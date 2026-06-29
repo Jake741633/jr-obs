@@ -1,94 +1,89 @@
+const menuItems = [
+  "Dashboard",
+  "Jobs",
+  "Customers",
+  "Builders",
+  "Quotes",
+  "Invoices",
+  "Surveys",
+  "Materials",
+  "Job Packs",
+  "Staff",
+  "AI",
+  "Business",
+  "Settings",
+];
+
 export default function Home() {
   return (
     <main className="min-h-screen bg-slate-950 text-white">
-      <section className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-8 flex flex-col gap-2">
-          <p className="text-sm font-semibold uppercase tracking-[0.3em] text-cyan-400">
-            JR Electrical Services
-          </p>
-          <h1 className="text-4xl font-bold tracking-tight">JR OS Dashboard</h1>
-          <p className="text-slate-400">
-            AI-powered business suite for quoting, jobs, surveys, materials,
-            invoices and growth.
-          </p>
-        </div>
+      <div className="flex min-h-screen">
+        <aside className="hidden w-72 border-r border-slate-800 bg-slate-900 p-6 lg:block">
+          <h1 className="text-2xl font-bold">JR OS</h1>
+          <p className="mt-1 text-sm text-slate-400">Electrical Business Suite</p>
 
-        <div className="grid gap-4 md:grid-cols-4">
-          {[
-            ["Today&apos;s Jobs", "3", "Jobs scheduled today"],
-            ["Open Quotes", "7", "Waiting for approval"],
-            ["Unpaid Invoices", "£3,280", "Payments to chase"],
-            ["Business Score", "74%", "Leave PAYE readiness"],
-          ].map(([title, value, note]) => (
-            <div
-              key={title}
-              className="rounded-2xl border border-slate-800 bg-slate-900 p-5 shadow-lg"
-            >
-              <p className="text-sm text-slate-400">{title}</p>
-              <p className="mt-3 text-3xl font-bold">{value}</p>
-              <p className="mt-2 text-sm text-slate-500">{note}</p>
-            </div>
-          ))}
-        </div>
+          <nav className="mt-8 space-y-2">
+            {menuItems.map((item) => (
+              <button
+                key={item}
+                className="w-full rounded-xl px-4 py-3 text-left text-slate-300 hover:bg-slate-800 hover:text-white"
+              >
+                {item}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-3">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 lg:col-span-2">
-            <h2 className="text-xl font-semibold">Quick Actions</h2>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <section className="flex-1">
+          <header className="border-b border-slate-800 bg-slate-950 px-6 py-5">
+            <p className="text-sm text-cyan-400">Owner Dashboard</p>
+            <h2 className="text-3xl font-bold">Welcome back, Jake</h2>
+          </header>
+
+          <div className="p-6">
+            <div className="grid gap-4 md:grid-cols-4">
               {[
-                "New Quote",
-                "New Estimate",
-                "New Job",
-                "New Customer",
-                "Office Checklist",
-                "Site Survey",
-                "Material Order",
-                "Create Job Pack",
-                "Voice Note",
-              ].map((item) => (
-                <button
-                  key={item}
-                  className="rounded-xl bg-cyan-500 px-4 py-3 text-left font-semibold text-slate-950 hover:bg-cyan-400"
-                >
-                  {item}
-                </button>
+                ["Today&apos;s Jobs", "3"],
+                ["Open Quotes", "7"],
+                ["Unpaid Invoices", "£3,280"],
+                ["PAYE Readiness", "74%"],
+              ].map(([title, value]) => (
+                <div key={title} className="rounded-2xl border border-slate-800 bg-slate-900 p-5">
+                  <p className="text-sm text-slate-400">{title}</p>
+                  <p className="mt-3 text-3xl font-bold">{value}</p>
+                </div>
               ))}
             </div>
-          </div>
 
-          <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-6">
-            <h2 className="text-xl font-semibold text-cyan-300">
-              AI Business Coach
-            </h2>
-            <p className="mt-4 text-sm leading-6 text-slate-300">
-              Jake, JR OS will learn from your quotes, jobs, surveys and
-              invoices to help price work better, manage workload and plan when
-              it is safe to leave PAYE.
-            </p>
-            <button className="mt-6 rounded-xl bg-white px-4 py-3 font-semibold text-slate-950">
-              Open AI Coach
-            </button>
-          </div>
-        </div>
+            <div className="mt-6 grid gap-6 lg:grid-cols-3">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6 lg:col-span-2">
+                <h3 className="text-xl font-semibold">Quick Actions</h3>
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    "New Quote",
+                    "New Job",
+                    "New Survey",
+                    "Office Checklist",
+                    "Material Order",
+                    "Create Job Pack",
+                  ].map((item) => (
+                    <button key={item} className="rounded-xl bg-cyan-500 px-4 py-3 font-semibold text-slate-950">
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
 
-        <div className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-            <h2 className="text-xl font-semibold">Owner Lock</h2>
-            <p className="mt-3 text-slate-400">
-              Pricing, markups, profit, supplier discounts and business
-              financials are visible only to the owner.
-            </p>
+              <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-6">
+                <h3 className="text-xl font-semibold text-cyan-300">AI Business Coach</h3>
+                <p className="mt-4 text-sm leading-6 text-slate-300">
+                  JR OS will learn from jobs, quotes, materials and invoices to help you grow.
+                </p>
+              </div>
+            </div>
           </div>
-
-          <div className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-            <h2 className="text-xl font-semibold">Electrician Survey Mode</h2>
-            <p className="mt-3 text-slate-400">
-              Electricians can submit site surveys, photos and notes without
-              seeing customer prices or profit.
-            </p>
-          </div>
-        </div>
-      </section>
+        </section>
+      </div>
     </main>
   );
 }
