@@ -1,3 +1,4 @@
+import Link from "next/link";
 const menuItems = [
   "Dashboard",
   "Customers",
@@ -25,12 +26,17 @@ export default function Sidebar() {
 
       <nav className="mt-8 space-y-2">
         {menuItems.map((item) => (
-          <button
-            key={item}
-            className="w-full rounded-xl px-4 py-3 text-left text-slate-300 transition hover:bg-slate-800 hover:text-white"
-          >
-            {item}
-          </button>
+        <Link
+  key={item}
+  href={
+    item === "Dashboard"
+      ? "/"
+      : `/${item.toLowerCase().replace(/\s+/g, "-")}`
+  }
+  className="block w-full rounded-xl px-4 py-3 text-left text-slate-300 transition hover:bg-slate-800 hover:text-white"
+>
+  {item}
+</Link>
         ))}
       </nav>
     </aside>
