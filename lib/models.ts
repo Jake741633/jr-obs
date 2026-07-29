@@ -89,4 +89,28 @@ export interface Material {
   updatedAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | PricingDocument | Material;
+export interface JobPackMaterial {
+  id: EntityId;
+  materialId?: EntityId;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface JobPack {
+  id: EntityId;
+  name: string;
+  category: string;
+  description: string;
+  labourDescription: string;
+  labourHours: number;
+  labourRate: number;
+  materials: JobPackMaterial[];
+  testingRequirements: string;
+  certificatesRequired: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EntityBase = Customer | Builder | Job | PricingDocument | Material | JobPack;
