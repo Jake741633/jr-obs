@@ -9,6 +9,20 @@ export interface CloudSyncResult {
   errors: string[];
 }
 
+async function getCloudContext() {
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) throw new Error("Supabase is not configured yet.");
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData.user) throw new Error("Sign in before using cloud storage.");
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("organisation_id")
+    .eq("id", authData.user.id)
+    .single();
+  if (profileError || !profile?.organisation_id) throw new Error("Your JR OS organisation profile is not ready yet.");
+  return { supabase, user: authData.user, organisationId: profile.organisation_id as string };
+}
+
 export async function getCurrentCloudUser() {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return null;
@@ -40,12 +54,7 @@ export async function signOutCloudUser() {
 }
 
 export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) throw new Error("Supabase is not configured yet.");
-
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError || !authData.user) throw new Error("Sign in before starting migration.");
-
+  const { supabase, user, organisationId } = await getCloudContext();
   const backup = exportJrOsData();
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
 
@@ -54,43 +63,39 @@ export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
       result.skipped += 1;
       continue;
     }
-
-    const { error } = await supabase.from("app_records").upsert(
-      {
-        owner_id: authData.user.id,
-        storage_key: storageKey,
-        payload,
-        source_updated_at: new Date().toISOString(),
-      },
-      { onConflict: "owner_id,storage_key" },
-    );
-
+    const collection = storageKey.slice(JR_OS_STORAGE_PREFIX.length) || "general";
+    const id = `${organisationId}:${storageKey}`;
+    const { error } = await supabase.from("app_records").upsert({
+      id,
+      organisation_id: organisationId,
+      collection,
+      payload: { storageKey, value: payload },
+      created_by: user.id,
+      updated_by: user.id,
+      updated_at: new Date().toISOString(),
+    });
     if (error) result.errors.push(`${storageKey}: ${error.message}`);
     else result.uploaded += 1;
   }
 
-  if (result.errors.length === 0) {
-    window.localStorage.setItem("jr-os-last-cloud-sync", new Date().toISOString());
-  }
-
+  if (result.errors.length === 0) window.localStorage.setItem("jr-os-last-cloud-sync", new Date().toISOString());
   return result;
 }
 
 export async function restoreCloudDataToLocal() {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) throw new Error("Supabase is not configured yet.");
-
-  const { data: authData } = await supabase.auth.getUser();
-  if (!authData.user) throw new Error("Sign in before restoring cloud data.");
-
+  const { supabase, organisationId } = await getCloudContext();
   const { data, error } = await supabase
     .from("app_records")
-    .select("storage_key,payload")
-    .eq("owner_id", authData.user.id);
-
+    .select("payload")
+    .eq("organisation_id", organisationId);
   if (error) throw error;
+
+  let restored = 0;
   for (const record of data ?? []) {
-    window.localStorage.setItem(record.storage_key, JSON.stringify(record.payload));
+    const payload = record.payload as { storageKey?: string; value?: unknown };
+    if (!payload.storageKey?.startsWith(JR_OS_STORAGE_PREFIX)) continue;
+    window.localStorage.setItem(payload.storageKey, JSON.stringify(payload.value));
+    restored += 1;
   }
-  return data?.length ?? 0;
+  return restored;
 }
