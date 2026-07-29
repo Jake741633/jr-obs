@@ -1,21 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function makeId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []) {
+  const initialValueRef = useRef(initialValue);
   const [items, setItems] = useState<T[]>(initialValue);
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(key);
-      if (saved) setItems(JSON.parse(saved) as T[]);
+      setItems(saved ? (JSON.parse(saved) as T[]) : initialValueRef.current);
     } catch {
-      setItems(initialValue);
+      setItems(initialValueRef.current);
     } finally {
       setIsReady(true);
     }
