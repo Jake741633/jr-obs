@@ -35,6 +35,27 @@ export interface SiteSurvey {
   voiceNotes: string; surveyNotes: string; labourHours: number; labourRate: number; healthScore: number; createdAt: string; updatedAt: string;
 }
 
+export type CertificateType = "Electrical Installation Certificate" | "Minor Electrical Installation Works Certificate" | "Electrical Installation Condition Report" | "Emergency Lighting Certificate" | "Fire Alarm Certificate" | "Other";
+export type CertificateStatus = "Draft" | "In progress" | "Complete" | "Issued" | "Superseded";
+export interface ElectricalCertificate {
+  id: EntityId;
+  number: string;
+  type: CertificateType;
+  status: CertificateStatus;
+  customerId?: EntityId;
+  jobId?: EntityId;
+  installationAddress: string;
+  description: string;
+  inspectorName: string;
+  inspectionDate: string;
+  nextInspectionDate: string;
+  outcome: "Satisfactory" | "Unsatisfactory" | "Not applicable";
+  observations: string;
+  externalPdfUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
 export interface JobDocument {
   id: EntityId;
@@ -51,4 +72,4 @@ export interface JobDocument {
   createdAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | JobTimelineEntry | PricingDocument | Invoice | Material | JobPack | SiteSurvey | JobDocument;
+export type EntityBase = Customer | Builder | Job | JobTimelineEntry | PricingDocument | Invoice | Material | JobPack | SiteSurvey | ElectricalCertificate | JobDocument;
