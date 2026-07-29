@@ -39,6 +39,34 @@ export interface Job {
   updatedAt: string;
 }
 
+export type JobMilestoneType =
+  | "Enquiry received"
+  | "Site survey booked"
+  | "Quote prepared"
+  | "Quote sent"
+  | "Quote accepted"
+  | "Deposit received"
+  | "Materials ordered"
+  | "Materials delivered"
+  | "First fix complete"
+  | "Second fix complete"
+  | "Testing complete"
+  | "Certificate uploaded"
+  | "Invoice sent"
+  | "Payment received"
+  | "Review requested"
+  | "Custom update";
+
+export interface JobTimelineEntry {
+  id: EntityId;
+  jobId: EntityId;
+  milestone: JobMilestoneType;
+  note: string;
+  completedBy: string;
+  completedAt: string;
+  createdAt: string;
+}
+
 export type PricingDocumentType = "Quote" | "Estimate";
 export type PricingDocumentStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Expired";
 
@@ -136,4 +164,4 @@ export interface JobPack {
   updatedAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | PricingDocument | Invoice | Material | JobPack;
+export type EntityBase = Customer | Builder | Job | JobTimelineEntry | PricingDocument | Invoice | Material | JobPack;
