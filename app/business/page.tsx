@@ -139,13 +139,13 @@ export default function BusinessPage() {
     </section>
 
     <section className="grid gap-4 md:grid-cols-5">
-      {[
+      {([
         ["Finance", intelligence.financeScore, PoundSterling],
         ["Sales", intelligence.salesScore, FileText],
         ["Delivery", intelligence.deliveryScore, BriefcaseBusiness],
         ["Data quality", intelligence.dataScore, ShieldCheck],
         ["Resilience", intelligence.resilienceScore, Users],
-      ].map(([label, score, Icon]) => <Card key={String(label)}><div className="flex items-center justify-between"><Icon className="size-5 text-cyan-300" /><span className="text-lg font-bold">{String(score)}</span></div><p className="mt-3 text-sm text-slate-400">{String(label)}</p><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-400" style={{ width: `${Number(score)}%` }} /></div></Card>)}
+      ] as const).map(([label, score, Icon]) => <Card key={label}><div className="flex items-center justify-between"><Icon className="size-5 text-cyan-300" /><span className="text-lg font-bold">{score}</span></div><p className="mt-3 text-sm text-slate-400">{label}</p><div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-400" style={{ width: `${score}%` }} /></div></Card>)}
     </section>
 
     <section className="grid gap-6 xl:grid-cols-[1.2fr_1fr]">
