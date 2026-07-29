@@ -69,4 +69,24 @@ export interface PricingDocument {
   updatedAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | PricingDocument;
+export type MaterialCategory = "Cable" | "Protection" | "Accessories" | "Lighting" | "Containment" | "EV" | "Testing" | "Fire alarm" | "Emergency lighting" | "Other";
+export type MaterialUnit = "Each" | "Metre" | "Drum" | "Box" | "Pack";
+
+export interface Material {
+  id: EntityId;
+  name: string;
+  category: MaterialCategory;
+  manufacturer: string;
+  supplier: string;
+  supplierUrl: string;
+  stockCode: string;
+  unit: MaterialUnit;
+  tradeCost: number;
+  sellPrice: number;
+  favourite: boolean;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EntityBase = Customer | Builder | Job | PricingDocument | Material;
