@@ -67,6 +67,31 @@ export interface JobTimelineEntry {
   createdAt: string;
 }
 
+export type JobDocumentCategory =
+  | "Certificate"
+  | "Photo"
+  | "Drawing"
+  | "RAMS"
+  | "Site note"
+  | "Material order"
+  | "Handover"
+  | "Other";
+
+export interface JobDocument {
+  id: EntityId;
+  jobId: EntityId;
+  name: string;
+  category: JobDocumentCategory;
+  fileName: string;
+  mimeType: string;
+  dataUrl: string;
+  externalUrl: string;
+  notes: string;
+  uploadedBy: string;
+  uploadedAt: string;
+  createdAt: string;
+}
+
 export type PricingDocumentType = "Quote" | "Estimate";
 export type PricingDocumentStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Expired";
 
@@ -164,4 +189,4 @@ export interface JobPack {
   updatedAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | JobTimelineEntry | PricingDocument | Invoice | Material | JobPack;
+export type EntityBase = Customer | Builder | Job | JobTimelineEntry | JobDocument | PricingDocument | Invoice | Material | JobPack;
