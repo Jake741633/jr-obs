@@ -24,6 +24,10 @@ export interface Material { id: EntityId; name: string; category: MaterialCatego
 export interface JobPackMaterial { id: EntityId; materialId?: EntityId; description: string; quantity: number; unitPrice: number; }
 export interface JobPack { id: EntityId; name: string; category: string; description: string; labourDescription: string; labourHours: number; labourRate: number; materials: JobPackMaterial[]; testingRequirements: string; certificatesRequired: string; notes: string; createdAt: string; updatedAt: string; }
 
+export type PurchaseItemStatus = "Needed" | "Ordered" | "Delivered";
+export interface PurchaseListItem { id: EntityId; materialId?: EntityId; description: string; supplier: string; stockCode: string; supplierUrl?: string; quantity: number; unitCost: number; status: PurchaseItemStatus; }
+export interface PurchaseList { id: EntityId; number: string; title: string; pricingDocumentId?: EntityId; jobId?: EntityId; items: PurchaseListItem[]; notes: string; createdAt: string; updatedAt: string; }
+
 export type SurveyStatus = "Draft" | "In progress" | "Complete";
 export type SurveySeverity = "Low" | "Medium" | "High";
 export interface SurveyCircuit { id: EntityId; name: string; protectiveDevice: string; cableSize: string; estimatedLength: number; observations: string; recommendation: string; }
@@ -88,4 +92,4 @@ export interface JobDocument {
   createdAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | JobTimelineEntry | PricingDocument | Invoice | Material | JobPack | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | Job | JobTimelineEntry | PricingDocument | Invoice | Material | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
