@@ -3,10 +3,15 @@ export type EntityId = string;
 export interface Customer { id: EntityId; name: string; email: string; phone: string; address: string; notes: string; createdAt: string; updatedAt: string; }
 export interface Builder { id: EntityId; companyName: string; contactName: string; email: string; phone: string; address: string; notes: string; createdAt: string; updatedAt: string; }
 export type JobStatus = "Lead" | "Quoted" | "Scheduled" | "In progress" | "Complete" | "On hold";
-export interface Job { id: EntityId; title: string; customerId?: EntityId; builderId?: EntityId; siteAddress: string; status: JobStatus; startDate: string; value: number; notes: string; createdAt: string; updatedAt: string; }
+export type JobPriority = "Low" | "Normal" | "High" | "Urgent";
+export interface Job { id: EntityId; title: string; customerId?: EntityId; builderId?: EntityId; siteAddress: string; status: JobStatus; startDate: string; targetCompletionDate?: string; priority?: JobPriority; assignedTo?: string[]; value: number; notes: string; createdAt: string; updatedAt: string; }
 
 export type JobMilestoneType = "Enquiry received" | "Site survey booked" | "Quote prepared" | "Quote sent" | "Quote accepted" | "Deposit received" | "Materials ordered" | "Materials delivered" | "First fix complete" | "Second fix complete" | "Testing complete" | "Certificate uploaded" | "Invoice sent" | "Payment received" | "Review requested" | "Custom update";
 export interface JobTimelineEntry { id: EntityId; jobId: EntityId; milestone: JobMilestoneType; note: string; completedBy: string; completedAt: string; createdAt: string; }
+
+export interface SiteDiaryEntry { id: EntityId; jobId: EntityId; workDate: string; startedAt: string; finishedAt: string; breakMinutes: number; completedBy: string; workCompleted: string; delays: string; customerRequests: string; materialsUsed: string; voiceNotes: string; createdAt: string; updatedAt: string; }
+export type VariationStatus = "Draft" | "Awaiting approval" | "Approved" | "Declined" | "Invoiced";
+export interface JobVariation { id: EntityId; jobId: EntityId; number: string; title: string; description: string; labourHours: number; labourRate: number; materialCost: number; materialCharge: number; otherCharge: number; status: VariationStatus; approvalMethod: "Not approved" | "Signature" | "Email" | "WhatsApp" | "Verbal"; approvalReference: string; requestedBy: string; createdAt: string; updatedAt: string; }
 
 export type PricingDocumentType = "Quote" | "Estimate";
 export type PricingDocumentStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Expired";
@@ -92,4 +97,4 @@ export interface JobDocument {
   createdAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | JobTimelineEntry | PricingDocument | Invoice | Material | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | Job | JobTimelineEntry | SiteDiaryEntry | JobVariation | PricingDocument | Invoice | Material | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
