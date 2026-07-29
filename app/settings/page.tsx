@@ -5,6 +5,7 @@ import { Brain, CheckCircle2, Cloud, Download, ShieldCheck, Upload } from "lucid
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { defaultAiProfile, downloadJrOsBackup, importJrOsBackup, type JrAiProfile } from "../../lib/appData";
+import { getCloudReadiness } from "../../lib/cloudConfig";
 
 const profileKey = "jr-os-ai-profile";
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none focus:border-cyan-400";
@@ -13,6 +14,7 @@ export default function SettingsPage() {
   const [profile, setProfile] = useState<JrAiProfile>(defaultAiProfile);
   const [ready, setReady] = useState(false);
   const [message, setMessage] = useState("");
+  const cloud = getCloudReadiness();
 
   useEffect(() => {
     try {
@@ -50,7 +52,7 @@ export default function SettingsPage() {
     <div className="grid gap-4 md:grid-cols-3">
       <Card><Brain className="size-6 text-cyan-300" /><p className="mt-3 font-bold">Personalised assistant</p><p className="mt-2 text-sm text-slate-400">Your approved preferences can guide future survey, quote and certificate drafts.</p></Card>
       <Card><ShieldCheck className="size-6 text-emerald-300" /><p className="mt-3 font-bold">Inspector remains in control</p><p className="mt-2 text-sm text-slate-400">AI suggestions remain drafts and technical decisions must be reviewed before issue.</p></Card>
-      <Card><Cloud className="size-6 text-amber-300" /><p className="mt-3 font-bold">Cloud sync is next</p><p className="mt-2 text-sm text-slate-400">The current build saves to this browser. Account-based cloud storage will make it available across devices.</p></Card>
+      <Card><Cloud className={`size-6 ${cloud.configured ? "text-emerald-300" : "text-amber-300"}`} /><p className="mt-3 font-bold">{cloud.configured ? "Cloud keys detected" : "Cloud setup required"}</p><p className="mt-2 text-sm text-slate-400">{cloud.configured ? "JR OS has the environment settings needed for the next authentication and sync stage." : "Add the Supabase project URL and public anon key before account-based syncing is enabled."}</p></Card>
     </div>
 
     <Card className="border-cyan-400/30">
@@ -70,6 +72,16 @@ export default function SettingsPage() {
     </Card>
 
     <Card>
+      <h2 className="text-xl font-bold">Cloud foundation status</h2>
+      <p className="mt-2 text-sm text-slate-400">The database schema, security policies, file bucket plan and environment checks are now included in the repository.</p>
+      <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm"><strong className="block text-white">Supabase project URL</strong><span className={cloud.projectUrlPresent ? "text-emerald-300" : "text-amber-300"}>{cloud.projectUrlPresent ? "Detected" : "Not configured"}</span></div>
+        <div className="rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm"><strong className="block text-white">Supabase public key</strong><span className={cloud.anonKeyPresent ? "text-emerald-300" : "text-amber-300"}>{cloud.anonKeyPresent ? "Detected" : "Not configured"}</span></div>
+      </div>
+      <p className="mt-4 text-sm text-slate-400">No local records will be deleted when cloud migration is added. The migration will copy records first, verify them, and keep a local recovery cache.</p>
+    </Card>
+
+    <Card>
       <h2 className="text-xl font-bold">Data protection and backup</h2>
       <p className="mt-2 text-sm text-slate-400">Download a complete backup before changing browser, clearing website data or moving device. Restore it here at any time.</p>
       <div className="mt-5 flex flex-wrap gap-3">
@@ -77,7 +89,7 @@ export default function SettingsPage() {
         <label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><Upload className="mr-2 size-4" />Restore backup<input type="file" accept="application/json,.json" className="hidden" onChange={restoreBackup} /></label>
       </div>
       {message ? <p className="mt-4 text-sm text-cyan-300">{message}</p> : null}
-      <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100"><strong>Current storage:</strong> browser local storage. It survives normal closing and reopening, but it is not yet a secure cloud database and does not automatically sync between your phone and laptop.</div>
+      <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100"><strong>Current live storage:</strong> browser local storage. The cloud foundation is prepared, but cloud syncing will only activate after the Supabase project is created, environment values are added and authentication is connected.</div>
     </Card>
   </div>;
 }
