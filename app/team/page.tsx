@@ -16,12 +16,28 @@ const timesheetStatuses: TimesheetStatus[] = ["Draft", "Submitted", "Approved"];
 const blankMember = { name: "", role: "Electrician" as TeamRole, status: "Active" as TeamMemberStatus, email: "", phone: "", emergencyContact: "", emergencyPhone: "", hourlyCost: "0", chargeRate: "0", vanRegistration: "", notes: "" };
 const blankQualification = { teamMemberId: "", name: "", certificateNumber: "", issuedAt: "", expiresAt: "", notes: "" };
 const blankTimesheet = { teamMemberId: "", jobId: "", workDate: "", startedAt: "", finishedAt: "", breakMinutes: "0", notes: "", status: "Draft" as TimesheetStatus };
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function dateKey(value: string) {
+  const [year = 0, month = 0, day = 0] = value.split("-").map(Number);
+  return year * 372 + month * 31 + day;
+}
+
+function formatDate(value: string) {
+  if (!value) return "";
+  const [year, month, day] = value.split("-");
+  return `${day}/${month}/${year}`;
+}
+
+function minutesFromTime(value: string) {
+  const [hours = 0, minutes = 0] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
 
 function hoursFor(entry: TimesheetEntry) {
   if (!entry.startedAt || !entry.finishedAt) return 0;
-  const start = new Date(`${entry.workDate}T${entry.startedAt}`).getTime();
-  const finish = new Date(`${entry.workDate}T${entry.finishedAt}`).getTime();
-  return Math.max(0, (finish - start) / 3_600_000 - entry.breakMinutes / 60);
+  const workedMinutes = minutesFromTime(entry.finishedAt) - minutesFromTime(entry.startedAt) - entry.breakMinutes;
+  return Math.max(0, workedMinutes / 60);
 }
 
 export default function TeamPage() {
@@ -36,13 +52,21 @@ export default function TeamPage() {
   const [showTimesheetForm, setShowTimesheetForm] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [message, setMessage] = useState("");
+  const [warningWindow] = useState(() => {
+    const today = new Date();
+    const todayValue = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    return { todayKey: dateKey(todayValue), limitKey: dateKey(new Date(today.getTime() + 60 * DAY_MS).toISOString().slice(0, 10)) };
+  });
 
   const activeMembers = useMemo(() => team.items.filter((member) => member.status === "Active"), [team.items]);
-  const visibleTimesheets = useMemo(() => timesheets.items.filter((entry) => !selectedMemberId || entry.teamMemberId === selectedMemberId).toSorted((a, b) => new Date(b.workDate).getTime() - new Date(a.workDate).getTime()), [timesheets.items, selectedMemberId]);
-  const expiringQualifications = useMemo(() => {
-    const limit = Date.now() + 60 * 24 * 60 * 60 * 1000;
-    return team.items.flatMap((member) => member.qualifications.map((qualification) => ({ member, qualification }))).filter(({ qualification }) => qualification.expiresAt && new Date(`${qualification.expiresAt}T12:00:00`).getTime() <= limit);
-  }, [team.items]);
+  const visibleTimesheets = useMemo(() => timesheets.items.filter((entry) => !selectedMemberId || entry.teamMemberId === selectedMemberId).toSorted((a, b) => b.workDate.localeCompare(a.workDate)), [timesheets.items, selectedMemberId]);
+  const expiringQualifications = useMemo(() => team.items
+    .flatMap((member) => member.qualifications.map((qualification) => ({ member, qualification })))
+    .filter(({ qualification }) => {
+      if (!qualification.expiresAt) return false;
+      const expiryKey = dateKey(qualification.expiresAt);
+      return expiryKey >= warningWindow.todayKey && expiryKey <= warningWindow.limitKey;
+    }), [team.items, warningWindow]);
   const approvedHours = visibleTimesheets.filter((entry) => entry.status === "Approved").reduce((sum, entry) => sum + hoursFor(entry), 0);
   const approvedLabourCost = visibleTimesheets.filter((entry) => entry.status === "Approved").reduce((sum, entry) => {
     const member = team.items.find((item) => item.id === entry.teamMemberId);
@@ -113,12 +137,12 @@ export default function TeamPage() {
 
     {showTimesheetForm ? <Card><form onSubmit={addTimesheet} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Team member</span><select value={timesheetForm.teamMemberId} onChange={(event) => setTimesheetForm({ ...timesheetForm, teamMemberId: event.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose member</option>{activeMembers.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select value={timesheetForm.jobId} onChange={(event) => setTimesheetForm({ ...timesheetForm, jobId: event.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">General / office</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label><InputField required label="Work date" type="date" value={timesheetForm.workDate} onChange={(event) => setTimesheetForm({ ...timesheetForm, workDate: event.target.value })} /><InputField label="Started" type="time" value={timesheetForm.startedAt} onChange={(event) => setTimesheetForm({ ...timesheetForm, startedAt: event.target.value })} /><InputField label="Finished" type="time" value={timesheetForm.finishedAt} onChange={(event) => setTimesheetForm({ ...timesheetForm, finishedAt: event.target.value })} /><InputField label="Break minutes" type="number" min="0" value={timesheetForm.breakMinutes} onChange={(event) => setTimesheetForm({ ...timesheetForm, breakMinutes: event.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Status</span><select value={timesheetForm.status} onChange={(event) => setTimesheetForm({ ...timesheetForm, status: event.target.value as TimesheetStatus })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{timesheetStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><div className="md:col-span-2 xl:col-span-3"><TextareaField label="Notes" value={timesheetForm.notes} onChange={(event) => setTimesheetForm({ ...timesheetForm, notes: event.target.value })} /></div><div className="md:col-span-2 xl:col-span-3 flex justify-end"><Button type="submit">Save timesheet</Button></div></form></Card> : null}
 
-    {expiringQualifications.length ? <section className="space-y-3"><h2 className="text-xl font-bold">Qualification warnings</h2>{expiringQualifications.map(({ member, qualification }) => <Card key={`${member.id}-${qualification.id}`} className="border-amber-500/30"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 size-5 text-amber-300" /><div><p className="font-semibold">{member.name} · {qualification.name}</p><p className="mt-1 text-sm text-slate-400">{qualification.expiresAt ? `Expires ${new Date(`${qualification.expiresAt}T12:00:00`).toLocaleDateString("en-GB")}` : "No expiry date recorded"}{qualification.certificateNumber ? ` · ${qualification.certificateNumber}` : ""}</p></div></div></Card>)}</section> : null}
+    {expiringQualifications.length ? <section className="space-y-3"><h2 className="text-xl font-bold">Qualification warnings</h2>{expiringQualifications.map(({ member, qualification }) => <Card key={`${member.id}-${qualification.id}`} className="border-amber-500/30"><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 size-5 text-amber-300" /><div><p className="font-semibold">{member.name} · {qualification.name}</p><p className="mt-1 text-sm text-slate-400">{qualification.expiresAt ? `Expires ${formatDate(qualification.expiresAt)}` : "No expiry date recorded"}{qualification.certificateNumber ? ` · ${qualification.certificateNumber}` : ""}</p></div></div></Card>)}</section> : null}
 
     <section className="grid gap-6 xl:grid-cols-2">
-      <div className="space-y-3"><h2 className="text-xl font-bold">Team</h2>{team.items.length === 0 ? <Card><p className="text-sm text-slate-400">No team members have been added yet.</p></Card> : team.items.map((member) => <Card key={member.id}><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{member.role}</p><h3 className="mt-1 text-lg font-bold">{member.name}</h3><p className="text-sm text-slate-500">{member.status}{member.vanRegistration ? ` · ${member.vanRegistration}` : ""}</p></div><button onClick={() => team.remove((item) => item.id === member.id)} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label={`Delete ${member.name}`}><Trash2 className="size-4" /></button></div><div className="mt-4 grid gap-2 text-sm text-slate-400 sm:grid-cols-2"><p>Cost: <span className="font-semibold text-slate-200">{money.format(member.hourlyCost)}/h</span></p><p>Charge: <span className="font-semibold text-slate-200">{money.format(member.chargeRate)}/h</span></p><p>{member.phone || "No phone"}</p><p>{member.email || "No email"}</p></div><div className="mt-4 border-t border-slate-800 pt-4"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Qualifications</p>{member.qualifications.length === 0 ? <p className="mt-2 text-sm text-slate-500">None recorded.</p> : <div className="mt-2 flex flex-wrap gap-2">{member.qualifications.map((qualification) => <span key={qualification.id} className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-300">{qualification.name}{qualification.expiresAt ? ` · ${new Date(`${qualification.expiresAt}T12:00:00`).toLocaleDateString("en-GB")}` : ""}</span>)}</div>}</div></Card>)}</div>
+      <div className="space-y-3"><h2 className="text-xl font-bold">Team</h2>{team.items.length === 0 ? <Card><p className="text-sm text-slate-400">No team members have been added yet.</p></Card> : team.items.map((member) => <Card key={member.id}><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{member.role}</p><h3 className="mt-1 text-lg font-bold">{member.name}</h3><p className="text-sm text-slate-500">{member.status}{member.vanRegistration ? ` · ${member.vanRegistration}` : ""}</p></div><button onClick={() => team.remove((item) => item.id === member.id)} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label={`Delete ${member.name}`}><Trash2 className="size-4" /></button></div><div className="mt-4 grid gap-2 text-sm text-slate-400 sm:grid-cols-2"><p>Cost: <span className="font-semibold text-slate-200">{money.format(member.hourlyCost)}/h</span></p><p>Charge: <span className="font-semibold text-slate-200">{money.format(member.chargeRate)}/h</span></p><p>{member.phone || "No phone"}</p><p>{member.email || "No email"}</p></div><div className="mt-4 border-t border-slate-800 pt-4"><p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Qualifications</p>{member.qualifications.length === 0 ? <p className="mt-2 text-sm text-slate-500">None recorded.</p> : <div className="mt-2 flex flex-wrap gap-2">{member.qualifications.map((qualification) => <span key={qualification.id} className="rounded-full border border-slate-700 bg-slate-950 px-3 py-1 text-xs text-slate-300">{qualification.name}{qualification.expiresAt ? ` · ${formatDate(qualification.expiresAt)}` : ""}</span>)}</div>}</div></Card>)}</div>
 
-      <div className="space-y-3"><h2 className="text-xl font-bold">Timesheets</h2>{visibleTimesheets.length === 0 ? <Card><p className="text-sm text-slate-400">No timesheet entries for this selection.</p></Card> : visibleTimesheets.map((entry) => <Card key={entry.id}><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{memberName(entry.teamMemberId)}</p><h3 className="mt-1 font-bold">{new Date(`${entry.workDate}T12:00:00`).toLocaleDateString("en-GB")}</h3><p className="text-sm text-slate-500">{jobName(entry.jobId)} · {hoursFor(entry).toFixed(1)}h</p></div><button onClick={() => timesheets.remove((item) => item.id === entry.id)} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label="Delete timesheet"><Trash2 className="size-4" /></button></div>{entry.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{entry.notes}</p> : null}<div className="mt-4 flex items-center gap-3 border-t border-slate-800 pt-4"><span className="text-xs text-slate-500">Status</span><select value={entry.status} onChange={(event) => updateTimesheetStatus(entry.id, event.target.value as TimesheetStatus)} className="min-h-10 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm">{timesheetStatuses.map((status) => <option key={status}>{status}</option>)}</select></div></Card>)}</div>
+      <div className="space-y-3"><h2 className="text-xl font-bold">Timesheets</h2>{visibleTimesheets.length === 0 ? <Card><p className="text-sm text-slate-400">No timesheet entries for this selection.</p></Card> : visibleTimesheets.map((entry) => <Card key={entry.id}><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{memberName(entry.teamMemberId)}</p><h3 className="mt-1 font-bold">{formatDate(entry.workDate)}</h3><p className="text-sm text-slate-500">{jobName(entry.jobId)} · {hoursFor(entry).toFixed(1)}h</p></div><button onClick={() => timesheets.remove((item) => item.id === entry.id)} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label="Delete timesheet"><Trash2 className="size-4" /></button></div>{entry.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{entry.notes}</p> : null}<div className="mt-4 flex items-center gap-3 border-t border-slate-800 pt-4"><span className="text-xs text-slate-500">Status</span><select value={entry.status} onChange={(event) => updateTimesheetStatus(entry.id, event.target.value as TimesheetStatus)} className="min-h-10 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm">{timesheetStatuses.map((status) => <option key={status}>{status}</option>)}</select></div></Card>)}</div>
     </section>
   </div>;
 }
