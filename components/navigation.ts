@@ -1,0 +1,14 @@
+import { BriefcaseBusiness, Building2, LayoutDashboard, Settings, Users } from "lucide-react";
+
+export const primaryNavigation = [
+  { label: "Command Centre", href: "/", icon: LayoutDashboard },
+  { label: "Customers", href: "/customers", icon: Users },
+  { label: "Builders", href: "/builders", icon: Building2 },
+  { label: "Jobs", href: "/jobs", icon: BriefcaseBusiness },
+  { label: "Settings", href: "/settings", icon: Settings },
+];
+
+export const secondaryNavigation = [
+  ["Quotes", "/quotes"], ["Estimates", "/estimates"], ["Invoices", "/invoices"], ["Materials", "/materials"],
+  ["Surveys", "/surveys"], ["Job Packs", "/job-packs"], ["JR AI", "/ai"], ["Business", "/business"],
+] as const;
