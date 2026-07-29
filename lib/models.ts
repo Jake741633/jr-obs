@@ -10,7 +10,7 @@ export interface JobTimelineEntry { id: EntityId; jobId: EntityId; milestone: Jo
 
 export type PricingDocumentType = "Quote" | "Estimate";
 export type PricingDocumentStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Expired";
-export interface PricingLineItem { id: EntityId; description: string; category: "Labour" | "Materials" | "Other"; quantity: number; unitPrice: number; }
+export interface PricingLineItem { id: EntityId; description: string; category: "Labour" | "Materials" | "Other"; quantity: number; unitPrice: number; unitCost?: number; materialId?: EntityId; supplier?: string; stockCode?: string; }
 export interface PricingDocument { id: EntityId; number: string; type: PricingDocumentType; status: PricingDocumentStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; title: string; validUntil: string; vatEnabled: boolean; vatRate: number; items: PricingLineItem[]; notes: string; terms: string; createdAt: string; updatedAt: string; }
 
 export type InvoiceStatus = "Draft" | "Sent" | "Part paid" | "Paid" | "Overdue" | "Cancelled";
