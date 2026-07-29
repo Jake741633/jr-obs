@@ -5,7 +5,6 @@ import { ClipboardCheck, Plus, Search } from "lucide-react";
 import { useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
-import { InputField } from "../../components/ui/FormField";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import type { Customer, Job, SiteSurvey } from "../../lib/models";
@@ -48,7 +47,7 @@ export default function SurveysPage() {
       <Button onClick={createSurvey}><Plus className="mr-2 size-4" />New survey</Button>
     </div>
 
-    <Card><div className="relative"><Search className="pointer-events-none absolute left-3 top-3 size-5 text-slate-500" /><InputField aria-label="Search surveys" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search survey, customer or job" className="pl-10" /></div></Card>
+    <Card><div className="relative"><Search className="pointer-events-none absolute left-3 top-3 size-5 text-slate-500" /><input aria-label="Search surveys" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search survey, customer or job" className="min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-3 text-white outline-none placeholder:text-slate-600 focus:border-cyan-400" /></div></Card>
 
     {filtered.length === 0 ? <Card><div className="grid place-items-center py-10 text-center"><ClipboardCheck className="size-10 text-slate-600" /><h2 className="mt-4 text-lg font-bold">No surveys found</h2><p className="mt-2 max-w-md text-sm text-slate-400">Create your first survey and complete it from your phone while walking around the property.</p></div></Card> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((survey) => {
       const customer = customers.items.find((item) => item.id === survey.customerId);
