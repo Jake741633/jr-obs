@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import { useParams } from "next/navigation";
 import { ArrowLeft, Building2, CalendarDays, CheckCircle2, Clock3, MapPin, Plus, Trash2, User, WalletCards } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
@@ -39,6 +39,7 @@ const blankEntry = {
 
 export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
+  const jobId = params.id;
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
@@ -47,13 +48,12 @@ export default function JobDetailPage() {
   const [form, setForm] = useState(blankEntry);
   const [error, setError] = useState("");
 
-  const job = jobs.items.find((item) => item.id === params.id);
+  const job = jobs.items.find((item) => item.id === jobId);
   const customer = customers.items.find((item) => item.id === job?.customerId);
   const builder = builders.items.find((item) => item.id === job?.builderId);
-  const entries = useMemo(
-    () => timeline.items.filter((item) => item.jobId === params.id).sort((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime()),
-    [timeline.items, params.id],
-  );
+  const entries = timeline.items
+    .filter((item) => item.jobId === jobId)
+    .toSorted((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
 
   if (!jobs.isReady || !customers.isReady || !builders.isReady || !timeline.isReady) return <Card>Loading job…</Card>;
 
@@ -70,7 +70,7 @@ export default function JobDetailPage() {
     const now = new Date().toISOString();
     const entry: JobTimelineEntry = {
       id: makeId("timeline"),
-      jobId: job.id,
+      jobId,
       milestone: form.milestone,
       note: form.note.trim(),
       completedBy: form.completedBy.trim() || "Jake",
@@ -85,7 +85,7 @@ export default function JobDetailPage() {
 
   function addMilestoneNow(milestone: JobMilestoneType) {
     const now = new Date().toISOString();
-    timeline.setItems((current) => [{ id: makeId("timeline"), jobId: job.id, milestone, note: "", completedBy: "Jake", completedAt: now, createdAt: now }, ...current]);
+    timeline.setItems((current) => [{ id: makeId("timeline"), jobId, milestone, note: "", completedBy: "Jake", completedAt: now, createdAt: now }, ...current]);
   }
 
   function deleteEntry(entry: JobTimelineEntry) {
