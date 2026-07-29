@@ -38,7 +38,7 @@ export default function SurveyDetailPage() {
     const patch: Partial<SiteSurvey> = { [key]: next };
     if (key === "defects") {
       patch.healthScore = Math.max(10, 100 - next.reduce((total, item) => total + (["Fire risk", "Rubber or VIR cable", "Signs of overheating"].includes(item) ? 12 : 6), 0));
-      patch.recommendations = Array.from(new Set([...survey.recommendations, ...next.map((item) => recommendationMap[item]).filter(Boolean)]));
+      patch.recommendations = Array.from(new Set([...(survey?.recommendations ?? []), ...next.map((item) => recommendationMap[item]).filter(Boolean)]));
     }
     update(patch);
   }
