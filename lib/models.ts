@@ -69,6 +69,29 @@ export interface PricingDocument {
   updatedAt: string;
 }
 
+export type InvoiceStatus = "Draft" | "Sent" | "Part paid" | "Paid" | "Overdue" | "Cancelled";
+
+export interface Invoice {
+  id: EntityId;
+  number: string;
+  status: InvoiceStatus;
+  customerId?: EntityId;
+  builderId?: EntityId;
+  jobId?: EntityId;
+  quoteId?: EntityId;
+  title: string;
+  issueDate: string;
+  dueDate: string;
+  vatEnabled: boolean;
+  vatRate: number;
+  items: PricingLineItem[];
+  amountPaid: number;
+  notes: string;
+  paymentDetails: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type MaterialCategory = "Cable" | "Protection" | "Accessories" | "Lighting" | "Containment" | "EV" | "Testing" | "Fire alarm" | "Emergency lighting" | "Other";
 export type MaterialUnit = "Each" | "Metre" | "Drum" | "Box" | "Pack";
 
@@ -113,4 +136,4 @@ export interface JobPack {
   updatedAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | PricingDocument | Material | JobPack;
+export type EntityBase = Customer | Builder | Job | PricingDocument | Invoice | Material | JobPack;
