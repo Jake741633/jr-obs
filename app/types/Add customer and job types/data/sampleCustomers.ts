@@ -1,4 +1,6 @@
-import type { Customer } from "../types/customer";
+import type { Customer } from "../../../../lib/models";
+
+const now = new Date().toISOString();
 
 export const sampleCustomers: Customer[] = [
   {
@@ -7,8 +9,8 @@ export const sampleCustomers: Customer[] = [
     phone: "07700 900000",
     email: "customer@example.com",
     address: "Epsom, Surrey",
-    preferredContact: "WhatsApp",
     notes: "Example customer record for JR OS testing.",
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
   },
 ];
