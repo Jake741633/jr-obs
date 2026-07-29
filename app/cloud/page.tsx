@@ -23,11 +23,18 @@ export default function CloudPage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [lastSync, setLastSync] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : window.localStorage.getItem("jr-os-last-cloud-sync"),
+  );
 
   useEffect(() => {
-    setLastSync(window.localStorage.getItem("jr-os-last-cloud-sync"));
-    getCurrentCloudUser().then((user) => setUserEmail(user?.email ?? null));
+    let active = true;
+    void getCurrentCloudUser().then((user) => {
+      if (active) setUserEmail(user?.email ?? null);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function run(action: () => Promise<unknown>, success: string) {
@@ -67,7 +74,7 @@ export default function CloudPage() {
 
     <Card>
       <h2 className="text-xl font-bold">JR OS account</h2>
-      {userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button disabled={busy} onClick={() => run(signOutCloudUser, "Signed out.")}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={(event) => submit(event, "signin")}><label className="grid gap-2 text-sm">Email<input type="email" required className={fieldClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="grid gap-2 text-sm">Password<input type="password" minLength={8} required className={fieldClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={busy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={busy || !configured} type="button" onClick={(event) => submit(event as unknown as FormEvent, "signup")}>Create account</Button></div></form>}
+      {userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button disabled={busy} onClick={() => run(signOutCloudUser, "Signed out.")}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={(event) => submit(event, "signin")}><label className="grid gap-2 text-sm">Email<input type="email" required className={fieldClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="grid gap-2 text-sm">Password<input type="password" minLength={8} required className={fieldClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={busy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={busy || !configured} type="button" onClick={() => run(() => signUpWithEmail(email, password), "Account created. Check your email if confirmation is enabled.")}>Create account</Button></div></form>}
     </Card>
 
     <Card>
