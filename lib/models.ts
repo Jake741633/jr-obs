@@ -39,4 +39,34 @@ export interface Job {
   updatedAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job;
+export type PricingDocumentType = "Quote" | "Estimate";
+export type PricingDocumentStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Expired";
+
+export interface PricingLineItem {
+  id: EntityId;
+  description: string;
+  category: "Labour" | "Materials" | "Other";
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface PricingDocument {
+  id: EntityId;
+  number: string;
+  type: PricingDocumentType;
+  status: PricingDocumentStatus;
+  customerId?: EntityId;
+  builderId?: EntityId;
+  jobId?: EntityId;
+  title: string;
+  validUntil: string;
+  vatEnabled: boolean;
+  vatRate: number;
+  items: PricingLineItem[];
+  notes: string;
+  terms: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type EntityBase = Customer | Builder | Job | PricingDocument;
