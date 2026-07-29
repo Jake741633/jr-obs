@@ -53,11 +53,29 @@ export default function CloudPage() {
     }
   }
 
-  async function submit(event: FormEvent, mode: "signin" | "signup") {
+  function accountDetailsAreValid() {
+    if (!email.trim()) {
+      setMessage("Enter your email address.");
+      return false;
+    }
+    if (password.length < 8) {
+      setMessage("Your password must be at least 8 characters long.");
+      return false;
+    }
+    return true;
+  }
+
+  async function signIn(event: FormEvent) {
     event.preventDefault();
+    if (!accountDetailsAreValid()) return;
+    await run(() => signInWithEmail(email.trim(), password), "Signed in securely.");
+  }
+
+  async function createAccount() {
+    if (!accountDetailsAreValid()) return;
     await run(
-      () => mode === "signin" ? signInWithEmail(email, password) : signUpWithEmail(email, password),
-      mode === "signin" ? "Signed in securely." : "Account created. Check your email if confirmation is enabled.",
+      () => signUpWithEmail(email.trim(), password),
+      "Account created. Check your email if confirmation is enabled.",
     );
   }
 
@@ -74,7 +92,7 @@ export default function CloudPage() {
 
     <Card>
       <h2 className="text-xl font-bold">JR OS account</h2>
-      {userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button disabled={busy} onClick={() => run(signOutCloudUser, "Signed out.")}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={(event) => submit(event, "signin")}><label className="grid gap-2 text-sm">Email<input type="email" required className={fieldClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="grid gap-2 text-sm">Password<input type="password" minLength={8} required className={fieldClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={busy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={busy || !configured} type="button" onClick={() => run(() => signUpWithEmail(email, password), "Account created. Check your email if confirmation is enabled.")}>Create account</Button></div></form>}
+      {userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button disabled={busy} onClick={() => run(signOutCloudUser, "Signed out.")}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={signIn}><label className="grid gap-2 text-sm">Email<input type="email" autoComplete="email" required className={fieldClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="grid gap-2 text-sm">Password<input type="password" autoComplete="current-password" minLength={8} required className={fieldClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={busy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={busy || !configured} type="button" onClick={createAccount}>Create account</Button></div></form>}
     </Card>
 
     <Card>
