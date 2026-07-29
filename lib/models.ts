@@ -37,6 +37,19 @@ export interface SiteSurvey {
 
 export type CertificateType = "Electrical Installation Certificate" | "Minor Electrical Installation Works Certificate" | "Electrical Installation Condition Report" | "Emergency Lighting Certificate" | "Fire Alarm Certificate" | "Other";
 export type CertificateStatus = "Draft" | "In progress" | "Complete" | "Issued" | "Superseded";
+export type ObservationCode = "C1" | "C2" | "C3" | "FI" | "No code";
+export type SuggestionConfidence = "High" | "Medium" | "Low";
+export interface CertificateObservation {
+  id: EntityId;
+  sourceText: string;
+  location: string;
+  observation: string;
+  recommendation: string;
+  regulationReference: string;
+  code: ObservationCode;
+  confidence: SuggestionConfidence;
+  accepted: boolean;
+}
 export interface ElectricalCertificate {
   id: EntityId;
   number: string;
@@ -51,6 +64,7 @@ export interface ElectricalCertificate {
   nextInspectionDate: string;
   outcome: "Satisfactory" | "Unsatisfactory" | "Not applicable";
   observations: string;
+  structuredObservations?: CertificateObservation[];
   externalPdfUrl: string;
   createdAt: string;
   updatedAt: string;
