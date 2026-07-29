@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
-import { Eye, FileText, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Eye, FileText, Pencil, Plus, Save, Search, Trash2 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
@@ -26,8 +26,11 @@ export default function QuotesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedJobPackId, setSelectedJobPackId] = useState("");
+  const [savePackName, setSavePackName] = useState("");
+  const [savePackCategory, setSavePackCategory] = useState("Custom");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [form, setForm] = useState(blankForm);
   const [items, setItems] = useState<PricingLineItem[]>([]);
   const [line, setLine] = useState(blankItem);
@@ -41,19 +44,19 @@ export default function QuotesPage() {
   const vat = form.vatEnabled ? subtotal * (Number(form.vatRate || 0) / 100) : 0;
 
   function reset() {
-    setForm(blankForm); setItems([]); setLine(blankItem); setEditingId(null); setSelectedJobPackId(""); setError(""); setShowForm(false);
+    setForm(blankForm); setItems([]); setLine(blankItem); setEditingId(null); setSelectedJobPackId(""); setSavePackName(""); setSavePackCategory("Custom"); setError(""); setSuccess(""); setShowForm(false);
   }
 
   function startEdit(document: PricingDocument) {
     setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms });
-    setItems(document.items); setEditingId(document.id); setError(""); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" });
+    setItems(document.items); setEditingId(document.id); setSavePackName(document.title); setError(""); setSuccess(""); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function addLine() {
     const quantity = Number(line.quantity); const unitPrice = Number(line.unitPrice);
     if (!line.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) { setError("Add a description, positive quantity and valid unit price."); return; }
     setItems((current) => [...current, { id: makeId("line"), description: line.description.trim(), category: line.category, quantity, unitPrice }]);
-    setLine(blankItem); setError("");
+    setLine(blankItem); setError(""); setSuccess("");
   }
 
   function addJobPack() {
@@ -68,11 +71,45 @@ export default function QuotesPage() {
       title: current.title || pack.name,
       notes: [current.notes, pack.description, pack.testingRequirements ? `Testing: ${pack.testingRequirements}` : "", pack.certificatesRequired ? `Certificates: ${pack.certificatesRequired}` : "", pack.notes].filter(Boolean).join("\n\n"),
     }));
-    setSelectedJobPackId(""); setError("");
+    setSavePackName((current) => current || pack.name);
+    setSelectedJobPackId(""); setError(""); setSuccess(`${pack.name} added. You can now change every line for this job.`);
+  }
+
+  function saveAsJobPack() {
+    const name = savePackName.trim() || form.title.trim();
+    if (!name) { setError("Enter a name for the new job pack."); return; }
+    if (items.length === 0) { setError("Add pricing lines before saving a job pack."); return; }
+
+    const labourLines = items.filter((item) => item.category === "Labour");
+    const materialLines = items.filter((item) => item.category === "Materials");
+    const otherLines = items.filter((item) => item.category === "Other");
+    const labourTotal = labourLines.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+    const singleLabour = labourLines.length === 1 ? labourLines[0] : undefined;
+    const now = new Date().toISOString();
+
+    const pack: JobPack = {
+      id: makeId("pack"),
+      name,
+      category: savePackCategory.trim() || "Custom",
+      description: form.title.trim(),
+      labourDescription: singleLabour?.description || labourLines.map((item) => item.description).filter(Boolean).join(" + ") || `${name} labour`,
+      labourHours: singleLabour?.quantity ?? (labourTotal > 0 ? 1 : 0),
+      labourRate: singleLabour?.unitPrice ?? labourTotal,
+      materials: materialLines.map((item) => ({ id: makeId("pack-material"), description: item.description, quantity: item.quantity, unitPrice: item.unitPrice })),
+      testingRequirements: "",
+      certificatesRequired: "",
+      notes: [form.notes, otherLines.length ? `Other allowances from original quote:\n${otherLines.map((item) => `- ${item.description}: ${item.quantity} × ${money.format(item.unitPrice)}`).join("\n")}` : ""].filter(Boolean).join("\n\n"),
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    jobPacks.setItems((current) => [pack, ...current]);
+    setError(""); setSuccess(`${name} saved as a new reusable job pack.`);
   }
 
   function updateLine(id: string, changes: Partial<PricingLineItem>) {
     setItems((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item));
+    setSuccess("");
   }
 
   function submit(event: FormEvent) {
@@ -97,7 +134,7 @@ export default function QuotesPage() {
       <div className="flex items-center justify-between gap-4"><div><h2 className="text-lg font-bold">{editingId ? "Edit pricing document" : "Create pricing document"}</h2><p className="text-sm text-slate-500">Start from a job pack, then tailor every line to the actual installation, location and scope.</p></div>{editingId ? <Button type="button" variant="secondary" onClick={reset}>Cancel edit</Button> : null}</div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Document type</span><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PricingDocumentType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Quote</option><option>Estimate</option></select></label>
-        <InputField required label="Title / scope" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+        <InputField required label="Title / scope" value={form.title} onChange={(e) => { setForm({ ...form, title: e.target.value }); if (!savePackName) setSavePackName(e.target.value); }} />
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Customer</span><select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value, builderId: "" })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">None</option>{customers.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Builder</span><select value={form.builderId} onChange={(e) => setForm({ ...form, builderId: e.target.value, customerId: "" })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">None</option>{builders.items.map((item) => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select></label>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select value={form.jobId} onChange={(e) => setForm({ ...form, jobId: e.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">No linked job</option>{jobs.items.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
@@ -118,7 +155,13 @@ export default function QuotesPage() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2"><TextareaField label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /><TextareaField label="Terms & conditions" value={form.terms} onChange={(e) => setForm({ ...form, terms: e.target.value })} /></div>
-      <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Subtotal {money.format(subtotal)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Total {money.format(subtotal + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
+
+      <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
+        <h2 className="font-semibold">Save this version as a new job pack</h2><p className="mt-1 text-sm text-slate-400">Use this after tailoring a quote for a particular type of property, installation method or location. It creates a new template and does not overwrite the original pack.</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]"><InputField label="New pack name" value={savePackName} onChange={(e) => setSavePackName(e.target.value)} /><InputField label="Category" value={savePackCategory} onChange={(e) => setSavePackCategory(e.target.value)} /><Button type="button" className="self-end" onClick={saveAsJobPack}><Save className="mr-2 size-4" />Save as job pack</Button></div>
+      </div>
+
+      <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}{success ? <p className="text-sm text-emerald-300">{success}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Subtotal {money.format(subtotal)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Total {money.format(subtotal + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
     </form></Card> : null}
 
     <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search documents" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
