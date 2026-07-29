@@ -25,6 +25,9 @@ const gbp = new Intl.NumberFormat("en-GB", {
   maximumFractionDigits: 0,
 });
 
+// Captured once when this page module loads so memoised calculations remain pure.
+const pageOpenedAt = Date.now();
+
 function documentTotal(document: PricingDocument | Invoice) {
   const subtotal = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   return subtotal + (document.vatEnabled ? subtotal * (document.vatRate / 100) : 0);
@@ -58,7 +61,6 @@ export default function AiPage() {
   const ready = jobs.isReady && pricing.isReady && invoices.isReady && surveys.isReady && certificates.isReady;
 
   const assistant = useMemo(() => {
-    const now = Date.now();
     const quotes = pricing.items.filter((item) => item.type === "Quote");
     const openQuotes = quotes.filter((item) => item.status === "Draft" || item.status === "Sent");
     const draftQuotes = quotes.filter((item) => item.status === "Draft");
@@ -66,7 +68,7 @@ export default function AiPage() {
     const pipelineValue = openQuotes.reduce((sum, item) => sum + documentTotal(item), 0);
 
     const unpaidInvoices = invoices.items.filter((item) => item.status !== "Paid" && item.status !== "Cancelled");
-    const overdueInvoices = unpaidInvoices.filter((item) => item.dueDate && new Date(`${item.dueDate}T23:59:59`).getTime() < now);
+    const overdueInvoices = unpaidInvoices.filter((item) => item.dueDate && new Date(`${item.dueDate}T23:59:59`).getTime() < pageOpenedAt);
     const overdueValue = overdueInvoices.reduce((sum, item) => sum + Math.max(0, documentTotal(item) - item.amountPaid), 0);
 
     const activeJobs = jobs.items.filter((item) => item.status !== "Complete" && item.status !== "On hold");
