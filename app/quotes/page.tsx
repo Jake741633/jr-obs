@@ -9,7 +9,7 @@ import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { Builder, Customer, Job, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem } from "../../lib/models";
+import type { Builder, Customer, Job, JobPack, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const defaultTerms = "This document is based on the described scope. Variations, unforeseen work and making good are excluded unless stated otherwise.";
@@ -22,8 +22,10 @@ export default function QuotesPage() {
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const jobPacks = useLocalStorageCollection<JobPack>("jr-os-job-packs");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedJobPackId, setSelectedJobPackId] = useState("");
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [form, setForm] = useState(blankForm);
@@ -39,44 +41,38 @@ export default function QuotesPage() {
   const vat = form.vatEnabled ? subtotal * (Number(form.vatRate || 0) / 100) : 0;
 
   function reset() {
-    setForm(blankForm);
-    setItems([]);
-    setLine(blankItem);
-    setEditingId(null);
-    setError("");
-    setShowForm(false);
+    setForm(blankForm); setItems([]); setLine(blankItem); setEditingId(null); setSelectedJobPackId(""); setError(""); setShowForm(false);
   }
 
   function startEdit(document: PricingDocument) {
-    setForm({
-      type: document.type,
-      title: document.title,
-      customerId: document.customerId ?? "",
-      builderId: document.builderId ?? "",
-      jobId: document.jobId ?? "",
-      validUntil: document.validUntil,
-      vatEnabled: document.vatEnabled,
-      vatRate: String(document.vatRate),
-      notes: document.notes,
-      terms: document.terms,
-    });
-    setItems(document.items);
-    setEditingId(document.id);
-    setError("");
-    setShowForm(true);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms });
+    setItems(document.items); setEditingId(document.id); setError(""); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function addLine() {
-    const quantity = Number(line.quantity);
-    const unitPrice = Number(line.unitPrice);
-    if (!line.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) {
-      setError("Add a description, positive quantity and valid unit price.");
-      return;
-    }
+    const quantity = Number(line.quantity); const unitPrice = Number(line.unitPrice);
+    if (!line.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) { setError("Add a description, positive quantity and valid unit price."); return; }
     setItems((current) => [...current, { id: makeId("line"), description: line.description.trim(), category: line.category, quantity, unitPrice }]);
-    setLine(blankItem);
-    setError("");
+    setLine(blankItem); setError("");
+  }
+
+  function addJobPack() {
+    const pack = jobPacks.items.find((item) => item.id === selectedJobPackId);
+    if (!pack) { setError("Choose a job pack first."); return; }
+    const imported: PricingLineItem[] = [];
+    if (pack.labourHours > 0) imported.push({ id: makeId("line"), description: pack.labourDescription || `${pack.name} labour`, category: "Labour", quantity: pack.labourHours, unitPrice: pack.labourRate });
+    pack.materials.forEach((material) => imported.push({ id: makeId("line"), description: material.description, category: "Materials", quantity: material.quantity, unitPrice: material.unitPrice }));
+    setItems((current) => [...current, ...imported]);
+    setForm((current) => ({
+      ...current,
+      title: current.title || pack.name,
+      notes: [current.notes, pack.description, pack.testingRequirements ? `Testing: ${pack.testingRequirements}` : "", pack.certificatesRequired ? `Certificates: ${pack.certificatesRequired}` : "", pack.notes].filter(Boolean).join("\n\n"),
+    }));
+    setSelectedJobPackId(""); setError("");
+  }
+
+  function updateLine(id: string, changes: Partial<PricingLineItem>) {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item));
   }
 
   function submit(event: FormEvent) {
@@ -84,49 +80,21 @@ export default function QuotesPage() {
     if (!form.title.trim()) { setError("Document title is required."); return; }
     if (!form.customerId && !form.builderId) { setError("Select a customer or builder."); return; }
     if (items.length === 0) { setError("Add at least one labour, material or other line item."); return; }
-    const now = new Date().toISOString();
-    const existing = documents.items.find((item) => item.id === editingId);
+    const now = new Date().toISOString(); const existing = documents.items.find((item) => item.id === editingId);
     const nextNumber = existing?.number ?? `${form.type === "Quote" ? "Q" : "E"}-${String(documents.items.filter((item) => item.type === form.type).length + 1).padStart(4, "0")}`;
-    const payload = {
-      type: form.type,
-      customerId: form.customerId || undefined,
-      builderId: form.builderId || undefined,
-      jobId: form.jobId || undefined,
-      title: form.title.trim(),
-      validUntil: form.validUntil,
-      vatEnabled: form.vatEnabled,
-      vatRate: Number(form.vatRate || 0),
-      items,
-      notes: form.notes,
-      terms: form.terms,
-      updatedAt: now,
-    };
-    documents.setItems((current) => editingId
-      ? current.map((document) => document.id === editingId ? { ...document, ...payload } : document)
-      : [{ id: makeId("doc"), number: nextNumber, status: "Draft", ...payload, createdAt: now }, ...current]);
-    reset();
+    const payload = { type: form.type, customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined, title: form.title.trim(), validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items, notes: form.notes, terms: form.terms, updatedAt: now };
+    documents.setItems((current) => editingId ? current.map((document) => document.id === editingId ? { ...document, ...payload } : document) : [{ id: makeId("doc"), number: nextNumber, status: "Draft", ...payload, createdAt: now }, ...current]); reset();
   }
 
-  function updateStatus(id: string, status: PricingDocumentStatus) {
-    documents.setItems((current) => current.map((document) => document.id === id ? { ...document, status, updatedAt: new Date().toISOString() } : document));
-  }
-
-  function deleteDocument(document: PricingDocument) {
-    if (window.confirm(`Delete ${document.number} - ${document.title}? This cannot be undone.`)) {
-      documents.remove((item) => item.id === document.id);
-    }
-  }
-
-  function total(doc: PricingDocument) {
-    const net = doc.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-    return net + (doc.vatEnabled ? net * doc.vatRate / 100 : 0);
-  }
+  function updateStatus(id: string, status: PricingDocumentStatus) { documents.setItems((current) => current.map((document) => document.id === id ? { ...document, status, updatedAt: new Date().toISOString() } : document)); }
+  function deleteDocument(document: PricingDocument) { if (window.confirm(`Delete ${document.number} - ${document.title}? This cannot be undone.`)) documents.remove((item) => item.id === document.id); }
+  function total(doc: PricingDocument) { const net = doc.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); return net + (doc.vatEnabled ? net * doc.vatRate / 100 : 0); }
 
   return <div className="space-y-6">
     <PageHeader eyebrow="Sales" title="Quotes & Estimates" description="Build clear, professional pricing documents linked to customers, builders and jobs." action={<Button onClick={() => showForm ? reset() : setShowForm(true)}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New document"}</Button>} />
 
     {showForm ? <Card><form onSubmit={submit} className="space-y-6">
-      <div className="flex items-center justify-between gap-4"><div><h2 className="text-lg font-bold">{editingId ? "Edit pricing document" : "Create pricing document"}</h2><p className="text-sm text-slate-500">{editingId ? "Update the scope, pricing or terms without changing the document number." : "Create a new quote or estimate draft."}</p></div>{editingId ? <Button type="button" variant="secondary" onClick={reset}>Cancel edit</Button> : null}</div>
+      <div className="flex items-center justify-between gap-4"><div><h2 className="text-lg font-bold">{editingId ? "Edit pricing document" : "Create pricing document"}</h2><p className="text-sm text-slate-500">Start from a job pack, then tailor every line to the actual installation, location and scope.</p></div>{editingId ? <Button type="button" variant="secondary" onClick={reset}>Cancel edit</Button> : null}</div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Document type</span><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PricingDocumentType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Quote</option><option>Estimate</option></select></label>
         <InputField required label="Title / scope" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
@@ -138,16 +106,15 @@ export default function QuotesPage() {
         {form.vatEnabled ? <InputField label="VAT rate (%)" type="number" min="0" value={form.vatRate} onChange={(e) => setForm({ ...form, vatRate: e.target.value })} /> : null}
       </div>
 
+      <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+        <h2 className="font-semibold">Start from a job pack</h2><p className="mt-1 text-sm text-slate-400">This copies the pack into this quote only. You can then change quantities, prices, descriptions or remove anything without altering the original template.</p>
+        <div className="mt-4 flex flex-col gap-3 md:flex-row"><select value={selectedJobPackId} onChange={(e) => setSelectedJobPackId(e.target.value)} className="min-h-11 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose a job pack</option>{jobPacks.items.map((pack) => <option key={pack.id} value={pack.id}>{pack.name} · {pack.category}</option>)}</select><Button type="button" onClick={addJobPack}>Add pack to quote</Button></div>
+      </div>
+
       <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
         <h2 className="font-semibold">Pricing lines</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_150px_110px_150px_auto]">
-          <InputField label="Description" value={line.description} onChange={(e) => setLine({ ...line, description: e.target.value })} />
-          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={line.category} onChange={(e) => setLine({ ...line, category: e.target.value as PricingLineItem["category"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Labour</option><option>Materials</option><option>Other</option></select></label>
-          <InputField label="Qty" type="number" min="0.01" step="0.01" value={line.quantity} onChange={(e) => setLine({ ...line, quantity: e.target.value })} />
-          <InputField label="Unit price (£)" type="number" min="0" step="0.01" value={line.unitPrice} onChange={(e) => setLine({ ...line, unitPrice: e.target.value })} />
-          <Button type="button" className="self-end" onClick={addLine}>Add</Button>
-        </div>
-        <div className="mt-4 space-y-2">{items.map((item) => <div key={item.id} className="flex items-center justify-between gap-4 rounded-xl bg-slate-900 px-4 py-3 text-sm"><div><span className="font-medium">{item.description}</span><span className="ml-2 text-slate-500">{item.category} · {item.quantity} × {money.format(item.unitPrice)}</span></div><div className="flex items-center gap-3"><strong>{money.format(item.quantity * item.unitPrice)}</strong><button type="button" onClick={() => setItems((current) => current.filter((lineItem) => lineItem.id !== item.id))} className="text-slate-500 hover:text-red-300"><Trash2 className="size-4" /></button></div></div>)}</div>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_150px_110px_150px_auto]"><InputField label="Description" value={line.description} onChange={(e) => setLine({ ...line, description: e.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={line.category} onChange={(e) => setLine({ ...line, category: e.target.value as PricingLineItem["category"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Labour</option><option>Materials</option><option>Other</option></select></label><InputField label="Qty" type="number" min="0.01" step="0.01" value={line.quantity} onChange={(e) => setLine({ ...line, quantity: e.target.value })} /><InputField label="Unit price (£)" type="number" min="0" step="0.01" value={line.unitPrice} onChange={(e) => setLine({ ...line, unitPrice: e.target.value })} /><Button type="button" className="self-end" onClick={addLine}>Add</Button></div>
+        <div className="mt-4 space-y-3">{items.map((item) => <div key={item.id} className="grid gap-3 rounded-xl bg-slate-900 p-3 md:grid-cols-[1fr_140px_100px_140px_auto] md:items-end"><InputField label="Description" value={item.description} onChange={(e) => updateLine(item.id, { description: e.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={item.category} onChange={(e) => updateLine(item.id, { category: e.target.value as PricingLineItem["category"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Labour</option><option>Materials</option><option>Other</option></select></label><InputField label="Qty" type="number" min="0.01" step="0.01" value={String(item.quantity)} onChange={(e) => updateLine(item.id, { quantity: Number(e.target.value) })} /><InputField label="Unit price (£)" type="number" min="0" step="0.01" value={String(item.unitPrice)} onChange={(e) => updateLine(item.id, { unitPrice: Number(e.target.value) })} /><div className="flex items-center justify-between gap-3 md:block"><strong className="whitespace-nowrap">{money.format(item.quantity * item.unitPrice)}</strong><button type="button" onClick={() => setItems((current) => current.filter((lineItem) => lineItem.id !== item.id))} className="ml-3 rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div></div>)}</div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-2"><TextareaField label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /><TextareaField label="Terms & conditions" value={form.terms} onChange={(e) => setForm({ ...form, terms: e.target.value })} /></div>
