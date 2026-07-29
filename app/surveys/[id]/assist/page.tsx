@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ChangeEvent, useMemo, useState } from "react";
@@ -95,7 +96,7 @@ export default function SurveyAssistPage() {
 
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-4"><div><div className="flex items-center gap-3"><Camera className="size-6 text-cyan-400" /><h2 className="text-xl font-bold">Consumer-unit photos</h2></div><p className="mt-2 text-sm text-slate-400">Take a clear front-on photo and, where safe, a separate close-up of labels and protective devices.</p></div><label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl bg-cyan-400 px-4 text-sm font-semibold text-slate-950 hover:bg-cyan-300"><ImagePlus className="mr-2 size-4" />Add board photo<input className="hidden" type="file" accept="image/*" capture="environment" onChange={addBoardPhoto} /></label></div>
-      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{survey.photos.filter((photo) => photo.category === "Consumer unit").map((photo) => <div key={photo.id} className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950">{photo.dataUrl ? <img src={photo.dataUrl} alt={photo.name} className="aspect-square w-full object-cover" /> : <div className="grid aspect-square place-items-center text-slate-600"><Camera className="size-8" /></div>}<div className="p-3"><p className="truncate text-sm font-semibold">{photo.name}</p><p className="mt-1 text-xs text-slate-500">{photo.note}</p></div></div>)}{survey.photos.filter((photo) => photo.category === "Consumer unit").length === 0 ? <p className="text-sm text-slate-500">No board photos added yet.</p> : null}</div>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{survey.photos.filter((photo) => photo.category === "Consumer unit").map((photo) => <div key={photo.id} className="overflow-hidden rounded-xl border border-slate-800 bg-slate-950">{photo.dataUrl ? <div className="relative aspect-square"><Image src={photo.dataUrl} alt={photo.name} fill unoptimized sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw" className="object-cover" /></div> : <div className="grid aspect-square place-items-center text-slate-600"><Camera className="size-8" /></div>}<div className="p-3"><p className="truncate text-sm font-semibold">{photo.name}</p><p className="mt-1 text-xs text-slate-500">{photo.note}</p></div></div>)}{survey.photos.filter((photo) => photo.category === "Consumer unit").length === 0 ? <p className="text-sm text-slate-500">No board photos added yet.</p> : null}</div>
     </Card>
   </div>;
 }
