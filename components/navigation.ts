@@ -10,5 +10,5 @@ export const primaryNavigation = [
 
 export const secondaryNavigation = [
   ["Quotes", "/quotes"], ["Estimates", "/estimates"], ["Invoices", "/invoices"], ["Materials", "/materials"],
-  ["Surveys", "/surveys"], ["Certificates", "/certificates"], ["Job Packs", "/job-packs"], ["JR AI", "/ai"], ["Business", "/business"],
+  ["Surveys", "/surveys"], ["Certificates", "/certificates"], ["Job Packs", "/job-packs"], ["JR AI", "/ai"], ["Business", "/business"], ["Cloud & Account", "/cloud"],
 ] as const;
