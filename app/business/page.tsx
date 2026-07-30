@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
@@ -16,6 +16,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
+import { BusinessManagementCentre } from "../../components/business/BusinessManagementCentre";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useLocalStorageCollection } from "../../lib/storage";
@@ -33,6 +34,7 @@ function clamp(value: number, minimum = 0, maximum = 100) {
 }
 
 export default function BusinessPage() {
+  const [view, setView] = useState<"Setup" | "Health">("Setup");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
@@ -118,13 +120,18 @@ export default function BusinessPage() {
     };
   }, [builders.items, customers.items, invoices.items, jobs.items, pricing.items]);
 
-  if (!ready) return <Card>Loading business intelligence…</Card>;
+  if (!ready) return <Card>Loading business centre…</Card>;
 
   const healthTone = intelligence.overallScore >= 80 ? "text-emerald-300" : intelligence.overallScore >= 60 ? "text-amber-300" : "text-red-300";
 
   return <div className="space-y-6">
-    <PageHeader eyebrow="Business intelligence" title="Business health" description="Live financial, sales and delivery signals calculated from your JR OS records without background services or extra software." action={<Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Command Centre <ArrowRight className="size-4" /></Link>} />
+    <PageHeader eyebrow="Business administration" title="Business Setup & Company Management" description="Control company details, customer document settings and the live health of JR Electrical Services from one centre." action={<Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Command Centre <ArrowRight className="size-4" /></Link>} />
 
+    <div className="grid gap-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-2 sm:grid-cols-2">
+      {(["Setup", "Health"] as const).map((item) => <button key={item} type="button" onClick={() => setView(item)} className={`min-h-11 rounded-xl px-4 text-sm font-semibold transition ${view === item ? "bg-cyan-400 text-slate-950" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}>{item === "Setup" ? "Company management" : "Business health"}</button>)}
+    </div>
+
+    {view === "Setup" ? <BusinessManagementCentre /> : <>
     <section className="grid gap-4 lg:grid-cols-[1.15fr_2fr]">
       <Card className="border-cyan-400/30">
         <div className="flex items-center justify-between"><div><p className="text-sm text-slate-400">JR OS health score</p><p className={`mt-2 text-6xl font-black ${healthTone}`}>{intelligence.overallScore}</p><p className="mt-1 text-sm text-slate-500">out of 100</p></div><CircleGauge className={`size-12 ${healthTone}`} /></div>
@@ -165,5 +172,6 @@ export default function BusinessPage() {
         </dl>
       </Card>
     </section>
+    </>}
   </div>;
 }
