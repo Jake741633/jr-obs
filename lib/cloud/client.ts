@@ -9,7 +9,8 @@ export interface CloudSession {
   user: { id: string; email?: string };
 }
 
-const SESSION_KEY = "jr-os-cloud-session";
+type StoredSupabaseSession = { access_token?: string; refresh_token?: string; expires_in?: number; expires_at?: number; user?: { id: string; email?: string } };
+const SESSION_KEY = "jr-os-supabase-session";
 
 function headers(session?: CloudSession) {
   return { apikey: cloudConfig.anonKey, Authorization: `Bearer ${session?.accessToken || cloudConfig.anonKey}`, "Content-Type": "application/json" };
@@ -23,9 +24,26 @@ async function request<T>(path: string, init: RequestInit = {}, session?: CloudS
   return response.json() as Promise<T>;
 }
 
+function normalizeSession(value: StoredSupabaseSession | null): CloudSession | null {
+  if (!value?.access_token || !value.user) return null;
+  return {
+    accessToken: value.access_token,
+    refreshToken: value.refresh_token || "",
+    expiresAt: value.expires_at ? value.expires_at * 1000 : Date.now() + (value.expires_in || 3600) * 1000,
+    user: value.user,
+  };
+}
+
 export const cloudSession = {
-  load(): CloudSession | null { if (typeof window === "undefined") return null; try { return JSON.parse(window.localStorage.getItem(SESSION_KEY) || "null") as CloudSession | null; } catch { return null; } },
-  save(session: CloudSession | null) { if (typeof window === "undefined") return; if (session) window.localStorage.setItem(SESSION_KEY, JSON.stringify(session)); else window.localStorage.removeItem(SESSION_KEY); },
+  load(): CloudSession | null {
+    if (typeof window === "undefined") return null;
+    try { return normalizeSession(JSON.parse(window.localStorage.getItem(SESSION_KEY) || "null") as StoredSupabaseSession | null); } catch { return null; }
+  },
+  save(session: CloudSession | null) {
+    if (typeof window === "undefined") return;
+    if (!session) window.localStorage.removeItem(SESSION_KEY);
+    else window.localStorage.setItem(SESSION_KEY, JSON.stringify({ access_token: session.accessToken, refresh_token: session.refreshToken, expires_at: Math.floor(session.expiresAt / 1000), user: session.user }));
+  },
 };
 
 export async function signInWithPassword(email: string, password: string) {
@@ -35,9 +53,8 @@ export async function signInWithPassword(email: string, password: string) {
 }
 
 export async function signOut() { const session = cloudSession.load(); if (session) await request<void>("/auth/v1/logout", { method: "POST" }, session).catch(() => undefined); cloudSession.save(null); }
-
 export async function refreshSession(session = cloudSession.load()) {
-  if (!session) return null;
+  if (!session?.refreshToken) return null;
   const payload = await request<{ access_token: string; refresh_token: string; expires_in: number; user: { id: string; email?: string } }>("/auth/v1/token?grant_type=refresh_token", { method: "POST", body: JSON.stringify({ refresh_token: session.refreshToken }) });
   const refreshed: CloudSession = { accessToken: payload.access_token, refreshToken: payload.refresh_token, expiresAt: Date.now() + payload.expires_in * 1000, user: payload.user };
   cloudSession.save(refreshed); return refreshed;
