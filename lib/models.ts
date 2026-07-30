@@ -22,6 +22,11 @@ export interface TimesheetEntry { id: EntityId; teamMemberId: EntityId; jobId?: 
 export type PlannerEntryType = "Job" | "Survey" | "Delivery" | "Training" | "Holiday" | "Office" | "Other";
 export interface PlannerEntry { id: EntityId; title: string; type: PlannerEntryType; date: string; startTime: string; endTime: string; jobId?: EntityId; teamMemberIds: EntityId[]; location: string; notes: string; status: "Planned" | "Confirmed" | "Complete" | "Cancelled"; createdAt: string; updatedAt: string; }
 
+export type VehicleStatus = "Active" | "Off road" | "Sold";
+export interface FleetVehicle { id: EntityId; registration: string; make: string; model: string; status: VehicleStatus; assignedTeamMemberId?: EntityId; motDue: string; insuranceDue: string; serviceDue: string; currentMileage: number; notes: string; createdAt: string; updatedAt: string; }
+export type ToolStatus = "Available" | "Assigned" | "In repair" | "Retired";
+export interface ToolAsset { id: EntityId; name: string; category: string; manufacturer: string; model: string; serialNumber: string; assetTag: string; status: ToolStatus; assignedTeamMemberId?: EntityId; assignedVehicleId?: EntityId; purchaseDate: string; purchaseCost: number; warrantyUntil: string; calibrationDue: string; notes: string; createdAt: string; updatedAt: string; }
+
 export type PricingDocumentType = "Quote" | "Estimate";
 export type PricingDocumentStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Expired";
 export interface PricingLineItem { id: EntityId; description: string; category: "Labour" | "Materials" | "Other"; quantity: number; unitPrice: number; unitCost?: number; materialId?: EntityId; supplier?: string; stockCode?: string; }
@@ -106,4 +111,4 @@ export interface JobDocument {
   createdAt: string;
 }
 
-export type EntityBase = Customer | Builder | Job | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | PricingDocument | Invoice | Material | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | Job | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | PricingDocument | Invoice | Material | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
