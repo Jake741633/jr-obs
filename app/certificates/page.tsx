@@ -1,163 +1,178 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { ClipboardCheck, ExternalLink, FileCheck2, Plus, Search, Sparkles, Trash2 } from "lucide-react";
+import { FormEvent, useMemo, useState } from "react";
+import { Archive, FileCheck2, FileDown, History, PenLine, Plus, Save, Search, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { businessStorageKeys, defaultCertificateDefaults } from "../../lib/businessSettings";
 import { suggestCertificateObservations } from "../../lib/certificate-code-suggestions";
+import {
+  certificatePdfHtml,
+  complianceStatuses,
+  createCertificateDraft,
+  nextCertificateNumber,
+  saveCertificateRevision,
+  supportedCertificateTypes,
+  type ComplianceCertificate,
+  type ComplianceCertificateStatus,
+  type SupportedComplianceCertificateType,
+} from "../../lib/complianceCertificates";
+import type { ElectricalTestingRecord } from "../../lib/electricalTesting";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { CertificateDefaults, CertificateObservation, CertificateStatus, CertificateType, Customer, ElectricalCertificate, Job, ObservationCode } from "../../lib/models";
+import type { CertificateDefaults, CertificateObservation, Customer, Invoice, Job, ObservationCode } from "../../lib/models";
 
-const certificateTypes: CertificateType[] = [
-  "Electrical Installation Certificate",
-  "Minor Electrical Installation Works Certificate",
-  "Electrical Installation Condition Report",
-  "Emergency Lighting Certificate",
-  "Fire Alarm Certificate",
-  "Other",
-];
-
-const statuses: CertificateStatus[] = ["Draft", "In progress", "Complete", "Issued", "Superseded"];
 const observationCodes: ObservationCode[] = ["C1", "C2", "C3", "FI", "No code"];
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none transition focus:border-cyan-400";
-
-function addYears(date: string, years: number) {
-  if (!date || years <= 0) return "";
-  const result = new Date(`${date}T12:00:00`);
-  result.setFullYear(result.getFullYear() + years);
-  return result.toISOString().slice(0, 10);
-}
-
-function blankCertificate(index: number, defaults: CertificateDefaults = defaultCertificateDefaults): ElectricalCertificate {
-  const now = new Date().toISOString();
-  const prefix = defaults.certificatePrefix.trim().toUpperCase() || "CERT";
-  return {
-    id: makeId("certificate"), number: `${prefix}-${String(index + 1).padStart(4, "0")}`,
-    type: defaults.defaultType, status: "Draft", installationAddress: "", description: "",
-    inspectorName: defaults.inspectorName, schemeProvider: defaults.schemeProvider, registrationNumber: defaults.registrationNumber,
-    inspectionDate: "", nextInspectionDate: "", outcome: defaults.defaultOutcome,
-    observations: defaults.notes, structuredObservations: [], externalPdfUrl: "", createdAt: now, updatedAt: now,
-  };
-}
+const today = () => new Date().toISOString().slice(0, 10);
 
 export default function CertificatesPage() {
-  const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
+  const certificates = useLocalStorageCollection<ComplianceCertificate>("jr-os-certificates");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const testing = useLocalStorageCollection<ElectricalTestingRecord>("jr-os-electrical-testing");
   const defaultsStore = useLocalStorageCollection<CertificateDefaults>(businessStorageKeys.certificates, [defaultCertificateDefaults]);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState<ElectricalCertificate>(() => blankCertificate(0));
+  const [form, setForm] = useState<ComplianceCertificate | null>(null);
   const [findingText, setFindingText] = useState("");
+  const [message, setMessage] = useState("");
 
-  const certificateDefaults = defaultsStore.items[0] ?? defaultCertificateDefaults;
-  const isReady = certificates.isReady && customers.isReady && jobs.isReady && defaultsStore.isReady;
-  if (!isReady) return <Card>Loading certificates…</Card>;
+  const defaults = defaultsStore.items[0] ?? defaultCertificateDefaults;
+  const ready = certificates.isReady && customers.isReady && jobs.isReady && invoices.isReady && testing.isReady && defaultsStore.isReady;
 
-  const filtered = certificates.items.filter((certificate) => {
+  const filtered = useMemo(() => certificates.items.filter((certificate) => {
     const customer = customers.items.find((item) => item.id === certificate.customerId)?.name ?? "";
     const job = jobs.items.find((item) => item.id === certificate.jobId)?.title ?? "";
     return `${certificate.number} ${certificate.type} ${certificate.status} ${certificate.installationAddress} ${customer} ${job}`.toLowerCase().includes(search.toLowerCase());
-  });
+  }), [certificates.items, customers.items, jobs.items, search]);
 
-  function startNewCertificate() { setForm(blankCertificate(certificates.items.length, certificateDefaults)); setFindingText(""); setShowForm(true); }
+  if (!ready) return <Card>Loading Compliance & Certificate Centre…</Card>;
+
+  function startNewCertificate() {
+    const type = (supportedCertificateTypes.includes(defaults.defaultType as SupportedComplianceCertificateType)
+      ? defaults.defaultType
+      : supportedCertificateTypes[0]) as SupportedComplianceCertificateType;
+    setForm(createCertificateDraft({
+      id: makeId("certificate"),
+      number: nextCertificateNumber(defaults.certificatePrefix, certificates.items),
+      type,
+      inspectorName: defaults.inspectorName,
+      schemeProvider: defaults.schemeProvider,
+      registrationNumber: defaults.registrationNumber,
+      notes: defaults.notes,
+    }));
+    setFindingText("");
+    setShowForm(true);
+  }
+
+  function editCertificate(certificate: ComplianceCertificate) {
+    setForm({ ...certificate, revisionHistory: certificate.revisionHistory ?? [], structuredObservations: certificate.structuredObservations ?? [] });
+    setFindingText("");
+    setShowForm(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function populateFromJob(jobId: string) {
+    if (!form) return;
+    const job = jobs.items.find((item) => item.id === jobId);
+    const customer = customers.items.find((item) => item.id === job?.customerId);
+    const linkedTesting = [...testing.items].filter((item) => item.jobId === jobId).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+    const linkedInvoice = invoices.items.find((item) => item.jobId === jobId);
+    setForm({
+      ...form,
+      jobId: job?.id,
+      customerId: customer?.id,
+      invoiceId: linkedInvoice?.id,
+      testingRecordId: linkedTesting?.id,
+      installationAddress: job?.siteAddress || customer?.address || form.installationAddress,
+      description: [job?.title, linkedTesting ? `Testing record ${linkedTesting.id}: ${linkedTesting.circuits.length} circuit results captured.` : ""].filter(Boolean).join("\n"),
+      inspectionDate: linkedTesting?.testDate || form.inspectionDate,
+      remedialActions: linkedTesting?.outstandingActions.join("\n") || form.remedialActions,
+    });
+  }
+
   function saveCertificate(event: FormEvent) {
     event.preventDefault();
-    const now = new Date().toISOString();
-    certificates.setItems((current) => {
-      const exists = current.some((item) => item.id === form.id);
-      const record = { ...form, updatedAt: now };
-      return exists ? current.map((item) => item.id === form.id ? record : item) : [record, ...current];
-    });
-    setShowForm(false);
+    if (!form) return;
+    const saved = saveCertificateRevision(form, form.inspectorName);
+    certificates.setItems((current) => current.some((item) => item.id === saved.id)
+      ? current.map((item) => item.id === saved.id ? saved : item)
+      : [saved, ...current]);
+    setForm(saved);
+    setMessage(`Saved ${saved.number} as revision ${saved.revisionHistory?.length ?? 1}. Previous versions remain available.`);
   }
-  function editCertificate(certificate: ElectricalCertificate) {
-    setForm({ ...certificate, structuredObservations: certificate.structuredObservations ?? [] });
-    setFindingText(""); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" });
+
+  function sign(role: "inspector" | "customer", name: string) {
+    if (!form || !name.trim()) return;
+    const signature = { name: name.trim(), signedAt: new Date().toISOString() };
+    setForm(role === "inspector" ? { ...form, inspectorSignature: signature } : { ...form, customerSignature: signature });
   }
-  function deleteCertificate(certificate: ElectricalCertificate) {
-    if (window.confirm(`Delete ${certificate.number}?`)) certificates.remove((item) => item.id === certificate.id);
-  }
+
   function generateSuggestions() {
-    if (!findingText.trim()) return;
-    const suggestions = suggestCertificateObservations(findingText);
-    setForm((current) => ({ ...current, structuredObservations: [...(current.structuredObservations ?? []), ...suggestions] }));
+    if (!form || !findingText.trim()) return;
+    setForm({ ...form, structuredObservations: [...(form.structuredObservations ?? []), ...suggestCertificateObservations(findingText)] });
     setFindingText("");
   }
+
   function updateObservation(id: string, patch: Partial<CertificateObservation>) {
-    setForm((current) => ({ ...current, structuredObservations: (current.structuredObservations ?? []).map((item) => item.id === id ? { ...item, ...patch } : item) }));
-  }
-  function removeObservation(id: string) {
-    setForm((current) => ({ ...current, structuredObservations: (current.structuredObservations ?? []).filter((item) => item.id !== id) }));
+    if (!form) return;
+    setForm({ ...form, structuredObservations: (form.structuredObservations ?? []).map((item) => item.id === id ? { ...item, ...patch } : item) });
   }
 
-  const completeCount = certificates.items.filter((item) => item.status === "Complete" || item.status === "Issued").length;
-  const draftCount = certificates.items.filter((item) => item.status === "Draft" || item.status === "In progress").length;
+  function printCertificate() {
+    if (!form) return;
+    const popup = window.open("", "_blank", "noopener,noreferrer");
+    if (!popup) return setMessage("Allow pop-ups to open the PDF-ready certificate.");
+    popup.document.write(certificatePdfHtml(
+      form,
+      customers.items.find((item) => item.id === form.customerId),
+      jobs.items.find((item) => item.id === form.jobId),
+      invoices.items.find((item) => item.id === form.invoiceId),
+    ));
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  }
+
+  const awaitingIssue = certificates.items.filter((item) => item.status === "Ready for Review").length;
+  const awaitingSignatures = certificates.items.filter((item) => item.status !== "Archived" && (!item.inspectorSignature?.signedAt || !item.customerSignature?.signedAt)).length;
+  const issued = certificates.items.filter((item) => item.status === "Issued").length;
 
   return <div className="space-y-6">
-    <div className="flex flex-wrap items-end justify-between gap-4">
-      <div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Testing and compliance</p><h1 className="mt-1 text-3xl font-bold">Certificates</h1><p className="mt-2 text-sm text-slate-400">Manage electrical certificates and use JR Assist to prepare editable observation and code suggestions.</p></div>
-      <Button onClick={startNewCertificate}><Plus className="mr-2 size-4" />New certificate</Button>
-    </div>
+    <div className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Compliance & Certificate Centre</p><h1 className="mt-1 text-3xl font-bold">Certificates</h1><p className="mt-2 text-sm text-slate-400">Prepare, review, sign, issue and archive EIC, MEIWC and EICR records without replacing the existing JR OS certificate workflow.</p></div><Button onClick={startNewCertificate}><Plus className="mr-2 size-4" />New certificate</Button></div>
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Card><p className="text-sm text-slate-400">Total certificates</p><p className="mt-2 text-3xl font-bold">{certificates.items.length}</p></Card><Card><p className="text-sm text-slate-400">Awaiting issue</p><p className="mt-2 text-3xl font-bold text-amber-300">{awaitingIssue}</p></Card><Card><p className="text-sm text-slate-400">Awaiting signatures</p><p className="mt-2 text-3xl font-bold text-violet-300">{awaitingSignatures}</p></Card><Card><p className="text-sm text-slate-400">Issued</p><p className="mt-2 text-3xl font-bold text-emerald-300">{issued}</p></Card></div>
+    {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
-    <div className="grid gap-4 md:grid-cols-3">
-      <Card><p className="text-sm text-slate-400">Total records</p><p className="mt-2 text-3xl font-bold">{certificates.items.length}</p></Card>
-      <Card><p className="text-sm text-slate-400">Draft / in progress</p><p className="mt-2 text-3xl font-bold text-amber-300">{draftCount}</p></Card>
-      <Card><p className="text-sm text-slate-400">Complete / issued</p><p className="mt-2 text-3xl font-bold text-emerald-300">{completeCount}</p></Card>
-    </div>
-
-    {showForm ? <Card className="border-cyan-400/30"><form onSubmit={saveCertificate} className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Certificate record</p><h2 className="mt-1 text-xl font-bold">{form.number}</h2></div><Button type="button" variant="secondary" onClick={() => setShowForm(false)}>Close</Button></div>
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <label className="grid gap-2 text-sm">Certificate number<input required className={fieldClass} value={form.number} onChange={(event) => setForm({ ...form, number: event.target.value })} /></label>
-        <label className="grid gap-2 text-sm">Certificate type<select className={fieldClass} value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as CertificateType })}>{certificateTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
-        <label className="grid gap-2 text-sm">Status<select className={fieldClass} value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as CertificateStatus })}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
-        <label className="grid gap-2 text-sm">Customer<select className={fieldClass} value={form.customerId ?? ""} onChange={(event) => setForm({ ...form, customerId: event.target.value || undefined })}><option value="">No customer selected</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
-        <label className="grid gap-2 text-sm">Job<select className={fieldClass} value={form.jobId ?? ""} onChange={(event) => { const jobId = event.target.value || undefined; const job = jobs.items.find((item) => item.id === jobId); setForm({ ...form, jobId, installationAddress: form.installationAddress || job?.siteAddress || "" }); }}><option value="">No job selected</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
-        <label className="grid gap-2 text-sm">Inspector<input className={fieldClass} value={form.inspectorName} onChange={(event) => setForm({ ...form, inspectorName: event.target.value })} /></label>
-        <label className="grid gap-2 text-sm">Scheme provider<input className={fieldClass} value={form.schemeProvider ?? ""} onChange={(event) => setForm({ ...form, schemeProvider: event.target.value })} placeholder="NICEIC, NAPIT or other" /></label>
-        <label className="grid gap-2 text-sm">Registration number<input className={fieldClass} value={form.registrationNumber ?? ""} onChange={(event) => setForm({ ...form, registrationNumber: event.target.value })} /></label>
-        <label className="grid gap-2 text-sm md:col-span-2">Installation address<input required className={fieldClass} value={form.installationAddress} onChange={(event) => setForm({ ...form, installationAddress: event.target.value })} /></label>
-        <label className="grid gap-2 text-sm">Outcome<select className={fieldClass} value={form.outcome} onChange={(event) => setForm({ ...form, outcome: event.target.value as ElectricalCertificate["outcome"] })}><option>Satisfactory</option><option>Unsatisfactory</option><option>Not applicable</option></select></label>
-        <label className="grid gap-2 text-sm">Inspection date<input type="date" className={fieldClass} value={form.inspectionDate} onChange={(event) => { const inspectionDate = event.target.value; setForm({ ...form, inspectionDate, nextInspectionDate: form.nextInspectionDate || addYears(inspectionDate, certificateDefaults.nextInspectionYears) }); }} /></label>
-        <label className="grid gap-2 text-sm">Next inspection date<input type="date" className={fieldClass} value={form.nextInspectionDate} onChange={(event) => setForm({ ...form, nextInspectionDate: event.target.value })} /></label>
-        <label className="grid gap-2 text-sm">Existing PDF link<input type="url" className={fieldClass} placeholder="https://…" value={form.externalPdfUrl} onChange={(event) => setForm({ ...form, externalPdfUrl: event.target.value })} /></label>
-        <label className="grid gap-2 text-sm md:col-span-2 lg:col-span-3">Description<textarea className={`${fieldClass} min-h-24 py-3`} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+    {showForm && form ? <Card className="border-cyan-400/30"><form onSubmit={saveCertificate} className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Certificate record</p><h2 className="mt-1 text-xl font-bold">{form.number}</h2></div><div className="flex gap-2"><Button type="button" variant="secondary" onClick={printCertificate}><FileDown className="mr-2 size-4" />PDF-ready</Button><Button type="button" variant="secondary" onClick={() => setShowForm(false)}>Close</Button></div></div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <label className="grid gap-2 text-sm">Number<input className={fieldClass} value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} /></label>
+        <label className="grid gap-2 text-sm">Type<select className={fieldClass} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as SupportedComplianceCertificateType })}>{supportedCertificateTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
+        <label className="grid gap-2 text-sm">Status<select className={fieldClass} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ComplianceCertificateStatus, issuedAt: e.target.value === "Issued" ? new Date().toISOString() : form.issuedAt, archivedAt: e.target.value === "Archived" ? new Date().toISOString() : form.archivedAt })}>{complianceStatuses.map((status) => <option key={status}>{status}</option>)}</select></label>
+        <label className="grid gap-2 text-sm">Job<select className={fieldClass} value={form.jobId ?? ""} onChange={(e) => populateFromJob(e.target.value)}><option value="">Choose job</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
+        <label className="grid gap-2 text-sm">Customer<select className={fieldClass} value={form.customerId ?? ""} onChange={(e) => setForm({ ...form, customerId: e.target.value || undefined })}><option value="">Choose customer</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
+        <label className="grid gap-2 text-sm">Invoice<select className={fieldClass} value={form.invoiceId ?? ""} onChange={(e) => setForm({ ...form, invoiceId: e.target.value || undefined })}><option value="">No linked invoice</option>{invoices.items.filter((item) => !form.jobId || item.jobId === form.jobId).map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.number} · {invoice.title}</option>)}</select></label>
+        <label className="grid gap-2 text-sm">Testing record<select className={fieldClass} value={form.testingRecordId ?? ""} onChange={(e) => setForm({ ...form, testingRecordId: e.target.value || undefined })}><option value="">No linked testing</option>{testing.items.filter((item) => !form.jobId || item.jobId === form.jobId).map((record) => <option key={record.id} value={record.id}>{record.testDate} · {record.circuits.length} circuits</option>)}</select></label>
+        <label className="grid gap-2 text-sm">Inspector<input className={fieldClass} value={form.inspectorName} onChange={(e) => setForm({ ...form, inspectorName: e.target.value })} /></label>
+        <label className="grid gap-2 text-sm">Inspection date<input type="date" className={fieldClass} value={form.inspectionDate} onChange={(e) => setForm({ ...form, inspectionDate: e.target.value })} /></label>
+        <label className="grid gap-2 text-sm md:col-span-2 xl:col-span-3">Installation address<input className={fieldClass} value={form.installationAddress} onChange={(e) => setForm({ ...form, installationAddress: e.target.value })} /></label>
+        <label className="grid gap-2 text-sm md:col-span-2 xl:col-span-3">Description and testing summary<textarea className={`${fieldClass} min-h-28 py-3`} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
       </div>
 
-      <div className="rounded-2xl border border-violet-400/20 bg-violet-500/5 p-5">
-        <div className="flex items-start gap-3"><div className="rounded-xl bg-violet-400/10 p-2 text-violet-300"><Sparkles className="size-5" /></div><div><h3 className="font-bold">JR Assist observation helper</h3><p className="mt-1 text-sm text-slate-400">Type or dictate what you found. JR OS will create editable draft wording, a suggested classification and a reference. You remain responsible for checking and approving every entry.</p></div></div>
-        <textarea className={`${fieldClass} mt-4 min-h-28 py-3`} placeholder="Example: No main bonding visible to gas and signs of overheating on a neutral terminal…" value={findingText} onChange={(event) => setFindingText(event.target.value)} />
-        <div className="mt-3 flex justify-end"><Button type="button" onClick={generateSuggestions}><Sparkles className="mr-2 size-4" />Suggest observations</Button></div>
-      </div>
+      <div className="rounded-2xl border border-violet-400/20 bg-violet-500/5 p-5"><div className="flex items-start gap-3"><Sparkles className="mt-1 size-5 text-violet-300" /><div><h3 className="font-bold">JR Assist observations</h3><p className="mt-1 text-sm text-slate-400">Suggestions remain editable and require inspector review.</p></div></div><textarea className={`${fieldClass} mt-4 min-h-24 py-3`} value={findingText} onChange={(e) => setFindingText(e.target.value)} placeholder="Describe an observation…" /><div className="mt-3 flex justify-end"><Button type="button" onClick={generateSuggestions}>Suggest observations</Button></div></div>
 
-      {(form.structuredObservations ?? []).length > 0 ? <div className="space-y-4">
-        <div><h3 className="text-lg font-bold">Structured observations</h3><p className="mt-1 text-sm text-slate-400">Edit the location, wording, recommendation, reference and code before accepting.</p></div>
-        {(form.structuredObservations ?? []).map((item, index) => <div key={item.id} className="rounded-2xl border border-slate-700 bg-slate-950/50 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Observation {index + 1}</p><p className="mt-1 text-xs text-slate-500">Suggestion confidence: {item.confidence}</p></div><button type="button" onClick={() => removeObservation(item.id)} className="rounded-xl p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <label className="grid gap-2 text-sm">Location<input className={fieldClass} value={item.location} onChange={(event) => updateObservation(item.id, { location: event.target.value })} placeholder="Consumer unit, kitchen, circuit 4…" /></label>
-            <label className="grid gap-2 text-sm">Suggested code<select className={fieldClass} value={item.code} onChange={(event) => updateObservation(item.id, { code: event.target.value as ObservationCode })}>{observationCodes.map((code) => <option key={code}>{code}</option>)}</select></label>
-            <label className="grid gap-2 text-sm md:col-span-2">Observation<textarea className={`${fieldClass} min-h-24 py-3`} value={item.observation} onChange={(event) => updateObservation(item.id, { observation: event.target.value })} /></label>
-            <label className="grid gap-2 text-sm md:col-span-2">Recommendation<textarea className={`${fieldClass} min-h-24 py-3`} value={item.recommendation} onChange={(event) => updateObservation(item.id, { recommendation: event.target.value })} /></label>
-            <label className="grid gap-2 text-sm">Regulation reference<input className={fieldClass} value={item.regulationReference} onChange={(event) => updateObservation(item.id, { regulationReference: event.target.value })} /></label>
-            <label className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-700 px-3 text-sm"><input type="checkbox" checked={item.accepted} onChange={(event) => updateObservation(item.id, { accepted: event.target.checked })} /><span>Checked and accepted by inspector</span></label>
-          </div>
-        </div>)}
-      </div> : null}
+      {(form.structuredObservations ?? []).map((item, index) => <div key={item.id} className="rounded-2xl border border-slate-700 p-4"><div className="flex items-center justify-between"><p className="font-bold">Observation {index + 1}</p><button type="button" onClick={() => setForm({ ...form, structuredObservations: form.structuredObservations?.filter((entry) => entry.id !== item.id) })}><Trash2 className="size-4 text-slate-500" /></button></div><div className="mt-4 grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm">Location<input className={fieldClass} value={item.location} onChange={(e) => updateObservation(item.id, { location: e.target.value })} /></label><label className="grid gap-2 text-sm">Code<select className={fieldClass} value={item.code} onChange={(e) => updateObservation(item.id, { code: e.target.value as ObservationCode })}>{observationCodes.map((code) => <option key={code}>{code}</option>)}</select></label><label className="grid gap-2 text-sm md:col-span-2">Observation<textarea className={`${fieldClass} min-h-20 py-3`} value={item.observation} onChange={(e) => updateObservation(item.id, { observation: e.target.value })} /></label><label className="grid gap-2 text-sm md:col-span-2">Recommendation<textarea className={`${fieldClass} min-h-20 py-3`} value={item.recommendation} onChange={(e) => updateObservation(item.id, { recommendation: e.target.value })} /></label></div></div>)}
 
-      <label className="grid gap-2 text-sm">General certificate notes<textarea className={`${fieldClass} min-h-32 py-3`} value={form.observations} onChange={(event) => setForm({ ...form, observations: event.target.value })} /></label>
-      <div className="flex justify-end"><Button type="submit"><FileCheck2 className="mr-2 size-4" />Save certificate</Button></div>
+      <div className="grid gap-4 md:grid-cols-3"><label className="grid gap-2 text-sm">Remedial actions<textarea className={`${fieldClass} min-h-28 py-3`} value={form.remedialActions ?? ""} onChange={(e) => setForm({ ...form, remedialActions: e.target.value })} /></label><label className="grid gap-2 text-sm">Limitations<textarea className={`${fieldClass} min-h-28 py-3`} value={form.limitations ?? ""} onChange={(e) => setForm({ ...form, limitations: e.target.value })} /></label><label className="grid gap-2 text-sm">Recommendations<textarea className={`${fieldClass} min-h-28 py-3`} value={form.recommendations ?? ""} onChange={(e) => setForm({ ...form, recommendations: e.target.value })} /></label></div>
+
+      <div className="grid gap-4 md:grid-cols-2"><Card><h3 className="font-bold">Inspector signature</h3><input className={`${fieldClass} mt-3`} value={form.inspectorSignature?.name ?? form.inspectorName} onChange={(e) => setForm({ ...form, inspectorSignature: { name: e.target.value, signedAt: form.inspectorSignature?.signedAt ?? "" } })} /><Button type="button" className="mt-3" onClick={() => sign("inspector", form.inspectorSignature?.name ?? form.inspectorName)}><PenLine className="mr-2 size-4" />Sign as inspector</Button>{form.inspectorSignature?.signedAt ? <p className="mt-2 text-xs text-emerald-300">Signed {new Date(form.inspectorSignature.signedAt).toLocaleString("en-GB")}</p> : null}</Card><Card><h3 className="font-bold">Customer signature</h3><input className={`${fieldClass} mt-3`} value={form.customerSignature?.name ?? ""} onChange={(e) => setForm({ ...form, customerSignature: { name: e.target.value, signedAt: form.customerSignature?.signedAt ?? "" } })} /><Button type="button" className="mt-3" onClick={() => sign("customer", form.customerSignature?.name ?? "")}><PenLine className="mr-2 size-4" />Capture customer sign-off</Button>{form.customerSignature?.signedAt ? <p className="mt-2 text-xs text-emerald-300">Signed {new Date(form.customerSignature.signedAt).toLocaleString("en-GB")}</p> : null}</Card></div>
+
+      <Card><div className="flex items-center gap-2"><History className="size-5 text-cyan-300" /><h3 className="font-bold">Revision history</h3></div><div className="mt-3 space-y-2">{form.revisionHistory?.length ? [...form.revisionHistory].reverse().map((revision) => <div key={revision.id} className="rounded-xl border border-slate-800 px-3 py-2 text-sm">Revision {revision.revisionNumber} · {new Date(revision.savedAt).toLocaleString("en-GB")} · {revision.savedBy}</div>) : <p className="text-sm text-slate-500">The first revision will be stored when saved.</p>}</div></Card>
+      <div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setForm({ ...form, status: "Archived", archivedAt: new Date().toISOString() })}><Archive className="mr-2 size-4" />Archive</Button><Button type="submit"><Save className="mr-2 size-4" />Save new revision</Button></div>
     </form></Card> : null}
 
-    <Card><div className="relative"><Search className="pointer-events-none absolute left-3 top-3 size-5 text-slate-500" /><input aria-label="Search certificates" className={`${fieldClass} pl-10`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search certificate, customer, job or address" /></div></Card>
-
-    {filtered.length === 0 ? <Card><div className="grid place-items-center py-10 text-center"><ClipboardCheck className="size-10 text-slate-600" /><h2 className="mt-4 text-lg font-bold">No certificates found</h2><p className="mt-2 max-w-md text-sm text-slate-400">Create a certificate record to track testing, observations, issue status and the final PDF.</p></div></Card> : <div className="grid gap-4 xl:grid-cols-2">{filtered.map((certificate) => {
-      const customer = customers.items.find((item) => item.id === certificate.customerId);
-      const job = jobs.items.find((item) => item.id === certificate.jobId);
-      const statusClass = certificate.status === "Issued" || certificate.status === "Complete" ? "bg-emerald-500/10 text-emerald-300" : certificate.status === "Superseded" ? "bg-slate-700 text-slate-300" : "bg-amber-500/10 text-amber-300";
-      return <Card key={certificate.id} className="h-full"><div className="flex items-start gap-4"><div className="rounded-xl bg-cyan-400/10 p-3 text-cyan-300"><FileCheck2 className="size-6" /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{certificate.number}</p><h2 className="mt-1 font-bold">{certificate.type}</h2></div><span className={`rounded-full px-3 py-1 text-xs font-semibold ${statusClass}`}>{certificate.status}</span></div><p className="mt-3 text-sm text-slate-300">{certificate.installationAddress}</p><p className="mt-1 text-sm text-slate-500">{customer?.name || "No customer"}{job ? ` · ${job.title}` : ""}</p><p className="mt-2 text-xs text-slate-500">{certificate.structuredObservations?.length ?? 0} structured observation(s)</p><div className="mt-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => editCertificate(certificate)}>Open record</Button>{certificate.externalPdfUrl ? <a href={certificate.externalPdfUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="mr-2 size-4" />Open PDF</a> : null}<button onClick={() => deleteCertificate(certificate)} aria-label={`Delete ${certificate.number}`} className="rounded-xl p-3 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div></div></div></Card>;
-    })}</div>}
+    <Card><div className="flex items-center gap-3"><Search className="size-5 text-cyan-300" /><input className={fieldClass} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search number, customer, job, type or status" /></div></Card>
+    <div className="space-y-3">{filtered.map((certificate) => <Card key={certificate.id}><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{certificate.status}</p><h2 className="mt-1 text-lg font-bold">{certificate.number} · {certificate.type}</h2><p className="mt-1 text-sm text-slate-400">{certificate.installationAddress || "No installation address"}</p><p className="mt-2 text-xs text-slate-500">{certificate.revisionHistory?.length ?? 0} saved revision{certificate.revisionHistory?.length === 1 ? "" : "s"}{certificate.issuedAt ? ` · issued ${new Date(certificate.issuedAt).toLocaleDateString("en-GB")}` : ""}</p></div><Button type="button" variant="secondary" onClick={() => editCertificate(certificate)}><FileCheck2 className="mr-2 size-4" />Open</Button></div></Card>)}{filtered.length === 0 ? <Card>No matching certificates.</Card> : null}</div>
   </div>;
 }
