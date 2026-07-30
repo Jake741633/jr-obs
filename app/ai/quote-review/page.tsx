@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { AlertTriangle, ArrowLeft, CheckCircle2, FileSearch, Gauge, PoundSterling, ShieldCheck } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
@@ -29,55 +29,54 @@ function includesAny(value: string, terms: string[]) {
   return terms.some((term) => normalised.includes(term));
 }
 
+function reviewQuote(selected: PricingDocument) {
+  const subtotal = selected.items.reduce((sum, item) => sum + lineRevenue(item), 0);
+  const knownCost = selected.items.reduce((sum, item) => sum + lineCost(item), 0);
+  const grossProfit = subtotal - knownCost;
+  const margin = subtotal > 0 ? (grossProfit / subtotal) * 100 : 0;
+  const labour = selected.items.filter((item) => item.category === "Labour");
+  const materials = selected.items.filter((item) => item.category === "Materials");
+  const other = selected.items.filter((item) => item.category === "Other");
+  const findings: ReviewFinding[] = [];
+
+  if (!selected.items.length) findings.push({ level: "Action", title: "No line items", detail: "Add labour, materials and any other charges before sending this quote." });
+  if (!labour.length) findings.push({ level: "Action", title: "Labour is missing", detail: "Add a clear labour allowance so the price covers your time and any additional electrician required." });
+  else findings.push({ level: "Good", title: "Labour included", detail: `${labour.length} labour line${labour.length === 1 ? " is" : "s are"} included.` });
+
+  if (!materials.length) findings.push({ level: "Check", title: "No materials listed", detail: "Confirm this is genuinely labour-only or add the expected materials and sundries." });
+  if (materials.some((item) => !item.unitCost)) findings.push({ level: "Check", title: "Material costs are incomplete", detail: "Some material lines have no unit cost, so profit and margin may be overstated." });
+
+  if (knownCost === 0 && selected.items.length) findings.push({ level: "Check", title: "No costs recorded", detail: "Enter unit costs where possible to make the margin review meaningful." });
+  else if (margin < 20) findings.push({ level: "Action", title: "Low gross margin", detail: `The known gross margin is ${margin.toFixed(1)}%. Review labour recovery, material markup and risk allowance.` });
+  else if (margin < 30) findings.push({ level: "Check", title: "Margin needs a final check", detail: `The known gross margin is ${margin.toFixed(1)}%. Confirm it covers overheads, callbacks and unforeseen time.` });
+  else findings.push({ level: "Good", title: "Healthy known margin", detail: `The recorded costs produce a ${margin.toFixed(1)}% gross margin before overheads and tax.` });
+
+  if (!selected.validUntil) findings.push({ level: "Check", title: "No expiry date", detail: "Add a valid-until date to protect against supplier price changes and delayed decisions." });
+  if (!selected.terms.trim()) findings.push({ level: "Action", title: "Terms are missing", detail: "Add payment terms, exclusions, variation rules and how long the quote remains valid." });
+  else {
+    if (!includesAny(selected.terms, ["variation", "additional work", "extra work"])) findings.push({ level: "Check", title: "Variation wording not detected", detail: "State that changes or extra work require approval and may be charged separately." });
+    if (!includesAny(selected.terms, ["making good", "decoration", "decorating", "building work"])) findings.push({ level: "Check", title: "Making-good exclusion not detected", detail: "Clarify whether chasing, plastering, decorating and other building work are included or excluded." });
+    if (!includesAny(selected.terms, ["payment", "deposit", "due", "invoice"])) findings.push({ level: "Check", title: "Payment wording not detected", detail: "Include deposit requirements, stage payments or when the final invoice is due." });
+  }
+
+  const testingText = `${selected.title} ${selected.notes} ${selected.terms} ${selected.items.map((item) => item.description).join(" ")}`;
+  if (!includesAny(testingText, ["test", "testing", "certificate", "certification", "eic", "minor works", "eicr"])) findings.push({ level: "Check", title: "Testing or certification not mentioned", detail: "Confirm the required inspection, testing and certificate are allowed for and described." });
+
+  if (!selected.notes.trim()) findings.push({ level: "Check", title: "No scope notes", detail: "Add assumptions, access requirements, customer-supplied items and key exclusions." });
+  if (other.length) findings.push({ level: "Good", title: "Other charges separated", detail: `${other.length} additional charge line${other.length === 1 ? " is" : "s are"} clearly separated.` });
+
+  const actions = findings.filter((item) => item.level === "Action").length;
+  const checks = findings.filter((item) => item.level === "Check").length;
+  const score = Math.max(0, Math.min(100, 100 - actions * 18 - checks * 7));
+  return { subtotal, knownCost, grossProfit, margin, findings, actions, checks, score };
+}
+
 export default function QuoteReviewPage() {
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const quotes = documents.items.filter((item) => item.type === "Quote");
   const [selectedId, setSelectedId] = useState("");
   const selected = quotes.find((item) => item.id === selectedId) || quotes[0];
-
-  const review = useMemo(() => {
-    if (!selected) return null;
-
-    const subtotal = selected.items.reduce((sum, item) => sum + lineRevenue(item), 0);
-    const knownCost = selected.items.reduce((sum, item) => sum + lineCost(item), 0);
-    const grossProfit = subtotal - knownCost;
-    const margin = subtotal > 0 ? (grossProfit / subtotal) * 100 : 0;
-    const labour = selected.items.filter((item) => item.category === "Labour");
-    const materials = selected.items.filter((item) => item.category === "Materials");
-    const other = selected.items.filter((item) => item.category === "Other");
-    const findings: ReviewFinding[] = [];
-
-    if (!selected.items.length) findings.push({ level: "Action", title: "No line items", detail: "Add labour, materials and any other charges before sending this quote." });
-    if (!labour.length) findings.push({ level: "Action", title: "Labour is missing", detail: "Add a clear labour allowance so the price covers your time and any additional electrician required." });
-    else findings.push({ level: "Good", title: "Labour included", detail: `${labour.length} labour line${labour.length === 1 ? " is" : "s are"} included.` });
-
-    if (!materials.length) findings.push({ level: "Check", title: "No materials listed", detail: "Confirm this is genuinely labour-only or add the expected materials and sundries." });
-    if (materials.some((item) => !item.unitCost)) findings.push({ level: "Check", title: "Material costs are incomplete", detail: "Some material lines have no unit cost, so profit and margin may be overstated." });
-
-    if (knownCost === 0 && selected.items.length) findings.push({ level: "Check", title: "No costs recorded", detail: "Enter unit costs where possible to make the margin review meaningful." });
-    else if (margin < 20) findings.push({ level: "Action", title: "Low gross margin", detail: `The known gross margin is ${margin.toFixed(1)}%. Review labour recovery, material markup and risk allowance.` });
-    else if (margin < 30) findings.push({ level: "Check", title: "Margin needs a final check", detail: `The known gross margin is ${margin.toFixed(1)}%. Confirm it covers overheads, callbacks and unforeseen time.` });
-    else findings.push({ level: "Good", title: "Healthy known margin", detail: `The recorded costs produce a ${margin.toFixed(1)}% gross margin before overheads and tax.` });
-
-    if (!selected.validUntil) findings.push({ level: "Check", title: "No expiry date", detail: "Add a valid-until date to protect against supplier price changes and delayed decisions." });
-    if (!selected.terms.trim()) findings.push({ level: "Action", title: "Terms are missing", detail: "Add payment terms, exclusions, variation rules and how long the quote remains valid." });
-    else {
-      if (!includesAny(selected.terms, ["variation", "additional work", "extra work"])) findings.push({ level: "Check", title: "Variation wording not detected", detail: "State that changes or extra work require approval and may be charged separately." });
-      if (!includesAny(selected.terms, ["making good", "decoration", "decorating", "building work"])) findings.push({ level: "Check", title: "Making-good exclusion not detected", detail: "Clarify whether chasing, plastering, decorating and other building work are included or excluded." });
-      if (!includesAny(selected.terms, ["payment", "deposit", "due", "invoice"])) findings.push({ level: "Check", title: "Payment wording not detected", detail: "Include deposit requirements, stage payments or when the final invoice is due." });
-    }
-
-    const testingText = `${selected.title} ${selected.notes} ${selected.terms} ${selected.items.map((item) => item.description).join(" ")}`;
-    if (!includesAny(testingText, ["test", "testing", "certificate", "certification", "eic", "minor works", "eicr"])) findings.push({ level: "Check", title: "Testing or certification not mentioned", detail: "Confirm the required inspection, testing and certificate are allowed for and described." });
-
-    if (!selected.notes.trim()) findings.push({ level: "Check", title: "No scope notes", detail: "Add assumptions, access requirements, customer-supplied items and key exclusions." });
-    if (other.length) findings.push({ level: "Good", title: "Other charges separated", detail: `${other.length} additional charge line${other.length === 1 ? " is" : "s are"} clearly separated.` });
-
-    const actions = findings.filter((item) => item.level === "Action").length;
-    const checks = findings.filter((item) => item.level === "Check").length;
-    const score = Math.max(0, Math.min(100, 100 - actions * 18 - checks * 7));
-    return { subtotal, knownCost, grossProfit, margin, findings, actions, checks, score };
-  }, [selected]);
+  const review = selected ? reviewQuote(selected) : null;
 
   if (!documents.isReady) return <Card>Preparing quote review…</Card>;
 
