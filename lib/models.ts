@@ -35,7 +35,7 @@ export interface TeamQualification { id: EntityId; name: string; certificateNumb
 export interface TeamMember { id: EntityId; name: string; role: TeamRole; status: TeamMemberStatus; email: string; phone: string; emergencyContact: string; emergencyPhone: string; hourlyCost: number; chargeRate: number; vanRegistration: string; qualifications: TeamQualification[]; notes: string; createdAt: string; updatedAt: string; }
 export type TimesheetStatus = "Draft" | "Submitted" | "Approved";
 export interface TimesheetEntry { id: EntityId; teamMemberId: EntityId; jobId?: EntityId; workDate: string; startedAt: string; finishedAt: string; breakMinutes: number; notes: string; status: TimesheetStatus; createdAt: string; updatedAt: string; }
-export type LabourRateUnit = "Hour" | "Day";
+export type LabourRateUnit = "Hour" | "Half day" | "Day" | "Call-out" | "Minimum charge";
 export interface LabourRate { id: EntityId; name: string; description: string; costRate: number; chargeRate: number; unit: LabourRateUnit; active: boolean; createdAt: string; updatedAt: string; }
 export type OverheadFrequency = "Weekly" | "Monthly" | "Annual";
 export type OverheadCategory = "Vehicle" | "Insurance" | "Software" | "Registration" | "Accountancy" | "Phone" | "Tools" | "Training" | "Premises" | "Marketing" | "Other";
@@ -96,4 +96,3 @@ export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" |
 export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }
 
 export type EntityBase = Customer | Builder | CustomerProfile | CustomerInteraction | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | RamsDocument | TeamMember | TimesheetEntry | LabourRate | BusinessOverhead | LabourCostSettings | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
-
