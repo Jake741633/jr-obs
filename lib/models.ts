@@ -56,8 +56,11 @@ export interface BusinessExpense { id: EntityId; expenseDate: string; supplier: 
 
 export type PricingDocumentType = "Quote" | "Estimate";
 export type PricingDocumentStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Expired";
-export interface PricingLineItem { id: EntityId; description: string; category: "Labour" | "Materials" | "Other"; quantity: number; unitPrice: number; unitCost?: number; materialId?: EntityId; supplier?: string; stockCode?: string; }
-export interface PricingDocument { id: EntityId; number: string; type: PricingDocumentType; status: PricingDocumentStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; title: string; validUntil: string; vatEnabled: boolean; vatRate: number; items: PricingLineItem[]; notes: string; terms: string; createdAt: string; updatedAt: string; }
+export type QuoteLabourMode = "Hours" | "Days" | "Fixed";
+export interface PricingLineItem { id: EntityId; description: string; category: "Labour" | "Materials" | "Other"; quantity: number; unitPrice: number; unitCost?: number; materialId?: EntityId; supplier?: string; stockCode?: string; labourRateId?: EntityId; labourMode?: QuoteLabourMode; labourHours?: number; }
+export interface QuotePricingSettings { contingencyPercent: number; materialMarkupPercent: number; travelCost: number; travelPrice: number; parkingCost: number; parkingPrice: number; }
+export interface QuoteProfitabilitySnapshot { directCost: number; overheadCost: number; costPrice: number; sellingPrice: number; grossProfit: number; expectedProfit: number; grossMargin: number; netMargin: number; calculatedAt: string; }
+export interface PricingDocument { id: EntityId; number: string; type: PricingDocumentType; status: PricingDocumentStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; title: string; validUntil: string; vatEnabled: boolean; vatRate: number; items: PricingLineItem[]; pricingSettings?: QuotePricingSettings; profitability?: QuoteProfitabilitySnapshot; notes: string; terms: string; createdAt: string; updatedAt: string; }
 
 export type InvoiceStatus = "Draft" | "Sent" | "Part paid" | "Paid" | "Overdue" | "Cancelled";
 export interface Invoice { id: EntityId; number: string; status: InvoiceStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; quoteId?: EntityId; title: string; issueDate: string; dueDate: string; vatEnabled: boolean; vatRate: number; items: PricingLineItem[]; amountPaid: number; notes: string; paymentDetails: string; createdAt: string; updatedAt: string; }
