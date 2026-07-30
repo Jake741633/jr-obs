@@ -29,6 +29,10 @@ function pricingTotal(document: PricingDocument | Invoice) {
   return subtotal + (document.vatEnabled ? subtotal * (document.vatRate / 100) : 0);
 }
 
+function netDocumentTotal(document: PricingDocument | Invoice) {
+  return document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+}
+
 function clamp(value: number, minimum = 0, maximum = 100) {
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }
@@ -45,6 +49,8 @@ export default function BusinessPage() {
 
   const intelligence = useMemo(() => {
     const now = new Date();
+    const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const monthLabel = now.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
     const quotes = pricing.items.filter((item) => item.type === "Quote");
     const acceptedQuotes = quotes.filter((item) => item.status === "Accepted");
     const sentQuotes = quotes.filter((item) => ["Sent", "Accepted", "Declined", "Expired"].includes(item.status));
@@ -60,8 +66,21 @@ export default function BusinessPage() {
     const invoicedValue = invoices.items.reduce((sum, item) => sum + pricingTotal(item), 0);
     const collectedValue = invoices.items.reduce((sum, item) => sum + Math.min(pricingTotal(item), item.amountPaid), 0);
     const collectionRate = invoicedValue ? (collectedValue / invoicedValue) * 100 : 100;
+    const monthlyInvoices = invoices.items.filter((item) => item.status !== "Cancelled" && item.issueDate.startsWith(monthKey));
+    const monthlyRevenue = monthlyInvoices.reduce((sum, item) => sum + netDocumentTotal(item), 0);
+    const quotesById = new Map(quotes.map((quote) => [quote.id, quote]));
+    const monthlyProfit = monthlyInvoices.reduce((sum, invoice) => {
+      const linkedQuote = invoice.quoteId ? quotesById.get(invoice.quoteId) : undefined;
+      if (linkedQuote?.profitability) {
+        const quoteSellingPrice = linkedQuote.profitability.sellingPrice;
+        const invoiceShare = quoteSellingPrice > 0 ? netDocumentTotal(invoice) / quoteSellingPrice : 1;
+        return sum + linkedQuote.profitability.expectedProfit * invoiceShare;
+      }
+      return sum + invoice.items.reduce((lineSum, item) => lineSum + item.quantity * (item.unitPrice - (item.unitCost ?? item.unitPrice)), 0);
+    }, 0);
 
     const activeJobs = jobs.items.filter((item) => !["Complete", "On hold"].includes(item.status));
+    const outstandingJobs = jobs.items.filter((item) => item.status !== "Complete");
     const scheduledJobs = jobs.items.filter((item) => item.status === "Scheduled");
     const inProgressJobs = jobs.items.filter((item) => item.status === "In progress");
     const unscheduledActiveJobs = activeJobs.filter((item) => !item.startDate);
@@ -106,7 +125,12 @@ export default function BusinessPage() {
       overdueInvoices,
       overdueValue,
       collectionRate,
+      monthLabel,
+      monthlyInvoices,
+      monthlyRevenue,
+      monthlyProfit,
       activeJobs,
+      outstandingJobs,
       scheduledJobs,
       inProgressJobs,
       relationshipConcentration,
@@ -132,16 +156,18 @@ export default function BusinessPage() {
     </div>
 
     {view === "Setup" ? <BusinessManagementCentre /> : <>
-    <section className="grid gap-4 lg:grid-cols-[1.15fr_2fr]">
+    <section className="grid gap-4 lg:grid-cols-[0.8fr_2.2fr]">
       <Card className="border-cyan-400/30">
         <div className="flex items-center justify-between"><div><p className="text-sm text-slate-400">JR OS health score</p><p className={`mt-2 text-6xl font-black ${healthTone}`}>{intelligence.overallScore}</p><p className="mt-1 text-sm text-slate-500">out of 100</p></div><CircleGauge className={`size-12 ${healthTone}`} /></div>
         <p className="mt-5 text-sm text-slate-400">A practical operating score based on debt, quote conversion, scheduling, record quality and customer concentration. It is a guide, not an accounting statement.</p>
       </Card>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card><TrendingUp className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Quote pipeline</p><p className="mt-2 text-2xl font-bold">{gbp.format(intelligence.pipelineValue)}</p><p className="mt-1 text-xs text-slate-500">{intelligence.openQuotes.length} open quote{intelligence.openQuotes.length === 1 ? "" : "s"}</p></Card>
-        <Card><ReceiptText className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Outstanding</p><p className="mt-2 text-2xl font-bold">{gbp.format(intelligence.outstandingValue)}</p><p className="mt-1 text-xs text-slate-500">{intelligence.overdueInvoices.length} overdue</p></Card>
-        <Card><BriefcaseBusiness className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Active jobs</p><p className="mt-2 text-2xl font-bold">{intelligence.activeJobs.length}</p><p className="mt-1 text-xs text-slate-500">{intelligence.inProgressJobs.length} in progress</p></Card>
-        <Card><Banknote className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Collection rate</p><p className="mt-2 text-2xl font-bold">{Math.round(intelligence.collectionRate)}%</p><p className="mt-1 text-xs text-slate-500">of invoiced value recorded paid</p></Card>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <Card><PoundSterling className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Monthly revenue</p><p className="mt-2 text-2xl font-bold">{gbp.format(intelligence.monthlyRevenue)}</p><p className="mt-1 text-xs text-slate-500">{intelligence.monthlyInvoices.length} invoice{intelligence.monthlyInvoices.length === 1 ? "" : "s"} in {intelligence.monthLabel}, excluding VAT</p></Card>
+        <Card><TrendingUp className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Monthly profit</p><p className={`mt-2 text-2xl font-bold ${intelligence.monthlyProfit >= 0 ? "text-emerald-300" : "text-red-300"}`}>{gbp.format(intelligence.monthlyProfit)}</p><p className="mt-1 text-xs text-slate-500">Expected profit from linked quote data and recorded line costs</p></Card>
+        <Card><ReceiptText className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Unpaid invoices</p><p className="mt-2 text-2xl font-bold">{intelligence.outstandingInvoices.length}</p><p className="mt-1 text-xs text-slate-500">{gbp.format(intelligence.outstandingValue)} still to collect</p></Card>
+        <Card><FileText className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Quote conversion</p><p className="mt-2 text-2xl font-bold">{Math.round(intelligence.quoteConversion)}%</p><p className="mt-1 text-xs text-slate-500">{intelligence.quotes.filter((quote) => quote.status === "Accepted").length} accepted quote{intelligence.quotes.filter((quote) => quote.status === "Accepted").length === 1 ? "" : "s"}</p></Card>
+        <Card><BriefcaseBusiness className="size-5 text-blue-300" /><p className="mt-3 text-sm text-slate-400">Outstanding jobs</p><p className="mt-2 text-2xl font-bold">{intelligence.outstandingJobs.length}</p><p className="mt-1 text-xs text-slate-500">{intelligence.inProgressJobs.length} in progress · {intelligence.scheduledJobs.length} scheduled</p></Card>
+        <Card><Banknote className="size-5 text-fuchsia-300" /><p className="mt-3 text-sm text-slate-400">Collection rate</p><p className="mt-2 text-2xl font-bold">{Math.round(intelligence.collectionRate)}%</p><p className="mt-1 text-xs text-slate-500">of all invoiced value recorded paid</p></Card>
       </div>
     </section>
 
