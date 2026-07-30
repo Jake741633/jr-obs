@@ -9,11 +9,19 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
+import {
+  businessStorageKeys,
+  defaultBusinessProfile,
+  defaultDocumentBranding,
+  defaultPaymentTermsTemplates,
+  defaultVatSettings,
+  paymentTermsFromTemplate,
+} from "../../lib/businessSettings";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
 import { createJobFromAcceptedQuote, pricingDocumentTotal } from "../../lib/workflow";
-import type { Builder, BusinessOverhead, BusinessTermsTemplate, Customer, Job, JobDocument, JobPack, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment } from "../../lib/models";
+import type { Builder, BusinessOverhead, BusinessProfile, BusinessTermsTemplate, Customer, DocumentBrandingSettings, Job, JobDocument, JobPack, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsTemplate, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment, VatSettings } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const defaultTerms = "This document is based on the described scope. Variations, unforeseen work and making good are excluded unless stated otherwise.";
@@ -35,6 +43,10 @@ export default function QuotesPage() {
   const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
   const quoteSettingsStore = useLocalStorageCollection<QuotePricingSettings>("jr-os-quote-engine-settings", [defaultQuotePricingSettings]);
   const termsTemplates = useLocalStorageCollection<BusinessTermsTemplate>("jr-os-business-terms-templates", defaultBusinessTermsTemplates);
+  const paymentTermsTemplates = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
+  const profileStore = useLocalStorageCollection<BusinessProfile>(businessStorageKeys.profile, [defaultBusinessProfile]);
+  const vatStore = useLocalStorageCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
+  const brandingStore = useLocalStorageCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
   const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
   const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
   const [showForm, setShowForm] = useState(false);
@@ -58,6 +70,9 @@ export default function QuotesPage() {
   const [attachments, setAttachments] = useState<RecordAttachment[]>([]);
   const [attachmentLink, setAttachmentLink] = useState({ name: "", url: "" });
   const [attachmentError, setAttachmentError] = useState("");
+  const businessProfile = profileStore.items[0] ?? defaultBusinessProfile;
+  const vatSettings = vatStore.items[0] ?? defaultVatSettings;
+  const branding = brandingStore.items[0] ?? defaultDocumentBranding;
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),
@@ -112,6 +127,26 @@ export default function QuotesPage() {
     setShowForm(false);
   }
 
+  function startNewDocument() {
+    const savedPricing = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
+    const defaultPayment = paymentTermsTemplates.items.find((item) => item.active && item.isDefault)
+      ?? paymentTermsTemplates.items.find((item) => item.active);
+    setForm({
+      ...blankForm,
+      vatEnabled: vatSettings.registrationStatus === "VAT registered",
+      vatRate: String(vatSettings.defaultRate),
+    });
+    setItems([]);
+    setPricing(savedPricing);
+    setLabour({ ...blankLabour, rateId: savedPricing.defaultLabourRateId ?? "" });
+    setPaymentTerms(defaultPayment ? paymentTermsFromTemplate(defaultPayment) : { type: "Due on completion" });
+    setAttachments([]);
+    setEditingId(null);
+    setError("");
+    setSuccess("");
+    setShowForm(true);
+  }
+
   function startEdit(document: PricingDocument) {
     setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", siteAddress: document.siteAddress ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId ?? "", templateType: document.templateType });
     setItems(document.items);
@@ -146,7 +181,8 @@ export default function QuotesPage() {
       unitCost: 0,
       unitPrice: 0,
     })));
-    setPaymentTerms({ type: template.paymentType, depositPercent: template.paymentType === "Deposit" ? 25 : undefined, stages: template.paymentType === "Staged payments" ? "30% deposit · 40% after first fix · 30% on completion" : undefined });
+    const savedPaymentTemplate = paymentTermsTemplates.items.find((item) => item.active && item.type === template.paymentType);
+    setPaymentTerms(savedPaymentTemplate ? paymentTermsFromTemplate(savedPaymentTemplate) : { type: template.paymentType, depositPercent: template.paymentType === "Deposit" ? 25 : undefined, stages: template.paymentType === "Staged payments" ? "30% deposit · 40% after first fix · 30% on completion" : undefined });
     setSuccess(`${template.type} quote template applied. Review every section before sending.`);
   }
 
@@ -408,7 +444,7 @@ export default function QuotesPage() {
   function total(document: PricingDocument) { return pricingDocumentTotal(document); }
 
   return <div className="space-y-6">
-    <PageHeader eyebrow="Sales" title="Quotes & Estimates" description="Build professional pricing documents with live material costs, margins and reusable job packs." action={<Button onClick={() => showForm ? reset() : setShowForm(true)}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New document"}</Button>} />
+    <PageHeader eyebrow="Sales" title="Quotes & Estimates" description="Build professional pricing documents with live material costs, margins and reusable job packs." action={<Button onClick={() => showForm ? reset() : startNewDocument()}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New document"}</Button>} />
     {pageMessage ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{pageMessage}</div> : null}
 
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -497,9 +533,15 @@ export default function QuotesPage() {
       </div>
       <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4">
         <h2 className="font-semibold">Payment terms</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-3"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Payment structure</span><select value={paymentTerms.type} onChange={(event) => setPaymentTerms({ type: event.target.value as PaymentTermsType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Deposit</option><option>Staged payments</option><option>Due on completion</option></select></label>{paymentTerms.type === "Deposit" ? <InputField label="Deposit (%)" type="number" min="0" max="100" value={paymentTerms.depositPercent ?? 25} onChange={(event) => setPaymentTerms({ ...paymentTerms, depositPercent: Number(event.target.value || 0) })} /> : null}{paymentTerms.type === "Staged payments" ? <div className="md:col-span-2"><TextareaField label="Payment stages" value={paymentTerms.stages ?? ""} onChange={(event) => setPaymentTerms({ ...paymentTerms, stages: event.target.value })} /></div> : null}</div>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Saved payment terms</span><select value={paymentTerms.templateId ?? ""} onChange={(event) => { const template = paymentTermsTemplates.items.find((item) => item.id === event.target.value); if (template) setPaymentTerms(paymentTermsFromTemplate(template)); }} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Custom payment terms</option>{paymentTermsTemplates.items.filter((item) => item.active).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label>
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Payment structure</span><select value={paymentTerms.type} onChange={(event) => setPaymentTerms({ type: event.target.value as PaymentTermsType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Deposit</option><option>Staged payments</option><option>Due on completion</option></select></label>
+          {paymentTerms.type === "Deposit" ? <InputField label="Deposit (%)" type="number" min="0" max="100" value={paymentTerms.depositPercent ?? 25} onChange={(event) => setPaymentTerms({ ...paymentTerms, depositPercent: Number(event.target.value || 0) })} /> : null}
+          {paymentTerms.type === "Staged payments" ? <div className="md:col-span-2"><TextareaField label="Payment stages" value={paymentTerms.stages ?? ""} onChange={(event) => setPaymentTerms({ ...paymentTerms, stages: event.target.value })} /></div> : null}
+          <div className="md:col-span-3"><TextareaField label="Payment wording" value={paymentTerms.description ?? ""} onChange={(event) => setPaymentTerms({ ...paymentTerms, description: event.target.value })} /></div>
+        </div>
       </div>
-      <div><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Full quote preview</h2><p className="text-sm text-slate-500">This customer-facing layout matches the saved document and final PDF structure.</p></div><Eye className="size-5 text-cyan-300" /></div><QuotePreview number={editingId ? documents.items.find((item) => item.id === editingId)?.number ?? "DRAFT" : "DRAFT"} documentType={form.type} title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} siteAddress={form.siteAddress} validUntil={form.validUntil} items={items} notes={form.notes} terms={form.terms} paymentTerms={paymentTerms} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} subtotal={profitability.sellingPrice} /></div>
+      <div><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Full quote preview</h2><p className="text-sm text-slate-500">This customer-facing layout matches the saved document and final PDF structure.</p></div><Eye className="size-5 text-cyan-300" /></div><QuotePreview number={editingId ? documents.items.find((item) => item.id === editingId)?.number ?? "DRAFT" : "DRAFT"} documentType={form.type} title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} siteAddress={form.siteAddress} validUntil={form.validUntil} items={items} notes={form.notes} terms={form.terms} paymentTerms={paymentTerms} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} subtotal={profitability.sellingPrice} businessProfile={businessProfile} vatSettings={vatSettings} branding={branding} /></div>
       <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4"><h2 className="font-semibold">Save this version as a new job pack</h2><p className="mt-1 text-sm text-slate-400">Material links are retained so future quotes can use current library prices.</p><div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]"><InputField label="New pack name" value={savePackName} onChange={(e) => setSavePackName(e.target.value)} /><InputField label="Category" value={savePackCategory} onChange={(e) => setSavePackCategory(e.target.value)} /><Button type="button" className="self-end" onClick={saveAsJobPack}><Save className="mr-2 size-4" />Save as job pack</Button></div></div>
       <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}{success ? <p className="text-sm text-emerald-300">{success}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Selling price {money.format(profitability.sellingPrice)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Customer total {money.format(profitability.sellingPrice + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
     </form></Card> : null}

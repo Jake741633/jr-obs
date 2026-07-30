@@ -2,19 +2,36 @@
 
 import { FormEvent, useMemo, useState } from "react";
 import { FileText, Plus, Search, Trash2 } from "lucide-react";
+import { InvoicePreview } from "../../components/invoices/InvoicePreview";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
+import {
+  bankDetailsText,
+  businessStorageKeys,
+  defaultBankDetails,
+  defaultBusinessProfile,
+  defaultDocumentBranding,
+  defaultPaymentTermsTemplates,
+  defaultVatSettings,
+  paymentTermsText,
+} from "../../lib/businessSettings";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import { nextInvoiceNumber } from "../../lib/workflow";
-import type { Builder, Customer, Invoice, InvoiceStatus, Job, JobTimelineEntry, PricingDocument, PricingLineItem } from "../../lib/models";
+import type { Builder, BusinessBankDetails, BusinessProfile, Customer, DocumentBrandingSettings, Invoice, InvoiceStatus, Job, JobTimelineEntry, PaymentTermsTemplate, PricingDocument, PricingLineItem, VatSettings } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const statuses: InvoiceStatus[] = ["Draft", "Sent", "Part paid", "Paid", "Overdue", "Cancelled"];
 const blankLine = { description: "", category: "Labour" as PricingLineItem["category"], quantity: "1", unitPrice: "" };
-const blankForm = { title: "", customerId: "", builderId: "", jobId: "", quoteId: "", issueDate: new Date().toISOString().slice(0, 10), dueDate: "", vatEnabled: false, vatRate: "20", amountPaid: "0", notes: "", paymentDetails: "" };
+const blankForm = { title: "", customerId: "", builderId: "", jobId: "", quoteId: "", paymentTermsTemplateId: "", paymentTermsText: "", issueDate: new Date().toISOString().slice(0, 10), dueDate: "", vatEnabled: false, vatRate: "20", amountPaid: "0", notes: "", paymentDetails: "" };
+
+function addDays(date: string, days: number) {
+  const result = new Date(`${date}T12:00:00`);
+  result.setDate(result.getDate() + days);
+  return result.toISOString().slice(0, 10);
+}
 
 export default function InvoicesPage() {
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
@@ -23,12 +40,23 @@ export default function InvoicesPage() {
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
+  const profileStore = useLocalStorageCollection<BusinessProfile>(businessStorageKeys.profile, [defaultBusinessProfile]);
+  const vatStore = useLocalStorageCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
+  const bankStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
+  const brandingStore = useLocalStorageCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
+  const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [items, setItems] = useState<PricingLineItem[]>([]);
   const [line, setLine] = useState(blankLine);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
+  const businessProfile = profileStore.items[0] ?? defaultBusinessProfile;
+  const vatSettings = vatStore.items[0] ?? defaultVatSettings;
+  const bankDetails = bankStore.items[0] ?? defaultBankDetails;
+  const branding = brandingStore.items[0] ?? defaultDocumentBranding;
+  const ready = invoices.isReady && customers.isReady && builders.isReady && jobs.isReady && quotes.isReady && timeline.isReady
+    && profileStore.isReady && vatStore.isReady && bankStore.isReady && brandingStore.isReady && paymentTermsStore.isReady;
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),
@@ -44,10 +72,47 @@ export default function InvoicesPage() {
     setForm(blankForm); setItems([]); setLine(blankLine); setError(""); setShowForm(false);
   }
 
+  function startNewInvoice() {
+    const issueDate = new Date().toISOString().slice(0, 10);
+    const template = paymentTermsStore.items.find((item) => item.active && item.isDefault)
+      ?? paymentTermsStore.items.find((item) => item.active);
+    setForm({
+      ...blankForm,
+      issueDate,
+      dueDate: addDays(issueDate, template?.dueDays ?? 0),
+      vatEnabled: vatSettings.registrationStatus === "VAT registered",
+      vatRate: String(vatSettings.defaultRate),
+      paymentTermsTemplateId: template?.id ?? "",
+      paymentTermsText: template ? paymentTermsText({ type: template.type, name: template.name, description: template.description, dueDays: template.dueDays, depositPercent: template.depositPercent, stages: template.stages }) : "Payment due on completion",
+      paymentDetails: bankDetailsText(bankDetails),
+    });
+    setItems([]);
+    setLine(blankLine);
+    setError("");
+    setShowForm(true);
+  }
+
+  function selectPaymentTerms(id: string) {
+    const template = paymentTermsStore.items.find((item) => item.id === id);
+    if (!template) {
+      setForm((current) => ({ ...current, paymentTermsTemplateId: "" }));
+      return;
+    }
+    setForm((current) => ({
+      ...current,
+      paymentTermsTemplateId: template.id,
+      paymentTermsText: paymentTermsText({ type: template.type, name: template.name, description: template.description, dueDays: template.dueDays, depositPercent: template.depositPercent, stages: template.stages }),
+      dueDate: addDays(current.issueDate, template.dueDays),
+    }));
+  }
+
   function importQuote(id: string) {
     const quote = quotes.items.find((item) => item.id === id);
     if (!quote) return;
-    setForm((current) => ({ ...current, quoteId: quote.id, title: quote.title, customerId: quote.customerId ?? "", builderId: quote.builderId ?? "", jobId: quote.jobId ?? "", vatEnabled: quote.vatEnabled, vatRate: String(quote.vatRate), notes: quote.notes }));
+    setForm((current) => {
+      const dueDays = quote.paymentTerms?.dueDays ?? (quote.paymentTerms?.type === "Due on completion" ? 0 : 7);
+      return { ...current, quoteId: quote.id, title: quote.title, customerId: quote.customerId ?? "", builderId: quote.builderId ?? "", jobId: quote.jobId ?? "", paymentTermsTemplateId: quote.paymentTerms?.templateId ?? current.paymentTermsTemplateId, paymentTermsText: paymentTermsText(quote.paymentTerms), dueDate: addDays(current.issueDate, dueDays), vatEnabled: quote.vatEnabled, vatRate: String(quote.vatRate), notes: quote.notes };
+    });
     setItems(quote.items.map((item) => ({ ...item, id: makeId("invoice-line") })));
     setError("");
   }
@@ -67,7 +132,7 @@ export default function InvoicesPage() {
     if (items.length === 0) { setError("Add at least one invoice line."); return; }
     const now = new Date().toISOString();
     const number = nextInvoiceNumber(invoices.items);
-    const invoice: Invoice = { id: makeId("invoice"), number, status: "Draft", customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined, quoteId: form.quoteId || undefined, title: form.title.trim(), issueDate: form.issueDate, dueDate: form.dueDate, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items, amountPaid: Number(form.amountPaid || 0), notes: form.notes, paymentDetails: form.paymentDetails, createdAt: now, updatedAt: now };
+    const invoice: Invoice = { id: makeId("invoice"), number, status: "Draft", customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined, quoteId: form.quoteId || undefined, paymentTermsTemplateId: form.paymentTermsTemplateId || undefined, paymentTermsText: form.paymentTermsText, title: form.title.trim(), issueDate: form.issueDate, dueDate: form.dueDate, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items, amountPaid: Number(form.amountPaid || 0), notes: form.notes, paymentDetails: form.paymentDetails, createdAt: now, updatedAt: now };
     invoices.setItems((current) => [invoice, ...current]);
     if (invoice.jobId) timeline.setItems((current) => [{ id: makeId("timeline"), jobId: invoice.jobId!, milestone: "Invoice created", note: `${invoice.number} created and linked to this job.`, completedBy: "JR OS", completedAt: now, createdAt: now }, ...current]);
     reset();
@@ -105,7 +170,7 @@ export default function InvoicesPage() {
   }
 
   return <div className="space-y-6">
-    <PageHeader eyebrow="Finance" title="Invoices" description="Create invoices from accepted quotes or build them manually, then track payment status." action={<Button onClick={() => showForm ? reset() : setShowForm(true)}><Plus className="mr-2 size-4" />{showForm ? "Close form" : "New invoice"}</Button>} />
+    <PageHeader eyebrow="Finance" title="Invoices" description="Create invoices from accepted quotes or build them manually, then track payment status." action={<Button disabled={!ready} onClick={() => showForm ? reset() : startNewInvoice()}><Plus className="mr-2 size-4" />{showForm ? "Close form" : "New invoice"}</Button>} />
 
     {showForm ? <Card><form onSubmit={submit} className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -116,6 +181,7 @@ export default function InvoicesPage() {
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select value={form.jobId} onChange={(e) => setForm({ ...form, jobId: e.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">No linked job</option>{jobs.items.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
         <InputField required label="Issue date" type="date" value={form.issueDate} onChange={(e) => setForm({ ...form, issueDate: e.target.value })} />
         <InputField required label="Due date" type="date" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Payment terms</span><select value={form.paymentTermsTemplateId} onChange={(event) => selectPaymentTerms(event.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Custom terms</option>{paymentTermsStore.items.filter((item) => item.active).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label className="flex items-center gap-3 pt-8 text-sm text-slate-300"><input type="checkbox" checked={form.vatEnabled} onChange={(e) => setForm({ ...form, vatEnabled: e.target.checked })} /> Add VAT</label>
       </div>
 
@@ -125,11 +191,12 @@ export default function InvoicesPage() {
         <div className="mt-4 space-y-2">{items.map((item) => <div key={item.id} className="flex items-center justify-between gap-4 rounded-xl bg-slate-900 p-3"><div><p className="font-medium">{item.description}</p><p className="text-xs text-slate-500">{item.quantity} × {money.format(item.unitPrice)}</p></div><div className="flex items-center gap-3"><strong>{money.format(item.quantity * item.unitPrice)}</strong><button type="button" onClick={() => setItems((current) => current.filter((lineItem) => lineItem.id !== item.id))} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div></div>)}</div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2"><TextareaField label="Invoice notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /><TextareaField label="Payment details" value={form.paymentDetails} onChange={(e) => setForm({ ...form, paymentDetails: e.target.value })} /></div>
+      <div className="grid gap-4 md:grid-cols-3"><TextareaField label="Invoice notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /><TextareaField label="Payment terms wording" value={form.paymentTermsText} onChange={(e) => setForm({ ...form, paymentTermsText: e.target.value, paymentTermsTemplateId: "" })} /><TextareaField label="Payment details" value={form.paymentDetails} onChange={(e) => setForm({ ...form, paymentDetails: e.target.value })} /></div>
+      <div><h2 className="mb-3 text-lg font-bold">Branded invoice preview</h2><InvoicePreview number="DRAFT" title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} issueDate={form.issueDate} dueDate={form.dueDate} items={items} notes={form.notes} paymentTermsText={form.paymentTermsText} paymentDetails={form.paymentDetails} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} businessProfile={businessProfile} vatSettings={vatSettings} branding={branding} /></div>
       <div className="flex items-end justify-between border-t border-slate-800 pt-5"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Subtotal {money.format(subtotal)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Total {money.format(total)}</p><Button type="submit" className="mt-3">Save invoice</Button></div></div>
     </form></Card> : null}
 
     <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search invoices" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
-    {!invoices.isReady ? <Card>Loading invoices…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<FileText className="size-6" />} title={invoices.items.length ? "No matching invoices" : "No invoices yet"} description={invoices.items.length ? "Try a different search." : "Create an invoice manually or import an accepted quote."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((invoice) => { const gross = invoiceTotal(invoice); const outstanding = Math.max(0, gross - invoice.amountPaid); return <Card key={invoice.id}><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{invoice.number}</p><h2 className="mt-1 text-lg font-bold">{invoice.title}</h2><p className="text-sm text-slate-500">{names.get(invoice.customerId ?? "") || names.get(invoice.builderId ?? "") || "Unassigned"}</p><div className="mt-4 grid gap-3 border-t border-slate-800 pt-4"><label className="grid gap-2 text-xs text-slate-500"><span>Status</span><select value={invoice.status} onChange={(e) => updateStatus(invoice.id, e.target.value as InvoiceStatus)} className="min-h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200">{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><div className="flex justify-between text-sm"><span className="text-slate-500">Due {invoice.dueDate ? new Date(`${invoice.dueDate}T12:00:00`).toLocaleDateString("en-GB") : "—"}</span><strong>{money.format(gross)}</strong></div><div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding</span><span className={outstanding > 0 ? "font-semibold text-amber-300" : "font-semibold text-emerald-300"}>{money.format(outstanding)}</span></div>{invoice.status !== "Cancelled" ? <Button type="button" variant="secondary" onClick={() => recordPayment(invoice)}>{invoice.status === "Paid" ? "Update payment" : "Record payment"}</Button> : null}</div></Card>; })}</section>}
+    {!ready ? <Card>Loading invoices…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<FileText className="size-6" />} title={invoices.items.length ? "No matching invoices" : "No invoices yet"} description={invoices.items.length ? "Try a different search." : "Create an invoice manually or import an accepted quote."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((invoice) => { const gross = invoiceTotal(invoice); const outstanding = Math.max(0, gross - invoice.amountPaid); return <Card key={invoice.id}><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{invoice.number}</p><h2 className="mt-1 text-lg font-bold">{invoice.title}</h2><p className="text-sm text-slate-500">{names.get(invoice.customerId ?? "") || names.get(invoice.builderId ?? "") || "Unassigned"}</p><div className="mt-4 grid gap-3 border-t border-slate-800 pt-4"><label className="grid gap-2 text-xs text-slate-500"><span>Status</span><select value={invoice.status} onChange={(e) => updateStatus(invoice.id, e.target.value as InvoiceStatus)} className="min-h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200">{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><div className="flex justify-between text-sm"><span className="text-slate-500">Due {invoice.dueDate ? new Date(`${invoice.dueDate}T12:00:00`).toLocaleDateString("en-GB") : "—"}</span><strong>{money.format(gross)}</strong></div><div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding</span><span className={outstanding > 0 ? "font-semibold text-amber-300" : "font-semibold text-emerald-300"}>{money.format(outstanding)}</span></div>{invoice.status !== "Cancelled" ? <Button type="button" variant="secondary" onClick={() => recordPayment(invoice)}>{invoice.status === "Paid" ? "Update payment" : "Record payment"}</Button> : null}</div></Card>; })}</section>}
   </div>;
 }

@@ -79,7 +79,7 @@ export interface PricingDocument { id: EntityId; number: string; type: PricingDo
 export interface JobQuoteSnapshot { quoteId: EntityId; quoteNumber: string; items: PricingLineItem[]; pricingSettings?: QuotePricingSettings; profitability?: QuoteProfitabilitySnapshot; attachments: RecordAttachment[]; vatEnabled: boolean; vatRate: number; notes: string; terms: string; paymentTerms?: QuotePaymentTerms; convertedAt: string; }
 
 export type InvoiceStatus = "Draft" | "Sent" | "Part paid" | "Paid" | "Overdue" | "Cancelled";
-export interface Invoice { id: EntityId; number: string; status: InvoiceStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; quoteId?: EntityId; title: string; issueDate: string; dueDate: string; vatEnabled: boolean; vatRate: number; items: PricingLineItem[]; amountPaid: number; notes: string; paymentDetails: string; createdAt: string; updatedAt: string; }
+export interface Invoice { id: EntityId; number: string; status: InvoiceStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; quoteId?: EntityId; paymentTermsTemplateId?: EntityId; paymentTermsText?: string; title: string; issueDate: string; dueDate: string; vatEnabled: boolean; vatRate: number; items: PricingLineItem[]; amountPaid: number; notes: string; paymentDetails: string; createdAt: string; updatedAt: string; }
 
 export type MaterialCategory = "Cable" | "Protection" | "Accessories" | "Lighting" | "Containment" | "EV" | "Testing" | "Fire alarm" | "Emergency lighting" | "Other";
 export type MaterialUnit = "Each" | "Metre" | "Drum" | "Box" | "Pack";
@@ -109,7 +109,7 @@ export type CertificateStatus = "Draft" | "In progress" | "Complete" | "Issued" 
 export type ObservationCode = "C1" | "C2" | "C3" | "FI" | "No code";
 export type SuggestionConfidence = "High" | "Medium" | "Low";
 export interface CertificateObservation { id: EntityId; sourceText: string; location: string; observation: string; recommendation: string; regulationReference: string; code: ObservationCode; confidence: SuggestionConfidence; accepted: boolean; }
-export interface ElectricalCertificate { id: EntityId; number: string; type: CertificateType; status: CertificateStatus; customerId?: EntityId; jobId?: EntityId; installationAddress: string; description: string; inspectorName: string; inspectionDate: string; nextInspectionDate: string; outcome: "Satisfactory" | "Unsatisfactory" | "Not applicable"; observations: string; structuredObservations?: CertificateObservation[]; externalPdfUrl: string; createdAt: string; updatedAt: string; }
+export interface ElectricalCertificate { id: EntityId; number: string; type: CertificateType; status: CertificateStatus; customerId?: EntityId; jobId?: EntityId; installationAddress: string; description: string; inspectorName: string; schemeProvider?: string; registrationNumber?: string; inspectionDate: string; nextInspectionDate: string; outcome: "Satisfactory" | "Unsatisfactory" | "Not applicable"; observations: string; structuredObservations?: CertificateObservation[]; externalPdfUrl: string; createdAt: string; updatedAt: string; }
 
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
 export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }

@@ -1,11 +1,14 @@
 import type {
+  BusinessBankDetails,
   Invoice,
   Job,
   JobDocument,
   JobTimelineEntry,
+  PaymentTermsTemplate,
   PricingDocument,
   RecordAttachment,
 } from "./models";
+import { bankDetailsText, paymentTermsFromTemplate, paymentTermsText } from "./businessSettings";
 
 interface CreateJobFromQuoteInput {
   document: PricingDocument;
@@ -23,6 +26,8 @@ interface CreateInvoiceFromJobInput {
   invoiceId: string;
   now: string;
   createId: (prefix: string) => string;
+  bankDetails?: BusinessBankDetails;
+  defaultPaymentTerms?: PaymentTermsTemplate;
 }
 
 export function pricingDocumentNetTotal(document: PricingDocument) {
@@ -158,6 +163,8 @@ export function createInvoiceFromCompletedJob({
   invoiceId,
   now,
   createId,
+  bankDetails,
+  defaultPaymentTerms,
 }: CreateInvoiceFromJobInput) {
   const snapshot = job.quoteSnapshot;
   const sourceItems = snapshot?.items?.length
@@ -167,9 +174,10 @@ export function createInvoiceFromCompletedJob({
       : [{ id: createId("invoice-source-line"), description: job.title, category: "Labour" as const, quantity: 1, unitPrice: job.value }];
   const vatEnabled = snapshot?.vatEnabled ?? quote?.vatEnabled ?? false;
   const vatRate = snapshot?.vatRate ?? quote?.vatRate ?? 0;
-  const paymentTerms = snapshot?.paymentTerms ?? quote?.paymentTerms;
+  const paymentTerms = snapshot?.paymentTerms ?? quote?.paymentTerms ?? (defaultPaymentTerms ? paymentTermsFromTemplate(defaultPaymentTerms) : undefined);
   const issueDate = now.slice(0, 10);
-  const dueDate = addDays(new Date(`${issueDate}T12:00:00`), paymentTerms?.type === "Due on completion" ? 0 : 7);
+  const dueDays = paymentTerms?.dueDays ?? (paymentTerms?.type === "Due on completion" ? 0 : 7);
+  const dueDate = addDays(new Date(`${issueDate}T12:00:00`), dueDays);
   const quoteId = job.sourceQuoteId ?? snapshot?.quoteId ?? quote?.id;
   const quoteNumber = snapshot?.quoteNumber ?? quote?.number;
   const pricingSettings = snapshot?.pricingSettings ?? quote?.pricingSettings;
@@ -187,6 +195,8 @@ export function createInvoiceFromCompletedJob({
     builderId: job.builderId,
     jobId: job.id,
     quoteId,
+    paymentTermsTemplateId: paymentTerms?.templateId,
+    paymentTermsText: paymentTermsText(paymentTerms),
     title: job.title,
     issueDate,
     dueDate,
@@ -199,7 +209,7 @@ export function createInvoiceFromCompletedJob({
       quoteNumber ? `Based on accepted quote ${quoteNumber}.` : "",
       snapshot?.notes ?? quote?.notes ?? "",
     ].filter(Boolean).join("\n\n"),
-    paymentDetails: "",
+    paymentDetails: bankDetails ? bankDetailsText(bankDetails) : "",
     createdAt: now,
     updatedAt: now,
   };

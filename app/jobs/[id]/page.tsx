@@ -25,10 +25,12 @@ import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
+import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { createInvoiceFromCompletedJob } from "../../../lib/workflow";
 import type {
   Builder,
+  BusinessBankDetails,
   Customer,
   Invoice,
   Job,
@@ -36,6 +38,7 @@ import type {
   JobDocumentCategory,
   JobMilestoneType,
   JobTimelineEntry,
+  PaymentTermsTemplate,
   PricingDocument,
 } from "../../../lib/models";
 
@@ -102,6 +105,8 @@ export default function JobDetailPage() {
   const documents = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
   const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const bankDetailsStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
+  const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
   const [showTimelineForm, setShowTimelineForm] = useState(false);
   const [showDocumentForm, setShowDocumentForm] = useState(false);
   const [timelineForm, setTimelineForm] = useState(blankEntry);
@@ -123,7 +128,7 @@ export default function JobDetailPage() {
   const linkedQuotes = quotes.items.filter((item) => item.jobId === jobId);
   const linkedInvoices = invoices.items.filter((item) => item.jobId === jobId);
 
-  const isReady = jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady;
+  const isReady = jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady && bankDetailsStore.isReady && paymentTermsStore.isReady;
   if (!isReady) return <Card>Loading job…</Card>;
 
   if (!job) {
@@ -229,6 +234,8 @@ export default function JobDetailPage() {
       invoiceId: makeId("invoice"),
       now,
       createId: makeId,
+      bankDetails: bankDetailsStore.items[0] ?? defaultBankDetails,
+      defaultPaymentTerms: paymentTermsStore.items.find((item) => item.active && item.isDefault),
     });
     invoices.setItems((current) => [generated.invoice, ...current]);
     timeline.setItems((current) => {

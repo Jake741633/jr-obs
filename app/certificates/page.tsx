@@ -4,9 +4,10 @@ import { FormEvent, useState } from "react";
 import { ClipboardCheck, ExternalLink, FileCheck2, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
+import { businessStorageKeys, defaultCertificateDefaults } from "../../lib/businessSettings";
 import { suggestCertificateObservations } from "../../lib/certificate-code-suggestions";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { CertificateObservation, CertificateStatus, CertificateType, Customer, ElectricalCertificate, Job, ObservationCode } from "../../lib/models";
+import type { CertificateDefaults, CertificateObservation, CertificateStatus, CertificateType, Customer, ElectricalCertificate, Job, ObservationCode } from "../../lib/models";
 
 const certificateTypes: CertificateType[] = [
   "Electrical Installation Certificate",
@@ -21,13 +22,22 @@ const statuses: CertificateStatus[] = ["Draft", "In progress", "Complete", "Issu
 const observationCodes: ObservationCode[] = ["C1", "C2", "C3", "FI", "No code"];
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none transition focus:border-cyan-400";
 
-function blankCertificate(index: number): ElectricalCertificate {
+function addYears(date: string, years: number) {
+  if (!date || years <= 0) return "";
+  const result = new Date(`${date}T12:00:00`);
+  result.setFullYear(result.getFullYear() + years);
+  return result.toISOString().slice(0, 10);
+}
+
+function blankCertificate(index: number, defaults: CertificateDefaults = defaultCertificateDefaults): ElectricalCertificate {
   const now = new Date().toISOString();
+  const prefix = defaults.certificatePrefix.trim().toUpperCase() || "CERT";
   return {
-    id: makeId("certificate"), number: `CERT-${String(index + 1).padStart(4, "0")}`,
-    type: "Electrical Installation Condition Report", status: "Draft", installationAddress: "", description: "",
-    inspectorName: "Jake Rinaldi", inspectionDate: "", nextInspectionDate: "", outcome: "Not applicable",
-    observations: "", structuredObservations: [], externalPdfUrl: "", createdAt: now, updatedAt: now,
+    id: makeId("certificate"), number: `${prefix}-${String(index + 1).padStart(4, "0")}`,
+    type: defaults.defaultType, status: "Draft", installationAddress: "", description: "",
+    inspectorName: defaults.inspectorName, schemeProvider: defaults.schemeProvider, registrationNumber: defaults.registrationNumber,
+    inspectionDate: "", nextInspectionDate: "", outcome: defaults.defaultOutcome,
+    observations: defaults.notes, structuredObservations: [], externalPdfUrl: "", createdAt: now, updatedAt: now,
   };
 }
 
@@ -35,12 +45,14 @@ export default function CertificatesPage() {
   const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const defaultsStore = useLocalStorageCollection<CertificateDefaults>(businessStorageKeys.certificates, [defaultCertificateDefaults]);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<ElectricalCertificate>(() => blankCertificate(0));
   const [findingText, setFindingText] = useState("");
 
-  const isReady = certificates.isReady && customers.isReady && jobs.isReady;
+  const certificateDefaults = defaultsStore.items[0] ?? defaultCertificateDefaults;
+  const isReady = certificates.isReady && customers.isReady && jobs.isReady && defaultsStore.isReady;
   if (!isReady) return <Card>Loading certificates…</Card>;
 
   const filtered = certificates.items.filter((certificate) => {
@@ -49,7 +61,7 @@ export default function CertificatesPage() {
     return `${certificate.number} ${certificate.type} ${certificate.status} ${certificate.installationAddress} ${customer} ${job}`.toLowerCase().includes(search.toLowerCase());
   });
 
-  function startNewCertificate() { setForm(blankCertificate(certificates.items.length)); setFindingText(""); setShowForm(true); }
+  function startNewCertificate() { setForm(blankCertificate(certificates.items.length, certificateDefaults)); setFindingText(""); setShowForm(true); }
   function saveCertificate(event: FormEvent) {
     event.preventDefault();
     const now = new Date().toISOString();
@@ -104,9 +116,11 @@ export default function CertificatesPage() {
         <label className="grid gap-2 text-sm">Customer<select className={fieldClass} value={form.customerId ?? ""} onChange={(event) => setForm({ ...form, customerId: event.target.value || undefined })}><option value="">No customer selected</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
         <label className="grid gap-2 text-sm">Job<select className={fieldClass} value={form.jobId ?? ""} onChange={(event) => { const jobId = event.target.value || undefined; const job = jobs.items.find((item) => item.id === jobId); setForm({ ...form, jobId, installationAddress: form.installationAddress || job?.siteAddress || "" }); }}><option value="">No job selected</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
         <label className="grid gap-2 text-sm">Inspector<input className={fieldClass} value={form.inspectorName} onChange={(event) => setForm({ ...form, inspectorName: event.target.value })} /></label>
+        <label className="grid gap-2 text-sm">Scheme provider<input className={fieldClass} value={form.schemeProvider ?? ""} onChange={(event) => setForm({ ...form, schemeProvider: event.target.value })} placeholder="NICEIC, NAPIT or other" /></label>
+        <label className="grid gap-2 text-sm">Registration number<input className={fieldClass} value={form.registrationNumber ?? ""} onChange={(event) => setForm({ ...form, registrationNumber: event.target.value })} /></label>
         <label className="grid gap-2 text-sm md:col-span-2">Installation address<input required className={fieldClass} value={form.installationAddress} onChange={(event) => setForm({ ...form, installationAddress: event.target.value })} /></label>
         <label className="grid gap-2 text-sm">Outcome<select className={fieldClass} value={form.outcome} onChange={(event) => setForm({ ...form, outcome: event.target.value as ElectricalCertificate["outcome"] })}><option>Satisfactory</option><option>Unsatisfactory</option><option>Not applicable</option></select></label>
-        <label className="grid gap-2 text-sm">Inspection date<input type="date" className={fieldClass} value={form.inspectionDate} onChange={(event) => setForm({ ...form, inspectionDate: event.target.value })} /></label>
+        <label className="grid gap-2 text-sm">Inspection date<input type="date" className={fieldClass} value={form.inspectionDate} onChange={(event) => { const inspectionDate = event.target.value; setForm({ ...form, inspectionDate, nextInspectionDate: form.nextInspectionDate || addYears(inspectionDate, certificateDefaults.nextInspectionYears) }); }} /></label>
         <label className="grid gap-2 text-sm">Next inspection date<input type="date" className={fieldClass} value={form.nextInspectionDate} onChange={(event) => setForm({ ...form, nextInspectionDate: event.target.value })} /></label>
         <label className="grid gap-2 text-sm">Existing PDF link<input type="url" className={fieldClass} placeholder="https://…" value={form.externalPdfUrl} onChange={(event) => setForm({ ...form, externalPdfUrl: event.target.value })} /></label>
         <label className="grid gap-2 text-sm md:col-span-2 lg:col-span-3">Description<textarea className={`${fieldClass} min-h-24 py-3`} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
