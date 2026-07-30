@@ -32,6 +32,8 @@ export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []
   const suppressSyncRef = useRef(true);
   const { identity, isReady: identityReady, mode } = useCloudIdentity();
   const target = collectionCloudTarget(key);
+  const targetTable = target?.table;
+  const targetCollectionKey = target?.collectionKey;
 
   useEffect(() => {
     if (!identityReady) return;
@@ -42,11 +44,11 @@ export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []
     void (async () => {
       const local = readLocal(key, initialValueRef.current);
       let loaded = local;
-      if (target && identity) {
+      if (targetTable && identity) {
         const repository = createCollectionRepository<RepositoryRecord>({
           storageKey: key,
-          table: target.table,
-          collectionKey: target.collectionKey,
+          table: targetTable,
+          collectionKey: targetCollectionKey,
           organisationId: identity.organisationId,
           userId: identity.userId,
         });
@@ -60,12 +62,12 @@ export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []
     })();
 
     return () => { active = false; };
-  }, [identity, identityReady, key, mode, target?.collectionKey, target?.table]);
+  }, [identity, identityReady, key, mode, targetCollectionKey, targetTable]);
 
   useEffect(() => {
     if (!isReady) return;
     window.localStorage.setItem(key, JSON.stringify(items));
-    if (suppressSyncRef.current || !target || !identity || mode === "local") {
+    if (suppressSyncRef.current || !targetTable || !identity || mode === "local") {
       previousRef.current = items;
       return;
     }
@@ -75,21 +77,21 @@ export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []
     const nextById = new Map(items.map((item) => [recordId(item), item]).filter(([id]) => Boolean(id)) as [string, T][]);
     const repository = createCollectionRepository<RepositoryRecord>({
       storageKey: key,
-      table: target.table,
-      collectionKey: target.collectionKey,
+      table: targetTable,
+      collectionKey: targetCollectionKey,
       organisationId: identity.organisationId,
       userId: identity.userId,
     });
 
     for (const [id, item] of nextById) {
       const before = previousById.get(id);
-      if (!before || JSON.stringify(before) !== JSON.stringify(item)) repository.save(item as RepositoryRecord);
+      if (!before || JSON.stringify(before) !== JSON.stringify(item)) repository.save(item as unknown as RepositoryRecord);
     }
     for (const id of previousById.keys()) {
       if (!nextById.has(id)) repository.remove(id);
     }
     previousRef.current = items;
-  }, [identity, isReady, items, key, mode, target]);
+  }, [identity, isReady, items, key, mode, targetCollectionKey, targetTable]);
 
   const remove = useCallback((predicate: (item: T) => boolean) => {
     setItems((current) => current.filter((item) => !predicate(item)));
