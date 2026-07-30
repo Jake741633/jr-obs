@@ -4,8 +4,13 @@ import type {
   Job,
   JobDocument,
   JobTimelineEntry,
+  Material,
   PaymentTermsTemplate,
   PricingDocument,
+  PricingDocumentType,
+  PurchaseItemStatus,
+  PurchaseList,
+  PurchaseListItem,
   RecordAttachment,
 } from "./models";
 import { bankDetailsText, paymentTermsFromTemplate, paymentTermsText } from "./businessSettings";
@@ -30,6 +35,15 @@ interface CreateInvoiceFromJobInput {
   defaultPaymentTerms?: PaymentTermsTemplate;
 }
 
+interface CreatePurchaseListInput {
+  document: PricingDocument;
+  materials: Material[];
+  purchaseLists: PurchaseList[];
+  purchaseListId: string;
+  now: string;
+  createId: (prefix: string) => string;
+}
+
 export function pricingDocumentNetTotal(document: PricingDocument) {
   return document.profitability?.sellingPrice
     ?? document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
@@ -51,6 +65,24 @@ export function nextInvoiceNumber(invoices: Invoice[]) {
     return match ? Math.max(max, Number(match[1])) : max;
   }, 0);
   return `INV-${String(highest + 1).padStart(4, "0")}`;
+}
+
+export function nextPricingDocumentNumber(documents: PricingDocument[], type: PricingDocumentType) {
+  const prefix = type === "Quote" ? "Q" : "E";
+  const highest = documents.reduce((max, document) => {
+    if (document.type !== type) return max;
+    const match = document.number.match(new RegExp(`^${prefix}-(\\d+)$`, "i"));
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `${prefix}-${String(highest + 1).padStart(4, "0")}`;
+}
+
+export function nextPurchaseListNumber(purchaseLists: PurchaseList[]) {
+  const highest = purchaseLists.reduce((max, list) => {
+    const match = list.number.match(/^PO-(\d+)$/i);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `PO-${String(highest + 1).padStart(4, "0")}`;
 }
 
 function addDays(date: Date, days: number) {
@@ -225,4 +257,46 @@ export function createInvoiceFromCompletedJob({
   };
 
   return { invoice, timelineEntry };
+}
+
+export function createPurchaseListFromPricingDocument({
+  document,
+  materials,
+  purchaseLists,
+  purchaseListId,
+  now,
+  createId,
+}: CreatePurchaseListInput) {
+  const items: PurchaseListItem[] = document.items
+    .filter((item) => item.category === "Materials")
+    .map((line) => {
+      const material = materials.find((item) => item.id === line.materialId);
+      return {
+        id: createId("purchase-item"),
+        materialId: line.materialId,
+        description: line.description,
+        supplier: line.supplier || material?.supplier || "Unassigned supplier",
+        stockCode: line.stockCode || material?.stockCode || "",
+        supplierUrl: material?.supplierUrl,
+        quantity: line.quantity,
+        unitCost: line.unitCost ?? material?.tradeCost ?? line.unitPrice,
+        status: "Needed" as PurchaseItemStatus,
+      };
+    });
+
+  if (!items.length) return null;
+
+  const list: PurchaseList = {
+    id: purchaseListId,
+    number: nextPurchaseListNumber(purchaseLists),
+    title: document.title,
+    pricingDocumentId: document.id,
+    jobId: document.jobId,
+    items,
+    notes: `Created from ${document.type.toLowerCase()} ${document.number}. Confirm quantities and live supplier prices before ordering.`,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  return list;
 }

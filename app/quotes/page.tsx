@@ -20,7 +20,7 @@ import {
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
-import { createJobFromAcceptedQuote, pricingDocumentTotal } from "../../lib/workflow";
+import { createJobFromAcceptedQuote, nextPricingDocumentNumber, pricingDocumentTotal } from "../../lib/workflow";
 import type { Builder, BusinessOverhead, BusinessProfile, BusinessTermsTemplate, Customer, DocumentBrandingSettings, Job, JobDocument, JobPack, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsTemplate, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment, VatSettings } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -417,7 +417,7 @@ export default function QuotesPage() {
     if (items.length === 0) { setError("Add at least one labour, material or other line item."); return; }
     const now = new Date().toISOString();
     const existing = documents.items.find((item) => item.id === editingId);
-    const nextNumber = existing?.number ?? `${form.type === "Quote" ? "Q" : "E"}-${String(documents.items.filter((item) => item.type === form.type).length + 1).padStart(4, "0")}`;
+    const nextNumber = existing?.number ?? nextPricingDocumentNumber(documents.items, form.type);
     const payload = {
       type: form.type, customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined,
       title: form.title.trim(), siteAddress: form.siteAddress.trim() || undefined, validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items,

@@ -7,6 +7,7 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { createPurchaseListFromPricingDocument } from "../../lib/workflow";
 import type { Job, Material, PricingDocument, PurchaseItemStatus, PurchaseList, PurchaseListItem } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -54,39 +55,19 @@ export default function PurchasesPage() {
     if (!document) { setMessage("Choose a quote or estimate first."); return; }
     if (purchaseLists.items.some((list) => list.pricingDocumentId === document.id)) { setMessage("A purchase list already exists for this pricing document."); return; }
 
-    const purchaseItems: PurchaseListItem[] = document.items
-      .filter((item) => item.category === "Materials")
-      .map((line) => {
-        const material = materials.items.find((item) => item.id === line.materialId);
-        return {
-          id: makeId("purchase-item"),
-          materialId: line.materialId,
-          description: line.description,
-          supplier: line.supplier || material?.supplier || "Unassigned supplier",
-          stockCode: line.stockCode || material?.stockCode || "",
-          supplierUrl: material?.supplierUrl,
-          quantity: line.quantity,
-          unitCost: line.unitCost ?? material?.tradeCost ?? line.unitPrice,
-          status: "Needed" as PurchaseItemStatus,
-        };
-      });
-
-    if (!purchaseItems.length) { setMessage("This document has no material lines to order."); return; }
     const now = new Date().toISOString();
-    const list: PurchaseList = {
-      id: makeId("purchase"),
-      number: `PO-${String(purchaseLists.items.length + 1).padStart(4, "0")}`,
-      title: document.title,
-      pricingDocumentId: document.id,
-      jobId: document.jobId,
-      items: purchaseItems,
-      notes: `Created from ${document.type.toLowerCase()} ${document.number}. Confirm quantities and live supplier prices before ordering.`,
-      createdAt: now,
-      updatedAt: now,
-    };
+    const list = createPurchaseListFromPricingDocument({
+      document,
+      materials: materials.items,
+      purchaseLists: purchaseLists.items,
+      purchaseListId: makeId("purchase"),
+      now,
+      createId: makeId,
+    });
+    if (!list) { setMessage("This document has no material lines to order."); return; }
     purchaseLists.setItems((current) => [list, ...current]);
     setSelectedDocumentId("");
-    setMessage(`${list.number} created with ${purchaseItems.length} material line${purchaseItems.length === 1 ? "" : "s"}.`);
+    setMessage(`${list.number} created with ${list.items.length} material line${list.items.length === 1 ? "" : "s"}.`);
   }
 
   function updateItem(listId: string, itemId: string, changes: Partial<PurchaseListItem>) {
