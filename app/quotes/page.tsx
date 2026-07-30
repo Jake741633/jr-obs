@@ -2,20 +2,23 @@
 
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
-import { BriefcaseBusiness, Eye, FileText, PackagePlus, Pencil, Plus, Save, Search, Star, Trash2 } from "lucide-react";
+import { BriefcaseBusiness, Calculator, Clock3, Eye, FileText, PackagePlus, Pencil, Plus, Save, Search, TrendingUp, Trash2 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { Builder, Customer, Job, JobPack, Material, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem } from "../../lib/models";
+import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
+import type { Builder, BusinessOverhead, Customer, Job, JobPack, LabourCostSettings, LabourRate, Material, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePricingSettings } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const defaultTerms = "This document is based on the described scope. Variations, unforeseen work and making good are excluded unless stated otherwise.";
 const blankItem = { description: "", category: "Labour" as PricingLineItem["category"], quantity: "1", unitPrice: "", unitCost: "" };
 const blankForm = { type: "Quote" as PricingDocumentType, title: "", customerId: "", builderId: "", jobId: "", validUntil: "", vatEnabled: false, vatRate: "20", notes: "", terms: defaultTerms };
 const statuses: PricingDocumentStatus[] = ["Draft", "Sent", "Accepted", "Declined", "Expired"];
+const defaultLabourSettings: LabourCostSettings = { id: "labour-cost-settings", workingDaysPerYear: 220, billableHoursPerDay: 7.5, targetNetMargin: 25, contingencyPercent: 10, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
+const blankLabour = { rateId: "", mode: "Hours" as QuoteLabourMode, quantity: "1", fixedCost: "", fixedPrice: "", fixedHours: "" };
 
 export default function QuotesPage() {
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
@@ -24,6 +27,10 @@ export default function QuotesPage() {
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const jobPacks = useLocalStorageCollection<JobPack>("jr-os-job-packs");
   const materials = useLocalStorageCollection<Material>("jr-os-materials");
+  const labourRates = useLocalStorageCollection<LabourRate>("jr-os-labour-rates");
+  const overheads = useLocalStorageCollection<BusinessOverhead>("jr-os-business-overheads");
+  const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
+  const quoteSettingsStore = useLocalStorageCollection<QuotePricingSettings>("jr-os-quote-engine-settings", [defaultQuotePricingSettings]);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedJobPackId, setSelectedJobPackId] = useState("");
@@ -39,6 +46,8 @@ export default function QuotesPage() {
   const [form, setForm] = useState(blankForm);
   const [items, setItems] = useState<PricingLineItem[]>([]);
   const [line, setLine] = useState(blankItem);
+  const [labour, setLabour] = useState(blankLabour);
+  const [pricing, setPricing] = useState<QuotePricingSettings>(defaultQuotePricingSettings);
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),
@@ -55,11 +64,21 @@ export default function QuotesPage() {
       .slice(0, 30);
   }, [materialSearch, materials.items]);
 
-  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const internalCost = items.reduce((sum, item) => sum + item.quantity * (item.unitCost ?? item.unitPrice), 0);
-  const grossProfit = subtotal - internalCost;
-  const grossMargin = subtotal > 0 ? (grossProfit / subtotal) * 100 : 0;
-  const vat = form.vatEnabled ? subtotal * (Number(form.vatRate || 0) / 100) : 0;
+  const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
+  const profitability = useMemo(
+    () => calculateQuoteProfitability(items, pricing, overheads.items, labourSettings),
+    [items, labourSettings, overheads.items, pricing],
+  );
+  const vat = form.vatEnabled ? profitability.sellingPrice * (Number(form.vatRate || 0) / 100) : 0;
+  const dashboard = useMemo(() => {
+    const quoteDocs = documents.items.filter((document) => document.type === "Quote");
+    return {
+      pipelineValue: quoteDocs.filter((document) => ["Draft", "Sent"].includes(document.status)).reduce((sum, document) => sum + (document.profitability?.sellingPrice ?? document.items.reduce((lineSum, item) => lineSum + item.quantity * item.unitPrice, 0)), 0),
+      expectedProfit: quoteDocs.filter((document) => ["Draft", "Sent", "Accepted"].includes(document.status)).reduce((sum, document) => sum + (document.profitability?.expectedProfit ?? 0), 0),
+      accepted: quoteDocs.filter((document) => document.status === "Accepted").length,
+      drafts: quoteDocs.filter((document) => document.status === "Draft").length,
+    };
+  }, [documents.items]);
 
   function reset() {
     setForm(blankForm);
@@ -72,6 +91,8 @@ export default function QuotesPage() {
     setMaterialQuantity("1");
     setSavePackName("");
     setSavePackCategory("Custom");
+    setLabour(blankLabour);
+    setPricing(quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
     setError("");
     setSuccess("");
     setShowForm(false);
@@ -80,12 +101,54 @@ export default function QuotesPage() {
   function startEdit(document: PricingDocument) {
     setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms });
     setItems(document.items);
+    setPricing(document.pricingSettings ?? quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
     setEditingId(document.id);
     setSavePackName(document.title);
     setError("");
     setSuccess("");
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function updatePricing(patch: Partial<QuotePricingSettings>) {
+    const next = { ...pricing, ...patch };
+    setPricing(next);
+    quoteSettingsStore.setItems([next]);
+    if (patch.materialMarkupPercent !== undefined) {
+      setItems((current) => current.map((item) => item.category === "Materials"
+        ? { ...item, unitPrice: (item.unitCost ?? item.unitPrice) * (1 + patch.materialMarkupPercent! / 100) }
+        : item));
+    }
+  }
+
+  function addSavedLabour() {
+    const rate = labourRates.items.find((item) => item.id === labour.rateId && item.active);
+    if (!rate) { setError("Choose an active saved labour rate."); return; }
+    const quantity = Number(labour.quantity);
+    const fixedCost = Number(labour.fixedCost);
+    const fixedPrice = Number(labour.fixedPrice);
+    const fixedHours = Number(labour.fixedHours);
+    if (!Number.isFinite(quantity) || quantity <= 0) { setError("Enter a valid labour quantity."); return; }
+    if (labour.mode === "Fixed" && (!Number.isFinite(fixedCost) || fixedCost < 0 || !Number.isFinite(fixedPrice) || fixedPrice < 0 || !Number.isFinite(fixedHours) || fixedHours < 0)) {
+      setError("Enter valid fixed labour cost, selling price and expected hours.");
+      return;
+    }
+    const lineQuantity = labour.mode === "Fixed" ? 1 : quantity;
+    const labourHours = labour.mode === "Hours" ? quantity : labour.mode === "Days" ? quantity * labourSettings.billableHoursPerDay : fixedHours;
+    setItems((current) => [...current, {
+      id: makeId("line"),
+      description: `${rate.name} · ${labour.mode.toLowerCase()}`,
+      category: "Labour",
+      quantity: lineQuantity,
+      unitCost: labour.mode === "Fixed" ? fixedCost : rate.costRate,
+      unitPrice: labour.mode === "Fixed" ? fixedPrice : rate.chargeRate,
+      labourRateId: rate.id,
+      labourMode: labour.mode,
+      labourHours,
+    }]);
+    setLabour(blankLabour);
+    setError("");
+    setSuccess(`${rate.name} added using the saved Labour & Costs rate.`);
   }
 
   function addLine() {
@@ -113,7 +176,7 @@ export default function QuotesPage() {
       description,
       category: "Materials",
       quantity,
-      unitPrice: material.sellPrice,
+      unitPrice: material.tradeCost * (1 + pricing.materialMarkupPercent / 100),
       unitCost: material.tradeCost,
       materialId: material.id,
       supplier: material.supplier,
@@ -220,18 +283,31 @@ export default function QuotesPage() {
     const now = new Date().toISOString();
     const existing = documents.items.find((item) => item.id === editingId);
     const nextNumber = existing?.number ?? `${form.type === "Quote" ? "Q" : "E"}-${String(documents.items.filter((item) => item.type === form.type).length + 1).padStart(4, "0")}`;
-    const payload = { type: form.type, customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined, title: form.title.trim(), validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items, notes: form.notes, terms: form.terms, updatedAt: now };
+    const payload = {
+      type: form.type, customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined,
+      title: form.title.trim(), validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items,
+      pricingSettings: pricing,
+      profitability: { directCost: profitability.directCost, overheadCost: profitability.overheadCost, costPrice: profitability.costPrice, sellingPrice: profitability.sellingPrice, grossProfit: profitability.grossProfit, expectedProfit: profitability.expectedProfit, grossMargin: profitability.grossMargin, netMargin: profitability.netMargin, calculatedAt: now },
+      notes: form.notes, terms: form.terms, updatedAt: now,
+    };
     documents.setItems((current) => editingId ? current.map((document) => document.id === editingId ? { ...document, ...payload } : document) : [{ id: makeId("doc"), number: nextNumber, status: "Draft", ...payload, createdAt: now }, ...current]);
     reset();
   }
 
   function updateStatus(id: string, status: PricingDocumentStatus) { documents.setItems((current) => current.map((document) => document.id === id ? { ...document, status, updatedAt: new Date().toISOString() } : document)); setPageMessage(""); }
   function deleteDocument(document: PricingDocument) { if (window.confirm(`Delete ${document.number} - ${document.title}? This cannot be undone.`)) documents.remove((item) => item.id === document.id); }
-  function total(document: PricingDocument) { const net = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); return net + (document.vatEnabled ? net * document.vatRate / 100 : 0); }
+  function total(document: PricingDocument) { const net = document.profitability?.sellingPrice ?? document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); return net + (document.vatEnabled ? net * document.vatRate / 100 : 0); }
 
   return <div className="space-y-6">
     <PageHeader eyebrow="Sales" title="Quotes & Estimates" description="Build professional pricing documents with live material costs, margins and reusable job packs." action={<Button onClick={() => showForm ? reset() : setShowForm(true)}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New document"}</Button>} />
     {pageMessage ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{pageMessage}</div> : null}
+
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Card><FileText className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Open quote pipeline</p><p className="mt-2 text-2xl font-bold">{money.format(dashboard.pipelineValue)}</p></Card>
+      <Card><TrendingUp className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Expected quote profit</p><p className="mt-2 text-2xl font-bold text-emerald-300">{money.format(dashboard.expectedProfit)}</p></Card>
+      <Card><BriefcaseBusiness className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Accepted quotes</p><p className="mt-2 text-2xl font-bold">{dashboard.accepted}</p></Card>
+      <Card><Clock3 className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Drafts to finish</p><p className="mt-2 text-2xl font-bold">{dashboard.drafts}</p></Card>
+    </section>
 
     {showForm ? <Card><form onSubmit={submit} className="space-y-6">
       <div className="flex items-center justify-between gap-4"><div><h2 className="text-lg font-bold">{editingId ? "Edit pricing document" : "Create pricing document"}</h2><p className="text-sm text-slate-500">Use current library prices, then tailor every line to the actual job.</p></div>{editingId ? <Button type="button" variant="secondary" onClick={reset}>Cancel edit</Button> : null}</div>
@@ -251,6 +327,17 @@ export default function QuotesPage() {
         <div className="mt-4 flex flex-col gap-3 md:flex-row"><select value={selectedJobPackId} onChange={(e) => setSelectedJobPackId(e.target.value)} className="min-h-11 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose a job pack</option>{jobPacks.items.map((pack) => <option key={pack.id} value={pack.id}>{pack.name} · {pack.category}</option>)}</select><Button type="button" onClick={addJobPack}>Add pack to quote</Button></div>
       </div>
 
+      <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4">
+        <div className="flex items-start gap-3"><Calculator className="mt-0.5 size-5 text-violet-300" /><div><h2 className="font-semibold">Saved labour rates</h2><p className="mt-1 text-sm text-slate-400">Add labour using the true cost and charge rates saved in the Labour & Costs Centre.</p></div></div>
+        {labourRates.items.filter((rate) => rate.active).length === 0 ? <p className="mt-4 text-sm text-amber-300">No active labour rates are saved yet. Add them in Labour & Costs first.</p> : <div className="mt-4 grid gap-3 md:grid-cols-[1.4fr_120px_110px_1fr_auto]">
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Labour rate</span><select value={labour.rateId} onChange={(event) => setLabour({ ...labour, rateId: event.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose saved rate</option>{labourRates.items.filter((rate) => rate.active).map((rate) => <option key={rate.id} value={rate.id}>{rate.name} · {money.format(rate.chargeRate)}</option>)}</select></label>
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Method</span><select value={labour.mode} onChange={(event) => setLabour({ ...labour, mode: event.target.value as QuoteLabourMode })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Hours</option><option>Days</option><option>Fixed</option></select></label>
+          <InputField label={labour.mode === "Fixed" ? "Qty" : labour.mode} type="number" min="0.01" step="0.25" value={labour.quantity} onChange={(event) => setLabour({ ...labour, quantity: event.target.value })} />
+          {labour.mode === "Fixed" ? <div className="grid grid-cols-3 gap-2"><InputField label="Cost £" type="number" min="0" step="0.01" value={labour.fixedCost} onChange={(event) => setLabour({ ...labour, fixedCost: event.target.value })} /><InputField label="Sell £" type="number" min="0" step="0.01" value={labour.fixedPrice} onChange={(event) => setLabour({ ...labour, fixedPrice: event.target.value })} /><InputField label="Hours" type="number" min="0" step="0.25" value={labour.fixedHours} onChange={(event) => setLabour({ ...labour, fixedHours: event.target.value })} /></div> : <div className="self-end pb-3 text-sm text-slate-400">{labour.mode === "Days" ? `${labourSettings.billableHoursPerDay} hours per day` : "Uses saved hourly cost and charge"}</div>}
+          <Button type="button" className="self-end" onClick={addSavedLabour}>Add labour</Button>
+        </div>}
+      </div>
+
       <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4">
         <div className="flex items-start gap-3"><PackagePlus className="mt-0.5 size-5 text-emerald-300" /><div><h2 className="font-semibold">Smart material selector</h2><p className="mt-1 text-sm text-slate-400">Search by product, supplier, manufacturer or stock code. Favourites and recently updated items appear first.</p></div></div>
         <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1.4fr_110px_auto]"><InputField label="Search materials" value={materialSearch} onChange={(e) => setMaterialSearch(e.target.value)} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Material</span><select value={selectedMaterialId} onChange={(e) => setSelectedMaterialId(e.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose material</option>{materialOptions.map((material) => <option key={material.id} value={material.id}>{material.favourite ? "★ " : ""}{material.name} · {material.supplier || "No supplier"} · {money.format(material.sellPrice)}</option>)}</select></label><InputField label="Qty" type="number" min="0.01" step="0.01" value={materialQuantity} onChange={(e) => setMaterialQuantity(e.target.value)} /><Button type="button" className="self-end" onClick={addMaterial}>Add material</Button></div>
@@ -262,11 +349,26 @@ export default function QuotesPage() {
         <div className="mt-4 space-y-3">{items.map((item) => <div key={item.id} className="grid gap-3 rounded-xl bg-slate-900 p-3 md:grid-cols-[1fr_120px_90px_120px_120px_auto] md:items-end"><InputField label="Description" value={item.description} onChange={(e) => updateLine(item.id, { description: e.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={item.category} onChange={(e) => updateLine(item.id, { category: e.target.value as PricingLineItem["category"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Labour</option><option>Materials</option><option>Other</option></select></label><InputField label="Qty" type="number" min="0.01" step="0.01" value={String(item.quantity)} onChange={(e) => updateLine(item.id, { quantity: Number(e.target.value) })} /><InputField label="Unit cost (£)" type="number" min="0" step="0.01" value={String(item.unitCost ?? item.unitPrice)} onChange={(e) => updateLine(item.id, { unitCost: Number(e.target.value) })} /><InputField label="Sell price (£)" type="number" min="0" step="0.01" value={String(item.unitPrice)} onChange={(e) => updateLine(item.id, { unitPrice: Number(e.target.value) })} /><div className="flex items-center justify-between gap-3 md:block"><strong className="whitespace-nowrap">{money.format(item.quantity * item.unitPrice)}</strong><button type="button" onClick={() => setItems((current) => current.filter((lineItem) => lineItem.id !== item.id))} className="ml-3 rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div></div>)}</div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4"><Card><p className="text-sm text-slate-400">Trade / internal cost</p><p className="mt-2 text-2xl font-bold">{money.format(internalCost)}</p></Card><Card><p className="text-sm text-slate-400">Selling subtotal</p><p className="mt-2 text-2xl font-bold">{money.format(subtotal)}</p></Card><Card><p className="text-sm text-slate-400">Gross profit</p><p className={`mt-2 text-2xl font-bold ${grossProfit >= 0 ? "text-emerald-300" : "text-red-300"}`}>{money.format(grossProfit)}</p></Card><Card><p className="text-sm text-slate-400">Gross margin</p><p className={`mt-2 text-2xl font-bold ${grossMargin >= 20 ? "text-emerald-300" : grossMargin >= 10 ? "text-amber-300" : "text-red-300"}`}>{grossMargin.toFixed(1)}%</p></Card></div>
+      <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+        <h2 className="font-semibold">Quote allowances</h2><p className="mt-1 text-sm text-slate-400">Saved as your defaults and included in every live profit calculation.</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <InputField label="Contingency (%)" type="number" min="0" step="0.5" value={pricing.contingencyPercent} onChange={(event) => updatePricing({ contingencyPercent: Number(event.target.value || 0) })} />
+          <InputField label="Material markup (%)" type="number" min="0" step="0.5" value={pricing.materialMarkupPercent} onChange={(event) => updatePricing({ materialMarkupPercent: Number(event.target.value || 0) })} />
+          <div className="grid grid-cols-2 gap-2"><InputField label="Travel cost £" type="number" min="0" step="0.01" value={pricing.travelCost} onChange={(event) => updatePricing({ travelCost: Number(event.target.value || 0) })} /><InputField label="Travel sell £" type="number" min="0" step="0.01" value={pricing.travelPrice} onChange={(event) => updatePricing({ travelPrice: Number(event.target.value || 0) })} /></div>
+          <div className="grid grid-cols-2 gap-2"><InputField label="Parking cost £" type="number" min="0" step="0.01" value={pricing.parkingCost} onChange={(event) => updatePricing({ parkingCost: Number(event.target.value || 0) })} /><InputField label="Parking sell £" type="number" min="0" step="0.01" value={pricing.parkingPrice} onChange={(event) => updatePricing({ parkingPrice: Number(event.target.value || 0) })} /></div>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Card><p className="text-sm text-slate-400">Cost price</p><p className="mt-2 text-2xl font-bold">{money.format(profitability.costPrice)}</p><p className="mt-2 text-xs text-slate-500">Includes {money.format(profitability.overheadCost)} overhead allocation.</p></Card>
+        <Card><p className="text-sm text-slate-400">Selling price</p><p className="mt-2 text-2xl font-bold">{money.format(profitability.sellingPrice)}</p><p className="mt-2 text-xs text-slate-500">Before VAT.</p></Card>
+        <Card><p className="text-sm text-slate-400">Expected profit</p><p className={`mt-2 text-2xl font-bold ${profitability.expectedProfit >= 0 ? "text-emerald-300" : "text-red-300"}`}>{money.format(profitability.expectedProfit)}</p><p className="mt-2 text-xs text-slate-500">{profitability.labourHours.toFixed(1)} labour hours costed.</p></Card>
+        <Card><p className="text-sm text-slate-400">Gross / net margin</p><p className="mt-2 text-2xl font-bold"><span className="text-cyan-300">{profitability.grossMargin.toFixed(1)}%</span> / <span className={profitability.netMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}>{profitability.netMargin.toFixed(1)}%</span></p><p className="mt-2 text-xs text-slate-500">Target net margin {labourSettings.targetNetMargin}%.</p></Card>
+      </div>
 
       <div className="grid gap-4 md:grid-cols-2"><TextareaField label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /><TextareaField label="Terms & conditions" value={form.terms} onChange={(e) => setForm({ ...form, terms: e.target.value })} /></div>
       <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4"><h2 className="font-semibold">Save this version as a new job pack</h2><p className="mt-1 text-sm text-slate-400">Material links are retained so future quotes can use current library prices.</p><div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]"><InputField label="New pack name" value={savePackName} onChange={(e) => setSavePackName(e.target.value)} /><InputField label="Category" value={savePackCategory} onChange={(e) => setSavePackCategory(e.target.value)} /><Button type="button" className="self-end" onClick={saveAsJobPack}><Save className="mr-2 size-4" />Save as job pack</Button></div></div>
-      <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}{success ? <p className="text-sm text-emerald-300">{success}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Subtotal {money.format(subtotal)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Total {money.format(subtotal + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
+      <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}{success ? <p className="text-sm text-emerald-300">{success}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Selling price {money.format(profitability.sellingPrice)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Customer total {money.format(profitability.sellingPrice + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
     </form></Card> : null}
 
     <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search documents" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
