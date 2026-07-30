@@ -2,6 +2,10 @@ export type EntityId = string;
 
 export interface Customer { id: EntityId; name: string; email: string; phone: string; address: string; notes: string; createdAt: string; updatedAt: string; }
 export interface Builder { id: EntityId; companyName: string; contactName: string; email: string; phone: string; address: string; notes: string; createdAt: string; updatedAt: string; }
+export type CustomerTag = "Domestic" | "Landlord" | "Commercial" | "Builder" | "Repeat customer" | "VIP" | "Maintenance" | "Other";
+export interface CustomerProfile { id: EntityId; customerId: EntityId; tags: CustomerTag[]; preferredContact: "Phone" | "Email" | "WhatsApp"; nextFollowUpDate: string; followUpReason: string; reviewStatus: "Not requested" | "Requested" | "Received"; portalEnabled: boolean; portalNote: string; createdAt: string; updatedAt: string; }
+export type CustomerInteractionType = "Call" | "Email" | "WhatsApp" | "Site visit" | "Review request" | "Note";
+export interface CustomerInteraction { id: EntityId; customerId: EntityId; type: CustomerInteractionType; summary: string; outcome: string; completedBy: string; interactionAt: string; createdAt: string; }
 export type JobStatus = "Lead" | "Quoted" | "Scheduled" | "In progress" | "Complete" | "On hold";
 export type JobPriority = "Low" | "Normal" | "High" | "Urgent";
 export interface Job { id: EntityId; title: string; customerId?: EntityId; builderId?: EntityId; siteAddress: string; status: JobStatus; startDate: string; targetCompletionDate?: string; priority?: JobPriority; assignedTo?: string[]; value: number; notes: string; createdAt: string; updatedAt: string; }
@@ -79,4 +83,4 @@ export interface ElectricalCertificate { id: EntityId; number: string; type: Cer
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
 export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }
 
-export type EntityBase = Customer | Builder | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | CustomerProfile | CustomerInteraction | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
