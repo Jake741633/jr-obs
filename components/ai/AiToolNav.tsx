@@ -4,6 +4,7 @@ import {
   BrainCircuit,
   Calculator,
   CalendarCheck2,
+  Database,
   FilePenLine,
   PackageSearch,
   WandSparkles,
@@ -44,6 +45,13 @@ const tools = [
     href: "/ai/business-coach",
     icon: BrainCircuit,
     colour: "text-fuchsia-300",
+  },
+  {
+    title: "Learning Engine",
+    detail: "Memory, confidence and AI Mentor",
+    href: "/ai/learning",
+    icon: Database,
+    colour: "text-cyan-300",
   },
   {
     title: "AI Action Centre",

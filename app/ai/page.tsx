@@ -8,6 +8,7 @@ import {
   BriefcaseBusiness,
   CheckCircle2,
   ClipboardCheck,
+  Database,
   FileText,
   Percent,
   PoundSterling,
@@ -331,6 +332,18 @@ export default function AiPage() {
       {message ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
       <AiToolNav />
+
+      <Link href="/ai/learning">
+        <Card className="border-cyan-400/20 transition hover:border-cyan-400/40">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-4">
+              <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-cyan-400/10 text-cyan-300"><Database className="size-5" /></span>
+              <div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">AI Learning Engine</p><h2 className="mt-1 text-lg font-bold">Memory confidence {learning.memory.confidence.overall}% · {learning.memory.confidence.level}</h2><p className="mt-1 text-sm text-slate-500">{learning.memory.completedJobs} completed jobs, {learning.memory.acceptedQuotes} accepted quotes, {learning.memory.paidInvoices} paid invoices and {learning.memory.materialSignals} material signals learned.</p></div>
+            </div>
+            <span className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-300">Open learning evidence <ArrowRight className="size-4" /></span>
+          </div>
+        </Card>
+      </Link>
 
       <section className="grid gap-4 lg:grid-cols-[0.8fr_3.2fr]">
         <Card className="border-cyan-400/30">
