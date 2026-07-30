@@ -1,19 +1,20 @@
 "use client";
 
 import { exportJrOsData, JR_OS_STORAGE_PREFIX } from "./appData";
+import { collectionCloudTarget } from "./cloud/collections";
 import { importLocalCollection } from "./cloud/repository";
 import { readSupabaseSession, saveSupabaseSession, supabaseFetch, type SupabaseSession } from "./supabase/client";
 
 export interface CloudSyncResult { uploaded: number; skipped: number; errors: string[]; }
 
-const typedCollections = [
-  ["jr-os-customers", "customers"], ["jr-os-builders", "builders"], ["jr-os-jobs", "jobs"], ["jr-os-pricing-documents", "pricing_documents"],
-  ["jr-os-invoices", "invoices"], ["jr-os-payments", "payments"], ["jr-os-expenses", "expenses"], ["jr-os-materials", "materials"],
-  ["jr-os-stock-items", "stock_items"], ["jr-os-stock-movements", "stock_movements"], ["jr-os-purchase-lists", "purchase_lists"], ["jr-os-planner", "planner_entries"],
-  ["jr-os-team", "team_members"], ["jr-os-timesheets", "timesheets"], ["jr-os-certificates", "certificates"], ["jr-os-testing-records", "electrical_testing_records"],
-  ["jr-os-job-documents", "job_documents"], ["jr-os-portal-approvals", "portal_approvals"], ["jr-os-portal-requests", "portal_requests"],
-  ["jr-os-ai-recommendation-evidence", "ai_recommendation_evidence"],
-] as const;
+const cloudInternalKeys = [
+  "jr-os-cloud-session",
+  "jr-os-supabase-session",
+  "jr-os-cloud-sync-queue",
+  "jr-os-cloud-sync-status",
+  "jr-os-last-cloud-sync",
+  "jr-os-last-typed-cloud-sync",
+];
 
 async function getProfile(userId: string) {
   const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=organisation_id,role,customer_source_id`);
@@ -66,12 +67,26 @@ export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
 }
 
 export async function migrateTypedLocalDataToCloud(): Promise<CloudSyncResult> {
-  const { organisationId, role } = await getCloudContext();
-  if (!["owner", "admin", "office"].includes(role)) throw new Error("Only owner, admin or office users can run the typed migration.");
+  const { user, organisationId, role } = await getCloudContext();
+  if (!["owner", "admin", "office"].includes(role)) throw new Error("Only owner, admin or office users can run the collection migration.");
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
-  for (const [storageKey, table] of typedCollections) {
-    try { const migrated = await importLocalCollection(storageKey, table, organisationId); result.uploaded += migrated.imported; result.skipped += migrated.skipped; }
-    catch (error) { result.errors.push(`${storageKey}: ${error instanceof Error ? error.message : "Migration failed"}`); }
+  const storageKeys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
+    .filter((key): key is string => Boolean(key?.startsWith(JR_OS_STORAGE_PREFIX)))
+    .filter((key) => !cloudInternalKeys.includes(key) && !key.startsWith("jr-os-cloud-versions:"));
+
+  for (const storageKey of storageKeys) {
+    const target = collectionCloudTarget(storageKey);
+    if (!target) { result.skipped += 1; continue; }
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "[]") as unknown;
+      if (!Array.isArray(parsed) || parsed.some((record) => !record || typeof record !== "object" || typeof (record as { id?: unknown }).id !== "string")) {
+        result.skipped += 1;
+        continue;
+      }
+      const migrated = await importLocalCollection(storageKey, target.table, organisationId, target.collectionKey, user.id);
+      result.uploaded += migrated.imported;
+      result.skipped += migrated.skipped;
+    } catch (error) { result.errors.push(`${storageKey}: ${error instanceof Error ? error.message : "Migration failed"}`); }
   }
   if (!result.errors.length) window.localStorage.setItem("jr-os-last-typed-cloud-sync", new Date().toISOString());
   return result;
