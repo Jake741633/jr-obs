@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, BriefcaseBusiness, CalendarDays, FileText, TrendingUp, UserRound } from "lucide-react";
+import { useState } from "react";
+import { ArrowLeft, BriefcaseBusiness, CalendarDays, FileText, History, RotateCcw, TrendingUp, UserRound } from "lucide-react";
+import { QuotePreview } from "../../../components/quotes/QuotePreview";
+import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { useLocalStorageCollection } from "../../../lib/storage";
@@ -16,6 +19,7 @@ export default function PricingDocumentDetailPage() {
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const [message, setMessage] = useState("");
 
   if (!documents.isReady || !customers.isReady || !builders.isReady || !jobs.isReady) return <Card>Loading pricing document…</Card>;
 
@@ -29,9 +33,52 @@ export default function PricingDocumentDetailPage() {
   const vat = document.vatEnabled ? subtotal * document.vatRate / 100 : 0;
   const total = subtotal + vat;
   const profitability = document.profitability;
+  const documentId = document.id;
+  const revisions = document.revisions ?? [];
+
+  function restoreRevision(revisionId: string) {
+    const revision = revisions.find((item) => item.id === revisionId);
+    if (!revision || !window.confirm(`Restore revision ${revision.revisionNumber}? The current version will remain in the history.`)) return;
+    const now = new Date().toISOString();
+    documents.setItems((current) => current.map((item) => item.id !== documentId ? item : {
+      ...item,
+      revisions: [...(item.revisions ?? []), {
+        id: `revision_${Date.now()}`,
+        revisionNumber: (item.revisions?.length ?? 0) + 1,
+        savedAt: now,
+        title: item.title,
+        validUntil: item.validUntil,
+        vatEnabled: item.vatEnabled,
+        vatRate: item.vatRate,
+        items: item.items,
+        pricingSettings: item.pricingSettings,
+        profitability: item.profitability,
+        notes: item.notes,
+        terms: item.terms,
+        termsTemplateId: item.termsTemplateId,
+        paymentTerms: item.paymentTerms,
+        templateType: item.templateType,
+      }],
+      title: revision.title,
+      validUntil: revision.validUntil,
+      vatEnabled: revision.vatEnabled,
+      vatRate: revision.vatRate,
+      items: revision.items,
+      pricingSettings: revision.pricingSettings,
+      profitability: revision.profitability,
+      notes: revision.notes,
+      terms: revision.terms,
+      termsTemplateId: revision.termsTemplateId,
+      paymentTerms: revision.paymentTerms,
+      templateType: revision.templateType,
+      updatedAt: now,
+    }));
+    setMessage(`Revision ${revision.revisionNumber} restored.`);
+  }
 
   return <div className="space-y-6">
     <Link href="/quotes" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-cyan-300"><ArrowLeft className="size-4" />Back to quotes & estimates</Link>
+    {message ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{message}</div> : null}
 
     <Card className="border-cyan-400/30">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -63,5 +110,12 @@ export default function PricingDocumentDetailPage() {
     </Card>
 
     <section className="grid gap-4 lg:grid-cols-2"><Card><h2 className="font-semibold">Notes</h2><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-400">{document.notes || "No notes added."}</p></Card><Card><h2 className="font-semibold">Terms & conditions</h2><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-400">{document.terms || "No terms added."}</p></Card></section>
+
+    <section><div className="mb-3 flex items-center gap-2"><FileText className="size-5 text-cyan-300" /><div><h2 className="text-xl font-bold">Final document preview</h2><p className="text-sm text-slate-500">Customer-facing layout used for the quote PDF.</p></div></div><QuotePreview number={document.number} documentType={document.type} title={document.title} customer={customer} builder={builder} validUntil={document.validUntil} items={document.items} notes={document.notes} terms={document.terms} paymentTerms={document.paymentTerms} vatEnabled={document.vatEnabled} vatRate={document.vatRate} subtotal={subtotal} /></section>
+
+    <Card>
+      <div className="flex items-center gap-2 text-violet-300"><History className="size-5" /><div><h2 className="font-semibold">Version history</h2><p className="text-sm text-slate-500">Every saved edit keeps the previous customer-facing version.</p></div></div>
+      {!document.revisions?.length ? <p className="mt-4 text-sm text-slate-500">No previous revisions yet. Editing and saving this quote will create the first revision.</p> : <div className="mt-4 space-y-3">{document.revisions.toReversed().map((revision) => <div key={revision.id} className="flex flex-col gap-3 rounded-xl border border-slate-800 bg-slate-950/60 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">Revision {revision.revisionNumber} · {revision.title}</p><p className="mt-1 text-xs text-slate-500">Saved {new Date(revision.savedAt).toLocaleString("en-GB")} · {revision.items.length} sections/lines</p></div><Button type="button" variant="secondary" onClick={() => restoreRevision(revision.id)}><RotateCcw className="mr-2 size-4" />Restore</Button></div>)}</div>}
+    </Card>
   </div>;
 }
