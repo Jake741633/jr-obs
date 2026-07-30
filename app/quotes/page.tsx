@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
-import { BriefcaseBusiness, Calculator, Clock3, Eye, FileText, PackagePlus, Pencil, Plus, Save, Search, TrendingUp, Trash2 } from "lucide-react";
+import { BriefcaseBusiness, Calculator, Clock3, Eye, FileText, LayoutTemplate, PackagePlus, Pencil, Plus, Save, Search, TrendingUp, Trash2 } from "lucide-react";
+import { QuotePreview } from "../../components/quotes/QuotePreview";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
@@ -10,12 +11,13 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
-import type { Builder, BusinessOverhead, Customer, Job, JobPack, LabourCostSettings, LabourRate, Material, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePricingSettings } from "../../lib/models";
+import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
+import type { Builder, BusinessOverhead, BusinessTermsTemplate, Customer, Job, JobPack, LabourCostSettings, LabourRate, Material, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const defaultTerms = "This document is based on the described scope. Variations, unforeseen work and making good are excluded unless stated otherwise.";
 const blankItem = { description: "", category: "Labour" as PricingLineItem["category"], quantity: "1", unitPrice: "", unitCost: "" };
-const blankForm = { type: "Quote" as PricingDocumentType, title: "", customerId: "", builderId: "", jobId: "", validUntil: "", vatEnabled: false, vatRate: "20", notes: "", terms: defaultTerms };
+const blankForm = { type: "Quote" as PricingDocumentType, title: "", customerId: "", builderId: "", jobId: "", validUntil: "", vatEnabled: false, vatRate: "20", notes: "", terms: defaultTerms, termsTemplateId: "", templateType: undefined as QuoteTemplateType | undefined };
 const statuses: PricingDocumentStatus[] = ["Draft", "Sent", "Accepted", "Declined", "Expired"];
 const defaultLabourSettings: LabourCostSettings = { id: "labour-cost-settings", workingDaysPerYear: 220, billableHoursPerDay: 7.5, targetNetMargin: 25, contingencyPercent: 10, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
 const blankLabour = { rateId: "", mode: "Hours" as QuoteLabourMode, quantity: "1", fixedCost: "", fixedPrice: "", fixedHours: "" };
@@ -31,6 +33,7 @@ export default function QuotesPage() {
   const overheads = useLocalStorageCollection<BusinessOverhead>("jr-os-business-overheads");
   const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
   const quoteSettingsStore = useLocalStorageCollection<QuotePricingSettings>("jr-os-quote-engine-settings", [defaultQuotePricingSettings]);
+  const termsTemplates = useLocalStorageCollection<BusinessTermsTemplate>("jr-os-business-terms-templates", defaultBusinessTermsTemplates);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedJobPackId, setSelectedJobPackId] = useState("");
@@ -48,6 +51,7 @@ export default function QuotesPage() {
   const [line, setLine] = useState(blankItem);
   const [labour, setLabour] = useState(blankLabour);
   const [pricing, setPricing] = useState<QuotePricingSettings>(defaultQuotePricingSettings);
+  const [paymentTerms, setPaymentTerms] = useState<QuotePaymentTerms>({ type: "Due on completion" });
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),
@@ -93,21 +97,52 @@ export default function QuotesPage() {
     setSavePackCategory("Custom");
     setLabour(blankLabour);
     setPricing(quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
+    setPaymentTerms({ type: "Due on completion" });
     setError("");
     setSuccess("");
     setShowForm(false);
   }
 
   function startEdit(document: PricingDocument) {
-    setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms });
+    setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId ?? "", templateType: document.templateType });
     setItems(document.items);
     setPricing(document.pricingSettings ?? quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
+    setPaymentTerms(document.paymentTerms ?? { type: "Due on completion" });
     setEditingId(document.id);
     setSavePackName(document.title);
     setError("");
     setSuccess("");
     setShowForm(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function applyTemplate(templateType: QuoteTemplateType) {
+    const template = quoteTemplates.find((item) => item.type === templateType);
+    if (!template) return;
+    const termsTemplate = termsTemplates.items.find((item) => item.id === template.termsTemplateId);
+    setForm((current) => ({
+      ...current,
+      title: current.title || template.title,
+      notes: current.notes || template.notes,
+      terms: termsTemplate?.content ?? current.terms,
+      termsTemplateId: termsTemplate?.id ?? "",
+      templateType,
+    }));
+    setItems((current) => current.length ? current : template.sections.map((section) => ({
+      id: makeId("line"),
+      description: section.description,
+      category: section.category,
+      quantity: 1,
+      unitCost: 0,
+      unitPrice: 0,
+    })));
+    setPaymentTerms({ type: template.paymentType, depositPercent: template.paymentType === "Deposit" ? 25 : undefined, stages: template.paymentType === "Staged payments" ? "30% deposit · 40% after first fix · 30% on completion" : undefined });
+    setSuccess(`${template.type} quote template applied. Review every section before sending.`);
+  }
+
+  function selectTermsTemplate(id: string) {
+    const template = termsTemplates.items.find((item) => item.id === id);
+    setForm((current) => ({ ...current, termsTemplateId: id, terms: template?.content ?? current.terms }));
   }
 
   function updatePricing(patch: Partial<QuotePricingSettings>) {
@@ -288,9 +323,19 @@ export default function QuotesPage() {
       title: form.title.trim(), validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items,
       pricingSettings: pricing,
       profitability: { directCost: profitability.directCost, overheadCost: profitability.overheadCost, costPrice: profitability.costPrice, sellingPrice: profitability.sellingPrice, grossProfit: profitability.grossProfit, expectedProfit: profitability.expectedProfit, grossMargin: profitability.grossMargin, netMargin: profitability.netMargin, calculatedAt: now },
-      notes: form.notes, terms: form.terms, updatedAt: now,
+      notes: form.notes, terms: form.terms, termsTemplateId: form.termsTemplateId || undefined, paymentTerms, templateType: form.templateType, updatedAt: now,
     };
-    documents.setItems((current) => editingId ? current.map((document) => document.id === editingId ? { ...document, ...payload } : document) : [{ id: makeId("doc"), number: nextNumber, status: "Draft", ...payload, createdAt: now }, ...current]);
+    documents.setItems((current) => editingId ? current.map((document) => {
+      if (document.id !== editingId) return document;
+      const revision: QuoteRevision = {
+        id: makeId("revision"), revisionNumber: (document.revisions?.length ?? 0) + 1, savedAt: now,
+        title: document.title, validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: document.vatRate,
+        items: document.items, pricingSettings: document.pricingSettings, profitability: document.profitability,
+        notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId,
+        paymentTerms: document.paymentTerms, templateType: document.templateType,
+      };
+      return { ...document, ...payload, revisions: [...(document.revisions ?? []), revision] };
+    }) : [{ id: makeId("doc"), number: nextNumber, status: "Draft", ...payload, revisions: [], createdAt: now }, ...current]);
     reset();
   }
 
@@ -311,6 +356,10 @@ export default function QuotesPage() {
 
     {showForm ? <Card><form onSubmit={submit} className="space-y-6">
       <div className="flex items-center justify-between gap-4"><div><h2 className="text-lg font-bold">{editingId ? "Edit pricing document" : "Create pricing document"}</h2><p className="text-sm text-slate-500">Use current library prices, then tailor every line to the actual job.</p></div>{editingId ? <Button type="button" variant="secondary" onClick={reset}>Cancel edit</Button> : null}</div>
+      <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+        <div className="flex items-start gap-3"><LayoutTemplate className="mt-0.5 size-5 text-cyan-300" /><div><h2 className="font-semibold">Quote templates</h2><p className="mt-1 text-sm text-slate-400">Start with the right sections, wording and payment structure, then edit everything for the actual job.</p></div></div>
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">{quoteTemplates.map((template) => <button key={template.type} type="button" onClick={() => applyTemplate(template.type)} className={`min-h-11 rounded-xl border px-3 text-sm font-semibold transition ${form.templateType === template.type ? "border-cyan-400 bg-cyan-400/15 text-cyan-200" : "border-slate-700 bg-slate-950 text-slate-300 hover:border-cyan-500/50"}`}>{template.type}</button>)}</div>
+      </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Document type</span><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PricingDocumentType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Quote</option><option>Estimate</option></select></label>
         <InputField required label="Title / scope" value={form.title} onChange={(e) => { setForm({ ...form, title: e.target.value }); if (!savePackName) setSavePackName(e.target.value); }} />
@@ -345,8 +394,8 @@ export default function QuotesPage() {
 
       <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
         <h2 className="font-semibold">Pricing lines</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_130px_90px_130px_130px_auto]"><InputField label="Description" value={line.description} onChange={(e) => setLine({ ...line, description: e.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={line.category} onChange={(e) => setLine({ ...line, category: e.target.value as PricingLineItem["category"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Labour</option><option>Materials</option><option>Other</option></select></label><InputField label="Qty" type="number" min="0.01" step="0.01" value={line.quantity} onChange={(e) => setLine({ ...line, quantity: e.target.value })} /><InputField label="Unit cost (£)" type="number" min="0" step="0.01" value={line.unitCost} onChange={(e) => setLine({ ...line, unitCost: e.target.value })} /><InputField label="Sell price (£)" type="number" min="0" step="0.01" value={line.unitPrice} onChange={(e) => setLine({ ...line, unitPrice: e.target.value })} /><Button type="button" className="self-end" onClick={addLine}>Add</Button></div>
-        <div className="mt-4 space-y-3">{items.map((item) => <div key={item.id} className="grid gap-3 rounded-xl bg-slate-900 p-3 md:grid-cols-[1fr_120px_90px_120px_120px_auto] md:items-end"><InputField label="Description" value={item.description} onChange={(e) => updateLine(item.id, { description: e.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={item.category} onChange={(e) => updateLine(item.id, { category: e.target.value as PricingLineItem["category"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Labour</option><option>Materials</option><option>Other</option></select></label><InputField label="Qty" type="number" min="0.01" step="0.01" value={String(item.quantity)} onChange={(e) => updateLine(item.id, { quantity: Number(e.target.value) })} /><InputField label="Unit cost (£)" type="number" min="0" step="0.01" value={String(item.unitCost ?? item.unitPrice)} onChange={(e) => updateLine(item.id, { unitCost: Number(e.target.value) })} /><InputField label="Sell price (£)" type="number" min="0" step="0.01" value={String(item.unitPrice)} onChange={(e) => updateLine(item.id, { unitPrice: Number(e.target.value) })} /><div className="flex items-center justify-between gap-3 md:block"><strong className="whitespace-nowrap">{money.format(item.quantity * item.unitPrice)}</strong><button type="button" onClick={() => setItems((current) => current.filter((lineItem) => lineItem.id !== item.id))} className="ml-3 rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div></div>)}</div>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_130px_90px_130px_130px_auto]"><InputField label="Description" value={line.description} onChange={(e) => setLine({ ...line, description: e.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Section</span><select value={line.category} onChange={(e) => setLine({ ...line, category: e.target.value as PricingLineItem["category"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{["Labour", "Materials", "Travel", "Parking", "Plant Hire", "Contingency", "Other"].map((category) => <option key={category}>{category}</option>)}</select></label><InputField label="Qty" type="number" min="0.01" step="0.01" value={line.quantity} onChange={(e) => setLine({ ...line, quantity: e.target.value })} /><InputField label="Unit cost (£)" type="number" min="0" step="0.01" value={line.unitCost} onChange={(e) => setLine({ ...line, unitCost: e.target.value })} /><InputField label="Sell price (£)" type="number" min="0" step="0.01" value={line.unitPrice} onChange={(e) => setLine({ ...line, unitPrice: e.target.value })} /><Button type="button" className="self-end" onClick={addLine}>Add</Button></div>
+        <div className="mt-4 space-y-3">{items.map((item) => <div key={item.id} className="grid gap-3 rounded-xl bg-slate-900 p-3 md:grid-cols-[1fr_120px_90px_120px_120px_auto] md:items-end"><InputField label="Description" value={item.description} onChange={(e) => updateLine(item.id, { description: e.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Section</span><select value={item.category} onChange={(e) => updateLine(item.id, { category: e.target.value as PricingLineItem["category"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{["Labour", "Materials", "Travel", "Parking", "Plant Hire", "Contingency", "Other"].map((category) => <option key={category}>{category}</option>)}</select></label><InputField label="Qty" type="number" min="0.01" step="0.01" value={String(item.quantity)} onChange={(e) => updateLine(item.id, { quantity: Number(e.target.value) })} /><InputField label="Unit cost (£)" type="number" min="0" step="0.01" value={String(item.unitCost ?? item.unitPrice)} onChange={(e) => updateLine(item.id, { unitCost: Number(e.target.value) })} /><InputField label="Sell price (£)" type="number" min="0" step="0.01" value={String(item.unitPrice)} onChange={(e) => updateLine(item.id, { unitPrice: Number(e.target.value) })} /><div className="flex items-center justify-between gap-3 md:block"><strong className="whitespace-nowrap">{money.format(item.quantity * item.unitPrice)}</strong><button type="button" onClick={() => setItems((current) => current.filter((lineItem) => lineItem.id !== item.id))} className="ml-3 rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div></div>)}</div>
       </div>
 
       <div className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
@@ -366,7 +415,15 @@ export default function QuotesPage() {
         <Card><p className="text-sm text-slate-400">Gross / net margin</p><p className="mt-2 text-2xl font-bold"><span className="text-cyan-300">{profitability.grossMargin.toFixed(1)}%</span> / <span className={profitability.netMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}>{profitability.netMargin.toFixed(1)}%</span></p><p className="mt-2 text-xs text-slate-500">Target net margin {labourSettings.targetNetMargin}%.</p></Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2"><TextareaField label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /><TextareaField label="Terms & conditions" value={form.terms} onChange={(e) => setForm({ ...form, terms: e.target.value })} /></div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <TextareaField label="Notes / scope shown to customer" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        <div className="space-y-3"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Saved terms & conditions template</span><select value={form.termsTemplateId} onChange={(event) => selectTermsTemplate(event.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Custom terms</option>{termsTemplates.items.filter((template) => template.active).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label><TextareaField label="Terms & conditions" value={form.terms} onChange={(e) => setForm({ ...form, terms: e.target.value, termsTemplateId: "" })} /></div>
+      </div>
+      <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4">
+        <h2 className="font-semibold">Payment terms</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-3"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Payment structure</span><select value={paymentTerms.type} onChange={(event) => setPaymentTerms({ type: event.target.value as PaymentTermsType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Deposit</option><option>Staged payments</option><option>Due on completion</option></select></label>{paymentTerms.type === "Deposit" ? <InputField label="Deposit (%)" type="number" min="0" max="100" value={paymentTerms.depositPercent ?? 25} onChange={(event) => setPaymentTerms({ ...paymentTerms, depositPercent: Number(event.target.value || 0) })} /> : null}{paymentTerms.type === "Staged payments" ? <div className="md:col-span-2"><TextareaField label="Payment stages" value={paymentTerms.stages ?? ""} onChange={(event) => setPaymentTerms({ ...paymentTerms, stages: event.target.value })} /></div> : null}</div>
+      </div>
+      <div><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Full quote preview</h2><p className="text-sm text-slate-500">This customer-facing layout matches the saved document and final PDF structure.</p></div><Eye className="size-5 text-cyan-300" /></div><QuotePreview number={editingId ? documents.items.find((item) => item.id === editingId)?.number ?? "DRAFT" : "DRAFT"} documentType={form.type} title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} validUntil={form.validUntil} items={items} notes={form.notes} terms={form.terms} paymentTerms={paymentTerms} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} subtotal={profitability.sellingPrice} /></div>
       <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4"><h2 className="font-semibold">Save this version as a new job pack</h2><p className="mt-1 text-sm text-slate-400">Material links are retained so future quotes can use current library prices.</p><div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]"><InputField label="New pack name" value={savePackName} onChange={(e) => setSavePackName(e.target.value)} /><InputField label="Category" value={savePackCategory} onChange={(e) => setSavePackCategory(e.target.value)} /><Button type="button" className="self-end" onClick={saveAsJobPack}><Save className="mr-2 size-4" />Save as job pack</Button></div></div>
       <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}{success ? <p className="text-sm text-emerald-300">{success}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Selling price {money.format(profitability.sellingPrice)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Customer total {money.format(profitability.sellingPrice + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
     </form></Card> : null}
