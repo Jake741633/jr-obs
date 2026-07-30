@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { ArrowRight, BriefcaseBusiness, CircleAlert, FileText, Percent, PoundSterling, TrendingUp, Users } from "lucide-react";
 import { ComplianceDashboard } from "../components/ComplianceDashboard";
+import { PaymentControlDashboard } from "../components/PaymentControlDashboard";
 import { PortalActivityDashboard } from "../components/PortalActivityDashboard";
 import { ScheduleOverview } from "../components/ScheduleOverview";
 import { Card } from "../components/ui/Card";
@@ -40,10 +41,9 @@ export default function Home() {
     const linkedQuoteProfit = new Map(quoteDocuments.map((quote) => [quote.id, quote.profitability?.expectedProfit ?? 0]));
     const jobExpectedProfit = activeProfitJobs.reduce((sum, job) => sum + (job.quoteSnapshot?.profitability?.expectedProfit ?? linkedQuoteProfit.get(job.sourceQuoteId ?? "") ?? 0), 0);
     const wonQuotesAwaitingJob = quoteDocuments.filter((quote) => quote.status === "Accepted" && !quote.jobId);
-    const unconvertedExpectedProfit = wonQuotesAwaitingJob.reduce((sum, quote) => sum + (quote.profitability?.expectedProfit ?? 0), 0);
-    const expectedProfit = jobExpectedProfit + unconvertedExpectedProfit;
+    const expectedProfit = jobExpectedProfit + wonQuotesAwaitingJob.reduce((sum, quote) => sum + (quote.profitability?.expectedProfit ?? 0), 0);
     const expectedProfitRecords = activeProfitJobs.filter((job) => Boolean(job.quoteSnapshot?.profitability || linkedQuoteProfit.get(job.sourceQuoteId ?? ""))).length + wonQuotesAwaitingJob.filter((quote) => Boolean(quote.profitability)).length;
-    return { activeJobs, openQuotes, quotePipeline, outstanding, overdueCount, recentJobs, urgentInvoices, quoteConversionRate, decidedQuotes, acceptedQuotes, jobsInProgress, scheduledJobs, outstandingInvoices, expectedProfit, expectedProfitRecords };
+    return { activeJobs, openQuotes, quotePipeline, outstanding, overdueCount, recentJobs, urgentInvoices, quoteConversionRate, jobsInProgress, scheduledJobs, outstandingInvoices, expectedProfit, expectedProfitRecords };
   }, [invoices.items, jobs.items, quotes.items]);
   if (!ready) return <Card>Loading command centre…</Card>;
   const metrics = [
@@ -56,10 +56,11 @@ export default function Home() {
     <PageHeader eyebrow="Owner dashboard" title="Command Centre" description="A live view of JR Electrical Services, calculated from the records saved in JR OS." action={<Link href="/jobs" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-cyan-400 px-4 text-sm font-semibold text-slate-950">Open jobs <ArrowRight className="size-4" /></Link>} />
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{metrics.map(({ label, value, detail, icon: Icon }) => <Card key={label}><div className="flex items-start justify-between"><div><p className="text-sm text-slate-400">{label}</p><p className="mt-3 text-3xl font-black tracking-tight">{value}</p></div><span className="rounded-xl bg-slate-800 p-2 text-cyan-300"><Icon className="size-5" /></span></div><p className="mt-3 text-xs text-slate-500">{detail}</p></Card>)}</section>
     <ScheduleOverview />
+    <PaymentControlDashboard />
     <PortalActivityDashboard />
     <section className="space-y-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Workflow performance</p><h2 className="mt-1 text-2xl font-bold">Quote-to-payment dashboard</h2></div><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Card><p className="text-sm text-slate-400">Quote conversion rate</p><p className="mt-3 text-3xl font-black">{dashboard.quoteConversionRate.toFixed(1)}%</p><Percent className="mt-3 size-5 text-violet-300" /></Card><Card><p className="text-sm text-slate-400">Jobs in progress</p><p className="mt-3 text-3xl font-black">{dashboard.jobsInProgress.length}</p><BriefcaseBusiness className="mt-3 size-5 text-amber-300" /></Card><Card><p className="text-sm text-slate-400">Unpaid invoices</p><p className="mt-3 text-3xl font-black">{dashboard.outstandingInvoices.length}</p><PoundSterling className="mt-3 size-5 text-rose-300" /></Card><Card><p className="text-sm text-slate-400">Expected profit</p><p className="mt-3 text-3xl font-black text-emerald-300">{money.format(dashboard.expectedProfit)}</p><TrendingUp className="mt-3 size-5 text-emerald-300" /></Card></div></section>
     <ComplianceDashboard />
     <section className="grid gap-6 xl:grid-cols-[1.35fr_1fr]"><Card><h2 className="text-lg font-bold">Recent jobs</h2><div className="mt-5 space-y-3">{dashboard.recentJobs.map((job) => <Link key={job.id} href={`/jobs/${job.id}`} className="flex items-center justify-between rounded-xl border border-slate-800 p-4"><div><p className="font-medium">{job.title}</p><p className="text-sm text-slate-500">{job.siteAddress}</p></div><StatusBadge status={job.status} /></Link>)}</div></Card><Card><div className="flex items-center gap-3"><CircleAlert className="size-5 text-amber-300" /><h2 className="text-lg font-bold">Money requiring attention</h2></div><div className="mt-5 space-y-3">{dashboard.urgentInvoices.map((invoice) => <Link key={invoice.id} href="/invoices" className="block rounded-xl border border-slate-800 p-4"><p className="font-medium">{invoice.number} · {invoice.title}</p><p className="text-sm text-slate-500">Due {invoice.dueDate}</p></Link>)}</div></Card></section>
-    <Card><h2 className="text-lg font-bold">Quick actions</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[["Open diary","/planner"],["Open customer portal","/customer-portal"],["Prepare quote","/quotes"],["Open certificates","/certificates"]].map(([label,href]) => <Link key={href} href={href} className="flex items-center justify-between rounded-xl border border-slate-800 px-4 py-3 text-sm font-medium">{label}<ArrowRight className="size-4" /></Link>)}</div></Card>
+    <Card><h2 className="text-lg font-bold">Quick actions</h2><div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[["Open payments","/payments"],["Open customer portal","/customer-portal"],["Prepare quote","/quotes"],["Open certificates","/certificates"]].map(([label,href]) => <Link key={href} href={href} className="flex items-center justify-between rounded-xl border border-slate-800 px-4 py-3 text-sm font-medium">{label}<ArrowRight className="size-4" /></Link>)}</div></Card>
   </div>;
 }
