@@ -40,6 +40,11 @@ export type MaterialUnit = "Each" | "Metre" | "Drum" | "Box" | "Pack";
 export type MaterialPriceSource = "Manual" | "Supplier link" | "Imported";
 export interface MaterialPriceHistory { id: EntityId; tradeCost: number; sellPrice: number; source: MaterialPriceSource; recordedAt: string; }
 export interface Material { id: EntityId; name: string; category: MaterialCategory; manufacturer: string; supplier: string; supplierUrl: string; stockCode: string; unit: MaterialUnit; tradeCost: number; sellPrice: number; favourite: boolean; notes: string; lastPriceCheckedAt?: string; priceSource?: MaterialPriceSource; priceHistory?: MaterialPriceHistory[]; createdAt: string; updatedAt: string; }
+export type StockLocationType = "Van" | "Store" | "Site" | "Other";
+export interface StockLocation { id: EntityId; name: string; type: StockLocationType; vehicleId?: EntityId; notes: string; createdAt: string; updatedAt: string; }
+export interface StockItem { id: EntityId; materialId?: EntityId; description: string; locationId: EntityId; quantity: number; minimumQuantity: number; unitCost: number; unit: MaterialUnit; stockCode: string; supplier: string; notes: string; createdAt: string; updatedAt: string; }
+export type StockMovementType = "Received" | "Used" | "Transferred" | "Adjusted" | "Returned";
+export interface StockMovement { id: EntityId; stockItemId: EntityId; type: StockMovementType; quantity: number; fromLocationId?: EntityId; toLocationId?: EntityId; jobId?: EntityId; note: string; movedAt: string; createdAt: string; }
 export interface JobPackMaterial { id: EntityId; materialId?: EntityId; description: string; quantity: number; unitPrice: number; }
 export interface JobPack { id: EntityId; name: string; category: string; description: string; labourDescription: string; labourHours: number; labourRate: number; materials: JobPackMaterial[]; testingRequirements: string; certificatesRequired: string; notes: string; createdAt: string; updatedAt: string; }
 
@@ -64,51 +69,10 @@ export type CertificateType = "Electrical Installation Certificate" | "Minor Ele
 export type CertificateStatus = "Draft" | "In progress" | "Complete" | "Issued" | "Superseded";
 export type ObservationCode = "C1" | "C2" | "C3" | "FI" | "No code";
 export type SuggestionConfidence = "High" | "Medium" | "Low";
-export interface CertificateObservation {
-  id: EntityId;
-  sourceText: string;
-  location: string;
-  observation: string;
-  recommendation: string;
-  regulationReference: string;
-  code: ObservationCode;
-  confidence: SuggestionConfidence;
-  accepted: boolean;
-}
-export interface ElectricalCertificate {
-  id: EntityId;
-  number: string;
-  type: CertificateType;
-  status: CertificateStatus;
-  customerId?: EntityId;
-  jobId?: EntityId;
-  installationAddress: string;
-  description: string;
-  inspectorName: string;
-  inspectionDate: string;
-  nextInspectionDate: string;
-  outcome: "Satisfactory" | "Unsatisfactory" | "Not applicable";
-  observations: string;
-  structuredObservations?: CertificateObservation[];
-  externalPdfUrl: string;
-  createdAt: string;
-  updatedAt: string;
-}
+export interface CertificateObservation { id: EntityId; sourceText: string; location: string; observation: string; recommendation: string; regulationReference: string; code: ObservationCode; confidence: SuggestionConfidence; accepted: boolean; }
+export interface ElectricalCertificate { id: EntityId; number: string; type: CertificateType; status: CertificateStatus; customerId?: EntityId; jobId?: EntityId; installationAddress: string; description: string; inspectorName: string; inspectionDate: string; nextInspectionDate: string; outcome: "Satisfactory" | "Unsatisfactory" | "Not applicable"; observations: string; structuredObservations?: CertificateObservation[]; externalPdfUrl: string; createdAt: string; updatedAt: string; }
 
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
-export interface JobDocument {
-  id: EntityId;
-  jobId: EntityId;
-  name: string;
-  category: JobDocumentCategory;
-  fileName: string;
-  mimeType: string;
-  dataUrl?: string;
-  externalUrl?: string;
-  notes: string;
-  uploadedBy: string;
-  uploadedAt: string;
-  createdAt: string;
-}
+export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }
 
-export type EntityBase = Customer | Builder | Job | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | PricingDocument | Invoice | Material | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | Job | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
