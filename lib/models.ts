@@ -23,6 +23,12 @@ export interface SiteDiaryEntry { id: EntityId; jobId: EntityId; workDate: strin
 export type VariationStatus = "Draft" | "Awaiting approval" | "Approved" | "Declined" | "Invoiced";
 export interface JobVariation { id: EntityId; jobId: EntityId; number: string; title: string; description: string; labourHours: number; labourRate: number; materialCost: number; materialCharge: number; otherCharge: number; status: VariationStatus; approvalMethod: "Not approved" | "Signature" | "Email" | "WhatsApp" | "Verbal"; approvalReference: string; requestedBy: string; createdAt: string; updatedAt: string; }
 
+export type RamsStatus = "Draft" | "Ready for review" | "Approved" | "Superseded";
+export type RiskLikelihood = 1 | 2 | 3 | 4 | 5;
+export type RiskSeverity = 1 | 2 | 3 | 4 | 5;
+export interface RiskAssessmentItem { id: EntityId; hazard: string; personsAtRisk: string; existingControls: string; likelihood: RiskLikelihood; severity: RiskSeverity; furtherActions: string; residualLikelihood: RiskLikelihood; residualSeverity: RiskSeverity; responsiblePerson: string; }
+export interface RamsDocument { id: EntityId; number: string; title: string; jobId?: EntityId; siteAddress: string; client: string; preparedBy: string; preparedDate: string; reviewDate: string; status: RamsStatus; scopeOfWorks: string; methodStatement: string; emergencyArrangements: string; ppeRequired: string[]; permitsRequired: string[]; risks: RiskAssessmentItem[]; approvalName: string; approvalDate: string; notes: string; createdAt: string; updatedAt: string; }
+
 export type TeamRole = "Owner" | "Electrician" | "Electrician's mate" | "Apprentice" | "Office" | "Subcontractor";
 export type TeamMemberStatus = "Active" | "On leave" | "Inactive";
 export interface TeamQualification { id: EntityId; name: string; certificateNumber: string; issuedAt: string; expiresAt: string; notes: string; }
@@ -83,4 +89,4 @@ export interface ElectricalCertificate { id: EntityId; number: string; type: Cer
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
 export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }
 
-export type EntityBase = Customer | Builder | CustomerProfile | CustomerInteraction | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | CustomerProfile | CustomerInteraction | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | RamsDocument | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
