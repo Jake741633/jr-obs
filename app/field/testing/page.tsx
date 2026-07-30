@@ -1,0 +1,137 @@
+"use client";
+
+import Link from "next/link";
+import { FormEvent, useMemo, useState } from "react";
+import { AlertTriangle, CheckCircle2, ClipboardCheck, FileText, Plus, Save, Trash2 } from "lucide-react";
+import { Button } from "../../../components/ui/Button";
+import { Card } from "../../../components/ui/Card";
+import { InputField, TextareaField } from "../../../components/ui/FormField";
+import { PageHeader } from "../../../components/ui/PageHeader";
+import { makeId, useLocalStorageCollection } from "../../../lib/storage";
+import type { Customer, ElectricalCertificate, Job } from "../../../lib/models";
+import {
+  certificateReadySummary,
+  testingProgress,
+  validateTestingRecord,
+  type CircuitTestResult,
+  type ElectricalTestingRecord,
+  type PolarityResult,
+  type TestingRecordStatus,
+} from "../../../lib/electricalTesting";
+
+const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none transition focus:border-cyan-400";
+const statuses: TestingRecordStatus[] = ["Draft", "In progress", "Ready for certificate", "Complete"];
+const polarities: PolarityResult[] = ["", "Confirmed", "Not confirmed", "Not tested"];
+
+function blankCircuit(): CircuitTestResult {
+  return { id: makeId("circuit-test"), circuitReference: "", description: "", protectiveDevice: "", r1r2: "", insulationResistance: "", polarity: "", zs: "", rcdTest: "", notes: "" };
+}
+
+function blankRecord(jobId = "", customerId?: string): ElectricalTestingRecord {
+  const now = new Date().toISOString();
+  return { id: makeId("testing"), jobId, customerId, status: "Draft", inspectorName: "Jake", testDate: now.slice(0, 10), supplyDetails: "", earthingArrangement: "", circuits: [blankCircuit()], outstandingActions: [], generalNotes: "", createdAt: now, updatedAt: now };
+}
+
+export default function MobileTestingPage() {
+  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
+  const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
+  const records = useLocalStorageCollection<ElectricalTestingRecord>("jr-os-electrical-testing");
+  const [form, setForm] = useState<ElectricalTestingRecord>(() => blankRecord());
+  const [actionText, setActionText] = useState("");
+  const [message, setMessage] = useState("");
+
+  const activeJobs = useMemo(() => jobs.items.filter((job) => job.status === "In progress" || job.status === "Scheduled"), [jobs.items]);
+  const selectedJob = jobs.items.find((job) => job.id === form.jobId);
+  const selectedCustomer = customers.items.find((customer) => customer.id === form.customerId);
+  const warnings = validateTestingRecord(form);
+  const progress = testingProgress(form);
+  const summary = certificateReadySummary(form, selectedJob?.title ?? "", selectedCustomer?.name ?? "");
+
+  function chooseJob(jobId: string) {
+    const job = jobs.items.find((item) => item.id === jobId);
+    setForm((current) => ({ ...current, jobId, customerId: job?.customerId, updatedAt: new Date().toISOString() }));
+  }
+
+  function updateCircuit(id: string, patch: Partial<CircuitTestResult>) {
+    setForm((current) => ({ ...current, circuits: current.circuits.map((circuit) => circuit.id === id ? { ...circuit, ...patch } : circuit), updatedAt: new Date().toISOString() }));
+  }
+
+  function saveRecord(event?: FormEvent) {
+    event?.preventDefault();
+    if (!form.jobId) { setMessage("Choose the active job before saving the testing record."); return; }
+    const now = new Date().toISOString();
+    const record = { ...form, updatedAt: now };
+    records.setItems((current) => current.some((item) => item.id === record.id) ? current.map((item) => item.id === record.id ? record : item) : [record, ...current]);
+    setForm(record);
+    setMessage("Testing draft saved locally. You can leave and resume it later.");
+  }
+
+  function resume(record: ElectricalTestingRecord) {
+    setForm(record);
+    setMessage(`Resumed testing record for ${jobs.items.find((job) => job.id === record.jobId)?.title ?? "job"}.`);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function addAction() {
+    if (!actionText.trim()) return;
+    setForm((current) => ({ ...current, outstandingActions: [...current.outstandingActions, actionText.trim()], updatedAt: new Date().toISOString() }));
+    setActionText("");
+  }
+
+  const ready = jobs.isReady && customers.isReady && certificates.isReady && records.isReady;
+  if (!ready) return <Card>Loading electrical testing workspace…</Card>;
+
+  return <div className="space-y-6">
+    <PageHeader eyebrow="Mobile testing" title="Electrical testing workspace" description="Capture circuit results against the active job, save drafts locally and prepare a structured summary for the certificate record." />
+
+    {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+
+    <section className="grid gap-4 sm:grid-cols-3">
+      <Card><p className="text-sm text-slate-400">Progress</p><p className="mt-2 text-3xl font-bold">{progress}%</p></Card>
+      <Card><p className="text-sm text-slate-400">Circuit records</p><p className="mt-2 text-3xl font-bold">{form.circuits.length}</p></Card>
+      <Card><p className="text-sm text-slate-400">Review prompts</p><p className="mt-2 text-3xl font-bold text-amber-300">{warnings.length}</p></Card>
+    </section>
+
+    <Card><form onSubmit={saveRecord} className="space-y-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Active job</span><select required className={fieldClass} value={form.jobId} onChange={(event) => chooseJob(event.target.value)}><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}{form.jobId && !activeJobs.some((job) => job.id === form.jobId) ? <option value={form.jobId}>{selectedJob?.title ?? "Selected job"}</option> : null}</select></label>
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked certificate</span><select className={fieldClass} value={form.certificateId ?? ""} onChange={(event) => setForm({ ...form, certificateId: event.target.value || undefined })}><option value="">Not linked yet</option>{certificates.items.filter((certificate) => !form.jobId || certificate.jobId === form.jobId).map((certificate) => <option key={certificate.id} value={certificate.id}>{certificate.number} · {certificate.type}</option>)}</select></label>
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Status</span><select className={fieldClass} value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as TestingRecordStatus })}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
+        <InputField label="Inspector" value={form.inspectorName} onChange={(event) => setForm({ ...form, inspectorName: event.target.value })} />
+        <InputField label="Test date" type="date" value={form.testDate} onChange={(event) => setForm({ ...form, testDate: event.target.value })} />
+        <InputField label="Earthing arrangement" value={form.earthingArrangement} onChange={(event) => setForm({ ...form, earthingArrangement: event.target.value })} />
+        <div className="md:col-span-2 xl:col-span-3"><TextareaField label="Supply details" value={form.supplyDetails} onChange={(event) => setForm({ ...form, supplyDetails: event.target.value })} /></div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Circuit results</h2><p className="text-sm text-slate-400">Enter measured values and units exactly as recorded on site.</p></div><Button type="button" variant="secondary" onClick={() => setForm((current) => ({ ...current, circuits: [...current.circuits, blankCircuit()] }))}><Plus className="mr-2 size-4" />Add circuit</Button></div>
+        {form.circuits.map((circuit, index) => <div key={circuit.id} className="rounded-2xl border border-slate-700 bg-slate-950/50 p-4">
+          <div className="mb-4 flex items-center justify-between"><p className="font-bold">Circuit {index + 1}</p><button type="button" onClick={() => setForm((current) => ({ ...current, circuits: current.circuits.filter((item) => item.id !== circuit.id) }))} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <InputField label="Circuit reference" value={circuit.circuitReference} onChange={(event) => updateCircuit(circuit.id, { circuitReference: event.target.value })} />
+            <InputField label="Description" value={circuit.description} onChange={(event) => updateCircuit(circuit.id, { description: event.target.value })} />
+            <InputField label="Protective device" value={circuit.protectiveDevice} onChange={(event) => updateCircuit(circuit.id, { protectiveDevice: event.target.value })} />
+            <InputField label="R1+R2 (Ω)" value={circuit.r1r2} onChange={(event) => updateCircuit(circuit.id, { r1r2: event.target.value })} />
+            <InputField label="Insulation resistance" value={circuit.insulationResistance} onChange={(event) => updateCircuit(circuit.id, { insulationResistance: event.target.value })} />
+            <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Polarity</span><select className={fieldClass} value={circuit.polarity} onChange={(event) => updateCircuit(circuit.id, { polarity: event.target.value as PolarityResult })}>{polarities.map((polarity) => <option key={polarity || "blank"} value={polarity}>{polarity || "Choose result"}</option>)}</select></label>
+            <InputField label="Zs (Ω)" value={circuit.zs} onChange={(event) => updateCircuit(circuit.id, { zs: event.target.value })} />
+            <InputField label="RCD results" value={circuit.rcdTest} onChange={(event) => updateCircuit(circuit.id, { rcdTest: event.target.value })} />
+            <div className="md:col-span-2 xl:col-span-4"><TextareaField label="Circuit notes" value={circuit.notes} onChange={(event) => updateCircuit(circuit.id, { notes: event.target.value })} /></div>
+          </div>
+        </div>)}
+      </div>
+
+      <div className="flex justify-end"><Button type="submit"><Save className="mr-2 size-4" />Save testing draft</Button></div>
+    </form></Card>
+
+    <section className="grid gap-4 xl:grid-cols-2">
+      <Card><div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 size-5 text-amber-300" /><div><h2 className="font-bold">Validation and review prompts</h2><p className="mt-1 text-sm text-slate-400">These prompts identify missing or unusual entries only. JR OS does not decide whether the installation complies.</p></div></div><div className="mt-4 space-y-2">{warnings.length ? warnings.map((warning, index) => <div key={`${warning.field}-${warning.circuitId ?? index}`} className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-sm text-amber-100">{warning.message}</div>) : <p className="flex items-center gap-2 text-sm text-emerald-300"><CheckCircle2 className="size-4" />No missing or unusual entries detected by the basic checks.</p>}</div></Card>
+      <Card><h2 className="font-bold">Outstanding actions</h2><div className="mt-4 flex gap-2"><input className={fieldClass} value={actionText} onChange={(event) => setActionText(event.target.value)} placeholder="Retest circuit, confirm device details…" /><Button type="button" onClick={addAction}>Add</Button></div><div className="mt-3 space-y-2">{form.outstandingActions.map((action, index) => <div key={`${action}-${index}`} className="flex items-center justify-between rounded-xl border border-slate-800 px-3 py-2 text-sm"><span>{action}</span><button type="button" onClick={() => setForm((current) => ({ ...current, outstandingActions: current.outstandingActions.filter((_, itemIndex) => itemIndex !== index) }))} className="text-slate-500 hover:text-red-300"><Trash2 className="size-4" /></button></div>)}</div></Card>
+    </section>
+
+    <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="flex items-center gap-2 font-bold"><FileText className="size-5 text-cyan-300" />Certificate-ready testing summary</h2><p className="mt-1 text-sm text-slate-400">Copy this checked summary into the linked certificate record when ready.</p></div><Link href="/certificates" className="rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold hover:border-cyan-400/50">Open certificates</Link></div><pre className="mt-4 whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">{summary}</pre></Card>
+
+    <section className="space-y-3"><div><h2 className="text-xl font-bold">Saved testing drafts</h2><p className="text-sm text-slate-400">Resume records stored on this device.</p></div>{records.items.length ? records.items.map((record) => <Card key={record.id}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{record.status} · {testingProgress(record)}%</p><h3 className="mt-1 font-bold">{jobs.items.find((job) => job.id === record.jobId)?.title ?? "Linked job"}</h3><p className="mt-1 text-sm text-slate-400">{record.circuits.length} circuit result{record.circuits.length === 1 ? "" : "s"} · updated {new Date(record.updatedAt).toLocaleString("en-GB")}</p></div><Button type="button" variant="secondary" onClick={() => resume(record)}><ClipboardCheck className="mr-2 size-4" />Resume</Button></div></Card>) : <Card>No testing drafts saved yet.</Card>}</section>
+  </div>;
+}
