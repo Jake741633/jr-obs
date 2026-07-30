@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, BriefcaseBusiness, CalendarDays, FileText, History, RotateCcw, TrendingUp, UserRound } from "lucide-react";
+import { ArrowLeft, BriefcaseBusiness, CalendarDays, Download, ExternalLink, FileText, History, Paperclip, RotateCcw, TrendingUp, UserRound } from "lucide-react";
 import { QuotePreview } from "../../../components/quotes/QuotePreview";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -47,12 +47,14 @@ export default function PricingDocumentDetailPage() {
         revisionNumber: (item.revisions?.length ?? 0) + 1,
         savedAt: now,
         title: item.title,
+        siteAddress: item.siteAddress,
         validUntil: item.validUntil,
         vatEnabled: item.vatEnabled,
         vatRate: item.vatRate,
         items: item.items,
         pricingSettings: item.pricingSettings,
         profitability: item.profitability,
+        attachments: item.attachments,
         notes: item.notes,
         terms: item.terms,
         termsTemplateId: item.termsTemplateId,
@@ -60,12 +62,14 @@ export default function PricingDocumentDetailPage() {
         templateType: item.templateType,
       }],
       title: revision.title,
+      siteAddress: revision.siteAddress,
       validUntil: revision.validUntil,
       vatEnabled: revision.vatEnabled,
       vatRate: revision.vatRate,
       items: revision.items,
       pricingSettings: revision.pricingSettings,
       profitability: revision.profitability,
+      attachments: revision.attachments,
       notes: revision.notes,
       terms: revision.terms,
       termsTemplateId: revision.termsTemplateId,
@@ -111,7 +115,9 @@ export default function PricingDocumentDetailPage() {
 
     <section className="grid gap-4 lg:grid-cols-2"><Card><h2 className="font-semibold">Notes</h2><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-400">{document.notes || "No notes added."}</p></Card><Card><h2 className="font-semibold">Terms & conditions</h2><p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-400">{document.terms || "No terms added."}</p></Card></section>
 
-    <section><div className="mb-3 flex items-center gap-2"><FileText className="size-5 text-cyan-300" /><div><h2 className="text-xl font-bold">Final document preview</h2><p className="text-sm text-slate-500">Customer-facing layout used for the quote PDF.</p></div></div><QuotePreview number={document.number} documentType={document.type} title={document.title} customer={customer} builder={builder} validUntil={document.validUntil} items={document.items} notes={document.notes} terms={document.terms} paymentTerms={document.paymentTerms} vatEnabled={document.vatEnabled} vatRate={document.vatRate} subtotal={subtotal} /></section>
+    {document.attachments?.length ? <Card><div className="flex items-center gap-2 text-cyan-300"><Paperclip className="size-5" /><div><h2 className="font-semibold">Quote attachments</h2><p className="text-sm text-slate-500">These files and links follow the quote into its live job.</p></div></div><div className="mt-4 grid gap-2 md:grid-cols-2">{document.attachments.map((attachment) => <div key={attachment.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 p-3"><div className="min-w-0"><p className="truncate font-semibold">{attachment.name}</p><p className="mt-1 truncate text-xs text-slate-500">{attachment.fileName || attachment.externalUrl}</p></div><div className="flex shrink-0">{attachment.dataUrl ? <a href={attachment.dataUrl} download={attachment.fileName || attachment.name} aria-label={`Download ${attachment.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Download className="size-4" /></a> : null}{attachment.externalUrl ? <a href={attachment.externalUrl} target="_blank" rel="noreferrer" aria-label={`Open ${attachment.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><ExternalLink className="size-4" /></a> : null}</div></div>)}</div></Card> : null}
+
+    <section><div className="mb-3 flex items-center gap-2"><FileText className="size-5 text-cyan-300" /><div><h2 className="text-xl font-bold">Final document preview</h2><p className="text-sm text-slate-500">Customer-facing layout used for the quote PDF.</p></div></div><QuotePreview number={document.number} documentType={document.type} title={document.title} customer={customer} builder={builder} siteAddress={document.siteAddress} validUntil={document.validUntil} items={document.items} notes={document.notes} terms={document.terms} paymentTerms={document.paymentTerms} vatEnabled={document.vatEnabled} vatRate={document.vatRate} subtotal={subtotal} /></section>
 
     <Card>
       <div className="flex items-center gap-2 text-violet-300"><History className="size-5" /><div><h2 className="font-semibold">Version history</h2><p className="text-sm text-slate-500">Every saved edit keeps the previous customer-facing version.</p></div></div>

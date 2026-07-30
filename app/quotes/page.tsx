@@ -1,8 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
-import { BriefcaseBusiness, Calculator, Clock3, Eye, FileText, LayoutTemplate, PackagePlus, Pencil, Plus, Save, Search, TrendingUp, Trash2 } from "lucide-react";
+import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { BriefcaseBusiness, Calculator, Clock3, Download, ExternalLink, Eye, FileText, LayoutTemplate, PackagePlus, Paperclip, Pencil, Plus, Save, Search, TrendingUp, Trash2 } from "lucide-react";
 import { QuotePreview } from "../../components/quotes/QuotePreview";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -12,12 +12,13 @@ import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
-import type { Builder, BusinessOverhead, BusinessTermsTemplate, Customer, Job, JobPack, LabourCostSettings, LabourRate, Material, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType } from "../../lib/models";
+import { createJobFromAcceptedQuote, pricingDocumentTotal } from "../../lib/workflow";
+import type { Builder, BusinessOverhead, BusinessTermsTemplate, Customer, Job, JobDocument, JobPack, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const defaultTerms = "This document is based on the described scope. Variations, unforeseen work and making good are excluded unless stated otherwise.";
 const blankItem = { description: "", category: "Labour" as PricingLineItem["category"], quantity: "1", unitPrice: "", unitCost: "" };
-const blankForm = { type: "Quote" as PricingDocumentType, title: "", customerId: "", builderId: "", jobId: "", validUntil: "", vatEnabled: false, vatRate: "20", notes: "", terms: defaultTerms, termsTemplateId: "", templateType: undefined as QuoteTemplateType | undefined };
+const blankForm = { type: "Quote" as PricingDocumentType, title: "", customerId: "", builderId: "", jobId: "", siteAddress: "", validUntil: "", vatEnabled: false, vatRate: "20", notes: "", terms: defaultTerms, termsTemplateId: "", templateType: undefined as QuoteTemplateType | undefined };
 const statuses: PricingDocumentStatus[] = ["Draft", "Sent", "Accepted", "Declined", "Expired"];
 const defaultLabourSettings: LabourCostSettings = { id: "labour-cost-settings", workingDaysPerYear: 220, billableHoursPerDay: 7.5, targetNetMargin: 25, contingencyPercent: 10, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
 const blankLabour = { rateId: "", mode: "Hours" as QuoteLabourMode, quantity: "1", fixedCost: "", fixedPrice: "", fixedHours: "" };
@@ -34,6 +35,8 @@ export default function QuotesPage() {
   const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
   const quoteSettingsStore = useLocalStorageCollection<QuotePricingSettings>("jr-os-quote-engine-settings", [defaultQuotePricingSettings]);
   const termsTemplates = useLocalStorageCollection<BusinessTermsTemplate>("jr-os-business-terms-templates", defaultBusinessTermsTemplates);
+  const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
+  const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedJobPackId, setSelectedJobPackId] = useState("");
@@ -52,6 +55,9 @@ export default function QuotesPage() {
   const [labour, setLabour] = useState(blankLabour);
   const [pricing, setPricing] = useState<QuotePricingSettings>(defaultQuotePricingSettings);
   const [paymentTerms, setPaymentTerms] = useState<QuotePaymentTerms>({ type: "Due on completion" });
+  const [attachments, setAttachments] = useState<RecordAttachment[]>([]);
+  const [attachmentLink, setAttachmentLink] = useState({ name: "", url: "" });
+  const [attachmentError, setAttachmentError] = useState("");
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),
@@ -98,16 +104,20 @@ export default function QuotesPage() {
     setLabour(blankLabour);
     setPricing(quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
     setPaymentTerms({ type: "Due on completion" });
+    setAttachments([]);
+    setAttachmentLink({ name: "", url: "" });
+    setAttachmentError("");
     setError("");
     setSuccess("");
     setShowForm(false);
   }
 
   function startEdit(document: PricingDocument) {
-    setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId ?? "", templateType: document.templateType });
+    setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", siteAddress: document.siteAddress ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId ?? "", templateType: document.templateType });
     setItems(document.items);
     setPricing(document.pricingSettings ?? quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
     setPaymentTerms(document.paymentTerms ?? { type: "Due on completion" });
+    setAttachments(document.attachments ?? []);
     setEditingId(document.id);
     setSavePackName(document.title);
     setError("");
@@ -143,6 +153,65 @@ export default function QuotesPage() {
   function selectTermsTemplate(id: string) {
     const template = termsTemplates.items.find((item) => item.id === id);
     setForm((current) => ({ ...current, termsTemplateId: id, terms: template?.content ?? current.terms }));
+  }
+
+  function selectCustomer(customerId: string) {
+    const customer = customers.items.find((item) => item.id === customerId);
+    setForm((current) => ({ ...current, customerId, builderId: "", siteAddress: customer?.address ?? current.siteAddress }));
+  }
+
+  function selectBuilder(builderId: string) {
+    const builder = builders.items.find((item) => item.id === builderId);
+    setForm((current) => ({ ...current, builderId, customerId: "", siteAddress: builder?.address ?? current.siteAddress }));
+  }
+
+  function selectJob(jobId: string) {
+    const job = jobs.items.find((item) => item.id === jobId);
+    setForm((current) => ({
+      ...current,
+      jobId,
+      customerId: job?.customerId ?? current.customerId,
+      builderId: job?.builderId ?? current.builderId,
+      siteAddress: job?.siteAddress ?? current.siteAddress,
+    }));
+  }
+
+  async function addAttachmentFiles(event: ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (!files.length) return;
+    const oversized = files.find((file) => file.size > 2_000_000);
+    if (oversized) { setAttachmentError(`${oversized.name} is over the 2 MB local-storage limit.`); return; }
+    const added = await Promise.all(files.map(async (file): Promise<RecordAttachment | null> => {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(new Error("Unable to read file"));
+        reader.readAsDataURL(file);
+      }).catch(() => "");
+      if (!dataUrl) return null;
+      const now = new Date().toISOString();
+      return { id: makeId("attachment"), name: file.name.replace(/\.[^/.]+$/, ""), fileName: file.name, mimeType: file.type, dataUrl, notes: "", createdAt: now };
+    }));
+    setAttachments((current) => [...current, ...added.filter((item): item is RecordAttachment => Boolean(item))]);
+    setAttachmentError(added.some((item) => !item) ? "One or more files could not be read." : "");
+  }
+
+  function addAttachmentLink() {
+    const name = attachmentLink.name.trim();
+    const externalUrl = attachmentLink.url.trim();
+    if (!name || !externalUrl) { setAttachmentError("Enter a name and URL for the attachment."); return; }
+    try {
+      const url = new URL(externalUrl);
+      if (!["http:", "https:"].includes(url.protocol)) throw new Error("Invalid protocol");
+    } catch {
+      setAttachmentError("Enter a valid http or https URL.");
+      return;
+    }
+    const now = new Date().toISOString();
+    setAttachments((current) => [...current, { id: makeId("attachment"), name, fileName: "", mimeType: "", externalUrl, notes: "", createdAt: now }]);
+    setAttachmentLink({ name: "", url: "" });
+    setAttachmentError("");
   }
 
   function updatePricing(patch: Partial<QuotePricingSettings>) {
@@ -285,24 +354,19 @@ export default function QuotesPage() {
     const builder = builders.items.find((item) => item.id === document.builderId);
     const now = new Date().toISOString();
     const jobId = makeId("job");
-    const jobValue = total(document);
-    const scope = document.items.map((item) => `- ${item.description} (${item.quantity} × ${money.format(item.unitPrice)})`).join("\n");
-    const job: Job = {
-      id: jobId,
-      title: document.title,
-      customerId: document.customerId,
-      builderId: document.builderId,
-      siteAddress: customer?.address || builder?.address || "Address to be confirmed",
-      status: "Scheduled",
-      startDate: "",
-      value: jobValue,
-      notes: [`Created from ${document.type.toLowerCase()} ${document.number}.`, document.notes, `Agreed scope:\n${scope}`, `Terms:\n${document.terms}`].filter(Boolean).join("\n\n"),
-      createdAt: now,
-      updatedAt: now,
-    };
-    jobs.setItems((current) => [job, ...current]);
+    const converted = createJobFromAcceptedQuote({
+      document,
+      customerAddress: customer?.address,
+      builderAddress: builder?.address,
+      jobId,
+      now,
+      createId: makeId,
+    });
+    jobs.setItems((current) => [converted.job, ...current]);
+    timeline.setItems((current) => [...converted.timelineEntries, ...current]);
+    if (converted.jobDocuments.length) jobDocuments.setItems((current) => [...converted.jobDocuments, ...current]);
     documents.setItems((current) => current.map((item) => item.id === document.id ? { ...item, jobId, updatedAt: now } : item));
-    setPageMessage(`${document.number} converted into a live scheduled job.`);
+    setPageMessage(`${document.number} converted into a live scheduled job with ${document.items.length} pricing lines and ${converted.jobDocuments.length} attachment${converted.jobDocuments.length === 1 ? "" : "s"}.`);
   }
 
   function updateLine(id: string, changes: Partial<PricingLineItem>) {
@@ -320,18 +384,18 @@ export default function QuotesPage() {
     const nextNumber = existing?.number ?? `${form.type === "Quote" ? "Q" : "E"}-${String(documents.items.filter((item) => item.type === form.type).length + 1).padStart(4, "0")}`;
     const payload = {
       type: form.type, customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined,
-      title: form.title.trim(), validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items,
+      title: form.title.trim(), siteAddress: form.siteAddress.trim() || undefined, validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items,
       pricingSettings: pricing,
       profitability: { directCost: profitability.directCost, overheadCost: profitability.overheadCost, costPrice: profitability.costPrice, sellingPrice: profitability.sellingPrice, grossProfit: profitability.grossProfit, expectedProfit: profitability.expectedProfit, grossMargin: profitability.grossMargin, netMargin: profitability.netMargin, calculatedAt: now },
-      notes: form.notes, terms: form.terms, termsTemplateId: form.termsTemplateId || undefined, paymentTerms, templateType: form.templateType, updatedAt: now,
+      attachments, notes: form.notes, terms: form.terms, termsTemplateId: form.termsTemplateId || undefined, paymentTerms, templateType: form.templateType, updatedAt: now,
     };
     documents.setItems((current) => editingId ? current.map((document) => {
       if (document.id !== editingId) return document;
       const revision: QuoteRevision = {
         id: makeId("revision"), revisionNumber: (document.revisions?.length ?? 0) + 1, savedAt: now,
-        title: document.title, validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: document.vatRate,
+        title: document.title, siteAddress: document.siteAddress, validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: document.vatRate,
         items: document.items, pricingSettings: document.pricingSettings, profitability: document.profitability,
-        notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId,
+        attachments: document.attachments, notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId,
         paymentTerms: document.paymentTerms, templateType: document.templateType,
       };
       return { ...document, ...payload, revisions: [...(document.revisions ?? []), revision] };
@@ -341,7 +405,7 @@ export default function QuotesPage() {
 
   function updateStatus(id: string, status: PricingDocumentStatus) { documents.setItems((current) => current.map((document) => document.id === id ? { ...document, status, updatedAt: new Date().toISOString() } : document)); setPageMessage(""); }
   function deleteDocument(document: PricingDocument) { if (window.confirm(`Delete ${document.number} - ${document.title}? This cannot be undone.`)) documents.remove((item) => item.id === document.id); }
-  function total(document: PricingDocument) { const net = document.profitability?.sellingPrice ?? document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); return net + (document.vatEnabled ? net * document.vatRate / 100 : 0); }
+  function total(document: PricingDocument) { return pricingDocumentTotal(document); }
 
   return <div className="space-y-6">
     <PageHeader eyebrow="Sales" title="Quotes & Estimates" description="Build professional pricing documents with live material costs, margins and reusable job packs." action={<Button onClick={() => showForm ? reset() : setShowForm(true)}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New document"}</Button>} />
@@ -363,12 +427,24 @@ export default function QuotesPage() {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Document type</span><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PricingDocumentType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Quote</option><option>Estimate</option></select></label>
         <InputField required label="Title / scope" value={form.title} onChange={(e) => { setForm({ ...form, title: e.target.value }); if (!savePackName) setSavePackName(e.target.value); }} />
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Customer</span><select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value, builderId: "" })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">None</option>{customers.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Builder</span><select value={form.builderId} onChange={(e) => setForm({ ...form, builderId: e.target.value, customerId: "" })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">None</option>{builders.items.map((item) => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select></label>
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select value={form.jobId} onChange={(e) => setForm({ ...form, jobId: e.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">No linked job</option>{jobs.items.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Customer</span><select value={form.customerId} onChange={(e) => selectCustomer(e.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">None</option>{customers.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Builder</span><select value={form.builderId} onChange={(e) => selectBuilder(e.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">None</option>{builders.items.map((item) => <option key={item.id} value={item.id}>{item.companyName}</option>)}</select></label>
+        <InputField label="Site address" value={form.siteAddress} onChange={(e) => setForm({ ...form, siteAddress: e.target.value })} />
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select value={form.jobId} onChange={(e) => selectJob(e.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">No linked job</option>{jobs.items.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}</select></label>
         <InputField label="Valid until" type="date" value={form.validUntil} onChange={(e) => setForm({ ...form, validUntil: e.target.value })} />
         <label className="flex items-center gap-3 pt-8 text-sm text-slate-300"><input type="checkbox" checked={form.vatEnabled} onChange={(e) => setForm({ ...form, vatEnabled: e.target.checked })} /> Add VAT</label>
         {form.vatEnabled ? <InputField label="VAT rate (%)" type="number" min="0" value={form.vatRate} onChange={(e) => setForm({ ...form, vatRate: e.target.value })} /> : null}
+      </div>
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+        <div className="flex items-start gap-3"><Paperclip className="mt-0.5 size-5 text-cyan-300" /><div><h2 className="font-semibold">Quote attachments</h2><p className="mt-1 text-sm text-slate-400">Drawings, photos and linked documents will be copied into the job folder when this quote is accepted.</p></div></div>
+        <div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Upload files</span><input type="file" multiple onChange={addAttachmentFiles} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1 file:text-slate-200" /><span className="text-xs font-normal text-slate-500">Maximum 2 MB per local file.</span></label>
+          <div className="grid grid-cols-2 gap-2"><InputField label="Link name" value={attachmentLink.name} onChange={(event) => setAttachmentLink({ ...attachmentLink, name: event.target.value })} /><InputField label="External URL" type="url" placeholder="https://..." value={attachmentLink.url} onChange={(event) => setAttachmentLink({ ...attachmentLink, url: event.target.value })} /></div>
+          <Button type="button" className="self-end" onClick={addAttachmentLink}>Add link</Button>
+        </div>
+        {attachmentError ? <p className="mt-3 text-sm text-red-300">{attachmentError}</p> : null}
+        {attachments.length ? <div className="mt-4 grid gap-2 md:grid-cols-2">{attachments.map((attachment) => <div key={attachment.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 bg-slate-900 p-3"><div className="min-w-0"><p className="truncate text-sm font-semibold">{attachment.name}</p><p className="mt-1 truncate text-xs text-slate-500">{attachment.fileName || attachment.externalUrl}</p></div><div className="flex shrink-0 items-center gap-1">{attachment.dataUrl ? <a href={attachment.dataUrl} download={attachment.fileName || attachment.name} aria-label={`Download ${attachment.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Download className="size-4" /></a> : null}{attachment.externalUrl ? <a href={attachment.externalUrl} target="_blank" rel="noreferrer" aria-label={`Open ${attachment.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><ExternalLink className="size-4" /></a> : null}<button type="button" onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))} aria-label={`Remove ${attachment.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div></div>)}</div> : <p className="mt-4 text-sm text-slate-500">No attachments added.</p>}
       </div>
 
       <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
@@ -423,7 +499,7 @@ export default function QuotesPage() {
         <h2 className="font-semibold">Payment terms</h2>
         <div className="mt-4 grid gap-3 md:grid-cols-3"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Payment structure</span><select value={paymentTerms.type} onChange={(event) => setPaymentTerms({ type: event.target.value as PaymentTermsType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Deposit</option><option>Staged payments</option><option>Due on completion</option></select></label>{paymentTerms.type === "Deposit" ? <InputField label="Deposit (%)" type="number" min="0" max="100" value={paymentTerms.depositPercent ?? 25} onChange={(event) => setPaymentTerms({ ...paymentTerms, depositPercent: Number(event.target.value || 0) })} /> : null}{paymentTerms.type === "Staged payments" ? <div className="md:col-span-2"><TextareaField label="Payment stages" value={paymentTerms.stages ?? ""} onChange={(event) => setPaymentTerms({ ...paymentTerms, stages: event.target.value })} /></div> : null}</div>
       </div>
-      <div><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Full quote preview</h2><p className="text-sm text-slate-500">This customer-facing layout matches the saved document and final PDF structure.</p></div><Eye className="size-5 text-cyan-300" /></div><QuotePreview number={editingId ? documents.items.find((item) => item.id === editingId)?.number ?? "DRAFT" : "DRAFT"} documentType={form.type} title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} validUntil={form.validUntil} items={items} notes={form.notes} terms={form.terms} paymentTerms={paymentTerms} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} subtotal={profitability.sellingPrice} /></div>
+      <div><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Full quote preview</h2><p className="text-sm text-slate-500">This customer-facing layout matches the saved document and final PDF structure.</p></div><Eye className="size-5 text-cyan-300" /></div><QuotePreview number={editingId ? documents.items.find((item) => item.id === editingId)?.number ?? "DRAFT" : "DRAFT"} documentType={form.type} title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} siteAddress={form.siteAddress} validUntil={form.validUntil} items={items} notes={form.notes} terms={form.terms} paymentTerms={paymentTerms} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} subtotal={profitability.sellingPrice} /></div>
       <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4"><h2 className="font-semibold">Save this version as a new job pack</h2><p className="mt-1 text-sm text-slate-400">Material links are retained so future quotes can use current library prices.</p><div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]"><InputField label="New pack name" value={savePackName} onChange={(e) => setSavePackName(e.target.value)} /><InputField label="Category" value={savePackCategory} onChange={(e) => setSavePackCategory(e.target.value)} /><Button type="button" className="self-end" onClick={saveAsJobPack}><Save className="mr-2 size-4" />Save as job pack</Button></div></div>
       <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}{success ? <p className="text-sm text-emerald-300">{success}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Selling price {money.format(profitability.sellingPrice)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Customer total {money.format(profitability.sellingPrice + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
     </form></Card> : null}

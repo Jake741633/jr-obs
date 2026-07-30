@@ -16,6 +16,7 @@ interface QuotePreviewProps {
   title: string;
   customer?: Customer;
   builder?: Builder;
+  siteAddress?: string;
   validUntil: string;
   items: PricingLineItem[];
   notes: string;
@@ -26,7 +27,7 @@ interface QuotePreviewProps {
   subtotal: number;
 }
 
-export function QuotePreview({ number, documentType, title, customer, builder, validUntil, items, notes, terms, paymentTerms, vatEnabled, vatRate, subtotal }: QuotePreviewProps) {
+export function QuotePreview({ number, documentType, title, customer, builder, siteAddress, validUntil, items, notes, terms, paymentTerms, vatEnabled, vatRate, subtotal }: QuotePreviewProps) {
   const recipient = customer?.name || builder?.companyName || "Customer name";
   const address = customer?.address || builder?.address || "Customer address";
   const vat = vatEnabled ? subtotal * vatRate / 100 : 0;
@@ -43,7 +44,7 @@ export function QuotePreview({ number, documentType, title, customer, builder, v
     </div>
     <div className="grid gap-6 px-6 py-6 sm:grid-cols-2 sm:px-9">
       <div><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Prepared for</p><p className="mt-2 font-bold">{recipient}</p><p className="whitespace-pre-line text-sm text-slate-600">{address}</p></div>
-      <div className="sm:text-right"><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Valid until</p><p className="mt-2 font-semibold">{validUntil ? new Date(`${validUntil}T00:00:00`).toLocaleDateString("en-GB") : "To be confirmed"}</p></div>
+      <div className="sm:text-right"><p className="text-xs font-bold uppercase tracking-wider text-slate-500">Valid until</p><p className="mt-2 font-semibold">{validUntil ? new Date(`${validUntil}T00:00:00`).toLocaleDateString("en-GB") : "To be confirmed"}</p>{siteAddress ? <><p className="mt-4 text-xs font-bold uppercase tracking-wider text-slate-500">Site address</p><p className="mt-1 whitespace-pre-line text-sm text-slate-600">{siteAddress}</p></> : null}</div>
     </div>
     <div className="px-6 sm:px-9"><h2 className="text-xl font-bold">{title || "Quote title"}</h2>{notes ? <p className="mt-2 whitespace-pre-line text-sm leading-6 text-slate-600">{notes}</p> : null}</div>
     <div className="space-y-5 px-6 py-7 sm:px-9">
