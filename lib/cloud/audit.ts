@@ -5,7 +5,7 @@ import { cloudInsert } from "./client";
 export type AuditedAction = "quote_approved" | "certificate_issued" | "payment_changed" | "user_permission_changed" | "record_deleted";
 
 export async function writeAuditEvent(input: {
-  businessId: string;
+  organisationId: string;
   action: AuditedAction;
   entityTable: string;
   sourceId?: string;
@@ -13,7 +13,7 @@ export async function writeAuditEvent(input: {
   afterData?: unknown;
 }) {
   return cloudInsert("audit_log", [{
-    business_id: input.businessId,
+    organisation_id: input.organisationId,
     action: input.action,
     entity_table: input.entityTable,
     source_id: input.sourceId,
