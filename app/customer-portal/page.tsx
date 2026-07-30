@@ -1,135 +1,107 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, Clock3, FileCheck2, FileText, MessageSquare, Receipt, Send, ShieldCheck, XCircle } from "lucide-react";
+import { CalendarDays, CheckCircle2, Download, FileText, Image as ImageIcon, MessageSquare, Receipt, Send, ShieldCheck, XCircle } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
-import { TextareaField } from "../../components/ui/FormField";
+import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { Customer, ElectricalCertificate, Invoice, Job, JobTimelineEntry, PricingDocument, PricingDocumentStatus } from "../../lib/models";
+import { customerDocuments, invoicePortalStatus, jobProgress, portalAppointments, sharedPhotos, type PortalAccessRecord, type PortalActivity, type PortalApprovalRecord, type PortalPaymentLink, type PortalPhotoShare, type PortalRequest, type PortalRequestType } from "../../lib/customerPortal";
+import type { Customer, ElectricalCertificate, Invoice, Job, JobDocument, JobTimelineEntry, PlannerEntry, PricingDocument, PricingDocumentStatus } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
-
-type PortalMessage = {
-  id: string;
-  customerId: string;
-  jobId?: string;
-  sender: "Customer" | "JR Electrical";
-  message: string;
-  sentAt: string;
-};
-
-function pricingTotal(document: PricingDocument) {
-  const subtotal = document.items.reduce((total, item) => total + item.quantity * item.unitPrice, 0);
-  return document.vatEnabled ? subtotal * (1 + document.vatRate / 100) : subtotal;
-}
-
-function invoiceTotal(invoice: Invoice) {
-  const subtotal = invoice.items.reduce((total, item) => total + item.quantity * item.unitPrice, 0);
-  return invoice.vatEnabled ? subtotal * (1 + invoice.vatRate / 100) : subtotal;
-}
+const total = (document: PricingDocument | Invoice) => { const subtotal = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); return document.vatEnabled ? subtotal * (1 + document.vatRate / 100) : subtotal; };
+const dateTime = (value: string) => new Date(value).toLocaleString("en-GB");
 
 export default function CustomerPortalPage() {
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const pricingDocuments = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
+  const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
+  const planner = useLocalStorageCollection<PlannerEntry>("jr-os-planner");
   const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
-  const messages = useLocalStorageCollection<PortalMessage>("jr-os-portal-messages");
+  const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
+  const access = useLocalStorageCollection<PortalAccessRecord>("jr-os-portal-access");
+  const approvals = useLocalStorageCollection<PortalApprovalRecord>("jr-os-portal-approvals");
+  const requests = useLocalStorageCollection<PortalRequest>("jr-os-portal-requests");
+  const paymentLinks = useLocalStorageCollection<PortalPaymentLink>("jr-os-portal-payment-links");
+  const photoShares = useLocalStorageCollection<PortalPhotoShare>("jr-os-portal-photo-shares");
+  const activity = useLocalStorageCollection<PortalActivity>("jr-os-portal-activity");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
-  const [message, setMessage] = useState("");
-  const [messageJobId, setMessageJobId] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const [decisionId, setDecisionId] = useState("");
+  const [approvalName, setApprovalName] = useState("");
+  const [approvalComments, setApprovalComments] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [requestType, setRequestType] = useState<PortalRequestType>("Question");
+  const [requestJobId, setRequestJobId] = useState("");
+  const [requestPlannerId, setRequestPlannerId] = useState("");
+  const [requestDate, setRequestDate] = useState("");
+  const [requestMessage, setRequestMessage] = useState("");
+  const [notice, setNotice] = useState("");
 
   const selectedCustomer = customers.items.find((customer) => customer.id === selectedCustomerId);
   const customerJobs = useMemo(() => jobs.items.filter((job) => job.customerId === selectedCustomerId), [jobs.items, selectedCustomerId]);
   const jobIds = useMemo(() => new Set(customerJobs.map((job) => job.id)), [customerJobs]);
-  const customerQuotes = useMemo(() => pricingDocuments.items.filter((document) => document.type === "Quote" && (document.customerId === selectedCustomerId || (document.jobId && jobIds.has(document.jobId)))), [pricingDocuments.items, selectedCustomerId, jobIds]);
-  const customerInvoices = useMemo(() => invoices.items.filter((invoice) => invoice.customerId === selectedCustomerId || (invoice.jobId && jobIds.has(invoice.jobId))), [invoices.items, selectedCustomerId, jobIds]);
-  const customerCertificates = useMemo(() => certificates.items.filter((certificate) => certificate.customerId === selectedCustomerId || (certificate.jobId && jobIds.has(certificate.jobId))), [certificates.items, selectedCustomerId, jobIds]);
-  const customerTimeline = useMemo(() => timeline.items.filter((entry) => jobIds.has(entry.jobId)).sort((a, b) => b.completedAt.localeCompare(a.completedAt)), [timeline.items, jobIds]);
-  const customerMessages = useMemo(() => messages.items.filter((item) => item.customerId === selectedCustomerId).sort((a, b) => a.sentAt.localeCompare(b.sentAt)), [messages.items, selectedCustomerId]);
+  const customerPricing = useMemo(() => customerDocuments(documents.items, selectedCustomerId, jobIds), [documents.items, selectedCustomerId, jobIds]);
+  const customerInvoices = useMemo(() => customerDocuments(invoices.items, selectedCustomerId, jobIds), [invoices.items, selectedCustomerId, jobIds]);
+  const customerCertificates = useMemo(() => customerDocuments(certificates.items, selectedCustomerId, jobIds).filter((certificate) => certificate.status === "Issued"), [certificates.items, selectedCustomerId, jobIds]);
+  const appointments = useMemo(() => portalAppointments(planner.items, customerJobs, selectedCustomerId), [planner.items, customerJobs, selectedCustomerId]);
+  const progress = useMemo(() => timeline.items.filter((entry) => jobIds.has(entry.jobId)).sort((a, b) => b.completedAt.localeCompare(a.completedAt)), [timeline.items, jobIds]);
+  const photos = useMemo(() => sharedPhotos(jobDocuments.items, jobIds, photoShares.items), [jobDocuments.items, jobIds, photoShares.items]);
+  const customerApprovals = approvals.items.filter((item) => item.customerId === selectedCustomerId).sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+  const accessRecord = access.items.find((item) => item.customerId === selectedCustomerId && item.enabled);
+  const ready = [customers,jobs,documents,invoices,certificates,planner,timeline,jobDocuments,access,approvals,requests,paymentLinks,photoShares,activity].every((store) => store.isReady);
 
-  const outstandingQuoteValue = customerQuotes.filter((quote) => quote.status === "Sent").reduce((total, quote) => total + pricingTotal(quote), 0);
-  const outstandingInvoiceValue = customerInvoices.filter((invoice) => !["Paid", "Cancelled"].includes(invoice.status)).reduce((total, invoice) => total + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
-
-  function updateQuoteStatus(documentId: string, status: PricingDocumentStatus) {
-    pricingDocuments.setItems((current) => current.map((document) => document.id === documentId ? { ...document, status, updatedAt: new Date().toISOString() } : document));
-  }
-
-  function sendMessage(event: FormEvent) {
+  function enterPortal(event: FormEvent) {
     event.preventDefault();
-    if (!selectedCustomerId || !message.trim()) return;
-    messages.setItems((current) => [...current, {
-      id: makeId("portal-message"),
-      customerId: selectedCustomerId,
-      jobId: messageJobId || undefined,
-      sender: "JR Electrical",
-      message: message.trim(),
-      sentAt: new Date().toISOString(),
-    }]);
-    setMessage("");
+    if (!selectedCustomerId) return setNotice("Select a customer.");
+    if (accessRecord && accessCode !== accessRecord.accessCode) return setNotice("The demo access code is incorrect.");
+    setUnlocked(true); setNotice("");
   }
 
-  return (
-    <main className="space-y-6">
-      <PageHeader title="Customer Portal" description="Preview each customer’s jobs, quotes, invoices, certificates, progress updates and messages." />
+  function recordDecision(document: PricingDocument, decision: "Accepted" | "Declined") {
+    if (!approvalName.trim()) return setNotice("Enter the approving customer name.");
+    if (document.type === "Quote" && decision === "Accepted" && document.terms && !termsAccepted) return setNotice("Accept the terms and conditions before approving this quote.");
+    const now = new Date().toISOString();
+    approvals.setItems((current) => [{ id: makeId("portal-approval"), customerId: selectedCustomerId, documentId: document.id, documentType: document.type, decision, approvalName: approvalName.trim(), comments: approvalComments.trim(), termsAccepted: document.type === "Quote" ? termsAccepted : false, termsSnapshot: document.terms || "", decidedAt: now }, ...current]);
+    documents.setItems((current) => current.map((item) => item.id === document.id ? { ...item, status: (decision === "Accepted" ? "Accepted" : "Declined") as PricingDocumentStatus, updatedAt: now } : item));
+    activity.setItems((current) => [{ id: makeId("portal-activity"), customerId: selectedCustomerId, jobId: document.jobId, action: `${document.type} ${decision.toLowerCase()}`, detail: `${document.number} decided by ${approvalName.trim()}`, createdAt: now }, ...current]);
+    setDecisionId(""); setApprovalName(""); setApprovalComments(""); setTermsAccepted(false); setNotice(`${document.number} ${decision.toLowerCase()}. An audit entry was preserved.`);
+  }
 
-      <Card>
-        <label className="space-y-1 text-sm">
-          <span>Preview portal for customer</span>
-          <select className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3" value={selectedCustomerId} onChange={(event) => { setSelectedCustomerId(event.target.value); setMessageJobId(""); }}>
-            <option value="">Select a customer</option>
-            {customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
-          </select>
-        </label>
-      </Card>
+  function submitRequest(event: FormEvent) {
+    event.preventDefault();
+    if (!requestMessage.trim()) return setNotice("Enter the request or message.");
+    const now = new Date().toISOString();
+    requests.setItems((current) => [{ id: makeId("portal-request"), customerId: selectedCustomerId, jobId: requestJobId || undefined, plannerEntryId: requestPlannerId || undefined, type: requestType, message: requestMessage.trim(), requestedDate: requestDate || undefined, status: "Open", createdAt: now, updatedAt: now }, ...current]);
+    activity.setItems((current) => [{ id: makeId("portal-activity"), customerId: selectedCustomerId, jobId: requestJobId || undefined, action: requestType, detail: requestMessage.trim(), createdAt: now }, ...current]);
+    setRequestMessage(""); setRequestDate(""); setRequestPlannerId(""); setNotice("Request sent to the office. The diary has not been changed automatically.");
+  }
 
-      {!selectedCustomer && <Card><p className="text-slate-400">Select a customer to open their portal preview.</p></Card>}
+  function printDocument() { window.print(); }
+  if (!ready) return <Card>Loading customer portal…</Card>;
 
-      {selectedCustomer && <>
-        <section className="rounded-2xl border border-slate-800 bg-slate-900 p-6">
-          <p className="text-sm text-slate-400">Customer portal preview</p>
-          <h1 className="mt-1 text-3xl font-semibold">Welcome, {selectedCustomer.name}</h1>
-          <p className="mt-2 text-slate-400">Track work, approve quotes and access your JR Electrical documents in one place.</p>
-        </section>
+  if (!unlocked) return <main className="space-y-6"><PageHeader title="Customer Portal 2.0" description="Local/demo customer access for approvals, documents and job tracking." /><Card><form onSubmit={enterPortal} className="space-y-4"><label className="grid gap-2 text-sm"><span>Customer</span><select className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3" value={selectedCustomerId} onChange={(event) => { setSelectedCustomerId(event.target.value); setUnlocked(false); setAccessCode(""); }}><option value="">Select customer</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>{accessRecord ? <InputField label="Demo access code" type="password" value={accessCode} onChange={(event) => setAccessCode(event.target.value)} /> : <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-sm text-amber-200">No demo access code is configured for this customer. This local preview is not production authentication.</p>}<Button type="submit">Open customer portal</Button>{notice ? <p className="text-sm text-amber-300">{notice}</p> : null}</form></Card></main>;
 
-        <section className="grid gap-4 md:grid-cols-4">
-          <Card><CalendarDays className="h-5 w-5" /><p className="mt-3 text-3xl font-semibold">{customerJobs.length}</p><p className="text-sm text-slate-400">Jobs</p></Card>
-          <Card><FileText className="h-5 w-5" /><p className="mt-3 text-3xl font-semibold">{money.format(outstandingQuoteValue)}</p><p className="text-sm text-slate-400">Quotes awaiting decision</p></Card>
-          <Card><Receipt className="h-5 w-5" /><p className="mt-3 text-3xl font-semibold">{money.format(outstandingInvoiceValue)}</p><p className="text-sm text-slate-400">Outstanding invoices</p></Card>
-          <Card><ShieldCheck className="h-5 w-5" /><p className="mt-3 text-3xl font-semibold">{customerCertificates.length}</p><p className="text-sm text-slate-400">Certificates</p></Card>
-        </section>
+  return <main className="space-y-6">
+    <PageHeader title={`Welcome, ${selectedCustomer?.name ?? "customer"}`} description="Track your work, appointments, approvals, payments and JR Electrical documents." />
+    {notice ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{notice}</div> : null}
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Card><p className="text-sm text-slate-400">Active jobs</p><p className="mt-2 text-3xl font-bold">{customerJobs.filter((job) => job.status !== "Complete").length}</p></Card><Card><p className="text-sm text-slate-400">Upcoming appointments</p><p className="mt-2 text-3xl font-bold">{appointments.length}</p></Card><Card><p className="text-sm text-slate-400">Decisions required</p><p className="mt-2 text-3xl font-bold">{customerPricing.filter((item) => item.status === "Sent").length}</p></Card><Card><p className="text-sm text-slate-400">Invoices due</p><p className="mt-2 text-3xl font-bold">{customerInvoices.filter((item) => invoicePortalStatus(item) !== "Paid").length}</p></Card></section>
 
-        <section className="grid gap-6 xl:grid-cols-2">
-          <Card>
-            <h2 className="flex items-center gap-2 text-xl font-semibold"><CalendarDays className="h-5 w-5" />Jobs and progress</h2>
-            <div className="mt-4 space-y-3">{customerJobs.map((job) => <div key={job.id} className="rounded-xl bg-slate-950 p-4"><div className="flex items-start justify-between gap-4"><div><p className="font-medium">{job.title}</p><p className="text-sm text-slate-400">{job.siteAddress}</p></div><span className="rounded-full border border-slate-700 px-3 py-1 text-xs">{job.status}</span></div><p className="mt-3 text-sm text-slate-400">Start: {job.startDate || "To be arranged"}{job.targetCompletionDate ? ` · Target: ${job.targetCompletionDate}` : ""}</p></div>)}{customerJobs.length === 0 && <p className="text-slate-400">No jobs are linked to this customer.</p>}</div>
-          </Card>
+    <section className="grid gap-6 xl:grid-cols-2"><Card><h2 className="text-xl font-bold">Jobs and progress</h2><div className="mt-4 space-y-4">{customerJobs.map((job) => { const updates = progress.filter((entry) => entry.jobId === job.id); const percent = jobProgress(job, updates.length); return <div key={job.id} className="rounded-xl bg-slate-950 p-4"><div className="flex justify-between gap-4"><div><p className="font-semibold">{job.title}</p><p className="text-sm text-slate-400">{job.siteAddress}</p></div><span className="text-sm">{job.status}</span></div><div className="mt-4 h-2 overflow-hidden rounded bg-slate-800"><div className="h-full bg-cyan-400" style={{ width: `${percent}%` }} /></div><p className="mt-2 text-xs text-slate-500">Progress indication {percent}% · based on job status and saved completion updates</p>{updates.slice(0,2).map((entry) => <p key={entry.id} className="mt-2 text-sm text-slate-300">{entry.milestone}: {entry.note}</p>)}</div>; })}</div></Card>
+    <Card><h2 className="text-xl font-bold">Upcoming appointments</h2><div className="mt-4 space-y-3">{appointments.length ? appointments.map((entry) => <div key={entry.id} className="rounded-xl bg-slate-950 p-4"><p className="font-semibold">{entry.title}</p><p className="text-sm text-slate-400">{entry.date} · {entry.startTime || "Time TBC"}{entry.endTime ? `–${entry.endTime}` : ""}</p><p className="mt-1 text-sm text-slate-400">{entry.location || customerJobs.find((job) => job.id === entry.jobId)?.siteAddress}</p><button className="mt-3 text-sm font-semibold text-cyan-300" onClick={() => { setRequestType("Appointment change"); setRequestPlannerId(entry.id); setRequestJobId(entry.jobId || ""); }}>Request a change</button></div>) : <p className="text-slate-400">No upcoming appointments.</p>}</div></Card></section>
 
-          <Card>
-            <h2 className="flex items-center gap-2 text-xl font-semibold"><Clock3 className="h-5 w-5" />Recent progress</h2>
-            <div className="mt-4 space-y-3">{customerTimeline.slice(0, 8).map((entry) => <div key={entry.id} className="border-l-2 border-slate-700 pl-4"><p className="font-medium">{entry.milestone}</p><p className="text-sm text-slate-400">{entry.note || "Progress updated"}</p><p className="mt-1 text-xs text-slate-500">{new Date(entry.completedAt).toLocaleString("en-GB")}</p></div>)}{customerTimeline.length === 0 && <p className="text-slate-400">No progress updates have been published yet.</p>}</div>
-          </Card>
-        </section>
+    <Card><h2 className="flex items-center gap-2 text-xl font-bold"><FileText className="size-5" />Quotes and estimates</h2><div className="mt-4 grid gap-4 lg:grid-cols-2">{customerPricing.map((document) => { const latest = customerApprovals.find((approval) => approval.documentId === document.id); return <div key={document.id} className="rounded-xl bg-slate-950 p-4"><div className="flex justify-between gap-3"><div><p className="text-sm text-slate-400">{document.type} · {document.number}</p><p className="font-semibold">{document.title}</p></div><span className="text-sm">{document.status}</span></div><p className="mt-3 text-2xl font-bold">{money.format(total(document))}</p><div className="mt-3 flex flex-wrap gap-2"><Button variant="secondary" onClick={printDocument}><Download className="size-4" />Print / save PDF</Button>{document.status === "Sent" ? <Button onClick={() => setDecisionId(document.id)}>Review decision</Button> : null}</div>{latest ? <p className="mt-3 text-xs text-slate-500">Latest decision: {latest.decision} by {latest.approvalName} on {dateTime(latest.decidedAt)}. Full history is retained.</p> : null}{decisionId === document.id ? <div className="mt-4 space-y-3 border-t border-slate-800 pt-4"><InputField label="Approval name" value={approvalName} onChange={(event) => setApprovalName(event.target.value)} /><TextareaField label="Optional comments" value={approvalComments} onChange={(event) => setApprovalComments(event.target.value)} />{document.type === "Quote" && document.terms ? <label className="flex gap-3 text-sm"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I accept the quote terms and conditions shown on the document.</span></label> : null}<div className="flex gap-2"><Button onClick={() => recordDecision(document,"Accepted")}><CheckCircle2 className="size-4" />Approve</Button><Button variant="secondary" onClick={() => recordDecision(document,"Declined")}><XCircle className="size-4" />Reject</Button></div></div> : null}</div>; })}</div></Card>
 
-        <Card>
-          <h2 className="flex items-center gap-2 text-xl font-semibold"><FileCheck2 className="h-5 w-5" />Quotes</h2>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">{customerQuotes.map((quote) => <div key={quote.id} className="rounded-xl bg-slate-950 p-4"><div className="flex items-start justify-between gap-4"><div><p className="text-sm text-slate-400">{quote.number}</p><p className="font-medium">{quote.title}</p></div><span className="rounded-full border border-slate-700 px-3 py-1 text-xs">{quote.status}</span></div><p className="mt-4 text-2xl font-semibold">{money.format(pricingTotal(quote))}</p>{quote.status === "Sent" && <div className="mt-4 flex gap-2"><Button onClick={() => updateQuoteStatus(quote.id, "Accepted")}><CheckCircle2 className="h-4 w-4" />Accept</Button><Button variant="secondary" onClick={() => updateQuoteStatus(quote.id, "Declined")}><XCircle className="h-4 w-4" />Decline</Button></div>}</div>)}{customerQuotes.length === 0 && <p className="text-slate-400">No quotes are available.</p>}</div>
-        </Card>
+    <section className="grid gap-6 xl:grid-cols-2"><Card><h2 className="flex items-center gap-2 text-xl font-bold"><Receipt className="size-5" />Invoices</h2><div className="mt-4 space-y-3">{customerInvoices.map((invoice) => { const status = invoicePortalStatus(invoice); const link = paymentLinks.items.find((item) => item.invoiceId === invoice.id); return <div key={invoice.id} className="rounded-xl bg-slate-950 p-4"><div className="flex justify-between gap-3"><div><p className="font-semibold">{invoice.number} · {invoice.title}</p><p className="text-sm text-slate-400">Due {invoice.dueDate || "not set"}</p></div><span className="text-sm">{status}</span></div><p className="mt-3 text-xl font-bold">{money.format(total(invoice))}</p><div className="mt-3 flex flex-wrap gap-2"><Button variant="secondary" onClick={printDocument}>Print / save PDF</Button>{link?.paymentUrl && link.providerConfigured ? <a href={link.paymentUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950">Pay invoice</a> : <span className="rounded-xl border border-amber-500/20 px-3 py-2 text-xs text-amber-200">Online payment not configured</span>}</div></div>; })}</div></Card>
+    <Card><h2 className="flex items-center gap-2 text-xl font-bold"><ShieldCheck className="size-5" />Issued certificates</h2><div className="mt-4 space-y-3">{customerCertificates.map((certificate) => <div key={certificate.id} className="rounded-xl bg-slate-950 p-4"><p className="font-semibold">{certificate.number}</p><p className="text-sm text-slate-400">{certificate.type} · {certificate.installationAddress}</p><div className="mt-3 flex gap-2">{certificate.externalPdfUrl ? <a href={certificate.externalPdfUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-cyan-300">Download certificate</a> : <button onClick={printDocument} className="text-sm font-semibold text-cyan-300">Print certificate record</button>}</div></div>)}</div></Card></section>
 
-        <section className="grid gap-6 xl:grid-cols-2">
-          <Card><h2 className="flex items-center gap-2 text-xl font-semibold"><Receipt className="h-5 w-5" />Invoices</h2><div className="mt-4 space-y-3">{customerInvoices.map((invoice) => <div key={invoice.id} className="flex items-center justify-between gap-4 rounded-xl bg-slate-950 p-4"><div><p className="font-medium">{invoice.number} · {invoice.title}</p><p className="text-sm text-slate-400">Due {invoice.dueDate || "not set"} · {invoice.status}</p></div><p className="font-semibold">{money.format(invoiceTotal(invoice))}</p></div>)}{customerInvoices.length === 0 && <p className="text-slate-400">No invoices are available.</p>}</div></Card>
-          <Card><h2 className="flex items-center gap-2 text-xl font-semibold"><ShieldCheck className="h-5 w-5" />Certificates</h2><div className="mt-4 space-y-3">{customerCertificates.map((certificate) => <div key={certificate.id} className="rounded-xl bg-slate-950 p-4"><p className="font-medium">{certificate.number} · {certificate.type}</p><p className="text-sm text-slate-400">{certificate.installationAddress} · {certificate.status}</p>{certificate.externalPdfUrl && <a className="mt-2 inline-block text-sm underline" href={certificate.externalPdfUrl} target="_blank" rel="noreferrer">Open certificate</a>}</div>)}{customerCertificates.length === 0 && <p className="text-slate-400">No certificates are available.</p>}</div></Card>
-        </section>
+    {photos.length ? <Card><h2 className="flex items-center gap-2 text-xl font-bold"><ImageIcon className="size-5" />Photo updates</h2><div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{photos.map(({document,share}) => <div key={document.id} className="overflow-hidden rounded-xl bg-slate-950">{document.dataUrl ? <img src={document.dataUrl} alt={share.caption || document.name} className="h-48 w-full object-cover" /> : null}<div className="p-3"><p className="font-medium">{share.caption || document.name}</p></div></div>)}</div></Card> : null}
 
-        <Card>
-          <h2 className="flex items-center gap-2 text-xl font-semibold"><MessageSquare className="h-5 w-5" />Portal messages</h2>
-          <div className="mt-4 max-h-80 space-y-3 overflow-y-auto">{customerMessages.map((item) => <div key={item.id} className={`rounded-xl p-4 ${item.sender === "JR Electrical" ? "ml-8 bg-slate-800" : "mr-8 bg-slate-950"}`}><div className="flex justify-between gap-4"><p className="font-medium">{item.sender}</p><p className="text-xs text-slate-500">{new Date(item.sentAt).toLocaleString("en-GB")}</p></div><p className="mt-2 text-sm">{item.message}</p></div>)}{customerMessages.length === 0 && <p className="text-slate-400">No portal messages yet.</p>}</div>
-          <form onSubmit={sendMessage} className="mt-5 space-y-4"><label className="space-y-1 text-sm"><span>Link message to job</span><select className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3" value={messageJobId} onChange={(event) => setMessageJobId(event.target.value)}><option value="">General message</option>{customerJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label><TextareaField label="Message" value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Send an update, appointment note or document request..." /><Button type="submit"><Send className="h-4 w-4" />Send portal message</Button></form>
-        </Card>
-      </>}
-    </main>
-  );
+    <Card><h2 className="flex items-center gap-2 text-xl font-bold"><MessageSquare className="size-5" />Contact JR Electrical</h2><form onSubmit={submitRequest} className="mt-4 grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm"><span>Request type</span><select className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3" value={requestType} onChange={(event) => setRequestType(event.target.value as PortalRequestType)}>{["Appointment change","Question","Additional work","General message"].map((type) => <option key={type}>{type}</option>)}</select></label><label className="grid gap-2 text-sm"><span>Related job</span><select className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3" value={requestJobId} onChange={(event) => setRequestJobId(event.target.value)}><option value="">General</option>{customerJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>{requestType === "Appointment change" ? <InputField label="Preferred new date" type="date" value={requestDate} onChange={(event) => setRequestDate(event.target.value)} /> : null}<div className="md:col-span-2"><TextareaField label="Message or request" value={requestMessage} onChange={(event) => setRequestMessage(event.target.value)} /></div><div className="md:col-span-2"><Button type="submit"><Send className="size-4" />Send to office</Button></div></form></Card>
+  </main>;
 }
