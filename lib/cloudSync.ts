@@ -16,6 +16,10 @@ const cloudInternalKeys = [
   "jr-os-last-typed-cloud-sync",
 ];
 
+function identityChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
+}
+
 async function getProfile(userId: string) {
   const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=organisation_id,role,customer_source_id`);
   const profile = Array.isArray(rows) ? rows[0] : null;
@@ -27,20 +31,24 @@ export async function getCurrentCloudUser() {
   const session = readSupabaseSession();
   if (!session?.access_token) return null;
   try { return await supabaseFetch("/auth/v1/user", { method: "GET" }) as { id: string; email?: string }; }
-  catch { saveSupabaseSession(null); return null; }
+  catch { saveSupabaseSession(null); identityChanged(); return null; }
 }
 
 export async function signInWithEmail(email: string, password: string) {
   const session = await supabaseFetch("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email, password }) }, false) as SupabaseSession;
-  saveSupabaseSession(session); return session.user ?? null;
+  saveSupabaseSession(session); identityChanged(); return session.user ?? null;
 }
 
 export async function signUpWithEmail(email: string, password: string) {
   const result = await supabaseFetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password, data: { full_name: "Jake Rinaldi", business_name: "JR Electrical Services" } }) }, false) as SupabaseSession;
-  if (result.access_token) saveSupabaseSession(result); return result.user ?? null;
+  if (result.access_token) { saveSupabaseSession(result); identityChanged(); }
+  return result.user ?? null;
 }
 
-export async function signOutCloudUser() { try { await supabaseFetch("/auth/v1/logout", { method: "POST" }); } finally { saveSupabaseSession(null); } }
+export async function signOutCloudUser() {
+  try { await supabaseFetch("/auth/v1/logout", { method: "POST" }); }
+  finally { saveSupabaseSession(null); identityChanged(); }
+}
 
 export async function getCloudContext() {
   const user = await getCurrentCloudUser();
