@@ -50,7 +50,7 @@ export default function Sidebar() {
 
       <nav className="mt-2 grid min-h-0 flex-1 gap-1 overflow-y-auto pr-1">
         {secondaryNavigation.map(([label, href]) => {
-          const nestedRoute = href !== "/" && pathname.startsWith(`${href}/`);
+          const nestedRoute = pathname.startsWith(`${href}/`);
           const active = pathname === href || nestedRoute;
 
           return (
