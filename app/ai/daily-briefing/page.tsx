@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { AlertTriangle, ArrowLeft, ArrowRight, BriefcaseBusiness, CalendarDays, ClipboardCheck, FileText, PackageCheck, ReceiptText, Star } from "lucide-react";
+import { FinanceDirectorInsights } from "../../../components/FinanceDirectorInsights";
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useLocalStorageCollection } from "../../../lib/storage";
@@ -62,6 +63,8 @@ export default function DailyBriefingPage() {
       <Card><ReceiptText className="size-5 text-red-300" /><p className="mt-3 text-sm text-slate-400">Overdue money</p><p className="mt-2 text-3xl font-bold">{money.format(overdueValue)}</p></Card>
       <Card><AlertTriangle className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Attention items</p><p className="mt-2 text-3xl font-bold">{attentionCount}</p></Card>
     </section>
+
+    <FinanceDirectorInsights />
 
     <section className="grid gap-4 lg:grid-cols-2">
       {sections.map(({ title, detail, href, icon: Icon, items }) => <Card key={title}>
