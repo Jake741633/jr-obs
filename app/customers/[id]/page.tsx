@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { BriefcaseBusiness, Clock3, FileText, Mail, MapPin, MessageSquareText, Phone, ReceiptText } from "lucide-react";
+import { BriefcaseBusiness, Clock3, FileText, Mail, MapPin, MessageSquareText, Phone, PoundSterling, ReceiptText } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
+import { buildCustomerInsight } from "../../../lib/aiLearning";
 import { buildCustomerActivity, type CustomerActivityKind } from "../../../lib/customerActivity";
 import { useLocalStorageCollection } from "../../../lib/storage";
 import { invoiceTotal, pricingDocumentTotal } from "../../../lib/workflow";
-import type { Customer, CustomerInteraction, Invoice, Job, PricingDocument } from "../../../lib/models";
+import type { Customer, CustomerInteraction, CustomerProfile, Invoice, Job, PricingDocument } from "../../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 
@@ -28,13 +29,14 @@ export default function CustomerDetailPage() {
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const interactions = useLocalStorageCollection<CustomerInteraction>("jr-os-customer-interactions");
+  const profiles = useLocalStorageCollection<CustomerProfile>("jr-os-customer-profiles");
   const customer = customers.items.find((item) => item.id === params.id);
   const linkedJobs = jobs.items.filter((job) => job.customerId === params.id).toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const linkedDocuments = documents.items.filter((document) => document.customerId === params.id).toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const linkedInvoices = invoices.items.filter((invoice) => invoice.customerId === params.id).toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const linkedInteractions = interactions.items.filter((interaction) => interaction.customerId === params.id);
 
-  const isReady = customers.isReady && jobs.isReady && documents.isReady && invoices.isReady && interactions.isReady;
+  const isReady = customers.isReady && jobs.isReady && documents.isReady && invoices.isReady && interactions.isReady && profiles.isReady;
   if (!isReady) return <Card>Loading customer…</Card>;
 
   if (!customer) {
@@ -43,6 +45,14 @@ export default function CustomerDetailPage() {
 
   const quotes = linkedDocuments.filter((document) => document.type === "Quote");
   const estimates = linkedDocuments.filter((document) => document.type === "Estimate");
+  const insight = buildCustomerInsight({
+    customerId: customer.id,
+    documents: documents.items,
+    jobs: jobs.items,
+    invoices: invoices.items,
+    profiles: profiles.items,
+    interactions: interactions.items,
+  });
   const activity = buildCustomerActivity({ customer, documents: linkedDocuments, jobs: linkedJobs, invoices: linkedInvoices, interactions: linkedInteractions });
 
   return <div className="space-y-6">
@@ -58,6 +68,16 @@ export default function CustomerDetailPage() {
         <p className="md:col-span-2"><span className="font-semibold text-slate-200">Notes:</span> {customer.notes || "No notes"}</p>
       </div>
     </Card>
+
+    <section className="space-y-4">
+      <div><p className="text-xs font-semibold uppercase tracking-wider text-fuchsia-300">AI customer insight</p><h2 className="mt-1 text-2xl font-bold">Relationship and payment history</h2><p className="mt-1 text-sm text-slate-400">Calculated only from this customer&apos;s linked JR OS records.</p></div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Card><BriefcaseBusiness className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Previous work</p><p className="mt-2 text-2xl font-bold">{insight.completedJobs} completed</p><p className="mt-1 text-xs text-slate-500">{linkedJobs.length} jobs · {insight.acceptedQuotes}/{insight.quoteCount} quotes accepted</p></Card>
+        <Card><PoundSterling className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Customer spending</p><p className="mt-2 text-2xl font-bold">{money.format(insight.totalInvoiced)}</p><p className="mt-1 text-xs text-slate-500">{money.format(insight.totalPaid)} recorded as paid</p></Card>
+        <Card><ReceiptText className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Payment history</p><p className={`mt-2 text-lg font-bold ${insight.outstanding > 0 ? "text-amber-300" : "text-emerald-300"}`}>{insight.paymentHistory}</p><p className="mt-1 text-xs text-slate-500">{insight.averagePaymentDays === null ? "No completed payment timing yet" : `Average ${insight.averagePaymentDays.toFixed(1)} days`} · {money.format(insight.outstanding)} outstanding</p></Card>
+        <Card><MessageSquareText className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Preferences</p><p className="mt-2 text-lg font-bold">{insight.preferredContact}</p><p className="mt-1 text-xs text-slate-500">{insight.preferences.length ? insight.preferences.join(" · ") : "No preferences learned yet"}</p></Card>
+      </div>
+    </section>
 
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Card><FileText className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Estimates</p><p className="mt-2 text-3xl font-bold">{estimates.length}</p></Card>
