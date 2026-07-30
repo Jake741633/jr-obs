@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ArrowLeft, Building2, BriefcaseBusiness, CalendarDays, FileText, UserRound } from "lucide-react";
+import { ArrowLeft, BriefcaseBusiness, CalendarDays, FileText, UserRound } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { useLocalStorageCollection } from "../../../lib/storage";
