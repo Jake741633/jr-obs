@@ -1,4 +1,5 @@
 import type {
+  Invoice,
   Job,
   JobDocument,
   JobTimelineEntry,
@@ -15,6 +16,15 @@ interface CreateJobFromQuoteInput {
   createId: (prefix: string) => string;
 }
 
+interface CreateInvoiceFromJobInput {
+  job: Job;
+  quote?: PricingDocument;
+  invoices: Invoice[];
+  invoiceId: string;
+  now: string;
+  createId: (prefix: string) => string;
+}
+
 export function pricingDocumentNetTotal(document: PricingDocument) {
   return document.profitability?.sellingPrice
     ?? document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
@@ -23,6 +33,25 @@ export function pricingDocumentNetTotal(document: PricingDocument) {
 export function pricingDocumentTotal(document: PricingDocument) {
   const net = pricingDocumentNetTotal(document);
   return net + (document.vatEnabled ? net * document.vatRate / 100 : 0);
+}
+
+export function invoiceTotal(invoice: Invoice) {
+  const net = invoice.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  return net + (invoice.vatEnabled ? net * invoice.vatRate / 100 : 0);
+}
+
+export function nextInvoiceNumber(invoices: Invoice[]) {
+  const highest = invoices.reduce((max, invoice) => {
+    const match = invoice.number.match(/^INV-(\d+)$/i);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `INV-${String(highest + 1).padStart(4, "0")}`;
+}
+
+function addDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result.toISOString().slice(0, 10);
 }
 
 function cloneAttachments(attachments: RecordAttachment[] = []) {
@@ -120,4 +149,70 @@ export function createJobFromAcceptedQuote({
   }));
 
   return { job, timelineEntries, jobDocuments };
+}
+
+export function createInvoiceFromCompletedJob({
+  job,
+  quote,
+  invoices,
+  invoiceId,
+  now,
+  createId,
+}: CreateInvoiceFromJobInput) {
+  const snapshot = job.quoteSnapshot;
+  const sourceItems = snapshot?.items?.length
+    ? snapshot.items
+    : quote?.items?.length
+      ? quote.items
+      : [{ id: createId("invoice-source-line"), description: job.title, category: "Labour" as const, quantity: 1, unitPrice: job.value }];
+  const vatEnabled = snapshot?.vatEnabled ?? quote?.vatEnabled ?? false;
+  const vatRate = snapshot?.vatRate ?? quote?.vatRate ?? 0;
+  const paymentTerms = snapshot?.paymentTerms ?? quote?.paymentTerms;
+  const issueDate = now.slice(0, 10);
+  const dueDate = addDays(new Date(`${issueDate}T12:00:00`), paymentTerms?.type === "Due on completion" ? 0 : 7);
+  const quoteId = job.sourceQuoteId ?? snapshot?.quoteId ?? quote?.id;
+  const quoteNumber = snapshot?.quoteNumber ?? quote?.number;
+  const pricingSettings = snapshot?.pricingSettings ?? quote?.pricingSettings;
+  const baseSellingPrice = sourceItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const invoiceItems = sourceItems.map((item) => ({ ...item, id: createId("invoice-line") }));
+  if (pricingSettings?.travelPrice) invoiceItems.push({ id: createId("invoice-line"), description: "Travel allowance", category: "Travel", quantity: 1, unitPrice: pricingSettings.travelPrice, unitCost: pricingSettings.travelCost });
+  if (pricingSettings?.parkingPrice) invoiceItems.push({ id: createId("invoice-line"), description: "Parking allowance", category: "Parking", quantity: 1, unitPrice: pricingSettings.parkingPrice, unitCost: pricingSettings.parkingCost });
+  if (pricingSettings?.contingencyPercent) invoiceItems.push({ id: createId("invoice-line"), description: `Contingency (${pricingSettings.contingencyPercent}%)`, category: "Contingency", quantity: 1, unitPrice: baseSellingPrice * pricingSettings.contingencyPercent / 100 });
+
+  const invoice: Invoice = {
+    id: invoiceId,
+    number: nextInvoiceNumber(invoices),
+    status: "Draft",
+    customerId: job.customerId,
+    builderId: job.builderId,
+    jobId: job.id,
+    quoteId,
+    title: job.title,
+    issueDate,
+    dueDate,
+    vatEnabled,
+    vatRate,
+    items: invoiceItems,
+    amountPaid: 0,
+    notes: [
+      `Generated from completed job ${job.title}.`,
+      quoteNumber ? `Based on accepted quote ${quoteNumber}.` : "",
+      snapshot?.notes ?? quote?.notes ?? "",
+    ].filter(Boolean).join("\n\n"),
+    paymentDetails: "",
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const timelineEntry: JobTimelineEntry = {
+    id: createId("timeline"),
+    jobId: job.id,
+    milestone: "Invoice created",
+    note: `${invoice.number} generated directly from the completed job.`,
+    completedBy: "JR OS",
+    completedAt: now,
+    createdAt: now,
+  };
+
+  return { invoice, timelineEntry };
 }

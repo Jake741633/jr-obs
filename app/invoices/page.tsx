@@ -8,7 +8,8 @@ import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { Builder, Customer, Invoice, InvoiceStatus, Job, PricingDocument, PricingLineItem } from "../../lib/models";
+import { nextInvoiceNumber } from "../../lib/workflow";
+import type { Builder, Customer, Invoice, InvoiceStatus, Job, JobTimelineEntry, PricingDocument, PricingLineItem } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const statuses: InvoiceStatus[] = ["Draft", "Sent", "Part paid", "Paid", "Overdue", "Cancelled"];
@@ -21,6 +22,7 @@ export default function InvoicesPage() {
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
+  const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [items, setItems] = useState<PricingLineItem[]>([]);
@@ -64,13 +66,43 @@ export default function InvoicesPage() {
     if (!form.issueDate || !form.dueDate) { setError("Issue and due dates are required."); return; }
     if (items.length === 0) { setError("Add at least one invoice line."); return; }
     const now = new Date().toISOString();
-    const number = `INV-${String(invoices.items.length + 1).padStart(4, "0")}`;
+    const number = nextInvoiceNumber(invoices.items);
     const invoice: Invoice = { id: makeId("invoice"), number, status: "Draft", customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined, quoteId: form.quoteId || undefined, title: form.title.trim(), issueDate: form.issueDate, dueDate: form.dueDate, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items, amountPaid: Number(form.amountPaid || 0), notes: form.notes, paymentDetails: form.paymentDetails, createdAt: now, updatedAt: now };
-    invoices.setItems((current) => [invoice, ...current]); reset();
+    invoices.setItems((current) => [invoice, ...current]);
+    if (invoice.jobId) timeline.setItems((current) => [{ id: makeId("timeline"), jobId: invoice.jobId!, milestone: "Invoice created", note: `${invoice.number} created and linked to this job.`, completedBy: "JR OS", completedAt: now, createdAt: now }, ...current]);
+    reset();
   }
 
-  function updateStatus(id: string, status: InvoiceStatus) { invoices.setItems((current) => current.map((invoice) => invoice.id === id ? { ...invoice, status, updatedAt: new Date().toISOString() } : invoice)); }
   function invoiceTotal(invoice: Invoice) { const net = invoice.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); return net + (invoice.vatEnabled ? net * invoice.vatRate / 100 : 0); }
+
+  function addInvoiceMilestone(invoice: Invoice, milestone: JobTimelineEntry["milestone"], note: string, now: string) {
+    if (!invoice.jobId) return;
+    timeline.setItems((current) => current.some((entry) => entry.jobId === invoice.jobId && entry.milestone === milestone)
+      ? current
+      : [{ id: makeId("timeline"), jobId: invoice.jobId!, milestone, note, completedBy: "JR OS", completedAt: now, createdAt: now }, ...current]);
+  }
+
+  function updateStatus(id: string, status: InvoiceStatus) {
+    const invoice = invoices.items.find((item) => item.id === id);
+    if (!invoice) return;
+    const now = new Date().toISOString();
+    const paidAmount = status === "Paid" ? invoiceTotal(invoice) : invoice.amountPaid;
+    invoices.setItems((current) => current.map((item) => item.id === id ? { ...item, status, amountPaid: paidAmount, updatedAt: now } : item));
+    if (status === "Sent") addInvoiceMilestone(invoice, "Invoice sent", `${invoice.number} sent to the customer.`, now);
+    if (status === "Paid") addInvoiceMilestone(invoice, "Payment received", `${invoice.number} paid in full.`, now);
+  }
+
+  function recordPayment(invoice: Invoice) {
+    const gross = invoiceTotal(invoice);
+    const response = window.prompt(`Amount received for ${invoice.number}`, String(invoice.amountPaid || gross));
+    if (response === null) return;
+    const amountPaid = Number(response);
+    if (!Number.isFinite(amountPaid) || amountPaid < 0 || amountPaid > gross) { window.alert(`Enter an amount between £0.00 and ${money.format(gross)}.`); return; }
+    const now = new Date().toISOString();
+    const status: InvoiceStatus = amountPaid >= gross ? "Paid" : amountPaid > 0 ? "Part paid" : invoice.status;
+    invoices.setItems((current) => current.map((item) => item.id === invoice.id ? { ...item, amountPaid, status, updatedAt: now } : item));
+    if (status === "Paid") addInvoiceMilestone(invoice, "Payment received", `${invoice.number} paid in full.`, now);
+  }
 
   return <div className="space-y-6">
     <PageHeader eyebrow="Finance" title="Invoices" description="Create invoices from accepted quotes or build them manually, then track payment status." action={<Button onClick={() => showForm ? reset() : setShowForm(true)}><Plus className="mr-2 size-4" />{showForm ? "Close form" : "New invoice"}</Button>} />
@@ -98,6 +130,6 @@ export default function InvoicesPage() {
     </form></Card> : null}
 
     <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search invoices" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
-    {!invoices.isReady ? <Card>Loading invoices…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<FileText className="size-6" />} title={invoices.items.length ? "No matching invoices" : "No invoices yet"} description={invoices.items.length ? "Try a different search." : "Create an invoice manually or import an accepted quote."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((invoice) => { const gross = invoiceTotal(invoice); const outstanding = Math.max(0, gross - invoice.amountPaid); return <Card key={invoice.id}><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{invoice.number}</p><h2 className="mt-1 text-lg font-bold">{invoice.title}</h2><p className="text-sm text-slate-500">{names.get(invoice.customerId ?? "") || names.get(invoice.builderId ?? "") || "Unassigned"}</p><div className="mt-4 grid gap-3 border-t border-slate-800 pt-4"><label className="grid gap-2 text-xs text-slate-500"><span>Status</span><select value={invoice.status} onChange={(e) => updateStatus(invoice.id, e.target.value as InvoiceStatus)} className="min-h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200">{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><div className="flex justify-between text-sm"><span className="text-slate-500">Due {invoice.dueDate ? new Date(`${invoice.dueDate}T12:00:00`).toLocaleDateString("en-GB") : "—"}</span><strong>{money.format(gross)}</strong></div><div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding</span><span className={outstanding > 0 ? "font-semibold text-amber-300" : "font-semibold text-emerald-300"}>{money.format(outstanding)}</span></div></div></Card>; })}</section>}
+    {!invoices.isReady ? <Card>Loading invoices…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<FileText className="size-6" />} title={invoices.items.length ? "No matching invoices" : "No invoices yet"} description={invoices.items.length ? "Try a different search." : "Create an invoice manually or import an accepted quote."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((invoice) => { const gross = invoiceTotal(invoice); const outstanding = Math.max(0, gross - invoice.amountPaid); return <Card key={invoice.id}><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{invoice.number}</p><h2 className="mt-1 text-lg font-bold">{invoice.title}</h2><p className="text-sm text-slate-500">{names.get(invoice.customerId ?? "") || names.get(invoice.builderId ?? "") || "Unassigned"}</p><div className="mt-4 grid gap-3 border-t border-slate-800 pt-4"><label className="grid gap-2 text-xs text-slate-500"><span>Status</span><select value={invoice.status} onChange={(e) => updateStatus(invoice.id, e.target.value as InvoiceStatus)} className="min-h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200">{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><div className="flex justify-between text-sm"><span className="text-slate-500">Due {invoice.dueDate ? new Date(`${invoice.dueDate}T12:00:00`).toLocaleDateString("en-GB") : "—"}</span><strong>{money.format(gross)}</strong></div><div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding</span><span className={outstanding > 0 ? "font-semibold text-amber-300" : "font-semibold text-emerald-300"}>{money.format(outstanding)}</span></div>{invoice.status !== "Cancelled" ? <Button type="button" variant="secondary" onClick={() => recordPayment(invoice)}>{invoice.status === "Paid" ? "Update payment" : "Record payment"}</Button> : null}</div></Card>; })}</section>}
   </div>;
 }

@@ -24,7 +24,9 @@ import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
+import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
+import { createInvoiceFromCompletedJob } from "../../../lib/workflow";
 import type {
   Builder,
   Customer,
@@ -43,13 +45,16 @@ const milestones: JobMilestoneType[] = [
   "Quote prepared",
   "Quote sent",
   "Quote accepted",
+  "Job created",
   "Deposit received",
   "Materials ordered",
   "Materials delivered",
   "First fix complete",
   "Second fix complete",
   "Testing complete",
+  "Job completed",
   "Certificate uploaded",
+  "Invoice created",
   "Invoice sent",
   "Payment received",
   "Review requested",
@@ -104,6 +109,7 @@ export default function JobDetailPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [timelineError, setTimelineError] = useState("");
   const [documentError, setDocumentError] = useState("");
+  const [invoiceMessage, setInvoiceMessage] = useState("");
 
   const job = jobs.items.find((item) => item.id === jobId);
   const customer = customers.items.find((item) => item.id === job?.customerId);
@@ -128,6 +134,9 @@ export default function JobDetailPage() {
   const formattedDate = job.startDate ? new Date(`${job.startDate}T12:00:00`).toLocaleDateString("en-GB") : "Not scheduled";
   const completedMilestones = new Set(entries.map((entry) => entry.milestone));
   const nextMilestone = milestones.find((milestone) => milestone !== "Custom update" && !completedMilestones.has(milestone));
+  const sourceQuote = linkedQuotes.find((quote) => quote.id === job.sourceQuoteId)
+    ?? quotes.items.find((quote) => quote.id === job.sourceQuoteId)
+    ?? linkedQuotes[0];
 
   function addTimelineEntry(event: FormEvent) {
     event.preventDefault();
@@ -208,6 +217,30 @@ export default function JobDetailPage() {
     if (window.confirm(`Delete ${document.name} from this job?`)) documents.remove((item) => item.id === document.id);
   }
 
+  function generateInvoice() {
+    if (!job) return;
+    if (job.status !== "Complete") { setInvoiceMessage("Mark the job as Complete before generating its final invoice."); return; }
+    if (linkedInvoices.length) { setInvoiceMessage(`${linkedInvoices[0].number} is already linked to this job.`); return; }
+    const now = new Date().toISOString();
+    const generated = createInvoiceFromCompletedJob({
+      job,
+      quote: sourceQuote,
+      invoices: invoices.items,
+      invoiceId: makeId("invoice"),
+      now,
+      createId: makeId,
+    });
+    invoices.setItems((current) => [generated.invoice, ...current]);
+    timeline.setItems((current) => {
+      const additions: JobTimelineEntry[] = [generated.timelineEntry];
+      if (!current.some((entry) => entry.jobId === jobId && entry.milestone === "Job completed")) {
+        additions.push({ id: makeId("timeline"), jobId, milestone: "Job completed", note: "Job marked complete before final invoice generation.", completedBy: "JR OS", completedAt: now, createdAt: now });
+      }
+      return [...additions, ...current];
+    });
+    setInvoiceMessage(`${generated.invoice.number} created as a draft and linked to this job and its source quote.`);
+  }
+
   return <div className="space-y-6">
     <Link href="/jobs" className="inline-flex items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200"><ArrowLeft className="size-4" />Back to jobs</Link>
 
@@ -220,6 +253,14 @@ export default function JobDetailPage() {
         <p className="md:col-span-2 whitespace-pre-wrap"><span className="font-semibold text-slate-200">Notes:</span> {job.notes || "No notes"}</p>
       </div>
     </Card>
+
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Project workflow</p><h2 className="mt-1 text-2xl font-bold">Quote → Job → Invoice → Payment</h2><p className="mt-1 text-sm text-slate-400">A live view built from the linked records, with no duplicate data entry.</p></div>{linkedInvoices.length ? <Link href="/invoices" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ReceiptText className="mr-2 size-4" />View invoice</Link> : <Button type="button" disabled={job.status !== "Complete"} onClick={generateInvoice}><ReceiptText className="mr-2 size-4" />Generate invoice</Button>}</div>
+      {invoiceMessage ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{invoiceMessage}</div> : null}
+      {job.status !== "Complete" && !linkedInvoices.length ? <p className="text-sm text-amber-300">Invoice generation unlocks when the job status is Complete.</p> : null}
+      <ProjectTimeline job={job} quote={sourceQuote} invoices={linkedInvoices} />
+      {job.quoteSnapshot ? <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Accepted pricing snapshot</p><h3 className="mt-1 text-lg font-bold">{job.quoteSnapshot.quoteNumber}</h3><p className="mt-1 text-sm text-slate-500">{job.quoteSnapshot.items.length} copied labour, material and allowance line{job.quoteSnapshot.items.length === 1 ? "" : "s"}</p></div>{sourceQuote ? <Link href={`/quotes/${sourceQuote.id}`} className="text-sm font-semibold text-cyan-300 hover:text-cyan-200">Open source quote</Link> : null}</div>{job.quoteSnapshot.profitability ? <div className="mt-4 grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-slate-950/60 p-3"><p className="text-xs text-slate-500">Cost price</p><p className="mt-1 font-bold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.costPrice)}</p></div><div className="rounded-xl bg-slate-950/60 p-3"><p className="text-xs text-slate-500">Selling price</p><p className="mt-1 font-bold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.sellingPrice)}</p></div><div className="rounded-xl bg-emerald-500/5 p-3"><p className="text-xs text-slate-500">Expected profit</p><p className="mt-1 font-bold text-emerald-300">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.expectedProfit)}</p></div></div> : null}</Card> : null}
+    </section>
 
     <section className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job folder</p><h2 className="mt-1 text-2xl font-bold">Documents and records</h2><p className="mt-1 text-sm text-slate-400">Keep certificates, photos, drawings, RAMS, handover documents and site records together.</p></div><Button onClick={() => setShowDocumentForm((current) => !current)}><Plus className="mr-2 size-4" />{showDocumentForm ? "Close document" : "Add document"}</Button></div>
