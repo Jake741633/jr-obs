@@ -12,13 +12,18 @@ export interface CloudSession {
 type StoredSupabaseSession = { access_token?: string; refresh_token?: string; expires_in?: number; expires_at?: number; user?: { id: string; email?: string } };
 const SESSION_KEY = "jr-os-supabase-session";
 
-function headers(session?: CloudSession) {
-  return { apikey: cloudConfig.anonKey, Authorization: `Bearer ${session?.accessToken || cloudConfig.anonKey}`, "Content-Type": "application/json" };
+function requestHeaders(session?: CloudSession, extra?: HeadersInit) {
+  const result = new Headers();
+  result.set("apikey", cloudConfig.anonKey);
+  result.set("Authorization", `Bearer ${session?.accessToken || cloudConfig.anonKey}`);
+  result.set("Content-Type", "application/json");
+  if (extra) new Headers(extra).forEach((value, key) => result.set(key, value));
+  return result;
 }
 
 async function request<T>(path: string, init: RequestInit = {}, session?: CloudSession): Promise<T> {
   if (!cloudConfig.isConfigured) throw new Error("Supabase is not configured.");
-  const response = await fetch(`${cloudConfig.url}${path}`, { ...init, headers: { ...headers(session), ...(init.headers || {}) } });
+  const response = await fetch(`${cloudConfig.url}${path}`, { ...init, headers: requestHeaders(session, init.headers) });
   if (!response.ok) throw new Error((await response.text()) || `Supabase request failed (${response.status}).`);
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
