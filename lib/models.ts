@@ -35,6 +35,12 @@ export interface TeamQualification { id: EntityId; name: string; certificateNumb
 export interface TeamMember { id: EntityId; name: string; role: TeamRole; status: TeamMemberStatus; email: string; phone: string; emergencyContact: string; emergencyPhone: string; hourlyCost: number; chargeRate: number; vanRegistration: string; qualifications: TeamQualification[]; notes: string; createdAt: string; updatedAt: string; }
 export type TimesheetStatus = "Draft" | "Submitted" | "Approved";
 export interface TimesheetEntry { id: EntityId; teamMemberId: EntityId; jobId?: EntityId; workDate: string; startedAt: string; finishedAt: string; breakMinutes: number; notes: string; status: TimesheetStatus; createdAt: string; updatedAt: string; }
+export type LabourRateUnit = "Hour" | "Day";
+export interface LabourRate { id: EntityId; name: string; description: string; costRate: number; chargeRate: number; unit: LabourRateUnit; active: boolean; createdAt: string; updatedAt: string; }
+export type OverheadFrequency = "Weekly" | "Monthly" | "Annual";
+export type OverheadCategory = "Vehicle" | "Insurance" | "Software" | "Registration" | "Accountancy" | "Phone" | "Tools" | "Training" | "Premises" | "Marketing" | "Other";
+export interface BusinessOverhead { id: EntityId; name: string; category: OverheadCategory; amount: number; frequency: OverheadFrequency; notes: string; active: boolean; createdAt: string; updatedAt: string; }
+export interface LabourCostSettings { id: EntityId; workingDaysPerYear: number; billableHoursPerDay: number; targetNetMargin: number; contingencyPercent: number; createdAt: string; updatedAt: string; }
 export type PlannerEntryType = "Job" | "Survey" | "Delivery" | "Training" | "Holiday" | "Office" | "Other";
 export interface PlannerEntry { id: EntityId; title: string; type: PlannerEntryType; date: string; startTime: string; endTime: string; jobId?: EntityId; teamMemberIds: EntityId[]; location: string; notes: string; status: "Planned" | "Confirmed" | "Complete" | "Cancelled"; createdAt: string; updatedAt: string; }
 
@@ -89,4 +95,5 @@ export interface ElectricalCertificate { id: EntityId; number: string; type: Cer
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
 export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }
 
-export type EntityBase = Customer | Builder | CustomerProfile | CustomerInteraction | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | RamsDocument | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | CustomerProfile | CustomerInteraction | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | RamsDocument | TeamMember | TimesheetEntry | LabourRate | BusinessOverhead | LabourCostSettings | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+
