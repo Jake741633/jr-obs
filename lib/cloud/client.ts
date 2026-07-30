@@ -1,6 +1,6 @@
 "use client";
 
-import { cloudConfig } from "./config";
+import { cloudConfig, cloudStorageBucket } from "./config";
 
 export interface CloudSession {
   accessToken: string;
@@ -45,7 +45,7 @@ export async function refreshSession(session = cloudSession.load()) {
 
 export async function cloudSelect<T>(table: string, query = "select=*") { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}?${query}`, { method: "GET" }, cloudSession.load() || undefined); }
 export async function cloudInsert<T extends object>(table: string, records: T[]) { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}`, { method: "POST", body: JSON.stringify(records), headers: { Prefer: "return=representation" } }, cloudSession.load() || undefined); }
-export async function cloudUpsert<T extends object>(table: string, records: T[]) { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}?on_conflict=business_id,source_id`, { method: "POST", body: JSON.stringify(records), headers: { Prefer: "resolution=merge-duplicates,return=representation" } }, cloudSession.load() || undefined); }
+export async function cloudUpsert<T extends object>(table: string, records: T[]) { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}?on_conflict=organisation_id,source_id`, { method: "POST", body: JSON.stringify(records), headers: { Prefer: "resolution=merge-duplicates,return=representation" } }, cloudSession.load() || undefined); }
 export async function cloudDelete(table: string, sourceId: string) { return request<void>(`/rest/v1/${encodeURIComponent(table)}?source_id=eq.${encodeURIComponent(sourceId)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }, cloudSession.load() || undefined); }
-export async function createSignedUpload(path: string, expiresIn = 600) { return request<{ signedURL: string; token: string }>(`/storage/v1/object/upload/sign/jr-os-private/${encodeURIComponent(path)}`, { method: "POST", body: JSON.stringify({ expiresIn }) }, cloudSession.load() || undefined); }
-export async function createSignedDownload(path: string, expiresIn = 300) { return request<{ signedURL: string }>(`/storage/v1/object/sign/jr-os-private/${encodeURIComponent(path)}`, { method: "POST", body: JSON.stringify({ expiresIn }) }, cloudSession.load() || undefined); }
+export async function createSignedUpload(path: string, expiresIn = 600) { return request<{ signedURL: string; token: string }>(`/storage/v1/object/upload/sign/${cloudStorageBucket}/${encodeURIComponent(path)}`, { method: "POST", body: JSON.stringify({ expiresIn }) }, cloudSession.load() || undefined); }
+export async function createSignedDownload(path: string, expiresIn = 300) { return request<{ signedURL: string }>(`/storage/v1/object/sign/${cloudStorageBucket}/${encodeURIComponent(path)}`, { method: "POST", body: JSON.stringify({ expiresIn }) }, cloudSession.load() || undefined); }
