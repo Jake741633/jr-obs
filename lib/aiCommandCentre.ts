@@ -1,6 +1,12 @@
 import { annualOverheadCost, calculateQuoteProfitability } from "./quoteEngine";
 import { invoiceTotal } from "./workflow";
+import {
+  buildMaterialLearningPatterns,
+  buildQuoteLearningSuggestion,
+} from "./aiLearning";
 import type {
+  AiConfidenceBreakdown,
+  AiLearningEvidence,
   AiReminder,
   BusinessOverhead,
   CustomerProfile,
@@ -44,7 +50,9 @@ export interface AiMaterialSuggestion {
   supplierUrl?: string;
   source: "Previous JR OS jobs" | "Job pack" | "Materials library";
   confidence: "High" | "Medium" | "Low";
+  confidenceScore: number;
   evidenceCount: number;
+  evidence: AiLearningEvidence[];
   reason: string;
 }
 
@@ -64,6 +72,9 @@ export interface AiPricingRecommendation {
   targetNetMargin: number;
   expectedLabourMargin: number;
   evidenceCount: number;
+  learnedSellingPrice: number;
+  confidence: AiConfidenceBreakdown;
+  evidence: AiLearningEvidence[];
   reasons: string[];
 }
 
@@ -215,6 +226,7 @@ export function suggestMaterials({
   materials,
   documents,
   jobs,
+  invoices = [],
   jobPacks,
   markupPercent,
   limit = 12,
@@ -224,6 +236,7 @@ export function suggestMaterials({
   materials: Material[];
   documents: PricingDocument[];
   jobs: Job[];
+  invoices?: Invoice[];
   jobPacks: JobPack[];
   markupPercent: number;
   limit?: number;
@@ -244,50 +257,55 @@ export function suggestMaterials({
     if (!existing) {
       aggregates.set(key, {
         suggestion,
-        totalQuantity: suggestion.quantity,
+        totalQuantity: suggestion.quantity * Math.max(1, suggestion.evidenceCount),
         occurrences: Math.max(1, suggestion.evidenceCount),
         score,
       });
       return;
     }
-    existing.totalQuantity += suggestion.quantity;
+    existing.totalQuantity += suggestion.quantity * Math.max(1, suggestion.evidenceCount);
     existing.occurrences += Math.max(1, suggestion.evidenceCount);
     existing.score = Math.max(existing.score, score) + 0.1;
+    const evidence = [...existing.suggestion.evidence, ...suggestion.evidence]
+      .filter((item, index, all) => all.findIndex((candidate) => candidate.id === item.id) === index);
     if (existing.suggestion.source !== "Previous JR OS jobs" && suggestion.source === "Previous JR OS jobs") {
-      existing.suggestion = suggestion;
+      existing.suggestion = { ...suggestion, evidence };
+    } else {
+      existing.suggestion = { ...existing.suggestion, evidence };
     }
   }
 
-  const linkedJobByQuote = new Map(jobs.filter((job) => job.sourceQuoteId).map((job) => [job.sourceQuoteId!, job]));
-  documents
-    .map((document) => {
-      const linkedJob = linkedJobByQuote.get(document.id) ?? jobs.find((job) => job.id === document.jobId);
-      const text = `${document.title} ${document.notes} ${linkedJob?.title ?? ""} ${linkedJob?.notes ?? ""}`;
-      return { document, linkedJob, score: relevantRecordScore(text, jobType, contextTokens, document.templateType) };
+  buildMaterialLearningPatterns({ documents, jobs, invoices, materials })
+    .map((pattern) => {
+      const relevantEvidence = pattern.evidence.filter((evidence) => evidence.jobType === jobType);
+      const score = pattern.confidenceScore / 100
+        + relevantEvidence.length * 0.35
+        + Math.max(0, pattern.evidence.reduce((sum, evidence) => sum + evidence.relevance, 0) / Math.max(1, pattern.evidence.length) / 100);
+      return { pattern, relevantEvidence, score };
     })
-    .filter(({ document, linkedJob, score }) => score > 0.35 && (Boolean(linkedJob) || ["Accepted", "Sent"].includes(document.status)))
+    .filter(({ relevantEvidence }) => relevantEvidence.length > 0)
     .toSorted((left, right) => right.score - left.score)
-    .slice(0, 8)
-    .forEach(({ document, score }) => {
-      document.items.filter((item) => item.category === "Materials").forEach((line) => {
-        const material = line.materialId ? materialById.get(line.materialId) : undefined;
-        const unitCost = line.unitCost ?? material?.tradeCost ?? line.unitPrice;
-        addSuggestion({
-          key: itemKey(line.materialId, line.description),
-          materialId: line.materialId,
-          description: material?.name || line.description,
-          quantity: line.quantity,
-          unitCost,
-          unitPrice: unitCost * (1 + markupPercent / 100),
-          supplier: line.supplier || material?.supplier || "Supplier to confirm",
-          stockCode: line.stockCode || material?.stockCode || "",
-          supplierUrl: material?.supplierUrl,
-          source: "Previous JR OS jobs",
-          confidence: score >= 1 ? "High" : "Medium",
-          evidenceCount: 1,
-          reason: `Used on similar JR OS work (${document.number} · ${document.title}).`,
-        }, score + 2);
-      });
+    .slice(0, limit)
+    .forEach(({ pattern, relevantEvidence, score }) => {
+      const material = pattern.materialId ? materialById.get(pattern.materialId) : undefined;
+      const unitCost = material?.tradeCost || pattern.averageUnitCost;
+      addSuggestion({
+        key: pattern.key,
+        materialId: pattern.materialId,
+        description: material?.name || pattern.description,
+        quantity: pattern.averageQuantity || 1,
+        unitCost,
+        unitPrice: unitCost * (1 + markupPercent / 100),
+        supplier: material?.supplier || "Supplier to confirm",
+        stockCode: material?.stockCode || "",
+        supplierUrl: material?.supplierUrl,
+        source: "Previous JR OS jobs",
+        confidence: pattern.confidenceScore >= 75 ? "High" : pattern.confidenceScore >= 45 ? "Medium" : "Low",
+        confidenceScore: pattern.confidenceScore,
+        evidenceCount: relevantEvidence.length,
+        evidence: relevantEvidence,
+        reason: `Used on ${relevantEvidence.length} successful ${jobType.toLowerCase()} record${relevantEvidence.length === 1 ? "" : "s"}; quantity is the recorded average.`,
+      }, score + 2);
     });
 
   jobPacks
@@ -314,7 +332,19 @@ export function suggestMaterials({
           supplierUrl: material?.supplierUrl,
           source: "Job pack",
           confidence: score >= 1 ? "High" : "Medium",
+          confidenceScore: Math.min(80, Math.round(40 + score * 20)),
           evidenceCount: 1,
+          evidence: [{
+            id: `evidence-job-pack-${pack.id}`,
+            kind: "Job pack",
+            recordId: pack.id,
+            title: pack.name,
+            detail: `${pack.category} reusable job pack`,
+            jobType,
+            occurredAt: pack.updatedAt,
+            relevance: Math.min(100, Math.round(score * 50)),
+            href: "/job-packs",
+          }],
           reason: `Included in the ${pack.name} JR OS job pack.`,
         }, score + 1);
       });
@@ -346,7 +376,19 @@ export function suggestMaterials({
         supplierUrl: material.supplierUrl,
         source: "Materials library",
         confidence: "Low",
+        confidenceScore: material.favourite ? 35 : 20,
         evidenceCount: 1,
+        evidence: [{
+          id: `evidence-material-${material.id}`,
+          kind: "Materials library",
+          recordId: material.id,
+          title: material.name,
+          detail: material.favourite ? "Saved as a favourite material" : `${material.category} library match`,
+          jobType,
+          occurredAt: material.updatedAt,
+          relevance: material.favourite ? 35 : 20,
+          href: "/materials",
+        }],
         reason: `Matches the ${jobType.toLowerCase()} job type or is saved as a favourite.`,
       }, material.favourite ? 0.65 : 0.35));
   }
@@ -359,6 +401,7 @@ export function suggestMaterials({
       unitPrice: roundMoney(suggestion.unitCost * (1 + markupPercent / 100)),
       evidenceCount: occurrences,
       confidence: score >= 2.7 || occurrences >= 3 ? "High" as const : score >= 1.2 ? "Medium" as const : "Low" as const,
+      confidenceScore: Math.min(100, Math.max(suggestion.confidenceScore, Math.round(score * 24 + Math.min(4, occurrences) * 7))),
     }))
     .toSorted((left, right) => {
       const confidence = { High: 3, Medium: 2, Low: 1 };
@@ -382,6 +425,8 @@ export function recommendPricing({
   labourSettings,
   quoteSettings,
   documents,
+  jobs = [],
+  invoices = [],
   jobPacks,
 }: {
   notes: string;
@@ -391,20 +436,20 @@ export function recommendPricing({
   labourSettings: LabourCostSettings;
   quoteSettings: QuotePricingSettings;
   documents: PricingDocument[];
+  jobs?: Job[];
+  invoices?: Invoice[];
   jobPacks: JobPack[];
 }): AiPricingRecommendation {
   const jobType = inferJobType(notes, selectedJobType);
   const contextTokens = tokens(`${jobType} ${notes}`);
-  const historicHours = documents
-    .map((document) => ({
-      score: relevantRecordScore(`${document.title} ${document.notes}`, jobType, contextTokens, document.templateType),
-      hours: document.items
-        .filter((item) => item.category === "Labour")
-        .reduce((sum, item) => sum + (item.labourHours ?? (item.labourMode === "Days" ? item.quantity * labourSettings.billableHoursPerDay : item.quantity)), 0),
-    }))
-    .filter((item) => item.score > 0.5 && item.hours > 0)
-    .toSorted((left, right) => right.score - left.score)
-    .slice(0, 8);
+  const learned = buildQuoteLearningSuggestion({
+    notes,
+    jobType,
+    documents,
+    jobs,
+    invoices,
+    labourSettings,
+  });
   const packHours = jobPacks
     .map((pack) => ({
       score: relevantRecordScore(`${pack.name} ${pack.category} ${pack.description}`, jobType, contextTokens),
@@ -413,10 +458,14 @@ export function recommendPricing({
     .filter((item) => item.score > 0.5 && item.hours > 0)
     .toSorted((left, right) => right.score - left.score)
     .slice(0, 5);
-  const evidence = [...historicHours, ...packHours];
-  const labourHours = evidence.length
-    ? evidence.reduce((sum, item) => sum + item.hours, 0) / evidence.length
-    : fallbackHours[jobType];
+  const packAverage = packHours.length
+    ? packHours.reduce((sum, item) => sum + item.hours, 0) / packHours.length
+    : 0;
+  const labourHours = learned.averageLabourHours > 0
+    ? packAverage > 0 && learned.confidence.labour < 75
+      ? learned.averageLabourHours * 0.75 + packAverage * 0.25
+      : learned.averageLabourHours
+    : packAverage || fallbackHours[jobType];
   const roundedHours = Math.max(1, Math.round(labourHours * 2) / 2);
   const labourMode: QuoteLabourMode = roundedHours >= labourSettings.billableHoursPerDay * 1.5 ? "Days" : "Hours";
   const activeRates = labourRates.filter((rate) => rate.active);
@@ -437,26 +486,33 @@ export function recommendPricing({
     : roundedHours;
   const unitCost = labourRate?.costRate ?? 0;
   const savedCharge = labourRate?.chargeRate ?? 0;
+  const learnedUnitCharge = labourMode === "Days"
+    ? learned.averageLabourPricePerHour * labourSettings.billableHoursPerDay
+    : learned.averageLabourPricePerHour;
   const recommendedUnitCharge = labourMode === "Days"
-    ? Math.max(savedCharge, recommendedHourlyRate * labourSettings.billableHoursPerDay)
-    : Math.max(savedCharge, recommendedHourlyRate);
+    ? Math.max(savedCharge, recommendedHourlyRate * labourSettings.billableHoursPerDay, learnedUnitCharge)
+    : Math.max(savedCharge, recommendedHourlyRate, learnedUnitCharge);
   const labourCost = labourQuantity * unitCost;
   const labourPrice = labourQuantity * recommendedUnitCharge;
   const totalLabourCost = labourCost + roundedHours * overheadHourlyCost;
   const expectedLabourMargin = labourPrice > 0 ? ((labourPrice - totalLabourCost) / labourPrice) * 100 : 0;
   const baseContingency = Math.max(quoteSettings.contingencyPercent, labourSettings.contingencyPercent);
   const riskAdjustment = jobType === "Rewire" || jobType === "Fault Finding" ? 2.5 : 0;
-  const contingencyPercent = Math.min(25, baseContingency + riskAdjustment);
-  const materialMarkupPercent = Math.max(0, quoteSettings.materialMarkupPercent);
+  const contingencyPercent = Math.min(25, Math.max(baseContingency, learned.averageContingency) + riskAdjustment);
+  const materialMarkupPercent = Math.max(0, quoteSettings.materialMarkupPercent, learned.averageMaterialMarkup);
   const reasons = [
-    evidence.length
-      ? `Labour allowance uses ${evidence.length} similar saved quote or job-pack record${evidence.length === 1 ? "" : "s"}.`
-      : `No close history was found, so the ${jobType.toLowerCase()} starter allowance is being used.`,
+    learned.sampleSize
+      ? `Labour and pricing use ${learned.sampleSize} accepted, completed or paid ${jobType.toLowerCase()} record${learned.sampleSize === 1 ? "" : "s"}.`
+      : packHours.length
+        ? `No successful close match was found, so ${packHours.length} reusable job pack${packHours.length === 1 ? "" : "s"} informed labour.`
+        : `No close successful history was found, so the ${jobType.toLowerCase()} starter allowance is being used.`,
     labourRate
       ? `${labourRate.name} is the closest active Labour & Costs rate.`
       : "No active labour rate is saved; complete Labour & Costs before sending the quote.",
     `Break-even includes ${roundMoney(overheadHourlyCost).toFixed(2)} per billable hour of saved business overhead.`,
-    `Material mark-up starts from the saved Quote Engine default of ${materialMarkupPercent.toFixed(1)}%.`,
+    learned.averageMaterialMarkup > 0
+      ? `Material mark-up protects the ${quoteSettings.materialMarkupPercent.toFixed(1)}% saved default and compares it with ${learned.averageMaterialMarkup.toFixed(1)}% from successful work.`
+      : `Material mark-up starts from the saved Quote Engine default of ${materialMarkupPercent.toFixed(1)}%.`,
     riskAdjustment
       ? `A small risk allowance was added for ${jobType.toLowerCase()} uncertainty; review it after the survey.`
       : `Contingency follows the saved Labour & Costs and Quote Engine defaults.`,
@@ -477,7 +533,10 @@ export function recommendPricing({
     contingencyPercent: roundMoney(contingencyPercent),
     targetNetMargin: labourSettings.targetNetMargin,
     expectedLabourMargin: roundMoney(expectedLabourMargin),
-    evidenceCount: evidence.length,
+    evidenceCount: learned.sampleSize + packHours.length,
+    learnedSellingPrice: learned.averageSellingPrice,
+    confidence: learned.confidence,
+    evidence: learned.evidence,
     reasons,
   };
 }
@@ -488,6 +547,7 @@ export function buildAiQuoteDraft({
   materials,
   documents,
   jobs,
+  invoices,
   jobPacks,
   labourRates,
   overheads,
@@ -500,6 +560,7 @@ export function buildAiQuoteDraft({
   materials: Material[];
   documents: PricingDocument[];
   jobs: Job[];
+  invoices: Invoice[];
   jobPacks: JobPack[];
   labourRates: LabourRate[];
   overheads: BusinessOverhead[];
@@ -507,13 +568,14 @@ export function buildAiQuoteDraft({
   quoteSettings: QuotePricingSettings;
   createId: (prefix: string) => string;
 }): AiQuoteDraft {
-  const pricing = recommendPricing({ notes, jobType, labourRates, overheads, labourSettings, quoteSettings, documents, jobPacks });
+  const pricing = recommendPricing({ notes, jobType, labourRates, overheads, labourSettings, quoteSettings, documents, jobs, invoices, jobPacks });
   const materialSuggestions = suggestMaterials({
     notes,
     jobType: pricing.jobType,
     materials,
     documents,
     jobs,
+    invoices,
     jobPacks,
     markupPercent: pricing.materialMarkupPercent,
   });

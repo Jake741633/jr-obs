@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ArrowLeft, Check, PackageCheck, PackageSearch, Plus, Sparkles } from "lucide-react";
 import { AiToolNav } from "../../../components/ai/AiToolNav";
+import { WhyRecommendation } from "../../../components/ai/WhyRecommendation";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { TextareaField } from "../../../components/ui/FormField";
@@ -14,6 +15,7 @@ import { nextPurchaseListNumber } from "../../../lib/workflow";
 import type {
   Job,
   JobPack,
+  Invoice,
   Material,
   PricingDocument,
   PurchaseItemStatus,
@@ -30,6 +32,7 @@ export default function AiMaterialsAssistantPage() {
   const materials = useLocalStorageCollection<Material>("jr-os-materials");
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const jobPacks = useLocalStorageCollection<JobPack>("jr-os-job-packs");
   const purchaseLists = useLocalStorageCollection<PurchaseList>("jr-os-purchase-lists");
   const quoteSettingsStore = useLocalStorageCollection<QuotePricingSettings>("jr-os-quote-engine-settings", [defaultQuotePricingSettings]);
@@ -39,7 +42,7 @@ export default function AiMaterialsAssistantPage() {
   const [suggestions, setSuggestions] = useState<AiMaterialSuggestion[]>([]);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [message, setMessage] = useState("");
-  const ready = [materials, documents, jobs, jobPacks, purchaseLists, quoteSettingsStore].every((store) => store.isReady);
+  const ready = [materials, documents, jobs, invoices, jobPacks, purchaseLists, quoteSettingsStore].every((store) => store.isReady);
   const quoteSettings = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
 
   function selectJob(id: string) {
@@ -61,6 +64,7 @@ export default function AiMaterialsAssistantPage() {
       materials: materials.items,
       documents: documents.items,
       jobs: jobs.items,
+      invoices: invoices.items,
       jobPacks: jobPacks.items,
       markupPercent: quoteSettings.materialMarkupPercent,
     });
@@ -170,7 +174,7 @@ export default function AiMaterialsAssistantPage() {
                     <div className="flex items-start gap-3">
                       <button type="button" onClick={() => toggle(suggestion.key)} className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border ${selected ? "border-cyan-400 bg-cyan-400 text-slate-950" : "border-slate-700"}`} aria-label={`${selected ? "Remove" : "Select"} ${suggestion.description}`}>{selected ? <Check className="size-4" /> : null}</button>
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{suggestion.description}</p><p className="mt-1 text-xs text-slate-500">{suggestion.supplier} · {suggestion.stockCode || "No stock code"}</p></div><span className={`rounded-full px-2 py-1 text-xs font-semibold ${suggestion.confidence === "High" ? "bg-emerald-500/10 text-emerald-300" : suggestion.confidence === "Medium" ? "bg-amber-500/10 text-amber-300" : "bg-slate-800 text-slate-400"}`}>{suggestion.confidence}</span></div>
+                        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{suggestion.description}</p><p className="mt-1 text-xs text-slate-500">{suggestion.supplier} · {suggestion.stockCode || "No stock code"}</p></div><span className={`rounded-full px-2 py-1 text-xs font-semibold ${suggestion.confidence === "High" ? "bg-emerald-500/10 text-emerald-300" : suggestion.confidence === "Medium" ? "bg-amber-500/10 text-amber-300" : "bg-slate-800 text-slate-400"}`}>{suggestion.confidence} · {suggestion.confidenceScore}%</span></div>
                         <p className="mt-3 text-sm text-slate-400">{suggestion.reason}</p>
                         <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_1fr]">
                           <label className="grid gap-1 text-xs text-slate-500"><span>Quantity</span><input type="number" min="0" step="0.01" value={suggestion.quantity} onChange={(event) => updateQuantity(suggestion.key, Number(event.target.value || 0))} className="min-h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label>
@@ -178,6 +182,10 @@ export default function AiMaterialsAssistantPage() {
                           <div className="rounded-lg bg-slate-950 px-3 py-2"><p className="text-xs text-slate-500">Quote price</p><p className="font-semibold">{money.format(suggestion.unitPrice)}</p></div>
                         </div>
                         <p className="mt-3 text-xs font-semibold uppercase tracking-wider text-cyan-400">{suggestion.source} · {suggestion.evidenceCount} reference{suggestion.evidenceCount === 1 ? "" : "s"}</p>
+                        <details className="mt-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
+                          <summary className="cursor-pointer text-sm font-semibold text-violet-300">Why this material?</summary>
+                          <div className="mt-3"><WhyRecommendation evidence={suggestion.evidence} showHeading={false} /></div>
+                        </details>
                       </div>
                     </div>
                   </Card>

@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ArrowLeft, Calculator, CheckCircle2, Save, Sparkles, TriangleAlert } from "lucide-react";
+import { AiConfidenceScore } from "../../../components/ai/AiConfidenceScore";
 import { AiToolNav } from "../../../components/ai/AiToolNav";
+import { WhyRecommendation } from "../../../components/ai/WhyRecommendation";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { TextareaField } from "../../../components/ui/FormField";
@@ -13,6 +15,8 @@ import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import type {
   BusinessOverhead,
+  Invoice,
+  Job,
   JobPack,
   LabourCostSettings,
   LabourRate,
@@ -37,6 +41,8 @@ const defaultLabourSettings: LabourCostSettings = {
 
 export default function AiPricingAssistantPage() {
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
+  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const labourRates = useLocalStorageCollection<LabourRate>("jr-os-labour-rates");
   const overheads = useLocalStorageCollection<BusinessOverhead>("jr-os-business-overheads");
   const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
@@ -49,7 +55,7 @@ export default function AiPricingAssistantPage() {
   const [message, setMessage] = useState("");
   const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
   const quoteSettings = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
-  const ready = [documents, labourRates, overheads, labourSettingsStore, quoteSettingsStore, jobPacks].every((store) => store.isReady);
+  const ready = [documents, jobs, invoices, labourRates, overheads, labourSettingsStore, quoteSettingsStore, jobPacks].every((store) => store.isReady);
   const draftQuotes = documents.items.filter((document) => document.type === "Quote" && document.status === "Draft");
   const selectedDocument = draftQuotes.find((document) => document.id === documentId);
 
@@ -76,6 +82,8 @@ export default function AiPricingAssistantPage() {
       labourSettings,
       quoteSettings: selectedDocument?.pricingSettings ?? quoteSettings,
       documents: documents.items,
+      jobs: jobs.items,
+      invoices: invoices.items,
       jobPacks: jobPacks.items,
     });
     setRecommendation(result);
@@ -220,6 +228,8 @@ export default function AiPricingAssistantPage() {
               <Card><p className="text-sm text-slate-400">Contingency</p><p className="mt-2 text-2xl font-bold">{recommendation.contingencyPercent.toFixed(1)}%</p><p className="mt-1 text-xs text-slate-500">risk-adjusted starting point</p></Card>
             </section>
 
+            <AiConfidenceScore confidence={recommendation.confidence} />
+
             <Card>
               <div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-emerald-300" /><div><h2 className="text-xl font-bold">Cost recovery</h2><p className="text-sm text-slate-500">{recommendation.jobType} · target net margin {recommendation.targetNetMargin.toFixed(1)}%</p></div></div>
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -229,7 +239,10 @@ export default function AiPricingAssistantPage() {
                 <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Expected labour margin</p><p className={`mt-1 text-xl font-bold ${recommendation.expectedLabourMargin >= recommendation.targetNetMargin ? "text-emerald-300" : "text-amber-300"}`}>{recommendation.expectedLabourMargin.toFixed(1)}%</p></div>
               </div>
               <div className="mt-5 space-y-2">{recommendation.reasons.map((reason) => <p key={reason} className="rounded-lg border border-slate-800 px-3 py-2 text-sm text-slate-400">{reason}</p>)}</div>
+              {recommendation.learnedSellingPrice > 0 ? <p className="mt-4 text-xs text-slate-500">Successful matched work averaged {money.format(recommendation.learnedSellingPrice)} before VAT. Review differences in scope, access and quantities.</p> : null}
             </Card>
+
+            <Card><WhyRecommendation evidence={recommendation.evidence} /></Card>
 
             <Card>
               <div className="flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100"><TriangleAlert className="mt-0.5 size-5 shrink-0 text-amber-300" /><p>Review labour duration, access, productivity, subcontract costs and scope risk yourself. A recommendation is not a fixed promise to the customer.</p></div>

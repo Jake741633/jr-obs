@@ -12,7 +12,9 @@ import {
   Trash2,
   TriangleAlert,
 } from "lucide-react";
+import { AiConfidenceScore } from "../../../components/ai/AiConfidenceScore";
 import { AiToolNav } from "../../../components/ai/AiToolNav";
+import { WhyRecommendation } from "../../../components/ai/WhyRecommendation";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
@@ -33,6 +35,7 @@ import type {
   BusinessOverhead,
   BusinessTermsTemplate,
   Customer,
+  Invoice,
   Job,
   JobPack,
   LabourCostSettings,
@@ -70,6 +73,7 @@ export default function AiQuoteBuilderPage() {
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const materials = useLocalStorageCollection<Material>("jr-os-materials");
   const jobPacks = useLocalStorageCollection<JobPack>("jr-os-job-packs");
   const labourRates = useLocalStorageCollection<LabourRate>("jr-os-labour-rates");
@@ -96,7 +100,7 @@ export default function AiQuoteBuilderPage() {
   const quoteSettings = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
   const vatSettings = vatStore.items[0] ?? defaultVatSettings;
   const ready = [
-    documents, customers, builders, jobs, materials, jobPacks, labourRates, overheads,
+    documents, customers, builders, jobs, invoices, materials, jobPacks, labourRates, overheads,
     labourSettingsStore, quoteSettingsStore, termsStore, paymentTermsStore, vatStore,
   ].every((store) => store.isReady);
 
@@ -135,6 +139,7 @@ export default function AiQuoteBuilderPage() {
       materials: materials.items,
       documents: documents.items,
       jobs: jobs.items,
+      invoices: invoices.items,
       jobPacks: jobPacks.items,
       labourRates: labourRates.items,
       overheads: overheads.items,
@@ -303,6 +308,7 @@ export default function AiQuoteBuilderPage() {
               <div className="mt-4 space-y-2">
                 {draft.scopeItems.length ? draft.scopeItems.map((item, index) => <p key={`${item}-${index}`} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-300">{item}</p>) : <p className="text-sm text-slate-500">No separate scope items were detected. Add more detail before sending.</p>}
               </div>
+              <div className="mt-5"><AiConfidenceScore confidence={draft.pricing.confidence} compact /></div>
               <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100"><TriangleAlert className="mb-2 size-5 text-amber-300" />This is a drafting aid. Verify design, quantities, access, regulations, testing, certification and exclusions yourself.</div>
             </Card>
           ) : null}
@@ -340,7 +346,10 @@ export default function AiQuoteBuilderPage() {
                   <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Net margin</p><p className={`mt-1 text-xl font-bold ${draft.profitability.netMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}`}>{draft.profitability.netMargin.toFixed(1)}%</p></div>
                 </div>
                 <p className="mt-4 text-sm text-slate-500">Includes {money.format(draft.profitability.overheadCost)} allocated business overhead and {draft.pricingSettings.contingencyPercent.toFixed(1)}% contingency.</p>
+                {draft.pricing.learnedSellingPrice > 0 ? <p className="mt-2 text-xs text-slate-500">Closest successful records averaged {money.format(draft.pricing.learnedSellingPrice)} before VAT. This is context, not a price cap.</p> : null}
               </Card>
+
+              <Card><WhyRecommendation evidence={draft.pricing.evidence} /></Card>
 
               <Card>
                 <div className="grid gap-4 sm:grid-cols-2">

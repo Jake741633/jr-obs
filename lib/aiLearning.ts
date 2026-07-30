@@ -473,6 +473,24 @@ function buildMaterialPatterns(sources: AiLearningSources) {
     .toSorted((left, right) => right.confidenceScore - left.confidenceScore || right.uses - left.uses);
 }
 
+export function buildMaterialLearningPatterns({
+  documents,
+  jobs,
+  invoices,
+  materials,
+}: Pick<AiLearningSources, "documents" | "jobs" | "invoices" | "materials">) {
+  return buildMaterialPatterns({
+    documents,
+    jobs,
+    invoices,
+    materials,
+    customers: [],
+    builders: [],
+    profiles: [],
+    interactions: [],
+  });
+}
+
 function buildJobPatterns(sources: AiLearningSources, settings: LabourCostSettings) {
   const successful = successfulWork(sources);
   const quoteDecisions = sources.documents.filter((document) =>
