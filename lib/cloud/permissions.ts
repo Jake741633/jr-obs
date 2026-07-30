@@ -3,8 +3,8 @@ export type JrRole = "owner" | "admin" | "office" | "electrician" | "customer";
 const rolePages: Record<JrRole, string[]> = {
   owner: ["*"],
   admin: ["*"],
-  office: ["/", "/customers", "/builders", "/jobs", "/quotes", "/estimates", "/invoices", "/payments", "/expenses", "/materials", "/stock", "/purchases", "/planner", "/team", "/surveys", "/certificates", "/job-finance", "/finance-director", "/ai", "/cloud"],
-  electrician: ["/", "/jobs", "/planner", "/field", "/site-management", "/surveys", "/certificates", "/materials", "/stock", "/purchases", "/cloud"],
+  office: ["/", "/menu", "/customers", "/builders", "/jobs", "/quotes", "/estimates", "/invoices", "/payments", "/expenses", "/materials", "/stock", "/purchases", "/planner", "/team", "/surveys", "/certificates", "/job-finance", "/finance-director", "/ai", "/cloud"],
+  electrician: ["/", "/menu", "/jobs", "/planner", "/field", "/site-management", "/surveys", "/certificates", "/materials", "/stock", "/purchases", "/cloud"],
   customer: ["/customer-portal", "/cloud"],
 };
 
