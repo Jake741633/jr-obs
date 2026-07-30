@@ -6,6 +6,12 @@ export type JobStatus = "Lead" | "Quoted" | "Scheduled" | "In progress" | "Compl
 export type JobPriority = "Low" | "Normal" | "High" | "Urgent";
 export interface Job { id: EntityId; title: string; customerId?: EntityId; builderId?: EntityId; siteAddress: string; status: JobStatus; startDate: string; targetCompletionDate?: string; priority?: JobPriority; assignedTo?: string[]; value: number; notes: string; createdAt: string; updatedAt: string; }
 
+export type LeadStage = "New enquiry" | "Contacted" | "Survey booked" | "Quote required" | "Quote sent" | "Won" | "Lost";
+export type LeadSource = "Website" | "Google" | "Referral" | "Builder" | "Repeat customer" | "Social media" | "MyBuilder" | "Checkatrade" | "Other";
+export type LeadPriority = "Low" | "Normal" | "High" | "Urgent";
+export interface SalesLead { id: EntityId; name: string; company: string; email: string; phone: string; siteAddress: string; workRequired: string; source: LeadSource; stage: LeadStage; priority: LeadPriority; estimatedValue: number; nextAction: string; followUpDate: string; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; lostReason?: string; notes: string; createdAt: string; updatedAt: string; }
+export interface LeadActivity { id: EntityId; leadId: EntityId; type: "Call" | "Email" | "WhatsApp" | "Site visit" | "Note" | "Stage change"; summary: string; completedBy: string; completedAt: string; createdAt: string; }
+
 export type JobMilestoneType = "Enquiry received" | "Site survey booked" | "Quote prepared" | "Quote sent" | "Quote accepted" | "Deposit received" | "Materials ordered" | "Materials delivered" | "First fix complete" | "Second fix complete" | "Testing complete" | "Certificate uploaded" | "Invoice sent" | "Payment received" | "Review requested" | "Custom update";
 export interface JobTimelineEntry { id: EntityId; jobId: EntityId; milestone: JobMilestoneType; note: string; completedBy: string; completedAt: string; createdAt: string; }
 
@@ -61,14 +67,7 @@ export type SurveyStatus = "Draft" | "In progress" | "Complete";
 export type SurveySeverity = "Low" | "Medium" | "High";
 export interface SurveyCircuit { id: EntityId; name: string; protectiveDevice: string; cableSize: string; estimatedLength: number; observations: string; recommendation: string; }
 export interface SurveyPhoto { id: EntityId; name: string; category: string; dataUrl?: string; externalUrl?: string; note: string; severity: SurveySeverity; }
-export interface SiteSurvey {
-  id: EntityId; number: string; status: SurveyStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId;
-  propertyType: string; occupancy: string; floors: number; bedrooms: number; constructionType: string; loftAccess: string; installationAge: string;
-  earthingArrangement: string; supplyType: string; fuseRating: string; cutoutType: string; meterPosition: string; consumerUnitPosition: string; mainBonding: string; earthingConductorSize: string;
-  consumerUnitManufacturer: string; consumerUnitWays: string; spdFitted: boolean; rcbosFitted: boolean; rcdType: string; spareWays: string; consumerUnitCondition: string;
-  circuits: SurveyCircuit[]; photos: SurveyPhoto[]; defects: string[]; risks: string[]; recommendations: string[];
-  voiceNotes: string; surveyNotes: string; labourHours: number; labourRate: number; healthScore: number; createdAt: string; updatedAt: string;
-}
+export interface SiteSurvey { id: EntityId; number: string; status: SurveyStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; propertyType: string; occupancy: string; floors: number; bedrooms: number; constructionType: string; loftAccess: string; installationAge: string; earthingArrangement: string; supplyType: string; fuseRating: string; cutoutType: string; meterPosition: string; consumerUnitPosition: string; mainBonding: string; earthingConductorSize: string; consumerUnitManufacturer: string; consumerUnitWays: string; spdFitted: boolean; rcbosFitted: boolean; rcdType: string; spareWays: string; consumerUnitCondition: string; circuits: SurveyCircuit[]; photos: SurveyPhoto[]; defects: string[]; risks: string[]; recommendations: string[]; voiceNotes: string; surveyNotes: string; labourHours: number; labourRate: number; healthScore: number; createdAt: string; updatedAt: string; }
 
 export type CertificateType = "Electrical Installation Certificate" | "Minor Electrical Installation Works Certificate" | "Electrical Installation Condition Report" | "Emergency Lighting Certificate" | "Fire Alarm Certificate" | "Other";
 export type CertificateStatus = "Draft" | "In progress" | "Complete" | "Issued" | "Superseded";
@@ -80,4 +79,4 @@ export interface ElectricalCertificate { id: EntityId; number: string; type: Cer
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
 export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }
 
-export type EntityBase = Customer | Builder | Job | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
