@@ -1,235 +1,380 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
-  AlertTriangle,
   ArrowRight,
   Brain,
   BriefcaseBusiness,
   CheckCircle2,
   ClipboardCheck,
   FileText,
-  Lightbulb,
+  Percent,
+  PoundSterling,
   ReceiptText,
   Sparkles,
+  TrendingUp,
 } from "lucide-react";
+import { AiActionCentre } from "../../components/ai/AiActionCentre";
+import { AiToolNav } from "../../components/ai/AiToolNav";
+import { SmartRecommendations } from "../../components/ai/SmartRecommendations";
+import { TodaysAssistant } from "../../components/ai/TodaysAssistant";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { useLocalStorageCollection } from "../../lib/storage";
-import type { ElectricalCertificate, Invoice, Job, PricingDocument, SiteSurvey } from "../../lib/models";
+import {
+  buildBusinessCoach,
+  buildSmartRecommendations,
+  buildTodayAssistant,
+} from "../../lib/aiCommandCentre";
+import {
+  businessStorageKeys,
+  defaultBankDetails,
+  defaultPaymentTermsTemplates,
+} from "../../lib/businessSettings";
+import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import {
+  createInvoiceFromCompletedJob,
+  createJobFromAcceptedQuote,
+  createPurchaseListFromPricingDocument,
+  pricingDocumentTotal,
+} from "../../lib/workflow";
+import type {
+  AiReminder,
+  AiReminderPriority,
+  Builder,
+  BusinessBankDetails,
+  Customer,
+  CustomerInteraction,
+  CustomerProfile,
+  ElectricalCertificate,
+  Invoice,
+  Job,
+  JobDocument,
+  JobTimelineEntry,
+  LabourCostSettings,
+  Material,
+  PaymentTermsTemplate,
+  PlannerEntry,
+  PricingDocument,
+  PurchaseList,
+  SiteSurvey,
+} from "../../lib/models";
 
-const gbp = new Intl.NumberFormat("en-GB", {
-  style: "currency",
-  currency: "GBP",
-  maximumFractionDigits: 0,
-});
-
-// Captured once when this page module loads so memoised calculations remain pure.
-const pageOpenedAt = Date.now();
-
-function documentTotal(document: PricingDocument | Invoice) {
-  const subtotal = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  return subtotal + (document.vatEnabled ? subtotal * (document.vatRate / 100) : 0);
-}
-
-type Priority = "High" | "Medium" | "Ready";
-
-type AssistantAction = {
-  id: string;
-  priority: Priority;
-  title: string;
-  detail: string;
-  href: string;
-  actionLabel: string;
-};
-
-type AssistantMetric = {
-  label: string;
-  value: string;
-  detail: string;
-  icon: typeof BriefcaseBusiness;
+const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
+const defaultLabourSettings: LabourCostSettings = {
+  id: "labour-cost-settings",
+  workingDaysPerYear: 220,
+  billableHoursPerDay: 7.5,
+  targetNetMargin: 25,
+  contingencyPercent: 10,
+  createdAt: new Date(0).toISOString(),
+  updatedAt: new Date(0).toISOString(),
 };
 
 export default function AiPage() {
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
+  const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const pricing = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
-  const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
+  const planner = useLocalStorageCollection<PlannerEntry>("jr-os-planner");
+  const profiles = useLocalStorageCollection<CustomerProfile>("jr-os-customer-profiles");
+  const interactions = useLocalStorageCollection<CustomerInteraction>("jr-os-customer-interactions");
+  const reminders = useLocalStorageCollection<AiReminder>("jr-os-ai-reminders");
   const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
+  const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
+  const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
+  const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
+  const materials = useLocalStorageCollection<Material>("jr-os-materials");
+  const purchaseLists = useLocalStorageCollection<PurchaseList>("jr-os-purchase-lists");
+  const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
+  const bankStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
+  const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
+  const [message, setMessage] = useState("");
 
-  const ready = jobs.isReady && pricing.isReady && invoices.isReady && surveys.isReady && certificates.isReady;
+  const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
+  const ready = [
+    jobs, customers, builders, pricing, invoices, planner, profiles, interactions, reminders, certificates,
+    surveys, timeline, jobDocuments, materials, purchaseLists, labourSettingsStore, bankStore, paymentTermsStore,
+  ].every((store) => store.isReady);
 
-  const assistant = useMemo(() => {
-    const quotes = pricing.items.filter((item) => item.type === "Quote");
-    const openQuotes = quotes.filter((item) => item.status === "Draft" || item.status === "Sent");
-    const draftQuotes = quotes.filter((item) => item.status === "Draft");
-    const sentQuotes = quotes.filter((item) => item.status === "Sent");
-    const pipelineValue = openQuotes.reduce((sum, item) => sum + documentTotal(item), 0);
+  const recommendations = useMemo(
+    () => buildSmartRecommendations({
+      jobs: jobs.items,
+      documents: pricing.items,
+      invoices: invoices.items,
+      certificates: certificates.items,
+      reminders: reminders.items,
+      labourSettings,
+    }),
+    [certificates.items, invoices.items, jobs.items, labourSettings, pricing.items, reminders.items],
+  );
 
-    const unpaidInvoices = invoices.items.filter((item) => item.status !== "Paid" && item.status !== "Cancelled");
-    const overdueInvoices = unpaidInvoices.filter((item) => item.dueDate && new Date(`${item.dueDate}T23:59:59`).getTime() < pageOpenedAt);
-    const overdueValue = overdueInvoices.reduce((sum, item) => sum + Math.max(0, documentTotal(item) - item.amountPaid), 0);
+  const today = useMemo(
+    () => buildTodayAssistant({
+      jobs: jobs.items,
+      planner: planner.items,
+      documents: pricing.items,
+      invoices: invoices.items,
+      profiles: profiles.items,
+      reminders: reminders.items,
+      recommendations,
+    }),
+    [invoices.items, jobs.items, planner.items, pricing.items, profiles.items, recommendations, reminders.items],
+  );
 
-    const activeJobs = jobs.items.filter((item) => item.status !== "Complete" && item.status !== "On hold");
-    const unscheduledJobs = activeJobs.filter((item) => !item.startDate);
-    const jobsWithoutValue = activeJobs.filter((item) => !item.value);
+  const coach = useMemo(
+    () => buildBusinessCoach({
+      documents: pricing.items,
+      invoices: invoices.items,
+      jobs: jobs.items,
+      certificates: certificates.items,
+      reminders: reminders.items,
+      labourSettings,
+    }),
+    [certificates.items, invoices.items, jobs.items, labourSettings, pricing.items, reminders.items],
+  );
 
-    const incompleteSurveys = surveys.items.filter((item) => item.status !== "Complete");
-    const completeSurveysWithoutQuote = surveys.items.filter((survey) =>
-      survey.status === "Complete" && !pricing.items.some((item) => item.jobId && item.jobId === survey.jobId),
-    );
+  const operations = useMemo(() => {
+    const activeJobs = jobs.items.filter((job) => !["Complete", "On hold"].includes(job.status));
+    const openQuotes = pricing.items.filter((document) => document.type === "Quote" && ["Draft", "Sent"].includes(document.status));
+    const quotePipeline = openQuotes.reduce((sum, document) => sum + pricingDocumentTotal(document), 0);
+    const overdueValue = today.overdueInvoices.reduce((sum, invoice) => {
+      const net = invoice.items.reduce((lineSum, item) => lineSum + item.quantity * item.unitPrice, 0);
+      const total = net + (invoice.vatEnabled ? net * invoice.vatRate / 100 : 0);
+      return sum + Math.max(0, total - invoice.amountPaid);
+    }, 0);
+    const incompleteSurveys = surveys.items.filter((survey) => survey.status !== "Complete");
+    const draftCertificates = certificates.items.filter((certificate) => ["Draft", "In progress"].includes(certificate.status));
+    const warnings = recommendations.filter((item) => item.severity === "Urgent").length * 10
+      + recommendations.filter((item) => item.severity === "Warning").length * 5
+      + incompleteSurveys.length * 2
+      + draftCertificates.length * 2;
+    return {
+      activeJobs,
+      openQuotes,
+      quotePipeline,
+      overdueValue,
+      incompleteSurveys,
+      readinessScore: Math.max(0, Math.min(100, 100 - warnings)),
+    };
+  }, [certificates.items, jobs.items, pricing.items, recommendations, surveys.items, today.overdueInvoices]);
 
-    const draftCertificates = certificates.items.filter((item) => item.status === "Draft" || item.status === "In progress");
-    const completeCertificatesNotIssued = certificates.items.filter((item) => item.status === "Complete");
+  const acceptedQuotes = pricing.items.filter((document) => document.type === "Quote" && document.status === "Accepted" && !document.jobId);
+  const completedJobs = jobs.items.filter((job) =>
+    job.status === "Complete" && !invoices.items.some((invoice) => invoice.jobId === job.id && invoice.status !== "Cancelled"),
+  );
+  const orderDocuments = pricing.items.filter((document) =>
+    (document.status === "Accepted" || Boolean(document.jobId))
+    && document.items.some((item) => item.category === "Materials")
+    && !purchaseLists.items.some((list) => list.pricingDocumentId === document.id),
+  );
 
-    const actions: AssistantAction[] = [];
+  function addReminder(input: {
+    title: string;
+    dueDate: string;
+    dueTime: string;
+    priority: AiReminderPriority;
+    customerId?: string;
+    notes: string;
+  }) {
+    const now = new Date().toISOString();
+    reminders.setItems((current) => [{
+      id: makeId("ai-reminder"),
+      ...input,
+      completed: false,
+      createdAt: now,
+      updatedAt: now,
+    }, ...current]);
+    setMessage(`Reminder saved for ${new Date(`${input.dueDate}T12:00:00`).toLocaleDateString("en-GB")}.`);
+  }
 
-    if (overdueInvoices.length) {
-      actions.push({
-        id: "overdue-invoices",
-        priority: "High",
-        title: `Chase ${overdueInvoices.length} overdue invoice${overdueInvoices.length === 1 ? "" : "s"}`,
-        detail: `${gbp.format(overdueValue)} remains overdue. Review the oldest balances first and record any payment received.`,
-        href: "/invoices",
-        actionLabel: "Open invoices",
-      });
+  function toggleReminder(id: string) {
+    reminders.setItems((current) => current.map((reminder) =>
+      reminder.id === id ? { ...reminder, completed: !reminder.completed, updatedAt: new Date().toISOString() } : reminder,
+    ));
+    setMessage("Reminder updated.");
+  }
+
+  function convertQuote(quoteId: string) {
+    const document = pricing.items.find((item) => item.id === quoteId);
+    if (!document || document.status !== "Accepted" || document.jobId) {
+      setMessage("That quote is no longer ready to convert.");
+      return;
     }
+    const customer = customers.items.find((item) => item.id === document.customerId);
+    const builder = builders.items.find((item) => item.id === document.builderId);
+    const now = new Date().toISOString();
+    const jobId = makeId("job");
+    const converted = createJobFromAcceptedQuote({
+      document,
+      customerAddress: customer?.address,
+      builderAddress: builder?.address,
+      jobId,
+      now,
+      createId: makeId,
+    });
+    jobs.setItems((current) => [converted.job, ...current]);
+    timeline.setItems((current) => [...converted.timelineEntries, ...current]);
+    if (converted.jobDocuments.length) jobDocuments.setItems((current) => [...converted.jobDocuments, ...current]);
+    pricing.setItems((current) => current.map((item) => item.id === document.id ? { ...item, jobId, updatedAt: now } : item));
+    setMessage(`${document.number} converted to ${converted.job.title}. Customer, address, scope, attachments and pricing remain linked.`);
+  }
 
-    if (sentQuotes.length) {
-      actions.push({
-        id: "sent-quotes",
-        priority: sentQuotes.length >= 3 ? "High" : "Medium",
-        title: `Follow up ${sentQuotes.length} sent quote${sentQuotes.length === 1 ? "" : "s"}`,
-        detail: `${gbp.format(sentQuotes.reduce((sum, item) => sum + documentTotal(item), 0))} has been sent but not yet accepted or declined.`,
-        href: "/quotes",
-        actionLabel: "Review quotes",
-      });
+  function generateInvoice(jobId: string) {
+    const job = jobs.items.find((item) => item.id === jobId);
+    if (!job || job.status !== "Complete" || invoices.items.some((invoice) => invoice.jobId === jobId && invoice.status !== "Cancelled")) {
+      setMessage("That job is no longer ready for a new final invoice.");
+      return;
     }
+    const quote = pricing.items.find((document) => document.id === job.sourceQuoteId)
+      ?? pricing.items.find((document) => document.jobId === job.id);
+    const defaultPaymentTerms = paymentTermsStore.items.find((template) => template.active && template.isDefault)
+      ?? paymentTermsStore.items.find((template) => template.active);
+    const now = new Date().toISOString();
+    const generated = createInvoiceFromCompletedJob({
+      job,
+      quote,
+      invoices: invoices.items,
+      invoiceId: makeId("invoice"),
+      now,
+      createId: makeId,
+      bankDetails: bankStore.items[0] ?? defaultBankDetails,
+      defaultPaymentTerms,
+    });
+    invoices.setItems((current) => [generated.invoice, ...current]);
+    timeline.setItems((current) => [generated.timelineEntry, ...current]);
+    setMessage(`${generated.invoice.number} created as a linked draft invoice for ${job.title}.`);
+  }
 
-    if (draftQuotes.length) {
-      actions.push({
-        id: "draft-quotes",
-        priority: "Medium",
-        title: `Finish ${draftQuotes.length} draft quote${draftQuotes.length === 1 ? "" : "s"}`,
-        detail: "Complete pricing, terms and exclusions before sending them to customers or builders.",
-        href: "/quotes",
-        actionLabel: "Finish drafts",
-      });
+  function orderMaterials(documentId: string) {
+    const document = pricing.items.find((item) => item.id === documentId);
+    if (!document || purchaseLists.items.some((list) => list.pricingDocumentId === document.id)) {
+      setMessage("A purchase list already exists or the source document is unavailable.");
+      return;
     }
-
-    if (unscheduledJobs.length) {
-      actions.push({
-        id: "unscheduled-jobs",
-        priority: "Medium",
-        title: `Schedule ${unscheduledJobs.length} active job${unscheduledJobs.length === 1 ? "" : "s"}`,
-        detail: "Adding realistic start dates improves workload visibility and reduces clashes with other work.",
-        href: "/jobs",
-        actionLabel: "Open jobs",
-      });
+    const now = new Date().toISOString();
+    const list = createPurchaseListFromPricingDocument({
+      document,
+      materials: materials.items,
+      purchaseLists: purchaseLists.items,
+      purchaseListId: makeId("purchase"),
+      now,
+      createId: makeId,
+    });
+    if (!list) {
+      setMessage("No priced material lines were found on that record.");
+      return;
     }
-
-    if (completeSurveysWithoutQuote.length) {
-      actions.push({
-        id: "survey-to-quote",
-        priority: "Medium",
-        title: `Turn ${completeSurveysWithoutQuote.length} completed survey${completeSurveysWithoutQuote.length === 1 ? "" : "s"} into pricing`,
-        detail: "The site information is ready to support a quote or estimate while the details are still fresh.",
-        href: "/surveys",
-        actionLabel: "Open surveys",
-      });
+    purchaseLists.setItems((current) => [list, ...current]);
+    if (list.jobId) {
+      timeline.setItems((current) => [{
+        id: makeId("timeline"),
+        jobId: list.jobId!,
+        milestone: "Materials ordered",
+        note: `${list.number} prepared in the AI Action Centre. Supplier orders still require confirmation.`,
+        completedBy: "JR OS",
+        completedAt: now,
+        createdAt: now,
+      }, ...current]);
     }
+    setMessage(`${list.number} created with ${list.items.length} material line${list.items.length === 1 ? "" : "s"}. Check live prices before ordering.`);
+  }
 
-    if (draftCertificates.length) {
-      actions.push({
-        id: "certificate-drafts",
-        priority: "Medium",
-        title: `Review ${draftCertificates.length} certificate draft${draftCertificates.length === 1 ? "" : "s"}`,
-        detail: "Check observations, inspector details and outcomes before completion or issue.",
-        href: "/certificates",
-        actionLabel: "Open certificates",
-      });
-    }
+  function contactCustomer(customerId: string) {
+    const customer = customers.items.find((item) => item.id === customerId);
+    if (!customer) return;
+    const preferredContact = profiles.items.find((profile) => profile.customerId === customerId)?.preferredContact ?? "Phone";
+    const interactionType: CustomerInteraction["type"] = preferredContact === "Phone" ? "Call" : preferredContact;
+    const now = new Date().toISOString();
+    interactions.setItems((current) => [{
+      id: makeId("interaction"),
+      customerId,
+      type: interactionType,
+      summary: `Contact action opened for ${customer.name} from the AI Action Centre.`,
+      outcome: "Outcome not yet recorded",
+      completedBy: "Jake",
+      interactionAt: now,
+      createdAt: now,
+    }, ...current]);
+    setMessage(`${preferredContact} opened for ${customer.name}; the contact action was added to CRM.`);
+  }
 
-    if (completeCertificatesNotIssued.length) {
-      actions.push({
-        id: "issue-certificates",
-        priority: "Ready",
-        title: `${completeCertificatesNotIssued.length} completed certificate${completeCertificatesNotIssued.length === 1 ? " is" : "s are"} ready for issue`,
-        detail: "Confirm the final record and mark it issued once the customer copy has been provided.",
-        href: "/certificates",
-        actionLabel: "Issue records",
-      });
-    }
+  if (!ready) return <Card>Preparing the AI Command Centre…</Card>;
 
-    if (!actions.length) {
-      actions.push({
-        id: "clear",
-        priority: "Ready",
-        title: "No urgent actions detected",
-        detail: "Current JR OS records do not show overdue invoices, unfinished quote follow-ups or incomplete technical records.",
-        href: "/",
-        actionLabel: "Command Centre",
-      });
-    }
+  const scoreTone = operations.readinessScore >= 80
+    ? "text-emerald-300"
+    : operations.readinessScore >= 60
+      ? "text-amber-300"
+      : "text-red-300";
 
-    const metrics: AssistantMetric[] = [
-      { label: "Live workload", value: String(activeJobs.length), detail: `${unscheduledJobs.length} need dates`, icon: BriefcaseBusiness },
-      { label: "Quote pipeline", value: gbp.format(pipelineValue), detail: `${openQuotes.length} open`, icon: FileText },
-      { label: "Overdue", value: gbp.format(overdueValue), detail: `${overdueInvoices.length} invoices`, icon: ReceiptText },
-      { label: "Survey queue", value: String(incompleteSurveys.length), detail: `${completeSurveysWithoutQuote.length} ready to price`, icon: ClipboardCheck },
-    ];
+  return (
+    <main className="space-y-8">
+      <PageHeader
+        eyebrow="JR AI"
+        title="AI Command Centre"
+        description="Turn the records already saved in JR OS into today’s priorities, draft quotes, material suggestions, safer pricing decisions and one-click workflow actions."
+        action={<Link href="/business" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Business Management <ArrowRight className="size-4" /></Link>}
+      />
 
-    const recordWarnings = jobsWithoutValue.length + unscheduledJobs.length + incompleteSurveys.length + draftCertificates.length;
-    const readinessScore = Math.max(0, Math.min(100, 100 - recordWarnings * 5 - overdueInvoices.length * 10 - draftQuotes.length * 4));
+      {message ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
-    return { actions: actions.slice(0, 6), metrics, readinessScore };
-  }, [certificates.items, invoices.items, jobs.items, pricing.items, surveys.items]);
+      <AiToolNav />
 
-  if (!ready) return <Card>Preparing JR AI assistant…</Card>;
+      <section className="grid gap-4 lg:grid-cols-[0.8fr_3.2fr]">
+        <Card className="border-cyan-400/30">
+          <div className="flex items-center justify-between"><Brain className="size-9 text-cyan-300" /><Sparkles className="size-5 text-cyan-400" /></div>
+          <p className="mt-5 text-sm text-slate-400">Operational readiness</p>
+          <p className={`mt-2 text-5xl font-black ${scoreTone}`}>{operations.readinessScore}</p>
+          <p className="mt-1 text-sm text-slate-500">out of 100</p>
+          <p className="mt-4 text-sm text-slate-400">A workflow guide based on overdue debt, incomplete records and open actions—not financial or technical approval.</p>
+        </Card>
 
-  const scoreTone = assistant.readinessScore >= 80 ? "text-emerald-300" : assistant.readinessScore >= 60 ? "text-amber-300" : "text-red-300";
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Card><BriefcaseBusiness className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Live workload</p><p className="mt-2 text-2xl font-bold">{operations.activeJobs.length}</p><p className="mt-1 text-xs text-slate-500">{today.todaysJobs.length} starting today</p></Card>
+          <Card><FileText className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Quote pipeline</p><p className="mt-2 text-2xl font-bold">{money.format(operations.quotePipeline)}</p><p className="mt-1 text-xs text-slate-500">{operations.openQuotes.length} open quotes</p></Card>
+          <Card><ReceiptText className="size-5 text-red-300" /><p className="mt-3 text-sm text-slate-400">Overdue</p><p className="mt-2 text-2xl font-bold">{money.format(operations.overdueValue)}</p><p className="mt-1 text-xs text-slate-500">{today.overdueInvoices.length} invoices</p></Card>
+          <Card><ClipboardCheck className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Survey queue</p><p className="mt-2 text-2xl font-bold">{operations.incompleteSurveys.length}</p><p className="mt-1 text-xs text-slate-500">draft or in progress</p></Card>
+        </div>
+      </section>
 
-  return <div className="space-y-6">
-    <PageHeader
-      eyebrow="JR AI"
-      title="Operations assistant"
-      description="A fast, local-first assistant that turns your existing JR OS records into practical next actions without background polling or extra services."
-      action={<Link href="/business" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Business health <ArrowRight className="size-4" /></Link>}
-    />
+      <TodaysAssistant snapshot={today} customers={customers.items} onAddReminder={addReminder} onToggleReminder={toggleReminder} />
 
-    <section className="grid gap-4 lg:grid-cols-[1fr_3fr]">
-      <Card className="border-cyan-400/30">
-        <div className="flex items-center justify-between"><Brain className="size-9 text-cyan-300" /><Sparkles className="size-5 text-cyan-400" /></div>
-        <p className="mt-5 text-sm text-slate-400">Operational readiness</p>
-        <p className={`mt-2 text-5xl font-black ${scoreTone}`}>{assistant.readinessScore}</p>
-        <p className="mt-1 text-sm text-slate-500">out of 100</p>
-        <p className="mt-4 text-sm text-slate-400">This score reflects incomplete records, overdue debt and unfinished workflow steps. It is a workflow guide rather than financial advice.</p>
-      </Card>
+      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
+        <SmartRecommendations recommendations={recommendations} />
+        <Card>
+          <div className="flex items-center justify-between gap-3">
+            <div><p className="text-xs font-semibold uppercase tracking-wider text-fuchsia-300">Business Coach</p><h2 className="mt-1 text-xl font-bold">Current business signals</h2></div>
+            <Link href="/ai/business-coach" className="text-cyan-300"><ArrowRight className="size-5" /></Link>
+          </div>
+          <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl bg-slate-950 p-4"><TrendingUp className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Monthly revenue</p><p className="mt-1 text-xl font-bold">{money.format(coach.monthlyRevenue)}</p></div>
+            <div className="rounded-xl bg-slate-950 p-4"><Percent className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Quote conversion</p><p className="mt-1 text-xl font-bold">{coach.quoteConversion.toFixed(1)}%</p></div>
+            <div className="rounded-xl bg-slate-950 p-4"><PoundSterling className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Unpaid value</p><p className="mt-1 text-xl font-bold">{money.format(coach.unpaidInvoiceValue)}</p></div>
+            <div className="rounded-xl bg-slate-950 p-4"><Brain className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Average net margin</p><p className={`mt-1 text-xl font-bold ${coach.averageNetMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}`}>{coach.averageNetMargin.toFixed(1)}%</p></div>
+          </div>
+        </Card>
+      </section>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {assistant.metrics.map(({ label, value, detail, icon: Icon }) => <Card key={label}><Icon className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">{label}</p><p className="mt-2 text-2xl font-bold">{value}</p><p className="mt-1 text-xs text-slate-500">{detail}</p></Card>)}
-      </div>
-    </section>
+      <AiActionCentre
+        acceptedQuotes={acceptedQuotes}
+        completedJobs={completedJobs}
+        orderDocuments={orderDocuments}
+        customers={customers.items}
+        profiles={profiles.items}
+        onConvertQuote={convertQuote}
+        onGenerateInvoice={generateInvoice}
+        onOrderMaterials={orderMaterials}
+        onContactCustomer={contactCustomer}
+      />
 
-    <section className="grid gap-6 xl:grid-cols-[1.35fr_1fr]">
       <Card>
-        <div className="flex items-start gap-3"><AlertTriangle className="mt-0.5 size-6 text-amber-300" /><div><h2 className="text-xl font-bold">Recommended next actions</h2><p className="text-sm text-slate-500">Prioritised from the records already saved in JR OS.</p></div></div>
-        <div className="mt-5 space-y-3">
-          {assistant.actions.map((item) => <Link key={item.id} href={item.href} className="block rounded-xl border border-slate-800 bg-slate-950/60 p-4 hover:border-slate-700">
-            <div className="flex items-start justify-between gap-4"><div><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${item.priority === "High" ? "bg-red-500/10 text-red-300" : item.priority === "Medium" ? "bg-amber-500/10 text-amber-300" : "bg-emerald-500/10 text-emerald-300"}`}>{item.priority}</span><h3 className="font-semibold">{item.title}</h3></div><p className="mt-2 text-sm text-slate-400">{item.detail}</p><p className="mt-3 text-xs font-semibold text-cyan-300">{item.actionLabel}</p></div><ArrowRight className="mt-1 size-4 shrink-0 text-slate-500" /></div>
-          </Link>)}
+        <div className="grid gap-4 md:grid-cols-3">
+          <div><CheckCircle2 className="size-5 text-emerald-300" /><h2 className="mt-3 font-semibold">Local-first intelligence</h2><p className="mt-1 text-sm text-slate-500">Recommendations update when JR OS records change and use the existing backup-compatible storage pattern.</p></div>
+          <div><CheckCircle2 className="size-5 text-emerald-300" /><h2 className="mt-3 font-semibold">Human approval stays required</h2><p className="mt-1 text-sm text-slate-500">Draft pricing, quantities, certification and supplier orders must be reviewed before use.</p></div>
+          <div><CheckCircle2 className="size-5 text-emerald-300" /><h2 className="mt-3 font-semibold">Existing AI tools preserved</h2><div className="mt-2 flex flex-wrap gap-2 text-sm"><Link className="text-cyan-300" href="/ai/daily-briefing">Daily briefing</Link><Link className="text-cyan-300" href="/ai/quote-review">Quote review</Link><Link className="text-cyan-300" href="/ai/job-review">Job review</Link></div></div>
         </div>
       </Card>
-
-      <Card>
-        <div className="flex items-start gap-3"><Lightbulb className="mt-0.5 size-6 text-cyan-300" /><div><h2 className="text-xl font-bold">How JR AI works now</h2><p className="text-sm text-slate-500">Useful immediately, with cloud AI still optional later.</p></div></div>
-        <div className="mt-5 space-y-3 text-sm">
-          <div className="rounded-xl bg-slate-950 p-4"><CheckCircle2 className="size-5 text-emerald-300" /><p className="mt-2 font-semibold">Local and fast</p><p className="mt-1 text-slate-400">Calculations run only when your stored records change.</p></div>
-          <div className="rounded-xl bg-slate-950 p-4"><CheckCircle2 className="size-5 text-emerald-300" /><p className="mt-2 font-semibold">No automatic technical decisions</p><p className="mt-1 text-slate-400">Survey and certificate suggestions still require your review and approval.</p></div>
-          <div className="rounded-xl bg-slate-950 p-4"><CheckCircle2 className="size-5 text-emerald-300" /><p className="mt-2 font-semibold">Ready for future intelligence</p><p className="mt-1 text-slate-400">Cloud memory, voice interpretation and photo analysis can later build on this workflow.</p></div>
-        </div>
-      </Card>
-    </section>
-  </div>;
+    </main>
+  );
 }
