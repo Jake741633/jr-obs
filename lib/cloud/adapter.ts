@@ -51,13 +51,13 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       writeLocal(storageKey, local);
       if (effectiveCloudMode() === "local") return;
       const version = expectedVersion ?? readVersions(storageKey)[record.id];
-      queueChange({ table, operation: "upsert", organisationId, sourceId: record.id, payload: record, expectedVersion: version, collectionKey, userId });
+      queueChange({ table, storageKey, operation: "upsert", organisationId, sourceId: record.id, payload: record, expectedVersion: version, collectionKey, userId });
     },
     remove(sourceId: string, expectedVersion?: number) {
       writeLocal(storageKey, readLocal<T>(storageKey).filter((record) => record.id !== sourceId));
       if (effectiveCloudMode() === "local") return;
       const version = expectedVersion ?? readVersions(storageKey)[sourceId];
-      queueChange({ table, operation: "delete", organisationId, sourceId, expectedVersion: version, collectionKey, userId });
+      queueChange({ table, storageKey, operation: "delete", organisationId, sourceId, expectedVersion: version, collectionKey, userId });
     },
   };
 }
