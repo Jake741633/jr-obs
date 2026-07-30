@@ -1,6 +1,6 @@
-import type { JobStatus, PricingDocumentStatus } from "../../lib/models";
+import type { InvoiceStatus, JobStatus, PricingDocumentStatus } from "../../lib/models";
 
-type SupportedStatus = JobStatus | PricingDocumentStatus;
+type SupportedStatus = JobStatus | PricingDocumentStatus | InvoiceStatus | "Ready to invoice";
 
 const styles: Record<SupportedStatus, string> = {
   Lead: "bg-slate-800 text-slate-300",
@@ -14,6 +14,11 @@ const styles: Record<SupportedStatus, string> = {
   Accepted: "bg-emerald-500/15 text-emerald-300",
   Declined: "bg-rose-500/15 text-rose-300",
   Expired: "bg-amber-500/15 text-amber-300",
+  "Part paid": "bg-amber-500/15 text-amber-300",
+  Paid: "bg-emerald-500/15 text-emerald-300",
+  Overdue: "bg-rose-500/15 text-rose-300",
+  Cancelled: "bg-slate-800 text-slate-400",
+  "Ready to invoice": "bg-cyan-500/15 text-cyan-300",
 };
 
 export function StatusBadge({ status }: { status: SupportedStatus }) {
