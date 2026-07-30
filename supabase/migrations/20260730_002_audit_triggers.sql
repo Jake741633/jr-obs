@@ -6,23 +6,35 @@ as $$
 declare
   action_name text;
   source_value text;
+  organisation_value uuid;
+  before_value jsonb;
+  after_value jsonb;
 begin
-  source_value := coalesce(new.source_id, old.source_id);
-
   if tg_op = 'DELETE' then
+    source_value := old.source_id;
+    organisation_value := old.organisation_id;
+    before_value := to_jsonb(old);
+    after_value := null;
     action_name := 'record_deleted';
-  elsif tg_table_name = 'payments' then
-    action_name := 'payment_changed';
-  elsif tg_table_name = 'pricing_documents'
-    and coalesce(old.payload->>'status','') <> 'Accepted'
-    and new.payload->>'status' = 'Accepted' then
-    action_name := 'quote_approved';
-  elsif tg_table_name = 'certificates'
-    and coalesce(old.payload->>'status','') <> 'Issued'
-    and new.payload->>'status' = 'Issued' then
-    action_name := 'certificate_issued';
   else
-    return coalesce(new,old);
+    source_value := new.source_id;
+    organisation_value := new.organisation_id;
+    before_value := case when tg_op='INSERT' then null else to_jsonb(old) end;
+    after_value := to_jsonb(new);
+
+    if tg_table_name = 'payments' then
+      action_name := 'payment_changed';
+    elsif tg_table_name = 'pricing_documents'
+      and coalesce(old.payload->>'status','') <> 'Accepted'
+      and new.payload->>'status' = 'Accepted' then
+      action_name := 'quote_approved';
+    elsif tg_table_name = 'certificates'
+      and coalesce(old.payload->>'status','') <> 'Issued'
+      and new.payload->>'status' = 'Issued' then
+      action_name := 'certificate_issued';
+    else
+      return new;
+    end if;
   end if;
 
   insert into public.audit_log (
@@ -34,16 +46,17 @@ begin
     before_data,
     after_data
   ) values (
-    coalesce(new.organisation_id,old.organisation_id),
+    organisation_value,
     auth.uid(),
     action_name,
     tg_table_name,
     source_value,
-    case when tg_op='INSERT' then null else to_jsonb(old) end,
-    case when tg_op='DELETE' then null else to_jsonb(new) end
+    before_value,
+    after_value
   );
 
-  return coalesce(new,old);
+  if tg_op='DELETE' then return old; end if;
+  return new;
 end;
 $$;
 
@@ -56,11 +69,13 @@ begin
   if tg_op='UPDATE' and (old.role is distinct from new.role or old.active is distinct from new.active or old.customer_source_id is distinct from new.customer_source_id) then
     insert into public.audit_log (organisation_id,actor_user_id,action,entity_table,source_id,before_data,after_data)
     values (new.organisation_id,auth.uid(),'user_permission_changed','profiles',new.id::text,to_jsonb(old),to_jsonb(new));
+    return new;
   elsif tg_op='DELETE' then
     insert into public.audit_log (organisation_id,actor_user_id,action,entity_table,source_id,before_data)
     values (old.organisation_id,auth.uid(),'record_deleted','profiles',old.id::text,to_jsonb(old));
+    return old;
   end if;
-  return coalesce(new,old);
+  return new;
 end;
 $$;
 
