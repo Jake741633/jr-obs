@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   ArrowRight,
   Banknote,
+  BrainCircuit,
   BriefcaseBusiness,
   CheckCircle2,
   CircleGauge,
@@ -149,7 +150,7 @@ export default function BusinessPage() {
   const healthTone = intelligence.overallScore >= 80 ? "text-emerald-300" : intelligence.overallScore >= 60 ? "text-amber-300" : "text-red-300";
 
   return <div className="space-y-6">
-    <PageHeader eyebrow="Business administration" title="Business Setup & Company Management" description="Control company details, customer document settings and the live health of JR Electrical Services from one centre." action={<Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Command Centre <ArrowRight className="size-4" /></Link>} />
+    <PageHeader eyebrow="Business administration" title="Business Setup & Company Management" description="Control company details, customer document settings and the live health of JR Electrical Services from one centre." action={<div className="flex flex-wrap gap-2"><Link href="/ai/business-coach" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/10 px-4 text-sm font-semibold text-fuchsia-200 hover:bg-fuchsia-500/20"><BrainCircuit className="size-4" />AI Business Coach</Link><Link href="/" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Command Centre <ArrowRight className="size-4" /></Link></div>} />
 
     <div className="grid gap-2 rounded-2xl border border-slate-800 bg-slate-900/70 p-2 sm:grid-cols-2">
       {(["Setup", "Health"] as const).map((item) => <button key={item} type="button" onClick={() => setView(item)} className={`min-h-11 rounded-xl px-4 text-sm font-semibold transition ${view === item ? "bg-cyan-400 text-slate-950" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}>{item === "Setup" ? "Company management" : "Business health"}</button>)}

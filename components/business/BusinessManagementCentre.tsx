@@ -347,7 +347,10 @@ export function BusinessManagementCentre() {
           <InputField label="Material mark-up (%)" type="number" min="0" step="0.1" value={quoteSettings.materialMarkupPercent} onChange={(event) => updateQuoteSettings({ materialMarkupPercent: Number(event.target.value || 0) })} />
           <InputField label="Contingency (%)" type="number" min="0" step="0.1" value={quoteSettings.contingencyPercent} onChange={(event) => updateQuoteSettings({ contingencyPercent: Number(event.target.value || 0) })} />
         </div>
-        <Link href="/labour-costs" className="mt-5 inline-flex min-h-11 items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Edit all labour rates & overheads</Link>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Link href="/labour-costs" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Edit all labour rates & overheads</Link>
+          <Link href="/ai/pricing" className="inline-flex min-h-11 items-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 text-sm font-semibold text-emerald-200 hover:bg-emerald-500/20">Open AI Pricing Assistant</Link>
+        </div>
       </Card>
 
       <Card>
