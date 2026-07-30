@@ -1,6 +1,7 @@
 import type { BusinessOverhead, LabourCostSettings, PricingLineItem, QuotePricingSettings } from "./models";
 
 export const defaultQuotePricingSettings: QuotePricingSettings = {
+  defaultLabourRateId: "",
   contingencyPercent: 0,
   materialMarkupPercent: 20,
   travelCost: 0,
