@@ -38,6 +38,7 @@ import {
   createPurchaseListFromPricingDocument,
   pricingDocumentTotal,
 } from "../../lib/workflow";
+import { useAiLearningMemory } from "../../lib/useAiLearningMemory";
 import type {
   AiReminder,
   AiReminderPriority,
@@ -93,10 +94,20 @@ export default function AiPage() {
   const [message, setMessage] = useState("");
 
   const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
+  const learning = useAiLearningMemory({
+    jobs: jobs.items,
+    documents: pricing.items,
+    invoices: invoices.items,
+    customers: customers.items,
+    builders: builders.items,
+    profiles: profiles.items,
+    interactions: interactions.items,
+    materials: materials.items,
+  }, labourSettings);
   const ready = [
     jobs, customers, builders, pricing, invoices, planner, profiles, interactions, reminders, certificates,
     surveys, timeline, jobDocuments, materials, purchaseLists, labourSettingsStore, bankStore, paymentTermsStore,
-  ].every((store) => store.isReady);
+  ].every((store) => store.isReady) && learning.isReady;
 
   const recommendations = useMemo(
     () => buildSmartRecommendations({
