@@ -27,6 +27,11 @@ export interface FleetVehicle { id: EntityId; registration: string; make: string
 export type ToolStatus = "Available" | "Assigned" | "In repair" | "Retired";
 export interface ToolAsset { id: EntityId; name: string; category: string; manufacturer: string; model: string; serialNumber: string; assetTag: string; status: ToolStatus; assignedTeamMemberId?: EntityId; assignedVehicleId?: EntityId; purchaseDate: string; purchaseCost: number; warrantyUntil: string; calibrationDue: string; notes: string; createdAt: string; updatedAt: string; }
 
+export type ExpenseCategory = "Materials" | "Fuel" | "Vehicle" | "Tools" | "Insurance" | "Software" | "Training" | "Subcontractor" | "Travel" | "Office" | "Other";
+export type ExpensePaymentMethod = "Business card" | "Bank transfer" | "Cash" | "Personal card" | "Direct debit" | "Other";
+export type ExpenseStatus = "Draft" | "Ready" | "Reconciled";
+export interface BusinessExpense { id: EntityId; expenseDate: string; supplier: string; description: string; category: ExpenseCategory; paymentMethod: ExpensePaymentMethod; status: ExpenseStatus; jobId?: EntityId; netAmount: number; vatAmount: number; grossAmount: number; receiptDataUrl?: string; receiptFileName?: string; receiptUrl?: string; notes: string; createdAt: string; updatedAt: string; }
+
 export type PricingDocumentType = "Quote" | "Estimate";
 export type PricingDocumentStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Expired";
 export interface PricingLineItem { id: EntityId; description: string; category: "Labour" | "Materials" | "Other"; quantity: number; unitPrice: number; unitCost?: number; materialId?: EntityId; supplier?: string; stockCode?: string; }
@@ -75,4 +80,4 @@ export interface ElectricalCertificate { id: EntityId; number: string; type: Cer
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
 export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }
 
-export type EntityBase = Customer | Builder | Job | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | Job | JobTimelineEntry | SiteDiaryEntry | JobVariation | TeamMember | TimesheetEntry | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
