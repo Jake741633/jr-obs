@@ -9,6 +9,6 @@ export const primaryNavigation = [
 ];
 
 export const secondaryNavigation = [
-  ["Quotes", "/quotes"], ["Estimates", "/estimates"], ["Invoices", "/invoices"], ["Job Finance", "/job-finance"], ["Materials", "/materials"], ["Purchase Lists", "/purchases"],
+  ["Quotes", "/quotes"], ["Estimates", "/estimates"], ["Invoices", "/invoices"], ["Job Finance", "/job-finance"], ["Materials", "/materials"], ["Stock Control", "/stock"], ["Purchase Lists", "/purchases"],
   ["Site Management", "/site-management"], ["Resource Planner", "/planner"], ["Team & Timesheets", "/team"], ["Fleet & Assets", "/assets"], ["Surveys", "/surveys"], ["Certificates", "/certificates"], ["Job Packs", "/job-packs"], ["JR AI", "/ai"], ["Business", "/business"], ["Cloud & Account", "/cloud"],
 ] as const;
