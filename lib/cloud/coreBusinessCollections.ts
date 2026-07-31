@@ -3,7 +3,7 @@
 import type { ComplianceCertificate } from "../complianceCertificates";
 import type { PortalApprovalRecord, PortalRequest } from "../customerPortal";
 import type { ElectricalTestingRecord } from "../electricalTesting";
-import type { BusinessExpense, Customer, Invoice, Job, JobDocument, JobPack, Material, PricingDocument, PurchaseList, RamsDocument, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
+import type { AiLearningEvidence, BusinessExpense, Customer, Invoice, Job, JobDocument, JobPack, Material, PricingDocument, PurchaseList, RamsDocument, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -32,6 +32,7 @@ export const coreBusinessStorageKeys = {
   surveys: "jr-os-surveys",
   rams: "jr-os-rams",
   jobPacks: "jr-os-job-packs",
+  aiRecommendationEvidence: "jr-os-ai-recommendation-evidence",
 } as const;
 
 export interface CloudJobDocument extends JobDocument {
@@ -63,3 +64,4 @@ export function useExpensesCollection() { return useCloudLocalCollection<Busines
 export function useSurveysCollection() { return useCloudLocalCollection<SiteSurvey>(coreBusinessStorageKeys.surveys); }
 export function useRamsCollection() { return useCloudLocalCollection<RamsDocument>(coreBusinessStorageKeys.rams); }
 export function useJobPacksCollection() { return useCloudLocalCollection<JobPack>(coreBusinessStorageKeys.jobPacks); }
+export function useAiRecommendationEvidenceCollection() { return useCloudLocalCollection<AiLearningEvidence>(coreBusinessStorageKeys.aiRecommendationEvidence); }
