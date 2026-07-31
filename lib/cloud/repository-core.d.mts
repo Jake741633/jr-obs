@@ -1,5 +1,5 @@
 export interface TenantQueryInput { organisationId: string; sourceId?: string; collectionKey?: string; includeDeleted?: boolean; }
-export interface QueueIdentity { table: string; sourceId: string; collectionKey?: string; }
+export interface QueueIdentity { organisationId: string; table: string; sourceId: string; collectionKey?: string; }
 export function collectionFilter(collectionKey?: string): string;
 export function tenantRecordQuery(input: Required<Pick<TenantQueryInput, "organisationId" | "sourceId">> & Pick<TenantQueryInput, "collectionKey" | "includeDeleted">): string;
 export function tenantListQuery(input: Pick<TenantQueryInput, "organisationId" | "collectionKey">): string;
