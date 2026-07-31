@@ -9,16 +9,17 @@ import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { useJobsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { Builder, Customer, Job, JobStatus } from "../../lib/models";
 
 const statuses: JobStatus[] = ["Lead", "Quoted", "Scheduled", "In progress", "Complete", "On hold"];
 const blank = { title: "", customerId: "", builderId: "", siteAddress: "", status: "Lead" as JobStatus, startDate: "", value: "", notes: "" };
 
 export default function JobsPage() {
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const builders = useLocalStorageCollection<Builder>("jr-os-builders");
+  const jobs = useJobsCollection();
+  const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const builders = useCloudLocalCollection<Builder>("jr-os-builders");
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
