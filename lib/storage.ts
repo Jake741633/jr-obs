@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createCollectionRepository, type RepositoryRecord } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
 import { useCloudIdentity } from "./cloud/useCloudIdentity";
@@ -31,43 +31,50 @@ export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []
   const previousRef = useRef<T[]>(initialValue);
   const suppressSyncRef = useRef(true);
   const { identity, isReady: identityReady, mode } = useCloudIdentity();
-  const target = collectionCloudTarget(key);
-  const targetTable = target?.table;
-  const targetCollectionKey = target?.collectionKey;
+  const target = useMemo(() => collectionCloudTarget(key), [key]);
+  const organisationId = identity?.organisationId;
+  const userId = identity?.userId;
 
   useEffect(() => {
     if (!identityReady) return;
     let active = true;
     suppressSyncRef.current = true;
-    setIsReady(false);
 
-    void (async () => {
+    async function loadCollection() {
       const local = readLocal(key, initialValueRef.current);
       let loaded = local;
-      if (targetTable && identity) {
+
+      if (target && organisationId && userId) {
         const repository = createCollectionRepository<RepositoryRecord>({
           storageKey: key,
-          table: targetTable,
-          collectionKey: targetCollectionKey,
-          organisationId: identity.organisationId,
-          userId: identity.userId,
+          table: target.table,
+          collectionKey: target.collectionKey,
+          organisationId,
+          userId,
         });
         loaded = await repository.list() as T[];
       }
+
       if (!active) return;
       previousRef.current = loaded;
       setItems(loaded);
       setIsReady(true);
-      queueMicrotask(() => { suppressSyncRef.current = false; });
-    })();
+      queueMicrotask(() => {
+        suppressSyncRef.current = false;
+      });
+    }
 
-    return () => { active = false; };
-  }, [identity, identityReady, key, mode, targetCollectionKey, targetTable]);
+    void loadCollection();
+    return () => {
+      active = false;
+    };
+  }, [identityReady, key, mode, organisationId, target, userId]);
 
   useEffect(() => {
     if (!isReady) return;
     window.localStorage.setItem(key, JSON.stringify(items));
-    if (suppressSyncRef.current || !targetTable || !identity || mode === "local") {
+
+    if (suppressSyncRef.current || !target || !organisationId || !userId || mode === "local") {
       previousRef.current = items;
       return;
     }
@@ -77,10 +84,10 @@ export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []
     const nextById = new Map(items.map((item) => [recordId(item), item]).filter(([id]) => Boolean(id)) as [string, T][]);
     const repository = createCollectionRepository<RepositoryRecord>({
       storageKey: key,
-      table: targetTable,
-      collectionKey: targetCollectionKey,
-      organisationId: identity.organisationId,
-      userId: identity.userId,
+      table: target.table,
+      collectionKey: target.collectionKey,
+      organisationId,
+      userId,
     });
 
     for (const [id, item] of nextById) {
@@ -91,7 +98,7 @@ export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []
       if (!nextById.has(id)) repository.remove(id);
     }
     previousRef.current = items;
-  }, [identity, isReady, items, key, mode, targetCollectionKey, targetTable]);
+  }, [isReady, items, key, mode, organisationId, target, userId]);
 
   const remove = useCallback((predicate: (item: T) => boolean) => {
     setItems((current) => current.filter((item) => !predicate(item)));
