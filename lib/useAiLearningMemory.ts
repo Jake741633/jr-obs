@@ -19,7 +19,11 @@ export function useAiLearningMemory(
     setItems,
     isReady,
   } = useLocalStorageCollection<AiLearningMemory>(AI_LEARNING_MEMORY_KEY);
-  const evidenceStore = useAiRecommendationEvidenceCollection();
+  const {
+    items: evidenceItems,
+    setItems: setEvidenceItems,
+    isReady: evidenceReady,
+  } = useAiRecommendationEvidenceCollection();
   const {
     jobs,
     documents,
@@ -59,19 +63,20 @@ export function useAiLearningMemory(
     [liveMemory.influentialRecords],
   );
   const storedEvidenceSignature = useMemo(
-    () => JSON.stringify(evidenceStore.items.map((item) => [item.id, item.recordId, item.occurredAt, item.relevance])),
-    [evidenceStore.items],
+    () => JSON.stringify(evidenceItems.map((item) => [item.id, item.recordId, item.occurredAt, item.relevance])),
+    [evidenceItems],
   );
 
   useEffect(() => {
-    if (!isReady || !evidenceStore.isReady) return;
+    if (!isReady || !evidenceReady) return;
     if (storedMemory?.sourceSignature !== liveMemory.sourceSignature) setItems([liveMemory]);
-    if (storedEvidenceSignature !== liveEvidenceSignature) evidenceStore.setItems(liveMemory.influentialRecords);
+    if (storedEvidenceSignature !== liveEvidenceSignature) setEvidenceItems(liveMemory.influentialRecords);
   }, [
-    evidenceStore,
+    evidenceReady,
     isReady,
     liveEvidenceSignature,
     liveMemory,
+    setEvidenceItems,
     setItems,
     storedEvidenceSignature,
     storedMemory?.sourceSignature,
@@ -79,6 +84,6 @@ export function useAiLearningMemory(
 
   return {
     memory: storedMemory?.sourceSignature === liveMemory.sourceSignature ? storedMemory : liveMemory,
-    isReady: isReady && evidenceStore.isReady,
+    isReady: isReady && evidenceReady,
   };
 }
