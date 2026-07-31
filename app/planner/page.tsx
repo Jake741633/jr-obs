@@ -7,8 +7,9 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, plannerStorageKey, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
+import { useCustomersCollection, useJobsCollection, usePlannerCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
+import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
 import type { Customer, FleetVehicle, Job, PlannerEntryType, TeamMember } from "../../lib/models";
 
 const types: PlannerEntryType[] = ["Job", "Survey", "Delivery", "Training", "Holiday", "Office", "Other"];
@@ -24,11 +25,11 @@ function shiftDate(value: string, amount: number, view: DiaryView) { const date 
 function mapsUrl(address: string) { return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`; }
 
 export default function PlannerPage() {
-  const entries = useLocalStorageCollection<ScheduledPlannerEntry>(plannerStorageKey);
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const team = useLocalStorageCollection<TeamMember>("jr-os-team");
-  const vehicles = useLocalStorageCollection<FleetVehicle>("jr-os-fleet");
+  const entries = usePlannerCollection();
+  const jobs = useJobsCollection();
+  const customers = useCustomersCollection();
+  const team = useCloudLocalCollection<TeamMember>("jr-os-team");
+  const vehicles = useCloudLocalCollection<FleetVehicle>("jr-os-fleet");
   const [view, setView] = useState<DiaryView>("week");
   const [anchor, setAnchor] = useState(today());
   const [form, setForm] = useState(blankForm);
@@ -51,7 +52,7 @@ export default function PlannerPage() {
     const groupId = form.recurrence === "None" ? undefined : makeId("recurrence");
     const dates = recurringDates(form.date, form.recurrence, Number(form.recurrenceCount));
     const durationDays = Math.max(0, Math.round((new Date(`${form.endDate}T12:00:00`).getTime() - new Date(`${form.date}T12:00:00`).getTime()) / 86400000));
-    const records: ScheduledPlannerEntry[] = dates.map((date, index) => {
+    const records: ScheduledPlannerEntry[] = dates.map((date) => {
       const end = new Date(`${date}T12:00:00`); end.setDate(end.getDate() + durationDays);
       return { id: makeId("planner"), title: form.title.trim(), type: form.type, date, endDate: end.toISOString().slice(0, 10), startTime: form.startTime, endTime: form.endTime, estimatedDurationMinutes: Math.max(0, Number(form.estimatedDurationMinutes || 0)), jobId: form.jobId || undefined, teamMemberIds: form.teamMemberIds, vehicleId: form.vehicleId || undefined, visitPhase: form.visitPhase, recurrence: form.recurrence, recurrenceCount: dates.length, recurrenceGroupId: groupId, location: form.location.trim(), notes: form.notes.trim(), status: form.status, createdAt: now, updatedAt: now };
     });
