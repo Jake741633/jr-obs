@@ -10,6 +10,7 @@ export interface CloudSession {
 }
 
 type StoredSupabaseSession = { access_token?: string; refresh_token?: string; expires_in?: number; expires_at?: number; user?: { id: string; email?: string } };
+type SignedStorageResponse = { signedURL?: string; signedUrl?: string; url?: string; token?: string };
 const SESSION_KEY = "jr-os-supabase-session";
 
 function requestHeaders(session?: CloudSession, extra?: HeadersInit) {
@@ -37,6 +38,16 @@ function normalizeSession(value: StoredSupabaseSession | null): CloudSession | n
     expiresAt: value.expires_at ? value.expires_at * 1000 : Date.now() + (value.expires_in || 3600) * 1000,
     user: value.user,
   };
+}
+
+function encodedObjectPath(path: string) {
+  return path.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+}
+
+function normalizeSignedStorageResponse(value: SignedStorageResponse) {
+  const signedURL = value.signedURL || value.signedUrl || value.url;
+  if (!signedURL) throw new Error("Supabase did not return a signed Storage URL.");
+  return { signedURL, token: value.token || "" };
 }
 
 export const cloudSession = {
@@ -70,5 +81,11 @@ export async function cloudInsert<T extends object>(table: string, records: T[])
 export async function cloudUpsert<T extends object>(table: string, records: T[], conflictColumns = "organisation_id,source_id") { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}?on_conflict=${encodeURIComponent(conflictColumns)}`, { method: "POST", body: JSON.stringify(records), headers: { Prefer: "resolution=merge-duplicates,return=representation" } }, cloudSession.load() || undefined); }
 export async function cloudPatch<T extends object>(table: string, query: string, patch: T) { return request<void>(`/rest/v1/${encodeURIComponent(table)}?${query}`, { method: "PATCH", body: JSON.stringify(patch), headers: { Prefer: "return=minimal" } }, cloudSession.load() || undefined); }
 export async function cloudDelete(table: string, sourceId: string, extraFilters = "") { return request<void>(`/rest/v1/${encodeURIComponent(table)}?source_id=eq.${encodeURIComponent(sourceId)}${extraFilters}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }, cloudSession.load() || undefined); }
-export async function createSignedUpload(path: string, expiresIn = 600) { return request<{ signedURL: string; token: string }>(`/storage/v1/object/upload/sign/${cloudStorageBucket}/${encodeURIComponent(path)}`, { method: "POST", body: JSON.stringify({ expiresIn }) }, cloudSession.load() || undefined); }
-export async function createSignedDownload(path: string, expiresIn = 300) { return request<{ signedURL: string }>(`/storage/v1/object/sign/${cloudStorageBucket}/${encodeURIComponent(path)}`, { method: "POST", body: JSON.stringify({ expiresIn }) }, cloudSession.load() || undefined); }
+export async function createSignedUpload(path: string, expiresIn = 600) {
+  const result = await request<SignedStorageResponse>(`/storage/v1/object/upload/sign/${cloudStorageBucket}/${encodedObjectPath(path)}`, { method: "POST", body: JSON.stringify({ expiresIn }) }, cloudSession.load() || undefined);
+  return normalizeSignedStorageResponse(result);
+}
+export async function createSignedDownload(path: string, expiresIn = 300) {
+  const result = await request<SignedStorageResponse>(`/storage/v1/object/sign/${cloudStorageBucket}/${encodedObjectPath(path)}`, { method: "POST", body: JSON.stringify({ expiresIn }) }, cloudSession.load() || undefined);
+  return normalizeSignedStorageResponse(result);
+}
