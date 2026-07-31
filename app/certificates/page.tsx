@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { businessStorageKeys, defaultCertificateDefaults } from "../../lib/businessSettings";
 import { suggestCertificateObservations } from "../../lib/certificate-code-suggestions";
+import { useCertificatesCollection } from "../../lib/cloud/coreBusinessCollections";
 import {
   certificatePdfHtml,
   complianceStatuses,
@@ -18,7 +19,7 @@ import {
   type SupportedComplianceCertificateType,
 } from "../../lib/complianceCertificates";
 import type { ElectricalTestingRecord } from "../../lib/electricalTesting";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { CertificateDefaults, CertificateObservation, Customer, Invoice, Job, ObservationCode } from "../../lib/models";
 
 const observationCodes: ObservationCode[] = ["C1", "C2", "C3", "FI", "No code"];
@@ -26,12 +27,12 @@ const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function CertificatesPage() {
-  const certificates = useLocalStorageCollection<ComplianceCertificate>("jr-os-certificates");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
-  const testing = useLocalStorageCollection<ElectricalTestingRecord>("jr-os-electrical-testing");
-  const defaultsStore = useLocalStorageCollection<CertificateDefaults>(businessStorageKeys.certificates, [defaultCertificateDefaults]);
+  const certificates = useCertificatesCollection();
+  const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
+  const invoices = useCloudLocalCollection<Invoice>("jr-os-invoices");
+  const testing = useCloudLocalCollection<ElectricalTestingRecord>("jr-os-electrical-testing");
+  const defaultsStore = useCloudLocalCollection<CertificateDefaults>(businessStorageKeys.certificates, [defaultCertificateDefaults]);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<ComplianceCertificate | null>(null);
