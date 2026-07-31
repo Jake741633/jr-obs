@@ -3,7 +3,7 @@
 import type { ComplianceCertificate } from "../complianceCertificates";
 import type { PortalApprovalRecord, PortalRequest } from "../customerPortal";
 import type { ElectricalTestingRecord } from "../electricalTesting";
-import type { BusinessExpense, Customer, Invoice, Job, JobDocument, Material, PricingDocument, PurchaseList, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
+import type { BusinessExpense, Customer, Invoice, Job, JobDocument, Material, PricingDocument, PurchaseList, RamsDocument, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -30,6 +30,7 @@ export const coreBusinessStorageKeys = {
   portalRequests: "jr-os-portal-requests",
   expenses: "jr-os-expenses",
   surveys: "jr-os-surveys",
+  rams: "jr-os-rams",
 } as const;
 
 export interface CloudJobDocument extends JobDocument {
@@ -59,3 +60,4 @@ export function usePortalApprovalsCollection() { return useCloudLocalCollection<
 export function usePortalRequestsCollection() { return useCloudLocalCollection<PortalRequest>(coreBusinessStorageKeys.portalRequests); }
 export function useExpensesCollection() { return useCloudLocalCollection<BusinessExpense>(coreBusinessStorageKeys.expenses); }
 export function useSurveysCollection() { return useCloudLocalCollection<SiteSurvey>(coreBusinessStorageKeys.surveys); }
+export function useRamsCollection() { return useCloudLocalCollection<RamsDocument>(coreBusinessStorageKeys.rams); }
