@@ -18,7 +18,8 @@ import {
   defaultVatSettings,
   paymentTermsText,
 } from "../../lib/businessSettings";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { useInvoicesCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { nextInvoiceNumber } from "../../lib/workflow";
 import type { Builder, BusinessBankDetails, BusinessProfile, Customer, DocumentBrandingSettings, Invoice, InvoiceStatus, Job, JobTimelineEntry, PaymentTermsTemplate, PricingDocument, PricingLineItem, VatSettings } from "../../lib/models";
 
@@ -34,17 +35,17 @@ function addDays(date: string, days: number) {
 }
 
 export default function InvoicesPage() {
-  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const builders = useLocalStorageCollection<Builder>("jr-os-builders");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
-  const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
-  const profileStore = useLocalStorageCollection<BusinessProfile>(businessStorageKeys.profile, [defaultBusinessProfile]);
-  const vatStore = useLocalStorageCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
-  const bankStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
-  const brandingStore = useLocalStorageCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
-  const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
+  const invoices = useInvoicesCollection();
+  const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const builders = useCloudLocalCollection<Builder>("jr-os-builders");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
+  const quotes = useCloudLocalCollection<PricingDocument>("jr-os-pricing-documents");
+  const timeline = useCloudLocalCollection<JobTimelineEntry>("jr-os-job-timeline");
+  const profileStore = useCloudLocalCollection<BusinessProfile>(businessStorageKeys.profile, [defaultBusinessProfile]);
+  const vatStore = useCloudLocalCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
+  const bankStore = useCloudLocalCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
+  const brandingStore = useCloudLocalCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
+  const paymentTermsStore = useCloudLocalCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [items, setItems] = useState<PricingLineItem[]>([]);
