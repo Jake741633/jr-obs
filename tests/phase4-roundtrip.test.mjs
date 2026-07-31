@@ -59,3 +59,29 @@ test("AI recommendation evidence retains source links, confidence inputs and ten
   assert.match(orgB, /organisation_id=eq\.org-b/);
   assert.notEqual(orgA, orgB);
 });
+
+test("AI learning memory retains confidence, job patterns, material patterns and evidence links", () => {
+  const memory = {
+    id: "ai-learning-memory",
+    schemaVersion: 1,
+    sourceSignature: "v1-org-a-signature",
+    learnedAt: "2026-07-31T13:00:00Z",
+    completedJobs: 4,
+    acceptedQuotes: 5,
+    paidInvoices: 3,
+    customerHistories: 6,
+    builderHistories: 2,
+    pricingSignals: 7,
+    materialSignals: 8,
+    confidence: { overall: 78, labour: 75, materials: 80, pricing: 79, level: "High", reasons: ["Recent completed work"] },
+    jobPatterns: [{ jobType: "EICR", successfulRecords: 3, averageSellingPrice: 420, evidence: [{ id: "evidence-1", recordId: "job-1" }] }],
+    frequentMaterials: [{ key: "mat-1", materialId: "mat-1", description: "RCBO", uses: 4, evidence: [{ id: "evidence-2", recordId: "quote-1" }] }],
+    influentialRecords: [{ id: "evidence-1", recordId: "job-1", href: "/jobs/job-1" }],
+  };
+  assert.deepEqual(cloudRowsToCache([{ source_id: memory.id, version: 1, payload: memory }]), [memory]);
+  const orgAQuery = tenantListQuery({ organisationId: "org-a", collectionKey: "jr-os-ai-learning-memory" });
+  const orgBQuery = tenantListQuery({ organisationId: "org-b", collectionKey: "jr-os-ai-learning-memory" });
+  assert.match(orgAQuery, /organisation_id=eq\.org-a/);
+  assert.match(orgBQuery, /organisation_id=eq\.org-b/);
+  assert.notEqual(orgAQuery, orgBQuery);
+});
