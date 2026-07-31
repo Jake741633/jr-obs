@@ -55,6 +55,21 @@ export interface PrivateFileMetadata {
   updated_by: string;
 }
 
+export interface PrivateFileBackedRecord {
+  id: string;
+  jobId?: string;
+  customerId?: string;
+  fileName?: string;
+  mimeType?: string;
+  dataUrl?: string;
+  receiptDataUrl?: string;
+  privateStoragePath?: string;
+  privateFileId?: string;
+  privateUploadState?: PrivateUploadState;
+  privateUploadError?: string;
+  signedDownloadUrl?: string;
+}
+
 function sanitizeSegment(value: string) {
   return value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "file";
 }
@@ -78,6 +93,15 @@ export function dataUrlByteSize(dataUrl: string) {
   return Math.max(0, Math.floor(encoded.length * 0.75) - padding);
 }
 
+export function cloudSafeFileRecord<T extends object>(storageKey: string, value: T): T {
+  if (storageKey !== "jr-os-job-documents" && storageKey !== "jr-os-expenses") return value;
+  const record = { ...value } as T & PrivateFileBackedRecord;
+  delete record.dataUrl;
+  delete record.receiptDataUrl;
+  delete record.signedDownloadUrl;
+  return record;
+}
+
 function dataUrlToBlob(dataUrl: string, mimeType: string) {
   const encoded = dataUrl.split(",")[1] || "";
   const binary = window.atob(encoded);
@@ -86,7 +110,7 @@ function dataUrlToBlob(dataUrl: string, mimeType: string) {
   return new Blob([bytes], { type: mimeType });
 }
 
-function readQueue() {
+export function readPrivateUploadQueue() {
   if (typeof window === "undefined") return [] as PrivateFileUploadQueueItem[];
   try { return JSON.parse(window.localStorage.getItem(PRIVATE_FILE_UPLOAD_QUEUE_KEY) || "[]") as PrivateFileUploadQueueItem[]; }
   catch { return []; }
@@ -107,7 +131,7 @@ export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "i
     createdAt: now,
     updatedAt: now,
   };
-  const current = readQueue();
+  const current = readPrivateUploadQueue();
   writeQueue([queued, ...current.filter((entry) => entry.id !== queued.id)]);
   return queued;
 }
@@ -125,8 +149,7 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
   if (blob.size !== item.size && Math.abs(blob.size - item.size) > 4) throw new Error("The cached file size does not match the queued upload.");
 
   const signed = await createSignedUpload(item.objectPath);
-  const signedPath = signed.signedURL;
-  const response = await fetch(signedObjectUrl(signedPath), {
+  const response = await fetch(signedObjectUrl(signed.signedURL), {
     method: "PUT",
     headers: { "Content-Type": item.mimeType, "x-upsert": "false" },
     body: blob,
@@ -151,7 +174,7 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
 }
 
 export async function flushPrivateFileUploadQueue(onSynced?: (item: PrivateFileUploadQueueItem, result: Awaited<ReturnType<typeof uploadQueuedPrivateFile>>) => void) {
-  const queue = readQueue();
+  const queue = readPrivateUploadQueue();
   const next: PrivateFileUploadQueueItem[] = [];
   for (const item of queue) {
     try {
