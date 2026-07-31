@@ -23,4 +23,7 @@
 \echo 'Applying JR OS security readiness phase 1'
 \ir ../migrations/20260731_005_security_readiness_phase1.sql
 
+\echo 'Applying JR OS profile RLS recursion fix'
+\ir ../migrations/20260731_006_profiles_rls_recursion_fix.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
