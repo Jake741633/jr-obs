@@ -6,7 +6,8 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { usePaymentsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { BusinessExpense, Customer, Invoice, PricingDocument } from "../../lib/models";
 import type { DepositRequirement, PaymentEntryType, PaymentMethod, PaymentRecord, PortalPaymentLink, ReconciliationStatus, ScheduledCashFlow } from "../../lib/payments";
 import { allocatedPaid, calculatedInvoiceState, depositAmount, forecastWindow, invoiceBalance, invoiceGross } from "../../lib/payments";
@@ -17,14 +18,14 @@ const types: PaymentEntryType[] = ["Payment", "Deposit", "Stage payment", "Credi
 const blankPayment = { customerId: "", invoiceId: "", paymentDate: new Date().toISOString().slice(0, 10), amount: "", method: "Bank transfer" as PaymentMethod, reference: "", notes: "", type: "Payment" as PaymentEntryType, reconciliationStatus: "Allocated" as ReconciliationStatus };
 
 export default function PaymentsPage() {
-  const payments = useLocalStorageCollection<PaymentRecord>("jr-os-payments");
-  const deposits = useLocalStorageCollection<DepositRequirement>("jr-os-deposit-requirements");
-  const schedules = useLocalStorageCollection<ScheduledCashFlow>("jr-os-scheduled-cash-flow");
-  const links = useLocalStorageCollection<PortalPaymentLink>("jr-os-portal-payment-links");
-  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
-  const expenses = useLocalStorageCollection<BusinessExpense>("jr-os-expenses");
+  const payments = usePaymentsCollection();
+  const deposits = useCloudLocalCollection<DepositRequirement>("jr-os-deposit-requirements");
+  const schedules = useCloudLocalCollection<ScheduledCashFlow>("jr-os-scheduled-cash-flow");
+  const links = useCloudLocalCollection<PortalPaymentLink>("jr-os-portal-payment-links");
+  const invoices = useCloudLocalCollection<Invoice>("jr-os-invoices");
+  const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const documents = useCloudLocalCollection<PricingDocument>("jr-os-pricing-documents");
+  const expenses = useCloudLocalCollection<BusinessExpense>("jr-os-expenses");
   const [form, setForm] = useState(blankPayment);
   const [depositDocId, setDepositDocId] = useState("");
   const [depositMode, setDepositMode] = useState<"Fixed" | "Percentage">("Percentage");
