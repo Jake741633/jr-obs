@@ -7,7 +7,8 @@ import { ChangeEvent, useMemo, useState } from "react";
 import { ArrowLeft, Camera, Check, ImagePlus, Sparkles } from "lucide-react";
 import { Button } from "../../../../components/ui/Button";
 import { Card } from "../../../../components/ui/Card";
-import { makeId, useLocalStorageCollection } from "../../../../lib/storage";
+import { useSurveysCollection } from "../../../../lib/cloud/coreBusinessCollections";
+import { makeId } from "../../../../lib/storage";
 import { interpretSurveyTranscript } from "../../../../lib/surveyAssist";
 import type { SiteSurvey, SurveyPhoto } from "../../../../lib/models";
 
@@ -15,7 +16,7 @@ const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-
 
 export default function SurveyAssistPage() {
   const { id } = useParams<{ id: string }>();
-  const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
+  const surveys = useSurveysCollection();
   const [transcript, setTranscript] = useState("");
   const [saved, setSaved] = useState("");
   const survey = surveys.items.find((item) => item.id === id);
