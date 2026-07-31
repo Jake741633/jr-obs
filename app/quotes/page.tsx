@@ -17,7 +17,8 @@ import {
   defaultVatSettings,
   paymentTermsFromTemplate,
 } from "../../lib/businessSettings";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { usePricingDocumentsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
 import { createJobFromAcceptedQuote, nextPricingDocumentNumber, pricingDocumentTotal } from "../../lib/workflow";
@@ -32,23 +33,23 @@ const defaultLabourSettings: LabourCostSettings = { id: "labour-cost-settings", 
 const blankLabour = { rateId: "", mode: "Hours" as QuoteLabourMode, quantity: "1", fixedCost: "", fixedPrice: "", fixedHours: "" };
 
 export default function QuotesPage() {
-  const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const builders = useLocalStorageCollection<Builder>("jr-os-builders");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const jobPacks = useLocalStorageCollection<JobPack>("jr-os-job-packs");
-  const materials = useLocalStorageCollection<Material>("jr-os-materials");
-  const labourRates = useLocalStorageCollection<LabourRate>("jr-os-labour-rates");
-  const overheads = useLocalStorageCollection<BusinessOverhead>("jr-os-business-overheads");
-  const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
-  const quoteSettingsStore = useLocalStorageCollection<QuotePricingSettings>("jr-os-quote-engine-settings", [defaultQuotePricingSettings]);
-  const termsTemplates = useLocalStorageCollection<BusinessTermsTemplate>("jr-os-business-terms-templates", defaultBusinessTermsTemplates);
-  const paymentTermsTemplates = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
-  const profileStore = useLocalStorageCollection<BusinessProfile>(businessStorageKeys.profile, [defaultBusinessProfile]);
-  const vatStore = useLocalStorageCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
-  const brandingStore = useLocalStorageCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
-  const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
-  const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
+  const documents = usePricingDocumentsCollection();
+  const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const builders = useCloudLocalCollection<Builder>("jr-os-builders");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
+  const jobPacks = useCloudLocalCollection<JobPack>("jr-os-job-packs");
+  const materials = useCloudLocalCollection<Material>("jr-os-materials");
+  const labourRates = useCloudLocalCollection<LabourRate>("jr-os-labour-rates");
+  const overheads = useCloudLocalCollection<BusinessOverhead>("jr-os-business-overheads");
+  const labourSettingsStore = useCloudLocalCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
+  const quoteSettingsStore = useCloudLocalCollection<QuotePricingSettings>("jr-os-quote-engine-settings", [defaultQuotePricingSettings]);
+  const termsTemplates = useCloudLocalCollection<BusinessTermsTemplate>("jr-os-business-terms-templates", defaultBusinessTermsTemplates);
+  const paymentTermsTemplates = useCloudLocalCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
+  const profileStore = useCloudLocalCollection<BusinessProfile>(businessStorageKeys.profile, [defaultBusinessProfile]);
+  const vatStore = useCloudLocalCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
+  const brandingStore = useCloudLocalCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
+  const timeline = useCloudLocalCollection<JobTimelineEntry>("jr-os-job-timeline");
+  const jobDocuments = useCloudLocalCollection<JobDocument>("jr-os-job-documents");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedJobPackId, setSelectedJobPackId] = useState("");
