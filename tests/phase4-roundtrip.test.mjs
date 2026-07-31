@@ -37,3 +37,25 @@ test("Job Pack records retain labour, materials, tasks, notes and stable IDs", (
   assert.deepEqual(cloudRowsToCache([{ source_id: pack.id, version: 1, payload: pack }]), [pack]);
   assert.match(tenantListQuery({ organisationId: "org-a", collectionKey: "jr-os-job-packs" }), /organisation_id=eq\.org-a/);
 });
+
+test("AI recommendation evidence retains source links, confidence inputs and tenant scoping", () => {
+  const evidence = {
+    id: "evidence-1",
+    kind: "Completed job",
+    recordId: "job-1",
+    title: "Consumer unit change",
+    detail: "Completed below quoted labour allowance",
+    jobType: "Consumer Unit",
+    occurredAt: "2026-07-31T12:00:00Z",
+    relevance: 92,
+    href: "/jobs/job-1",
+    jobId: "job-1",
+  };
+  assert.deepEqual(cloudRowsToCache([{ source_id: evidence.id, version: 1, payload: evidence }]), [evidence]);
+  assert.deepEqual(linkedSourceIds(evidence), { customerSourceId: undefined, jobSourceId: "job-1" });
+  const orgA = tenantListQuery({ organisationId: "org-a" });
+  const orgB = tenantListQuery({ organisationId: "org-b" });
+  assert.match(orgA, /organisation_id=eq\.org-a/);
+  assert.match(orgB, /organisation_id=eq\.org-b/);
+  assert.notEqual(orgA, orgB);
+});
