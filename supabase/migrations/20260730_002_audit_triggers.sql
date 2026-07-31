@@ -79,6 +79,9 @@ begin
 end;
 $$;
 
+revoke all on function public.audit_jr_entity_change() from public, anon, authenticated;
+revoke all on function public.audit_profile_change() from public, anon, authenticated;
+
 -- Append-only audit coverage for the requested sensitive actions.
 drop trigger if exists payments_audit on public.payments;
 create trigger payments_audit after insert or update or delete on public.payments for each row execute function public.audit_jr_entity_change();
