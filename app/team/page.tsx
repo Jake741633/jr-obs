@@ -6,7 +6,7 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useTeamCollection, useTimesheetsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { Job, TeamMember, TeamMemberStatus, TeamQualification, TeamRole, TimesheetEntry, TimesheetStatus } from "../../lib/models";
 
@@ -43,7 +43,7 @@ function hoursFor(entry: TimesheetEntry) {
 
 export default function TeamPage() {
   const team = useTeamCollection();
-  const timesheets = useCloudLocalCollection<TimesheetEntry>("jr-os-timesheets");
+  const timesheets = useTimesheetsCollection();
   const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const [memberForm, setMemberForm] = useState(blankMember);
   const [qualificationForm, setQualificationForm] = useState(blankQualification);
