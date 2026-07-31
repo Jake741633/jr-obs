@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { getCurrentCloudUser } from "../cloudSync";
+import { supabaseFetch } from "../supabase/client";
 import { effectiveCloudMode } from "./config";
 import type { JrRole } from "./permissions";
-import { supabaseFetch } from "../supabase/client";
 
 export interface CloudIdentity {
   userId: string;
@@ -14,42 +14,79 @@ export interface CloudIdentity {
   customerSourceId?: string;
 }
 
-let cachedIdentity: CloudIdentity | null = null;
+interface IdentitySnapshot {
+  identity: CloudIdentity | null;
+  isReady: boolean;
+}
+
+let snapshot: IdentitySnapshot = { identity: null, isReady: effectiveCloudMode() === "local" };
 let identityRequest: Promise<CloudIdentity | null> | null = null;
+const listeners = new Set<() => void>();
+
+function emit(next: IdentitySnapshot) {
+  snapshot = next;
+  listeners.forEach((listener) => listener());
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function getSnapshot() {
+  return snapshot;
+}
+
+function getServerSnapshot(): IdentitySnapshot {
+  return { identity: null, isReady: effectiveCloudMode() === "local" };
+}
 
 async function loadIdentity(force = false) {
-  if (effectiveCloudMode() === "local") return null;
-  if (!force && cachedIdentity) return cachedIdentity;
+  if (effectiveCloudMode() === "local") {
+    emit({ identity: null, isReady: true });
+    return null;
+  }
+  if (!force && snapshot.isReady) return snapshot.identity;
   if (!force && identityRequest) return identityRequest;
+
   identityRequest = (async () => {
     const user = await getCurrentCloudUser();
     if (!user) return null;
     const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=organisation_id,role,customer_source_id`);
     const profile = Array.isArray(rows) ? rows[0] : null;
     if (!profile?.organisation_id || !profile?.role) return null;
-    cachedIdentity = { userId: user.id, email: user.email, organisationId: profile.organisation_id, role: profile.role as JrRole, customerSourceId: profile.customer_source_id || undefined };
-    return cachedIdentity;
-  })().finally(() => { identityRequest = null; });
-  return identityRequest;
+    return {
+      userId: user.id,
+      email: user.email,
+      organisationId: profile.organisation_id,
+      role: profile.role as JrRole,
+      customerSourceId: profile.customer_source_id || undefined,
+    } satisfies CloudIdentity;
+  })();
+
+  try {
+    const identity = await identityRequest;
+    emit({ identity, isReady: true });
+    return identity;
+  } finally {
+    identityRequest = null;
+  }
+}
+
+function refreshIdentity() {
+  emit({ identity: null, isReady: false });
+  void loadIdentity(true);
 }
 
 export function useCloudIdentity() {
   const mode = effectiveCloudMode();
-  const [identity, setIdentity] = useState<CloudIdentity | null>(cachedIdentity);
-  const [isReady, setIsReady] = useState(mode === "local" || Boolean(cachedIdentity));
+  const current = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   useEffect(() => {
-    if (mode === "local") return;
-    let active = true;
-    const refresh = () => {
-      cachedIdentity = null;
-      setIsReady(false);
-      void loadIdentity(true).then((value) => { if (active) { setIdentity(value); setIsReady(true); } });
-    };
-    void loadIdentity().then((value) => { if (active) { setIdentity(value); setIsReady(true); } });
-    window.addEventListener("jr-os-cloud-identity-changed", refresh);
-    return () => { active = false; window.removeEventListener("jr-os-cloud-identity-changed", refresh); };
-  }, [mode]);
+    if (mode !== "local" && !current.isReady) void loadIdentity();
+    window.addEventListener("jr-os-cloud-identity-changed", refreshIdentity);
+    return () => window.removeEventListener("jr-os-cloud-identity-changed", refreshIdentity);
+  }, [current.isReady, mode]);
 
-  return { identity, isReady, mode };
+  return { identity: current.identity, isReady: current.isReady, mode };
 }
