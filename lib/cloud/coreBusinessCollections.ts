@@ -3,7 +3,7 @@
 import type { ComplianceCertificate } from "../complianceCertificates";
 import type { PortalApprovalRecord, PortalRequest } from "../customerPortal";
 import type { ElectricalTestingRecord } from "../electricalTesting";
-import type { Customer, Invoice, Job, JobDocument, Material, PricingDocument, PurchaseList, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
+import type { BusinessExpense, Customer, Invoice, Job, JobDocument, Material, PricingDocument, PurchaseList, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -28,6 +28,7 @@ export const coreBusinessStorageKeys = {
   jobDocuments: "jr-os-job-documents",
   portalApprovals: "jr-os-portal-approvals",
   portalRequests: "jr-os-portal-requests",
+  expenses: "jr-os-expenses",
 } as const;
 
 export interface CloudJobDocument extends JobDocument {
@@ -55,3 +56,4 @@ export function useCertificatesCollection() { return useCloudLocalCollection<Com
 export function useJobDocumentsCollection() { return useCloudLocalCollection<CloudJobDocument>(coreBusinessStorageKeys.jobDocuments); }
 export function usePortalApprovalsCollection() { return useCloudLocalCollection<PortalApprovalRecord>(coreBusinessStorageKeys.portalApprovals); }
 export function usePortalRequestsCollection() { return useCloudLocalCollection<PortalRequest>(coreBusinessStorageKeys.portalRequests); }
+export function useExpensesCollection() { return useCloudLocalCollection<BusinessExpense>(coreBusinessStorageKeys.expenses); }
