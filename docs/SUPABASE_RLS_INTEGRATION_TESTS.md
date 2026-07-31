@@ -1,43 +1,142 @@
-# JR OS Supabase RLS integration tests
+# JR OS Supabase RLS and Storage integration tests
 
-This harness tests the deployed JR OS schema and Row Level Security policies against a dedicated Supabase test project. Do not point it at production.
+This harness validates the deployed JR OS schema, Row Level Security policies, authentication boundaries and private Storage policies against a **dedicated disposable Supabase test project**.
 
-## What it creates
+Never point this workflow at production and never use production credentials.
 
-For each run the test creates:
+## Required schema
 
-- Two separate organisations.
-- An owner, office, electrician and customer account in each organisation.
-- Customer, job and portal-request records scoped to each organisation.
+Apply these files to the dedicated test project in order:
 
-The test then verifies:
+1. `supabase/schema.sql`
+2. `supabase/migrations/20260730_001_cloud_foundation.sql`
+3. `supabase/migrations/20260730_002_audit_triggers.sql`
+4. `supabase/migrations/20260730_003_permission_hardening.sql`
+5. `supabase/migrations/20260731_004_generic_collection_sync.sql`
+6. `supabase/migrations/20260731_005_security_readiness_phase1.sql`
 
-- Office users can create customer records for their own organisation.
-- Electricians cannot create office-only customer records.
-- Electricians can create field job records for their own organisation.
-- Owners can only read their own organisation's records.
-- Customer users can only read records matching their `customer_source_id`.
-- Customer users cannot create business job records.
-- Customer users can create their own portal requests.
-- The second organisation cannot read the first organisation's records.
+Migration `005`:
 
-Test records and users are deleted in a `finally` cleanup block.
+- Removes authenticated direct writes to `audit_log`.
+- Keeps audit history append-only through trusted database triggers.
+- Customer-scopes private-file metadata and Storage reads.
+- Restricts private uploads to staff roles and tenant-prefixed paths.
+- Enforces the JR OS MIME allowlist and 10 MB maximum in Storage RLS.
+- Restricts private-file deletion to owner and admin roles.
 
-## Required test project
+## Temporary test identities
 
-Create a separate Supabase project for automated RLS testing. Apply the JR OS schema and all migrations in order, including the generic collection migration and permission hardening migrations.
+Every run creates unique data using a random run ID.
 
-Never use a production project or production service-role key.
+Two organisations are created. Each organisation receives separate:
 
-## GitHub environment
+- Owner
+- Admin
+- Office user
+- Electrician
+- Customer Portal user
 
-Create a protected GitHub environment named:
+Customer users receive different stable `customer_source_id` values.
+
+## Database scenarios
+
+The suite verifies:
+
+- Same-tenant reads and writes.
+- Cross-tenant read denial.
+- Cross-tenant write denial.
+- Owner, admin, office, electrician and customer role boundaries.
+- Office-only table write policies.
+- Field-write table policies.
+- Customer Portal read and insert scope.
+- Generic `cloud_collections` tenant and customer scope.
+- Typed entity-table tenant scope.
+- Soft-delete tombstones remain available for synchronisation.
+- Active-record queries exclude tombstones.
+- Version increments occur when records are updated.
+- Office users cannot promote their own role.
+- Owners can manage staff roles and active state.
+- Deactivated users immediately lose tenant data access.
+- Revoked refresh tokens cannot create new sessions.
+- Authenticated users cannot forge, edit or delete audit records.
+- Payment changes produce trigger-generated audit entries.
+
+### Typed entities covered
+
+- Customers
+- Jobs
+- Quotes and estimates (`pricing_documents`)
+- Invoices
+- Payments
+- Expenses
+- Materials
+- Stock items and movements
+- Purchase lists
+- Planner entries
+- Team members
+- Timesheets
+- Certificates
+- Electrical testing records
+- Job documents
+- Portal approvals
+- Portal requests
+- AI recommendation evidence
+
+### Generic collections covered
+
+- Surveys
+- RAMS
+- Job Packs
+- AI learning memory
+
+## Private Storage scenarios
+
+The suite uses the private `jr-os-private` bucket and verifies:
+
+- Staff can request signed upload URLs for their own tenant path.
+- Signed uploads succeed for allowed content.
+- Customers cannot upload files.
+- Cross-tenant signed-upload requests are denied.
+- Unsupported MIME uploads are denied.
+- Files larger than 10 MB are denied.
+- Owners can create signed download URLs.
+- Customers can sign only customer-scoped files.
+- Customers cannot sign another customer's file.
+- Another organisation cannot sign or read the file.
+- Short-lived signed download URLs expire.
+- Office users cannot delete private objects.
+- Admin users can delete private objects.
+- `private_files` metadata follows the same tenant and customer scope.
+
+The test does not print access tokens, refresh tokens, service-role credentials or signed URLs.
+
+## Cleanup guarantees
+
+All test work runs inside `try/finally`.
+
+Cleanup attempts to remove:
+
+- Every uploaded test object.
+- Private-file metadata.
+- Audit rows created by the test.
+- Generic collection rows.
+- All typed entity rows.
+- All temporary Auth users.
+- Both temporary organisations.
+
+Cleanup uses the service role only inside the Node test runner. Each cleanup operation is best-effort so later cleanup continues even if one deletion fails.
+
+Use a disposable test project and enable Supabase project backups or periodic resets. A cancelled runner or infrastructure outage can still interrupt the final cleanup process.
+
+## Protected GitHub environment
+
+Create a GitHub environment named:
 
 ```text
 supabase-test
 ```
 
-Add these environment secrets:
+Add environment secrets:
 
 ```text
 SUPABASE_TEST_URL
@@ -45,31 +144,41 @@ SUPABASE_TEST_ANON_KEY
 SUPABASE_TEST_SERVICE_ROLE_KEY
 ```
 
-The service-role key is used only inside the GitHub Actions runner to create and remove test users and seed tenant records. It is never referenced by browser code or prefixed with `NEXT_PUBLIC_`.
+Security requirements:
 
-Restrict who can approve and run the `supabase-test` environment. Rotate the service-role key if it is ever exposed.
+- The project must contain no production customer data.
+- The service-role key must be from this dedicated test project only.
+- Do not prefix the service-role secret with `NEXT_PUBLIC_`.
+- Do not place it in Netlify browser variables.
+- Restrict environment deployment approval to trusted maintainers.
+- Rotate the service-role key immediately if exposure is suspected.
 
 ## Running in GitHub
 
-Open **Actions → JR OS Supabase RLS Integration → Run workflow**.
+Open:
 
-The workflow is manual only and runs:
+**Actions → JR OS Supabase RLS Integration → Run workflow**
+
+Enter the exact confirmation:
 
 ```text
+JR_OS_RLS_TEST
+```
+
+The workflow is manual-only, uses the protected `supabase-test` environment and prevents concurrent test runs against the same project.
+
+It runs:
+
+```text
+npm ci
 npm run test:rls
 ```
 
-The workflow supplies the required confirmation value:
-
-```text
-SUPABASE_TEST_CONFIRM=JR_OS_RLS_TEST
-```
-
-Without the URL, keys and exact confirmation value, the integration test is skipped.
+Without all secrets and the exact confirmation input, the integration test does not run.
 
 ## Running locally
 
-Use a dedicated test project and export:
+Use only the dedicated test project:
 
 ```bash
 export SUPABASE_TEST_URL="https://your-test-project.supabase.co"
@@ -79,17 +188,19 @@ export SUPABASE_TEST_CONFIRM="JR_OS_RLS_TEST"
 npm run test:rls
 ```
 
-Do not save the service-role key in `.env.local`, commit it, expose it to Next.js client code or deploy it to Netlify browser variables.
+Do not save the service-role key in a committed file or any client-readable environment variable.
 
-## Current coverage limits
+## Known limits
 
-The first harness covers database RLS for customers, jobs and portal requests. It does not yet verify:
+This suite materially improves confidence but does not prove production security. Remaining work includes:
 
-- Private Storage object policies and signed URL expiry.
-- Every typed and generic JR OS table.
-- Update and tombstone conflicts under concurrent users.
-- Certificate, payment and audit-trigger policies.
-- Session expiry, refresh and revoked-user behaviour.
-- File MIME inspection or malware scanning.
-
-Expand this real-project test suite before storing production customer data.
+- Run the workflow after every RLS or Storage policy change once the test environment is stable.
+- Add concurrent-update and explicit version-conflict tests using two live sessions.
+- Add Storage malware scanning and server-side content inspection.
+- Verify MIME type using file signatures rather than client headers alone.
+- Add rate-limit and abuse tests.
+- Test password reset, MFA and account-recovery flows.
+- Test JWT expiry and access-token lifetime behaviour separately from refresh-token revocation.
+- Add audit coverage for certificate issue, quote acceptance and record deletion in the live suite.
+- Add backup restoration and orphaned-object cleanup drills.
+- Conduct an independent security review before production customer data is stored.
