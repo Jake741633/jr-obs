@@ -30,6 +30,7 @@ export interface PrivateFileUploadQueueItem {
   organisationId: string;
   userId: string;
   sourceId: string;
+  parentSourceId?: string;
   storageKey: string;
   jobSourceId?: string;
   customerSourceId?: string;
@@ -74,6 +75,7 @@ export interface PrivateFileBackedRecord {
   privateUploadState?: PrivateUploadState;
   privateUploadError?: string;
   signedDownloadUrl?: string;
+  photos?: PrivateFileBackedRecord[];
 }
 
 function sanitizeSegment(value: string) {
@@ -103,13 +105,24 @@ export function dataUrlByteSize(dataUrl: string) {
   return Math.max(0, Math.floor(encoded.length * 0.75) - padding);
 }
 
+function stripPrivateBytes(record: PrivateFileBackedRecord) {
+  const safe = { ...record };
+  delete safe.dataUrl;
+  delete safe.receiptDataUrl;
+  delete safe.signedDownloadUrl;
+  return safe;
+}
+
 export function cloudSafeFileRecord<T extends object>(storageKey: string, value: T): T {
-  if (storageKey !== "jr-os-job-documents" && storageKey !== "jr-os-expenses") return value;
-  const record = { ...value } as T & PrivateFileBackedRecord;
-  delete record.dataUrl;
-  delete record.receiptDataUrl;
-  delete record.signedDownloadUrl;
-  return record;
+  if (storageKey === "jr-os-job-documents" || storageKey === "jr-os-expenses") {
+    return stripPrivateBytes(value as T & PrivateFileBackedRecord) as T;
+  }
+  if (storageKey === "jr-os-surveys") {
+    const record = { ...value } as T & PrivateFileBackedRecord;
+    if (record.photos) record.photos = record.photos.map((photo) => stripPrivateBytes(photo));
+    return record;
+  }
+  return value;
 }
 
 function dataUrlToBlob(dataUrl: string, mimeType: string) {
@@ -218,6 +231,10 @@ function embeddedFile(storageKey: string, record: PrivateFileBackedRecord) {
   return null;
 }
 
+function supportedStorageKey(storageKey: string) {
+  return ["jr-os-job-documents", "jr-os-expenses", "jr-os-surveys"].includes(storageKey);
+}
+
 export function usePrivateFileCollectionBridge<T>(input: {
   storageKey: string;
   items: T[];
@@ -230,10 +247,34 @@ export function usePrivateFileCollectionBridge<T>(input: {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (!isReady || mode === "local" || !identity || !["jr-os-job-documents", "jr-os-expenses"].includes(storageKey)) return;
+    if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
     const queuedIds = new Set(readPrivateUploadQueue().filter((item) => item.storageKey === storageKey).map((item) => item.sourceId));
     for (const item of items) {
       const record = item as PrivateFileBackedRecord;
+      if (storageKey === "jr-os-surveys") {
+        for (const photo of record.photos ?? []) {
+          if (!photo.dataUrl || photo.privateStoragePath || queuedIds.has(photo.id)) continue;
+          const mimeType = photo.mimeType || mimeFromDataUrl(photo.dataUrl);
+          const fileName = photo.fileName || `${photo.id}.${mimeType.split("/")[1] || "jpg"}`;
+          const size = dataUrlByteSize(photo.dataUrl);
+          if (validatePrivateFile({ name: fileName, size, type: mimeType })) continue;
+          queuePrivateFileUpload({
+            organisationId: identity.organisationId,
+            userId: identity.userId,
+            sourceId: photo.id,
+            parentSourceId: record.id,
+            storageKey,
+            jobSourceId: record.jobId,
+            customerSourceId: record.customerId,
+            fileName,
+            mimeType,
+            size,
+            dataUrl: photo.dataUrl,
+            objectPath: privateObjectPath(identity.organisationId, record.jobId, photo.id, fileName),
+          });
+        }
+        continue;
+      }
       const file = embeddedFile(storageKey, record);
       if (!file || record.privateStoragePath || queuedIds.has(record.id)) continue;
       const size = dataUrlByteSize(file.dataUrl);
@@ -257,6 +298,19 @@ export function usePrivateFileCollectionBridge<T>(input: {
       if (queued.storageKey !== storageKey || result.state !== "Synced") return;
       setItems((current) => current.map((item) => {
         const record = item as PrivateFileBackedRecord;
+        if (storageKey === "jr-os-surveys") {
+          if (record.id !== queued.parentSourceId) return item;
+          return {
+            ...record,
+            photos: (record.photos ?? []).map((photo) => photo.id === queued.sourceId ? {
+              ...photo,
+              privateStoragePath: queued.objectPath,
+              privateFileId: result.metadata.id,
+              privateUploadState: "Synced",
+              privateUploadError: undefined,
+            } : photo),
+          } as T;
+        }
         if (record.id !== queued.sourceId) return item;
         return {
           ...record,
@@ -274,11 +328,13 @@ export function usePrivateFileCollectionBridge<T>(input: {
   }, [identity, isReady, items, mode, setItems, storageKey]);
 
   useEffect(() => {
-    if (!isReady || mode === "local" || !identity || !["jr-os-job-documents", "jr-os-expenses"].includes(storageKey)) return;
+    if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
     let active = true;
-    const missing = items
-      .map((item) => item as PrivateFileBackedRecord)
-      .filter((record) => record.privateStoragePath && !signedUrls[record.id]);
+    const missing = items.flatMap((item) => {
+      const record = item as PrivateFileBackedRecord;
+      if (storageKey === "jr-os-surveys") return (record.photos ?? []).filter((photo) => photo.privateStoragePath && !signedUrls[photo.id]);
+      return record.privateStoragePath && !signedUrls[record.id] ? [record] : [];
+    });
     if (!missing.length) return;
     void Promise.all(missing.map(async (record) => [record.id, await signedPrivateDownloadUrl(record.privateStoragePath!)] as const))
       .then((entries) => { if (active) setSignedUrls((current) => ({ ...current, ...Object.fromEntries(entries) })); })
@@ -288,6 +344,12 @@ export function usePrivateFileCollectionBridge<T>(input: {
 
   return useMemo(() => items.map((item) => {
     const record = item as PrivateFileBackedRecord;
+    if (storageKey === "jr-os-surveys") {
+      return {
+        ...record,
+        photos: (record.photos ?? []).map((photo) => !photo.dataUrl && signedUrls[photo.id] ? { ...photo, dataUrl: signedUrls[photo.id] } : photo),
+      } as T;
+    }
     const signedUrl = signedUrls[record.id];
     if (!signedUrl) return item;
     if (storageKey === "jr-os-job-documents" && !record.dataUrl) return { ...record, dataUrl: signedUrl } as T;
