@@ -123,3 +123,9 @@ test("expense records round-trip without embedding receipt bytes in cloud payloa
   assert.deepEqual(cloudRowsToCache([{ source_id: expense.id, version: 1, payload: expense }]), [expense]);
   assert.deepEqual(linkedSourceIds(expense), { customerSourceId: undefined, jobSourceId: "job-1" });
 });
+
+test("survey records retain customer, job and nested inspection data", () => {
+  const survey = { id: "survey-1", customerId: "cus-1", jobId: "job-1", number: "SUR-0001", circuits: [{ id: "circuit-1", protectiveDevice: "B32" }], photos: [{ id: "photo-1", category: "Consumer unit" }], defects: ["No SPD"], recommendations: ["Install surge protection"] };
+  assert.deepEqual(cloudRowsToCache([{ source_id: survey.id, version: 1, payload: survey }]), [survey]);
+  assert.deepEqual(linkedSourceIds(survey), { customerSourceId: "cus-1", jobSourceId: "job-1" });
+});
