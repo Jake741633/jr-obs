@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { cloudInsert, cloudUpsert, createSignedDownload, createSignedUpload } from "./client";
-import { cloudConfig, cloudStorageBucket, effectiveCloudMode } from "./config";
+import { cloudConfig, cloudStorageBucket, effectiveCloudMode, type CloudMode } from "./config";
+import type { CloudIdentity } from "./useCloudIdentity";
 
 export const PRIVATE_FILE_UPLOAD_QUEUE_KEY = "jr-os-private-file-upload-queue";
 export const MAX_PRIVATE_FILE_BYTES = 10 * 1024 * 1024;
@@ -28,6 +30,7 @@ export interface PrivateFileUploadQueueItem {
   organisationId: string;
   userId: string;
   sourceId: string;
+  storageKey: string;
   jobSourceId?: string;
   customerSourceId?: string;
   fileName: string;
@@ -62,7 +65,10 @@ export interface PrivateFileBackedRecord {
   fileName?: string;
   mimeType?: string;
   dataUrl?: string;
+  externalUrl?: string;
   receiptDataUrl?: string;
+  receiptFileName?: string;
+  receiptUrl?: string;
   privateStoragePath?: string;
   privateFileId?: string;
   privateUploadState?: PrivateUploadState;
@@ -72,6 +78,10 @@ export interface PrivateFileBackedRecord {
 
 function sanitizeSegment(value: string) {
   return value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "file";
+}
+
+function mimeFromDataUrl(dataUrl: string) {
+  return /^data:([^;,]+)[;,]/.exec(dataUrl)?.[1] || "application/octet-stream";
 }
 
 export function privateObjectPath(organisationId: string, jobId: string | undefined, sourceId: string, fileName: string) {
@@ -126,7 +136,7 @@ export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "i
   const now = new Date().toISOString();
   const queued: PrivateFileUploadQueueItem = {
     ...item,
-    id: `${item.organisationId}:${item.sourceId}`,
+    id: `${item.organisationId}:${item.storageKey}:${item.sourceId}`,
     state: typeof navigator !== "undefined" && !navigator.onLine ? "Offline" : "Pending",
     createdAt: now,
     updatedAt: now,
@@ -196,4 +206,92 @@ export async function signedPrivateDownloadUrl(objectPath: string, expiresIn = 3
 
 export async function registerExistingPrivateFile(metadata: PrivateFileMetadata) {
   return cloudInsert<PrivateFileMetadata>("private_files", [metadata]);
+}
+
+function embeddedFile(storageKey: string, record: PrivateFileBackedRecord) {
+  if (storageKey === "jr-os-job-documents" && record.dataUrl && record.fileName) {
+    return { dataUrl: record.dataUrl, fileName: record.fileName, mimeType: record.mimeType || mimeFromDataUrl(record.dataUrl) };
+  }
+  if (storageKey === "jr-os-expenses" && record.receiptDataUrl && record.receiptFileName) {
+    return { dataUrl: record.receiptDataUrl, fileName: record.receiptFileName, mimeType: mimeFromDataUrl(record.receiptDataUrl) };
+  }
+  return null;
+}
+
+export function usePrivateFileCollectionBridge<T>(input: {
+  storageKey: string;
+  items: T[];
+  setItems: Dispatch<SetStateAction<T[]>>;
+  isReady: boolean;
+  identity: CloudIdentity | null;
+  mode: CloudMode;
+}) {
+  const { storageKey, items, setItems, isReady, identity, mode } = input;
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!isReady || mode === "local" || !identity || !["jr-os-job-documents", "jr-os-expenses"].includes(storageKey)) return;
+    const queuedIds = new Set(readPrivateUploadQueue().filter((item) => item.storageKey === storageKey).map((item) => item.sourceId));
+    for (const item of items) {
+      const record = item as PrivateFileBackedRecord;
+      const file = embeddedFile(storageKey, record);
+      if (!file || record.privateStoragePath || queuedIds.has(record.id)) continue;
+      const size = dataUrlByteSize(file.dataUrl);
+      if (validatePrivateFile({ name: file.fileName, size, type: file.mimeType })) continue;
+      queuePrivateFileUpload({
+        organisationId: identity.organisationId,
+        userId: identity.userId,
+        sourceId: record.id,
+        storageKey,
+        jobSourceId: record.jobId,
+        customerSourceId: record.customerId,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        size,
+        dataUrl: file.dataUrl,
+        objectPath: privateObjectPath(identity.organisationId, record.jobId, record.id, file.fileName),
+      });
+    }
+
+    const flush = () => void flushPrivateFileUploadQueue((queued, result) => {
+      if (queued.storageKey !== storageKey || result.state !== "Synced") return;
+      setItems((current) => current.map((item) => {
+        const record = item as PrivateFileBackedRecord;
+        if (record.id !== queued.sourceId) return item;
+        return {
+          ...record,
+          privateStoragePath: queued.objectPath,
+          privateFileId: result.metadata.id,
+          privateUploadState: "Synced",
+          privateUploadError: undefined,
+        } as T;
+      }));
+      setSignedUrls((current) => ({ ...current, [queued.sourceId]: result.signedDownloadUrl }));
+    });
+    flush();
+    window.addEventListener("online", flush);
+    return () => window.removeEventListener("online", flush);
+  }, [identity, isReady, items, mode, setItems, storageKey]);
+
+  useEffect(() => {
+    if (!isReady || mode === "local" || !identity || !["jr-os-job-documents", "jr-os-expenses"].includes(storageKey)) return;
+    let active = true;
+    const missing = items
+      .map((item) => item as PrivateFileBackedRecord)
+      .filter((record) => record.privateStoragePath && !signedUrls[record.id]);
+    if (!missing.length) return;
+    void Promise.all(missing.map(async (record) => [record.id, await signedPrivateDownloadUrl(record.privateStoragePath!)] as const))
+      .then((entries) => { if (active) setSignedUrls((current) => ({ ...current, ...Object.fromEntries(entries) })); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [identity, isReady, items, mode, signedUrls, storageKey]);
+
+  return useMemo(() => items.map((item) => {
+    const record = item as PrivateFileBackedRecord;
+    const signedUrl = signedUrls[record.id];
+    if (!signedUrl) return item;
+    if (storageKey === "jr-os-job-documents" && !record.dataUrl) return { ...record, dataUrl: signedUrl } as T;
+    if (storageKey === "jr-os-expenses" && !record.receiptDataUrl) return { ...record, receiptUrl: signedUrl } as T;
+    return item;
+  }), [items, signedUrls, storageKey]);
 }
