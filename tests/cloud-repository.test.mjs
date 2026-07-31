@@ -8,15 +8,17 @@ test("queries include organisation scope", () => {
 });
 
 test("queue coalesces duplicate writes", () => {
-  const first = { table: "customers", sourceId: "cus-1", operation: "upsert" };
-  const second = { table: "customers", sourceId: "cus-1", operation: "upsert", payload: { name: "Updated" } };
+  const first = { organisationId: "org-a", table: "customers", sourceId: "cus-1", operation: "upsert" };
+  const second = { organisationId: "org-a", table: "customers", sourceId: "cus-1", operation: "upsert", payload: { name: "Updated" } };
   assert.deepEqual(coalesceQueue([first], second), [second]);
 });
 
-test("collections remain separate", () => {
-  const queue = [{ table: "cloud_collections", sourceId: "same", collectionKey: "a" }];
-  const next = { table: "cloud_collections", sourceId: "same", collectionKey: "b" };
-  assert.equal(coalesceQueue(queue, next).length, 2);
+test("tenants and collections remain separate", () => {
+  const queue = [{ organisationId: "org-a", table: "cloud_collections", sourceId: "same", collectionKey: "a" }];
+  const otherCollection = { organisationId: "org-a", table: "cloud_collections", sourceId: "same", collectionKey: "b" };
+  const otherTenant = { organisationId: "org-b", table: "cloud_collections", sourceId: "same", collectionKey: "a" };
+  assert.equal(coalesceQueue(queue, otherCollection).length, 2);
+  assert.equal(coalesceQueue(queue, otherTenant).length, 2);
 });
 
 test("version mismatch reports conflict", () => {
