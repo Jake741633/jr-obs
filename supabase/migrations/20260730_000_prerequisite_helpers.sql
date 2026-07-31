@@ -2,6 +2,13 @@
 -- Apply after supabase/schema.sql and before 20260730_001_cloud_foundation.sql.
 -- This file is intentionally idempotent so a schema-only project can be recovered safely.
 
+-- The original base schema predates admin/customer roles and these cloud identity columns.
+alter table public.profiles add column if not exists customer_source_id text;
+alter table public.profiles add column if not exists active boolean not null default true;
+alter table public.profiles drop constraint if exists profiles_role_check;
+alter table public.profiles add constraint profiles_role_check
+  check (role in ('owner','admin','office','electrician','customer'));
+
 create or replace function public.current_jr_role()
 returns text
 language sql
@@ -12,7 +19,7 @@ as $$
   select p.role
   from public.profiles p
   where p.id = (select auth.uid())
-    and coalesce(p.active, true)
+    and p.active
   limit 1
 $$;
 
@@ -26,7 +33,7 @@ as $$
   select p.customer_source_id
   from public.profiles p
   where p.id = (select auth.uid())
-    and coalesce(p.active, true)
+    and p.active
   limit 1
 $$;
 
@@ -42,7 +49,7 @@ as $$
     from public.profiles p
     where p.id = (select auth.uid())
       and p.organisation_id = target_organisation_id
-      and coalesce(p.active, true)
+      and p.active
   )
 $$;
 
