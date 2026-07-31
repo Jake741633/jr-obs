@@ -8,14 +8,15 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { useCustomersCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { Customer, Job } from "../../lib/models";
 
 const blank = { name: "", email: "", phone: "", address: "", notes: "" };
 
 export default function CustomersPage() {
-  const { items, setItems, remove, isReady } = useLocalStorageCollection<Customer>("jr-os-customers");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const { items, setItems, remove, isReady } = useCustomersCollection();
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
