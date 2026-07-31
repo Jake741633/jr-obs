@@ -24,7 +24,7 @@ function recordId(value: unknown) {
     : null;
 }
 
-export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []) {
+export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) {
   const initialValueRef = useRef(initialValue);
   const [items, setItems] = useState<T[]>(initialValue);
   const [isReady, setIsReady] = useState(false);
@@ -106,3 +106,5 @@ export function useLocalStorageCollection<T>(key: string, initialValue: T[] = []
 
   return { items, setItems, remove, isReady };
 }
+
+export const useLocalStorageCollection = useCloudLocalCollection;
