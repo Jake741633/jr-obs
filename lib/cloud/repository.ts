@@ -1,10 +1,11 @@
 "use client";
 
-import { cloudDelete, cloudSelect, cloudUpsert } from "./client";
+import { cloudPatch, cloudSelect, cloudUpsert } from "./client";
 import { effectiveCloudMode } from "./config";
+import { coalesceQueue, hasVersionConflict, linkedSourceIds, makeTombstone, pendingImports, tenantRecordQuery } from "./repository-core.mjs";
 
 export type SyncState = "Synced" | "Pending" | "Offline" | "Conflict" | "Failed";
-export interface CloudEnvelope<T> { organisation_id: string; source_id: string; collection_key?: string; customer_source_id?: string; job_source_id?: string; version: number; source_updated_at?: string; payload: T; updated_at?: string; }
+export interface CloudEnvelope<T> { organisation_id: string; source_id: string; collection_key?: string; customer_source_id?: string; job_source_id?: string; version: number; source_updated_at?: string; payload: T; updated_at?: string; deleted_at?: string | null; }
 export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; payload?: T; expectedVersion?: number; queuedAt: string; attempts: number; state: SyncState; error?: string; }
 
 const QUEUE_KEY = "jr-os-cloud-sync-queue";
@@ -28,10 +29,9 @@ export const syncStatus = {
 
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "queuedAt" | "attempts" | "state">) {
   const queue = read<SyncQueueItem[]>(QUEUE_KEY, []);
-  const existingIndex = queue.findIndex((queued) => queued.table === item.table && queued.sourceId === item.sourceId && queued.collectionKey === item.collectionKey);
-  const next = { ...item, id: `${item.table}:${item.collectionKey || "typed"}:${item.sourceId}:${Date.now()}`, queuedAt: new Date().toISOString(), attempts: 0, state: navigator.onLine ? "Pending" as const : "Offline" as const };
-  if (existingIndex >= 0) queue[existingIndex] = next; else queue.push(next);
-  write(QUEUE_KEY, queue); syncStatus.set(navigator.onLine ? "Pending" : "Offline");
+  const next: SyncQueueItem<T> = { ...item, id: `${item.organisationId}:${item.table}:${item.collectionKey || "typed"}:${item.sourceId}:${Date.now()}`, queuedAt: new Date().toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
+  write(QUEUE_KEY, coalesceQueue(queue, next));
+  syncStatus.set(navigator.onLine ? "Pending" : "Offline");
 }
 
 export async function flushSyncQueue() {
@@ -40,28 +40,33 @@ export async function flushSyncQueue() {
   const remaining: SyncQueueItem[] = [];
   for (const item of queue) {
     try {
-      const filter = collectionFilter(item.collectionKey);
-      const existing = await cloudSelect<CloudEnvelope<unknown>>(item.table, `select=*&organisation_id=eq.${item.organisationId}&source_id=eq.${encodeURIComponent(item.sourceId)}${filter}&limit=1`);
+      const existing = await cloudSelect<CloudEnvelope<unknown>>(item.table, tenantRecordQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, includeDeleted: true }));
       const current = existing[0];
-      if (current && item.expectedVersion !== undefined && current.version !== item.expectedVersion) {
-        remaining.push({ ...item, state: "Conflict", error: `Cloud version ${current.version} differs from expected ${item.expectedVersion}.` });
+      if (hasVersionConflict(current?.version, item.expectedVersion)) {
+        remaining.push({ ...item, state: "Conflict", error: `Cloud version ${current?.version} differs from expected ${item.expectedVersion}.` });
         continue;
       }
 
       if (item.operation === "delete") {
-        await cloudDelete(item.table, item.sourceId, `&organisation_id=eq.${item.organisationId}${filter}`);
-        updateCachedVersion(item.storageKey, item.sourceId);
+        if (!current) { updateCachedVersion(item.storageKey, item.sourceId); continue; }
+        const deletedAt = new Date().toISOString();
+        const query = `organisation_id=eq.${encodeURIComponent(item.organisationId)}&source_id=eq.${encodeURIComponent(item.sourceId)}${collectionFilter(item.collectionKey)}`;
+        const tombstone = makeTombstone({ currentVersion: current.version, userId: item.userId, deletedAt });
+        await cloudPatch(item.table, query, { ...tombstone, source_updated_at: deletedAt });
+        updateCachedVersion(item.storageKey, item.sourceId, tombstone.version);
       } else {
         const nextVersion = (current?.version || 0) + 1;
+        const links = linkedSourceIds(item.payload);
         const record = {
           organisation_id: item.organisationId,
           source_id: item.sourceId,
           collection_key: item.collectionKey,
-          customer_source_id: (item.payload as { customerId?: string } | undefined)?.customerId,
-          job_source_id: (item.payload as { jobId?: string } | undefined)?.jobId,
+          customer_source_id: links.customerSourceId,
+          job_source_id: links.jobSourceId,
           version: nextVersion,
           source_updated_at: (item.payload as { updatedAt?: string } | undefined)?.updatedAt || new Date().toISOString(),
           payload: item.payload,
+          deleted_at: null,
           created_by: current ? undefined : item.userId,
           updated_by: item.userId,
         };
@@ -78,10 +83,9 @@ export async function importLocalCollection<T extends { id: string; updatedAt?: 
   const records = read<T[]>(storageKey, []);
   if (!records.length) return { imported: 0, skipped: 0 };
   const filter = collectionFilter(collectionKey);
-  const existing = await cloudSelect<{ source_id: string; source_updated_at?: string; version?: number }>(table, `select=source_id,source_updated_at,version&organisation_id=eq.${organisationId}${filter}`);
-  const marker = new Map(existing.map((row) => [row.source_id, row.source_updated_at || ""]));
-  const pending = records.filter((record) => !marker.has(record.id) || (record.updatedAt || "") > (marker.get(record.id) || ""));
-  if (pending.length) await cloudUpsert(table, pending.map((record) => ({ organisation_id: organisationId, collection_key: collectionKey, source_id: record.id, customer_source_id: record.customerId, job_source_id: record.jobId, version: 1, source_updated_at: record.updatedAt || new Date().toISOString(), payload: record, created_by: userId, updated_by: userId })), collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
+  const existing = await cloudSelect<{ source_id: string; source_updated_at?: string; version?: number; deleted_at?: string | null }>(table, `select=source_id,source_updated_at,version,deleted_at&organisation_id=eq.${encodeURIComponent(organisationId)}${filter}`);
+  const pending = pendingImports(records, existing);
+  if (pending.length) await cloudUpsert(table, pending.map((record) => ({ organisation_id: organisationId, collection_key: collectionKey, source_id: record.id, customer_source_id: record.customerId, job_source_id: record.jobId, version: 1, source_updated_at: record.updatedAt || new Date().toISOString(), payload: record, deleted_at: null, created_by: userId, updated_by: userId })), collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
   const versions = Object.fromEntries(existing.map((row) => [row.source_id, row.version || 1]));
   for (const record of pending) versions[record.id] = 1;
   write(`jr-os-cloud-versions:${storageKey}`, versions);
