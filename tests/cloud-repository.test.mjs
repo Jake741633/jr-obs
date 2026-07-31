@@ -1,10 +1,56 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { coalesceQueue, hasVersionConflict, linkedSourceIds, makeTombstone, pendingImports, tenantListQuery, tenantRecordQuery } from "../lib/cloud/repository-core.mjs";
+import {
+  applyLocalCrud,
+  cloudRowsToCache,
+  coalesceQueue,
+  hasVersionConflict,
+  linkedSourceIds,
+  makeTombstone,
+  pendingImports,
+  queueModeChange,
+  retainVersionConflict,
+  tenantListQuery,
+  tenantRecordQuery,
+} from "../lib/cloud/repository-core.mjs";
 
 test("queries include organisation scope", () => {
   assert.match(tenantListQuery({ organisationId: "org-a", collectionKey: "jr-os-custom" }), /organisation_id=eq\.org-a/);
   assert.match(tenantRecordQuery({ organisationId: "org-a", sourceId: "rec-1", collectionKey: "jr-os-custom", includeDeleted: true }), /source_id=eq\.rec-1/);
+});
+
+test("local-only CRUD preserves IDs and never queues", () => {
+  const created = applyLocalCrud([], { type: "save", record: { id: "cus-1", name: "Jake" } });
+  const updated = applyLocalCrud(created, { type: "save", record: { id: "cus-1", name: "Jake R" } });
+  const removed = applyLocalCrud(updated, { type: "remove", id: "cus-1" });
+  const result = queueModeChange({ mode: "local", online: true, queue: [], change: { organisationId: "org-a", table: "customers", sourceId: "cus-1" } });
+  assert.deepEqual(created, [{ id: "cus-1", name: "Jake" }]);
+  assert.deepEqual(updated, [{ id: "cus-1", name: "Jake R" }]);
+  assert.deepEqual(removed, []);
+  assert.deepEqual(result, { queue: [], status: "Synced" });
+});
+
+test("migration mode queues non-blocking writes", () => {
+  const change = { organisationId: "org-a", table: "customers", sourceId: "cus-1", operation: "upsert" };
+  const result = queueModeChange({ mode: "migration", online: true, queue: [], change });
+  assert.equal(result.status, "Pending");
+  assert.deepEqual(result.queue, [{ ...change, state: "Pending" }]);
+});
+
+test("cloud mode loading deduplicates, caches latest payload and filters tombstones", () => {
+  const rows = [
+    { source_id: "a", version: 1, payload: { id: "a", name: "Old" } },
+    { source_id: "a", version: 2, payload: { id: "a", name: "Latest" } },
+    { source_id: "b", version: 3, deleted_at: "2026-07-31T08:00:00Z", payload: { id: "b", name: "Deleted" } },
+  ];
+  assert.deepEqual(cloudRowsToCache(rows), [{ id: "a", name: "Latest" }]);
+});
+
+test("offline writes remain queued with Offline status", () => {
+  const change = { organisationId: "org-a", table: "payments", sourceId: "pay-1", operation: "upsert" };
+  const result = queueModeChange({ mode: "cloud", online: false, queue: [], change });
+  assert.equal(result.status, "Offline");
+  assert.equal(result.queue[0].state, "Offline");
 });
 
 test("queue coalesces duplicate writes", () => {
@@ -21,9 +67,14 @@ test("tenants and collections remain separate", () => {
   assert.equal(coalesceQueue(queue, otherTenant).length, 2);
 });
 
-test("version mismatch reports conflict", () => {
+test("version mismatch reports conflict and retains queued change", () => {
+  const change = { organisationId: "org-a", table: "invoices", sourceId: "inv-1", operation: "upsert", expectedVersion: 2 };
   assert.equal(hasVersionConflict(3, 2), true);
   assert.equal(hasVersionConflict(3, 3), false);
+  const retained = retainVersionConflict([], change, 3);
+  assert.equal(retained.length, 1);
+  assert.equal(retained[0].state, "Conflict");
+  assert.match(retained[0].error, /Cloud version 3/);
 });
 
 test("imports skip unchanged and deleted rows", () => {
@@ -33,7 +84,9 @@ test("imports skip unchanged and deleted rows", () => {
 });
 
 test("deletions create versioned tombstones", () => {
-  assert.equal(makeTombstone({ currentVersion: 4, userId: "user-1", deletedAt: "2026-07-31T08:00:00Z" }).version, 5);
+  const tombstone = makeTombstone({ currentVersion: 4, userId: "user-1", deletedAt: "2026-07-31T08:00:00Z" });
+  assert.equal(tombstone.version, 5);
+  assert.equal(tombstone.deleted_at, "2026-07-31T08:00:00Z");
 });
 
 test("customer and job links remain attached", () => {
