@@ -6,8 +6,9 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { FleetVehicle, Job, Material, MaterialUnit, StockItem, StockLocation, StockLocationType, StockMovement, StockMovementType } from "../../lib/models";
+import { useStockItemsCollection, useStockLocationsCollection, useStockMovementsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
+import type { FleetVehicle, Job, Material, MaterialUnit, StockItem, StockLocationType, StockMovementType } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const locationTypes: StockLocationType[] = ["Van", "Store", "Site", "Other"];
@@ -18,12 +19,12 @@ const blankItem = { materialId: "", description: "", locationId: "", quantity: "
 const blankMovement = { stockItemId: "", type: "Used" as StockMovementType, quantity: "1", jobId: "", note: "" };
 
 export default function StockPage() {
-  const locations = useLocalStorageCollection<StockLocation>("jr-os-stock-locations");
-  const stock = useLocalStorageCollection<StockItem>("jr-os-stock-items");
-  const movements = useLocalStorageCollection<StockMovement>("jr-os-stock-movements");
-  const materials = useLocalStorageCollection<Material>("jr-os-materials");
-  const vehicles = useLocalStorageCollection<FleetVehicle>("jr-os-fleet");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const locations = useStockLocationsCollection();
+  const stock = useStockItemsCollection();
+  const movements = useStockMovementsCollection();
+  const materials = useCloudLocalCollection<Material>("jr-os-materials");
+  const vehicles = useCloudLocalCollection<FleetVehicle>("jr-os-fleet");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const [locationForm, setLocationForm] = useState(blankLocation);
   const [itemForm, setItemForm] = useState(blankItem);
   const [movementForm, setMovementForm] = useState(blankMovement);
