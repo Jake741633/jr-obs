@@ -6,6 +6,7 @@ import {
   buildAiLearningMemory,
   type AiLearningSources,
 } from "./aiLearning";
+import { useAiRecommendationEvidenceCollection } from "./cloud/coreBusinessCollections";
 import type { AiLearningMemory, LabourCostSettings } from "./models";
 import { useLocalStorageCollection } from "./storage";
 
@@ -18,6 +19,7 @@ export function useAiLearningMemory(
     setItems,
     isReady,
   } = useLocalStorageCollection<AiLearningMemory>(AI_LEARNING_MEMORY_KEY);
+  const evidenceStore = useAiRecommendationEvidenceCollection();
   const {
     jobs,
     documents,
@@ -52,14 +54,31 @@ export function useAiLearningMemory(
     ],
   );
   const storedMemory = items[0];
+  const liveEvidenceSignature = useMemo(
+    () => JSON.stringify(liveMemory.influentialRecords.map((item) => [item.id, item.recordId, item.occurredAt, item.relevance])),
+    [liveMemory.influentialRecords],
+  );
+  const storedEvidenceSignature = useMemo(
+    () => JSON.stringify(evidenceStore.items.map((item) => [item.id, item.recordId, item.occurredAt, item.relevance])),
+    [evidenceStore.items],
+  );
 
   useEffect(() => {
-    if (!isReady || storedMemory?.sourceSignature === liveMemory.sourceSignature) return;
-    setItems([liveMemory]);
-  }, [isReady, liveMemory, setItems, storedMemory?.sourceSignature]);
+    if (!isReady || !evidenceStore.isReady) return;
+    if (storedMemory?.sourceSignature !== liveMemory.sourceSignature) setItems([liveMemory]);
+    if (storedEvidenceSignature !== liveEvidenceSignature) evidenceStore.setItems(liveMemory.influentialRecords);
+  }, [
+    evidenceStore,
+    isReady,
+    liveEvidenceSignature,
+    liveMemory,
+    setItems,
+    storedEvidenceSignature,
+    storedMemory?.sourceSignature,
+  ]);
 
   return {
     memory: storedMemory?.sourceSignature === liveMemory.sourceSignature ? storedMemory : liveMemory,
-    isReady,
+    isReady: isReady && evidenceStore.isReady,
   };
 }
