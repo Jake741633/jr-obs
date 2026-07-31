@@ -6,7 +6,8 @@ import { CheckCircle2, ExternalLink, PackageCheck, PackageOpen, Plus, ShoppingCa
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { usePurchaseListsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { createPurchaseListFromPricingDocument } from "../../lib/workflow";
 import type { Job, Material, PricingDocument, PurchaseItemStatus, PurchaseList, PurchaseListItem } from "../../lib/models";
 
@@ -23,10 +24,10 @@ function groupBySupplier(items: PurchaseListItem[]) {
 }
 
 export default function PurchasesPage() {
-  const purchaseLists = useLocalStorageCollection<PurchaseList>("jr-os-purchase-lists");
-  const pricing = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
-  const materials = useLocalStorageCollection<Material>("jr-os-materials");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const purchaseLists = usePurchaseListsCollection();
+  const pricing = useCloudLocalCollection<PricingDocument>("jr-os-pricing-documents");
+  const materials = useCloudLocalCollection<Material>("jr-os-materials");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [message, setMessage] = useState("");
 
