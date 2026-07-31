@@ -1,6 +1,6 @@
 "use client";
 
-import type { Customer, Invoice, Job, Material, PricingDocument } from "../models";
+import type { Customer, Invoice, Job, Material, PricingDocument, StockItem, StockLocation, StockMovement } from "../models";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -13,32 +13,18 @@ export const coreBusinessStorageKeys = {
   invoices: "jr-os-invoices",
   payments: "jr-os-payments",
   materials: "jr-os-materials",
+  stockLocations: "jr-os-stock-locations",
+  stockItems: "jr-os-stock-items",
+  stockMovements: "jr-os-stock-movements",
 } as const;
 
-export function useCustomersCollection() {
-  return useCloudLocalCollection<Customer>(coreBusinessStorageKeys.customers);
-}
-
-export function useJobsCollection() {
-  return useCloudLocalCollection<Job>(coreBusinessStorageKeys.jobs);
-}
-
-export function usePlannerCollection() {
-  return useCloudLocalCollection<ScheduledPlannerEntry>(coreBusinessStorageKeys.planner);
-}
-
-export function usePricingDocumentsCollection() {
-  return useCloudLocalCollection<PricingDocument>(coreBusinessStorageKeys.pricingDocuments);
-}
-
-export function useInvoicesCollection() {
-  return useCloudLocalCollection<Invoice>(coreBusinessStorageKeys.invoices);
-}
-
-export function usePaymentsCollection() {
-  return useCloudLocalCollection<PaymentRecord>(coreBusinessStorageKeys.payments);
-}
-
-export function useMaterialsCollection() {
-  return useCloudLocalCollection<Material>(coreBusinessStorageKeys.materials);
-}
+export function useCustomersCollection() { return useCloudLocalCollection<Customer>(coreBusinessStorageKeys.customers); }
+export function useJobsCollection() { return useCloudLocalCollection<Job>(coreBusinessStorageKeys.jobs); }
+export function usePlannerCollection() { return useCloudLocalCollection<ScheduledPlannerEntry>(coreBusinessStorageKeys.planner); }
+export function usePricingDocumentsCollection() { return useCloudLocalCollection<PricingDocument>(coreBusinessStorageKeys.pricingDocuments); }
+export function useInvoicesCollection() { return useCloudLocalCollection<Invoice>(coreBusinessStorageKeys.invoices); }
+export function usePaymentsCollection() { return useCloudLocalCollection<PaymentRecord>(coreBusinessStorageKeys.payments); }
+export function useMaterialsCollection() { return useCloudLocalCollection<Material>(coreBusinessStorageKeys.materials); }
+export function useStockLocationsCollection() { return useCloudLocalCollection<StockLocation>(coreBusinessStorageKeys.stockLocations); }
+export function useStockItemsCollection() { return useCloudLocalCollection<StockItem>(coreBusinessStorageKeys.stockItems); }
+export function useStockMovementsCollection() { return useCloudLocalCollection<StockMovement>(coreBusinessStorageKeys.stockMovements); }
