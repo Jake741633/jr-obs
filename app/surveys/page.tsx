@@ -6,7 +6,8 @@ import { useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { StatusBadge } from "../../components/ui/StatusBadge";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { useSurveysCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { Customer, Job, SiteSurvey } from "../../lib/models";
 
 function blankSurvey(index: number): SiteSurvey {
@@ -22,9 +23,9 @@ function blankSurvey(index: number): SiteSurvey {
 }
 
 export default function SurveysPage() {
-  const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const surveys = useSurveysCollection();
+  const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const [search, setSearch] = useState("");
 
   function createSurvey() {
