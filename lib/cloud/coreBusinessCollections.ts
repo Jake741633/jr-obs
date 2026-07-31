@@ -1,6 +1,7 @@
 "use client";
 
 import type { Customer, Invoice, Job, Material, PricingDocument, PurchaseList, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
+import type { ElectricalTestingRecord } from "../electricalTesting";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -19,6 +20,7 @@ export const coreBusinessStorageKeys = {
   purchaseLists: "jr-os-purchase-lists",
   team: "jr-os-team",
   timesheets: "jr-os-timesheets",
+  electricalTesting: "jr-os-electrical-testing",
 } as const;
 
 export function useCustomersCollection() { return useCloudLocalCollection<Customer>(coreBusinessStorageKeys.customers); }
@@ -34,3 +36,4 @@ export function useStockMovementsCollection() { return useCloudLocalCollection<S
 export function usePurchaseListsCollection() { return useCloudLocalCollection<PurchaseList>(coreBusinessStorageKeys.purchaseLists); }
 export function useTeamCollection() { return useCloudLocalCollection<TeamMember>(coreBusinessStorageKeys.team); }
 export function useTimesheetsCollection() { return useCloudLocalCollection<TimesheetEntry>(coreBusinessStorageKeys.timesheets); }
+export function useElectricalTestingCollection() { return useCloudLocalCollection<ElectricalTestingRecord>(coreBusinessStorageKeys.electricalTesting); }
