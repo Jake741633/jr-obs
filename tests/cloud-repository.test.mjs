@@ -92,3 +92,20 @@ test("deletions create versioned tombstones", () => {
 test("customer and job links remain attached", () => {
   assert.deepEqual(linkedSourceIds({ customerId: "cus-1", jobId: "job-1" }), { customerSourceId: "cus-1", jobSourceId: "job-1" });
 });
+
+test("operational and field payloads round-trip without changing IDs or shapes", () => {
+  const payloads = [
+    { id: "mat-1", name: "2.5mm cable", tradeCost: 42.5, favourite: true },
+    { id: "stock-1", materialId: "mat-1", locationId: "van-1", quantity: 3, minimumQuantity: 1 },
+    { id: "movement-1", stockItemId: "stock-1", jobId: "job-1", type: "Used", quantity: 1 },
+    { id: "purchase-1", jobId: "job-1", pricingDocumentId: "quote-1", items: [{ id: "line-1", quantity: 2 }] },
+    { id: "team-1", name: "Electrician", qualifications: [{ id: "qual-1", name: "18th Edition" }] },
+    { id: "timesheet-1", teamMemberId: "team-1", jobId: "job-1", workDate: "2026-07-31", breakMinutes: 30 },
+    { id: "testing-1", customerId: "cus-1", jobId: "job-1", circuits: [{ id: "circuit-1", zs: "0.42" }] },
+    { id: "certificate-1", customerId: "cus-1", jobId: "job-1", status: "Draft", revisionHistory: [] },
+  ];
+  const rows = payloads.map((payload, index) => ({ source_id: payload.id, version: index + 1, payload }));
+  assert.deepEqual(cloudRowsToCache(rows), payloads);
+  assert.deepEqual(linkedSourceIds(payloads[6]), { customerSourceId: "cus-1", jobSourceId: "job-1" });
+  assert.deepEqual(linkedSourceIds(payloads[7]), { customerSourceId: "cus-1", jobSourceId: "job-1" });
+});
