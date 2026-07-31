@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createCollectionRepository, type RepositoryRecord } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
-import { cloudSafeFileRecord } from "./cloud/privateFiles";
+import { cloudSafeFileRecord, usePrivateFileCollectionBridge } from "./cloud/privateFiles";
 import { useCloudIdentity } from "./cloud/useCloudIdentity";
 
 export function makeId(prefix: string) {
@@ -103,11 +103,13 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     previousRef.current = items;
   }, [isReady, items, key, mode, organisationId, target, userId]);
 
+  const displayItems = usePrivateFileCollectionBridge({ storageKey: key, items, setItems, isReady, identity, mode });
+
   const remove = useCallback((predicate: (item: T) => boolean) => {
     setItems((current) => current.filter((item) => !predicate(item)));
   }, []);
 
-  return { items, setItems, remove, isReady };
+  return { items: displayItems, setItems, remove, isReady };
 }
 
 export const useLocalStorageCollection = useCloudLocalCollection;
