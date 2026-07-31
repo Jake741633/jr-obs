@@ -60,8 +60,10 @@ using (
   and public.current_jr_role() in ('owner','admin')
 );
 
+drop trigger if exists cloud_collections_set_updated_at on public.cloud_collections;
 create trigger cloud_collections_set_updated_at before update on public.cloud_collections
 for each row execute function public.set_updated_at();
 
+drop trigger if exists cloud_collections_delete_audit on public.cloud_collections;
 create trigger cloud_collections_delete_audit after delete on public.cloud_collections
 for each row execute function public.audit_jr_entity_change();
