@@ -2,13 +2,11 @@
 
 import { useEffect, useMemo } from "react";
 import {
-  AI_LEARNING_MEMORY_KEY,
   buildAiLearningMemory,
   type AiLearningSources,
 } from "./aiLearning";
-import { useAiRecommendationEvidenceCollection } from "./cloud/coreBusinessCollections";
-import type { AiLearningMemory, LabourCostSettings } from "./models";
-import { useLocalStorageCollection } from "./storage";
+import { useAiLearningMemoryCollection, useAiRecommendationEvidenceCollection } from "./cloud/coreBusinessCollections";
+import type { LabourCostSettings } from "./models";
 
 export function useAiLearningMemory(
   sources: AiLearningSources,
@@ -18,7 +16,7 @@ export function useAiLearningMemory(
     items,
     setItems,
     isReady,
-  } = useLocalStorageCollection<AiLearningMemory>(AI_LEARNING_MEMORY_KEY);
+  } = useAiLearningMemoryCollection();
   const {
     items: evidenceItems,
     setItems: setEvidenceItems,
