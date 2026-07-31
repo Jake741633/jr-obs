@@ -7,8 +7,9 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { JobPack, JobPackMaterial, Material } from "../../lib/models";
+import { useJobPacksCollection, useMaterialsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId } from "../../lib/storage";
+import type { JobPack, JobPackMaterial } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const categories = ["Consumer unit", "Rewire", "EICR", "Fault finding", "EV charger", "Commercial small works", "Lighting", "Emergency lighting", "Fire alarm", "Custom"];
@@ -16,8 +17,8 @@ const blankForm = { name: "", category: "Custom", description: "", labourDescrip
 const blankMaterial = { materialId: "", description: "", quantity: "1", unitPrice: "" };
 
 export default function JobPacksPage() {
-  const packs = useLocalStorageCollection<JobPack>("jr-os-job-packs");
-  const materialsLibrary = useLocalStorageCollection<Material>("jr-os-materials");
+  const packs = useJobPacksCollection();
+  const materialsLibrary = useMaterialsCollection();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
