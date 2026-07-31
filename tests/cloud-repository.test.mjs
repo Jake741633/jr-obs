@@ -117,3 +117,9 @@ test("portal approval and request payloads retain audit and customer links", () 
   assert.deepEqual(linkedSourceIds(approval), { customerSourceId: "cus-1", jobSourceId: undefined });
   assert.deepEqual(linkedSourceIds(request), { customerSourceId: "cus-1", jobSourceId: "job-1" });
 });
+
+test("expense records round-trip without embedding receipt bytes in cloud payloads", () => {
+  const expense = { id: "expense-1", jobId: "job-1", supplier: "CEF", grossAmount: 120, receiptFileName: "receipt.pdf", receiptUrl: "signed-url", privateStoragePath: "org-a/jobs/job-1/expense-1/receipt.pdf" };
+  assert.deepEqual(cloudRowsToCache([{ source_id: expense.id, version: 1, payload: expense }]), [expense]);
+  assert.deepEqual(linkedSourceIds(expense), { customerSourceId: undefined, jobSourceId: "job-1" });
+});
