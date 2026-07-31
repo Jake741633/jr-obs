@@ -6,8 +6,9 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { Job, RamsDocument, RamsStatus, RiskAssessmentItem, RiskLikelihood, RiskSeverity } from "../../lib/models";
+import { useJobsCollection, useRamsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId } from "../../lib/storage";
+import type { RamsDocument, RamsStatus, RiskAssessmentItem, RiskLikelihood, RiskSeverity } from "../../lib/models";
 
 const statuses: RamsStatus[] = ["Draft", "Ready for review", "Approved", "Superseded"];
 const defaultPpe = ["Safety footwear", "Safety glasses", "Gloves"];
@@ -25,8 +26,8 @@ function scoreLabel(value: number) {
 }
 
 export default function RamsPage() {
-  const documents = useLocalStorageCollection<RamsDocument>("jr-os-rams");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const documents = useRamsCollection();
+  const jobs = useJobsCollection();
   const [form, setForm] = useState(blankForm);
   const [riskForm, setRiskForm] = useState(blankRisk);
   const [risks, setRisks] = useState<RiskAssessmentItem[]>([]);
