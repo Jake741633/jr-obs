@@ -6,8 +6,9 @@ import { FormEvent, useState } from "react";
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
-import { makeId, useLocalStorageCollection } from "../../../lib/storage";
-import type { Customer, Job, PricingDocument, SiteSurvey, SurveyCircuit } from "../../../lib/models";
+import { useCustomersCollection, useJobsCollection, usePricingDocumentsCollection, useSurveysCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { makeId } from "../../../lib/storage";
+import type { PricingDocument, SiteSurvey, SurveyCircuit } from "../../../lib/models";
 
 const steps = ["Customer", "Property", "Consumer unit", "Circuits", "Defects & risks", "Recommendations", "Review"];
 const defects = ["No SPD", "No RCD protection", "No RCBOs", "Missing main bonding", "Undersized bonding", "Signs of overheating", "Damaged accessories", "Rubber or VIR cable", "Incorrect polarity", "High Zs", "Failed RCD", "No labelling", "Fire risk", "Overloaded consumer unit"];
@@ -32,10 +33,10 @@ const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-
 
 export default function SurveyDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
+  const surveys = useSurveysCollection();
+  const customers = useCustomersCollection();
+  const jobs = useJobsCollection();
+  const quotes = usePricingDocumentsCollection();
   const [step, setStep] = useState(0);
   const [message, setMessage] = useState("");
   const survey = surveys.items.find((item) => item.id === id);
