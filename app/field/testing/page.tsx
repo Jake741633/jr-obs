@@ -7,7 +7,8 @@ import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../../lib/storage";
+import { useElectricalTestingCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../../lib/storage";
 import type { Customer, ElectricalCertificate, Job } from "../../../lib/models";
 import {
   certificateReadySummary,
@@ -33,10 +34,10 @@ function blankRecord(jobId = "", customerId?: string): ElectricalTestingRecord {
 }
 
 export default function MobileTestingPage() {
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
-  const records = useLocalStorageCollection<ElectricalTestingRecord>("jr-os-electrical-testing");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
+  const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const certificates = useCloudLocalCollection<ElectricalCertificate>("jr-os-certificates");
+  const records = useElectricalTestingCollection();
   const [form, setForm] = useState<ElectricalTestingRecord>(() => blankRecord());
   const [actionText, setActionText] = useState("");
   const [message, setMessage] = useState("");
