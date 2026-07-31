@@ -1,6 +1,6 @@
 "use client";
 
-import type { Customer, Invoice, Job, PricingDocument } from "../models";
+import type { Customer, Invoice, Job, Material, PricingDocument } from "../models";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -12,6 +12,7 @@ export const coreBusinessStorageKeys = {
   pricingDocuments: "jr-os-pricing-documents",
   invoices: "jr-os-invoices",
   payments: "jr-os-payments",
+  materials: "jr-os-materials",
 } as const;
 
 export function useCustomersCollection() {
@@ -36,4 +37,8 @@ export function useInvoicesCollection() {
 
 export function usePaymentsCollection() {
   return useCloudLocalCollection<PaymentRecord>(coreBusinessStorageKeys.payments);
+}
+
+export function useMaterialsCollection() {
+  return useCloudLocalCollection<Material>(coreBusinessStorageKeys.materials);
 }
