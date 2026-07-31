@@ -10,6 +10,7 @@ const files = [
   "supabase/migrations/20260730_003_permission_hardening.sql",
   "supabase/migrations/20260731_004_generic_collection_sync.sql",
   "supabase/migrations/20260731_005_security_readiness_phase1.sql",
+  "supabase/migrations/20260731_006_profiles_rls_recursion_fix.sql",
 ];
 
 const sql = Object.fromEntries(files.map((file) => [file, readFileSync(file, "utf8")]));
@@ -82,6 +83,15 @@ test("migration dependencies are created before triggers and policies use them",
   assert.match(generic, /drop trigger if exists cloud_collections_delete_audit/i);
   assert.match(security, /drop policy if exists jr_private_select/i);
   assert.match(security, /create policy jr_private_select/i);
+});
+
+test("profile and organisation read policies avoid recursive profile subqueries", () => {
+  const fix = sql[files[7]];
+  assert.match(fix, /drop policy if exists "Users can view organisation profiles"/i);
+  assert.match(fix, /create policy profiles_tenant_select/i);
+  assert.match(fix, /organisation_id\s*=\s*public\.current_organisation_id\(\)/i);
+  assert.match(fix, /create policy organisations_tenant_select/i);
+  assert.doesNotMatch(fix, /select\s+organisation_id\s+from\s+public\.profiles/i);
 });
 
 test("legacy and current private buckets remain distinct without public exposure", () => {
