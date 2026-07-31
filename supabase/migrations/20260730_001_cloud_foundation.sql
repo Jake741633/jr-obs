@@ -9,12 +9,24 @@ alter table public.profiles add constraint profiles_role_check check (role in ('
 alter table public.profiles add column if not exists customer_source_id text;
 alter table public.profiles add column if not exists active boolean not null default true;
 
-create or replace function public.current_organisation_id() returns uuid language sql stable security definer set search_path=public as $$ select organisation_id from public.profiles where id=auth.uid() and active limit 1 $$;
-create or replace function public.current_role() returns text language sql stable security definer set search_path=public as $$ select role from public.profiles where id=auth.uid() and active limit 1 $$;
-create or replace function public.can_manage_business() returns boolean language sql stable security definer set search_path=public as $$ select coalesce(public.current_role() in ('owner','admin'),false) $$;
-create or replace function public.can_manage_office_data() returns boolean language sql stable security definer set search_path=public as $$ select coalesce(public.current_role() in ('owner','admin','office'),false) $$;
-create or replace function public.can_manage_field_data() returns boolean language sql stable security definer set search_path=public as $$ select coalesce(public.current_role() in ('owner','admin','office','electrician'),false) $$;
-create or replace function public.touch_updated_at() returns trigger language plpgsql as $$ begin new.updated_at=now(); new.updated_by=auth.uid(); new.version=coalesce(old.version,0)+1; return new; end $$;
+create or replace function public.current_organisation_id() returns uuid language sql stable security definer set search_path='' as $$ select p.organisation_id from public.profiles p where p.id=(select auth.uid()) and p.active limit 1 $$;
+create or replace function public.current_role() returns text language sql stable security definer set search_path='' as $$ select p.role from public.profiles p where p.id=(select auth.uid()) and p.active limit 1 $$;
+create or replace function public.can_manage_business() returns boolean language sql stable security definer set search_path='' as $$ select coalesce(public.current_role() in ('owner','admin'),false) $$;
+create or replace function public.can_manage_office_data() returns boolean language sql stable security definer set search_path='' as $$ select coalesce(public.current_role() in ('owner','admin','office'),false) $$;
+create or replace function public.can_manage_field_data() returns boolean language sql stable security definer set search_path='' as $$ select coalesce(public.current_role() in ('owner','admin','office','electrician'),false) $$;
+create or replace function public.touch_updated_at() returns trigger language plpgsql set search_path='' as $$ begin new.updated_at=now(); new.updated_by=auth.uid(); new.version=coalesce(old.version,0)+1; return new; end $$;
+
+revoke all on function public.current_organisation_id() from public, anon;
+revoke all on function public.current_role() from public, anon;
+revoke all on function public.can_manage_business() from public, anon;
+revoke all on function public.can_manage_office_data() from public, anon;
+revoke all on function public.can_manage_field_data() from public, anon;
+grant execute on function public.current_organisation_id() to authenticated;
+grant execute on function public.current_role() to authenticated;
+grant execute on function public.can_manage_business() to authenticated;
+grant execute on function public.can_manage_office_data() to authenticated;
+grant execute on function public.can_manage_field_data() to authenticated;
+revoke all on function public.touch_updated_at() from public, anon, authenticated;
 
 create table if not exists public.audit_log (
   id uuid primary key default gen_random_uuid(), organisation_id uuid not null references public.organisations(id) on delete cascade,
@@ -72,6 +84,11 @@ end $$;
 alter table public.audit_log enable row level security;
 alter table public.migration_markers enable row level security;
 alter table public.private_files enable row level security;
+drop policy if exists audit_read on public.audit_log;
+drop policy if exists audit_append on public.audit_log;
+drop policy if exists markers_manage on public.migration_markers;
+drop policy if exists files_read on public.private_files;
+drop policy if exists files_write on public.private_files;
 create policy audit_read on public.audit_log for select to authenticated using (organisation_id=public.current_organisation_id() and public.can_manage_office_data());
 create policy audit_append on public.audit_log for insert to authenticated with check (organisation_id=public.current_organisation_id());
 create policy markers_manage on public.migration_markers for all to authenticated using (organisation_id=public.current_organisation_id() and public.can_manage_office_data()) with check (organisation_id=public.current_organisation_id() and public.can_manage_office_data());
@@ -79,6 +96,10 @@ create policy files_read on public.private_files for select to authenticated usi
 create policy files_write on public.private_files for all to authenticated using (organisation_id=public.current_organisation_id() and public.can_manage_field_data()) with check (organisation_id=public.current_organisation_id() and public.can_manage_field_data());
 
 insert into storage.buckets (id,name,public) values ('jr-os-private','jr-os-private',false) on conflict (id) do update set public=false;
+drop policy if exists jr_private_select on storage.objects;
+drop policy if exists jr_private_insert on storage.objects;
+drop policy if exists jr_private_update on storage.objects;
+drop policy if exists jr_private_delete on storage.objects;
 create policy jr_private_select on storage.objects for select to authenticated using (bucket_id='jr-os-private' and (storage.foldername(name))[1]=public.current_organisation_id()::text);
 create policy jr_private_insert on storage.objects for insert to authenticated with check (bucket_id='jr-os-private' and (storage.foldername(name))[1]=public.current_organisation_id()::text and public.can_manage_field_data());
 create policy jr_private_update on storage.objects for update to authenticated using (bucket_id='jr-os-private' and (storage.foldername(name))[1]=public.current_organisation_id()::text and public.can_manage_field_data());
