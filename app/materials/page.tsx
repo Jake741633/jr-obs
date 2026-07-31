@@ -7,7 +7,8 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { useMaterialsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId } from "../../lib/storage";
 import type { Material, MaterialCategory, MaterialPriceHistory, MaterialPriceSource, MaterialUnit } from "../../lib/models";
 
 const categories: MaterialCategory[] = ["Cable", "Protection", "Accessories", "Lighting", "Containment", "EV", "Testing", "Fire alarm", "Emergency lighting", "Other"];
@@ -36,7 +37,7 @@ function ageInDays(date?: string) {
 }
 
 export default function MaterialsPage() {
-  const materials = useLocalStorageCollection<Material>("jr-os-materials");
+  const materials = useMaterialsCollection();
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
