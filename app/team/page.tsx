@@ -6,7 +6,8 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { Job, TeamMember, TeamMemberStatus, TeamQualification, TeamRole, TimesheetEntry, TimesheetStatus } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -41,9 +42,9 @@ function hoursFor(entry: TimesheetEntry) {
 }
 
 export default function TeamPage() {
-  const team = useLocalStorageCollection<TeamMember>("jr-os-team");
-  const timesheets = useLocalStorageCollection<TimesheetEntry>("jr-os-timesheets");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const team = useTeamCollection();
+  const timesheets = useCloudLocalCollection<TimesheetEntry>("jr-os-timesheets");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const [memberForm, setMemberForm] = useState(blankMember);
   const [qualificationForm, setQualificationForm] = useState(blankQualification);
   const [timesheetForm, setTimesheetForm] = useState(blankTimesheet);
