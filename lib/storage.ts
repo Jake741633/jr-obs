@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createCollectionRepository, type RepositoryRecord } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
+import { cloudSafeFileRecord } from "./cloud/privateFiles";
 import { useCloudIdentity } from "./cloud/useCloudIdentity";
 
 export function makeId(prefix: string) {
@@ -92,7 +93,9 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
 
     for (const [id, item] of nextById) {
       const before = previousById.get(id);
-      if (!before || JSON.stringify(before) !== JSON.stringify(item)) repository.save(item as unknown as RepositoryRecord);
+      if (!before || JSON.stringify(before) !== JSON.stringify(item)) {
+        repository.save(cloudSafeFileRecord(key, item as unknown as object) as RepositoryRecord);
+      }
     }
     for (const id of previousById.keys()) {
       if (!nextById.has(id)) repository.remove(id);
