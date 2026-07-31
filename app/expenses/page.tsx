@@ -6,7 +6,8 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { useExpensesCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { BusinessExpense, ExpenseCategory, ExpensePaymentMethod, ExpenseStatus, Job } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -21,8 +22,8 @@ function formatDate(value: string) {
 }
 
 export default function ExpensesPage() {
-  const expenses = useLocalStorageCollection<BusinessExpense>("jr-os-expenses");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const expenses = useExpensesCollection();
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const [form, setForm] = useState(blankForm);
   const [showForm, setShowForm] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState("");
