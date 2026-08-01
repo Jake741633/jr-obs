@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, CloudCog, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CloudCog, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { runCloudCutoverCheck, type CloudCutoverReport } from "../../../lib/cloud/cutover";
-import { flushSyncQueue, getSyncQueue } from "../../../lib/cloud/repository";
+import { discardSyncQueueItem, flushSyncQueue, getOrganisationSyncQueue, getSyncQueue, type SyncQueueItem } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 
 function statusClass(status: string) {
@@ -14,9 +14,14 @@ function statusClass(status: string) {
   return "text-amber-300";
 }
 
+function queueItemLabel(item: SyncQueueItem) {
+  return item.storageKey || item.collectionKey || item.table;
+}
+
 export default function CloudCutoverPage() {
   const { identity, isReady, mode, refresh } = useCloudIdentity();
   const [report, setReport] = useState<CloudCutoverReport | null>(null);
+  const [queueItems, setQueueItems] = useState<SyncQueueItem[]>([]);
   const [busy, setBusy] = useState(false);
   const [identityBusy, setIdentityBusy] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
@@ -29,6 +34,10 @@ export default function CloudCutoverPage() {
       void refresh().finally(() => setIdentityBusy(false));
     }
   }, [identity, isReady, mode, refresh]);
+
+  function refreshQueueItems(organisationId: string) {
+    setQueueItems(getOrganisationSyncQueue(organisationId));
+  }
 
   async function refreshIdentity() {
     setIdentityBusy(true);
@@ -51,6 +60,7 @@ export default function CloudCutoverPage() {
     setError("");
     try {
       setReport(await runCloudCutoverCheck(identity.organisationId));
+      refreshQueueItems(identity.organisationId);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The cloud cutover check could not be completed.");
     } finally {
@@ -68,6 +78,7 @@ export default function CloudCutoverPage() {
       const result = await flushSyncQueue();
       const refreshedReport = await runCloudCutoverCheck(identity.organisationId);
       setReport(refreshedReport);
+      refreshQueueItems(identity.organisationId);
       setRepairMessage(
         result.remaining === 0
           ? `Sync repair complete. ${result.cleared} of ${before} queued changes were safely cleared and the queue is now empty.`
@@ -78,6 +89,27 @@ export default function CloudCutoverPage() {
     } finally {
       setRepairBusy(false);
     }
+  }
+
+  async function clearFailedQueueItem(item: SyncQueueItem) {
+    if (!identity?.organisationId || item.state !== "Failed") return;
+    const collection = report?.collections.find((entry) => entry.storageKey === item.storageKey || (entry.table === item.table && entry.collectionKey === item.collectionKey));
+    const cloudContainsRecord = Boolean(collection && collection.cloudCount > 0 && !collection.localOnlyIds.includes(item.sourceId));
+    if (!cloudContainsRecord) {
+      setError("This failed queue item cannot be cleared safely because the readiness check does not confirm its record exists in Supabase.");
+      return;
+    }
+    setError("");
+    setRepairMessage("");
+    const result = discardSyncQueueItem(item.id);
+    if (!result.removed) {
+      setError("The failed queue item was no longer present.");
+      return;
+    }
+    const refreshedReport = await runCloudCutoverCheck(identity.organisationId);
+    setReport(refreshedReport);
+    refreshQueueItems(identity.organisationId);
+    setRepairMessage(`Removed the stale failed queue marker for ${queueItemLabel(item)}. No local or cloud business record was deleted.`);
   }
 
   return <div className="space-y-6">
@@ -134,6 +166,20 @@ export default function CloudCutoverPage() {
           <div className="rounded-xl border border-slate-800 p-3"><p className="text-slate-400">Failed</p><p className="mt-1 text-xl font-bold">{report.failedQueueCount}</p></div>
           <div className="rounded-xl border border-slate-800 p-3"><p className="text-slate-400">Files queued</p><p className="mt-1 text-xl font-bold">{report.privateUploadQueueCount}</p></div>
         </div>
+        {queueItems.length ? <div className="mt-4 space-y-3">
+          {queueItems.map((item) => <div key={item.id} className="rounded-xl border border-slate-800 p-4 text-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold">{queueItemLabel(item)}</p>
+                <p className="mt-1 text-slate-400">{item.operation} · {item.state} · attempt {item.attempts}</p>
+                <p className="mt-1 break-all text-xs text-slate-500">Record: {item.sourceId}</p>
+                <p className="mt-1 break-all text-xs text-slate-500">Table: {item.table}{item.collectionKey ? ` · ${item.collectionKey}` : ""}</p>
+                {item.error ? <p className="mt-2 whitespace-pre-wrap text-red-300">{item.error}</p> : null}
+              </div>
+              {item.state === "Failed" ? <Button type="button" variant="secondary" onClick={() => void clearFailedQueueItem(item)}><Trash2 className="mr-2 size-4" />Clear stale marker</Button> : null}
+            </div>
+          </div>)}
+        </div> : null}
         {repairMessage ? <p className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-200">{repairMessage}</p> : null}
       </Card>
 
