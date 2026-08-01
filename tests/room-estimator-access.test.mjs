@@ -18,12 +18,12 @@ test("room estimator is exposed once in workspace navigation beside pricing tool
   assert.equal(routeMatches.length, 1);
 
   const priceBookIndex = navigationSource.indexOf('["Electrical Price Book", "/price-book"]');
-  const roomEstimatorIndex = navigationSource.indexOf('["Room Estimator", "/room-estimator"]');
+  const roomEstimatorIndex = navigationSource.indexOf('["Mobile Room Estimator", "/room-estimator"]');
   const estimatesIndex = navigationSource.indexOf('["Estimates", "/estimates"]');
 
   assert.ok(priceBookIndex >= 0, "Electrical Price Book navigation item is missing");
-  assert.ok(roomEstimatorIndex > priceBookIndex, "Room Estimator should follow the Price Book");
-  assert.ok(estimatesIndex > roomEstimatorIndex, "Room Estimator should stay with estimating tools");
+  assert.ok(roomEstimatorIndex > priceBookIndex, "Mobile Room Estimator should follow the Price Book");
+  assert.ok(estimatesIndex > roomEstimatorIndex, "Mobile Room Estimator should stay with estimating tools");
 });
 
 test("office users can access the price book and room estimator", () => {
