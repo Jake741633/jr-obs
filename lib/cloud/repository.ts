@@ -9,6 +9,7 @@ export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: str
 export interface GenericCloudEnvelope<T> extends TypedCloudEnvelope<T> { collection_key: string; }
 export type CloudEnvelope<T> = TypedCloudEnvelope<T> | GenericCloudEnvelope<T>;
 export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; payload?: T; expectedVersion?: number; queuedAt: string; attempts: number; state: SyncState; error?: string; }
+export interface SyncQueueFlushResult { processed: number; cleared: number; remaining: number; conflicts: number; failed: number; }
 
 const QUEUE_KEY = "jr-os-cloud-sync-queue";
 const STATUS_KEY = "jr-os-cloud-sync-status";
@@ -16,6 +17,7 @@ const STATUS_KEY = "jr-os-cloud-sync-status";
 function read<T>(key: string, fallback: T): T { try { return JSON.parse(window.localStorage.getItem(key) || "") as T; } catch { return fallback; } }
 function write(key: string, value: unknown) { window.localStorage.setItem(key, JSON.stringify(value)); }
 function collectionFilter(collectionKey?: string) { return collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : ""; }
+function samePayload(left: unknown, right: unknown) { return JSON.stringify(left ?? null) === JSON.stringify(right ?? null); }
 function updateCachedVersion(storageKey: string | undefined, sourceId: string, version?: number) {
   if (!storageKey) return;
   const key = `jr-os-cloud-versions:${storageKey}`;
@@ -29,33 +31,52 @@ export const syncStatus = {
   set(value: SyncState) { write(STATUS_KEY, value); window.dispatchEvent(new CustomEvent("jr-os-sync-status", { detail: value })); },
 };
 
+export function getSyncQueue() { return read<SyncQueueItem[]>(QUEUE_KEY, []); }
+
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "queuedAt" | "attempts" | "state">) {
-  const queue = read<SyncQueueItem[]>(QUEUE_KEY, []);
+  const queue = getSyncQueue();
   const next: SyncQueueItem<T> = { ...item, id: `${item.organisationId}:${item.table}:${item.collectionKey || "typed"}:${item.sourceId}:${Date.now()}`, queuedAt: new Date().toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
   write(QUEUE_KEY, coalesceQueue(queue, next));
   syncStatus.set(navigator.onLine ? "Pending" : "Offline");
 }
 
-export async function flushSyncQueue() {
-  if (!navigator.onLine) return syncStatus.set("Offline");
-  const queue = read<SyncQueueItem[]>(QUEUE_KEY, []);
+export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
+  if (!navigator.onLine) {
+    syncStatus.set("Offline");
+    const offlineQueue = getSyncQueue();
+    return { processed: 0, cleared: 0, remaining: offlineQueue.length, conflicts: offlineQueue.filter((item) => item.state === "Conflict").length, failed: offlineQueue.filter((item) => item.state === "Failed").length };
+  }
+  const queue = getSyncQueue();
   const remaining: SyncQueueItem[] = [];
+  let cleared = 0;
   for (const item of queue) {
     try {
       const existing = await cloudSelect<CloudEnvelope<unknown>>(item.table, tenantRecordQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, includeDeleted: true }));
       const current = existing[0];
+
+      if (item.operation === "delete" && (!current || current.deleted_at)) {
+        updateCachedVersion(item.storageKey, item.sourceId, current?.version);
+        cleared += 1;
+        continue;
+      }
+      if (item.operation === "upsert" && current && !current.deleted_at && samePayload(current.payload, item.payload)) {
+        updateCachedVersion(item.storageKey, item.sourceId, current.version);
+        cleared += 1;
+        continue;
+      }
       if (hasVersionConflict(current?.version, item.expectedVersion)) {
         remaining.push({ ...item, state: "Conflict", error: `Cloud version ${current?.version} differs from expected ${item.expectedVersion}.` });
         continue;
       }
 
       if (item.operation === "delete") {
-        if (!current) { updateCachedVersion(item.storageKey, item.sourceId); continue; }
+        if (!current) { updateCachedVersion(item.storageKey, item.sourceId); cleared += 1; continue; }
         const deletedAt = new Date().toISOString();
         const query = `organisation_id=eq.${encodeURIComponent(item.organisationId)}&source_id=eq.${encodeURIComponent(item.sourceId)}${collectionFilter(item.collectionKey)}`;
         const tombstone = makeTombstone({ currentVersion: current.version, userId: item.userId, deletedAt });
         await cloudPatch(item.table, query, { ...tombstone, source_updated_at: deletedAt });
         updateCachedVersion(item.storageKey, item.sourceId, tombstone.version);
+        cleared += 1;
       } else {
         const sourceUpdatedAt = (item.payload as { updatedAt?: string } | undefined)?.updatedAt || new Date().toISOString();
         const record = buildCloudEnvelope({
@@ -70,11 +91,15 @@ export async function flushSyncQueue() {
         });
         await cloudUpsert(item.table, [record], item.collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
         updateCachedVersion(item.storageKey, item.sourceId, record.version);
+        cleared += 1;
       }
     } catch (error) { remaining.push({ ...item, attempts: item.attempts + 1, state: "Failed", error: error instanceof Error ? error.message : "Sync failed" }); }
   }
   write(QUEUE_KEY, remaining);
-  syncStatus.set(remaining.some((item) => item.state === "Conflict") ? "Conflict" : remaining.length ? "Failed" : "Synced");
+  const conflicts = remaining.filter((item) => item.state === "Conflict").length;
+  const failed = remaining.filter((item) => item.state === "Failed").length;
+  syncStatus.set(conflicts ? "Conflict" : remaining.length ? "Failed" : "Synced");
+  return { processed: queue.length, cleared, remaining: remaining.length, conflicts, failed };
 }
 
 export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; customerSourceId?: string; jobId?: string; jobSourceId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string) {
