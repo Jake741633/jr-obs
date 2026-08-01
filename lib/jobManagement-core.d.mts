@@ -1,6 +1,6 @@
 import type { CanonicalJobStatus, CanonicalVariationStatus, Job, JobStatus, JobTimelineEntry, JobVariation, PricingLineItem, SiteDiaryEntry, VariationStatus } from "./models";
 
-export const canonicalJobStatuses: readonly CanonicalJobStatus[];
+export const canonicalJobStatuses: ReadonlyArray<CanonicalJobStatus> & { includes(searchElement: string, fromIndex?: number): boolean };
 export function normaliseJobStatus(status: JobStatus | string): CanonicalJobStatus;
 export function isCanonicalJobStatus(status: string): status is CanonicalJobStatus;
 export function isJobClosedStatus(status: JobStatus | string): boolean;
