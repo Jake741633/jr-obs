@@ -212,7 +212,7 @@ export function createInvoiceFromCompletedJob({
     ? snapshot.items
     : quote?.items?.length
       ? quote.items
-      : [{ id: createId("invoice-source-line"), description: job.title, category: "Labour" as const, quantity: 1, unitPrice: job.value }];
+      : [{ id: createId("invoice-source-line"), description: job.title, category: "Labour" as const, quantity: 1, unitPrice: job.originalContractValue ?? job.value }];
   const vatEnabled = snapshot?.vatEnabled ?? quote?.vatEnabled ?? false;
   const vatRate = snapshot?.vatRate ?? quote?.vatRate ?? 0;
   const paymentTerms = snapshot?.paymentTerms ?? quote?.paymentTerms ?? (defaultPaymentTerms ? paymentTermsFromTemplate(defaultPaymentTerms) : undefined);
@@ -222,13 +222,16 @@ export function createInvoiceFromCompletedJob({
   const quoteId = job.sourceQuoteId ?? snapshot?.quoteId ?? quote?.id;
   const quoteNumber = snapshot?.quoteNumber ?? quote?.number;
   const pricingSettings = snapshot?.pricingSettings ?? quote?.pricingSettings;
+  const liveInvoiceIds = new Set(invoices.filter((invoice) => invoice.status !== "Cancelled").map((invoice) => invoice.id));
+  const acceptedVariations = variations.filter((variation) => variation.jobId === job.id
+    && isAcceptedVariationStatus(variation.status)
+    && (!variation.invoiceId || !liveInvoiceIds.has(variation.invoiceId)));
   const baseSellingPrice = sourceItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   const invoiceItems = sourceItems.map((item) => ({ ...item, id: createId("invoice-line") }));
   if (pricingSettings?.travelPrice) invoiceItems.push({ id: createId("invoice-line"), description: "Travel allowance", category: "Travel", quantity: 1, unitPrice: pricingSettings.travelPrice, unitCost: pricingSettings.travelCost });
   if (pricingSettings?.parkingPrice) invoiceItems.push({ id: createId("invoice-line"), description: "Parking allowance", category: "Parking", quantity: 1, unitPrice: pricingSettings.parkingPrice, unitCost: pricingSettings.parkingCost });
   if (pricingSettings?.contingencyPercent) invoiceItems.push({ id: createId("invoice-line"), description: `Contingency (${pricingSettings.contingencyPercent}%)`, category: "Contingency", quantity: 1, unitPrice: baseSellingPrice * pricingSettings.contingencyPercent / 100 });
-  variations
-    .filter((variation) => variation.jobId === job.id && isAcceptedVariationStatus(variation.status))
+  acceptedVariations
     .filter((variation) => !invoiceItems.some((item) => item.variationId === variation.id))
     .forEach((variation) => invoiceItems.push(variationInvoiceLine(variation, createId("invoice-line"))));
 
@@ -240,7 +243,7 @@ export function createInvoiceFromCompletedJob({
     builderId: job.builderId,
     jobId: job.id,
     quoteId,
-    variationIds: variations.filter((variation) => variation.jobId === job.id && isAcceptedVariationStatus(variation.status)).map((variation) => variation.id),
+    variationIds: acceptedVariations.map((variation) => variation.id),
     paymentTermsTemplateId: paymentTerms?.templateId,
     paymentTermsText: paymentTermsText(paymentTerms),
     title: job.title,
@@ -253,7 +256,7 @@ export function createInvoiceFromCompletedJob({
     notes: [
       `Generated from completed job ${job.title}.`,
       quoteNumber ? `Based on accepted quote ${quoteNumber}.` : "",
-      variations.some((variation) => variation.jobId === job.id && isAcceptedVariationStatus(variation.status)) ? "Includes accepted job variations." : "",
+      acceptedVariations.length ? "Includes accepted job variations." : "",
       snapshot?.notes ?? quote?.notes ?? "",
     ].filter(Boolean).join("\n\n"),
     paymentDetails: bankDetails ? bankDetailsText(bankDetails) : "",

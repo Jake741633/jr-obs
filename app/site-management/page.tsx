@@ -7,9 +7,9 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useInvoicesCollection, useJobDocumentsCollection, useJobsCollection, useJobTimelineCollection, useJobVariationsCollection, useSiteDiariesCollection, useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
-import { applyVariationContractValue, isAcceptedVariationStatus, isJobInactiveStatus, normaliseSiteDiaryEntry, normaliseVariationStatus, siteDiaryDurationHours, siteDiaryTimelineEntry, transitionVariation, variationFinancials, variationInvoiceLine, variationTimelineEntry } from "../../lib/jobManagement-core.mjs";
+import { applyVariationContractValue, isAcceptedVariationStatus, isJobInactiveStatus, nextJobVariationNumber, normaliseSiteDiaryEntry, normaliseVariationStatus, siteDiaryDurationHours, siteDiaryTimelineEntry, transitionVariation, variationFinancials, variationInvoiceLine, variationTimelineEntry } from "../../lib/jobManagement-core.mjs";
 import { makeId } from "../../lib/storage";
-import type { CanonicalVariationStatus, JobDocument, JobVariation, RecordAttachment, SiteDiaryEntry } from "../../lib/models";
+import type { CanonicalVariationStatus, JobDocument, JobVariation, SiteDiaryEntry } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const blankDiary = { jobId: "", workDate: "", startedAt: "", finishedAt: "", breakMinutes: "0", completedBy: "Jake", staffPresent: [] as string[], otherStaffPresent: "", workCompleted: "", delays: "", builderInstructions: "", customerInstructions: "", materialsUsed: "", materialsRequired: "", voiceNoteTranscript: "", weather: "", issuesAndRisks: "", followUpActions: "" };
@@ -95,22 +95,25 @@ export default function SiteManagementPage() {
 
   async function addVariation(event: FormEvent) {
     event.preventDefault();
-    if (!variationForm.jobId || !variationForm.title.trim()) { setMessage("Choose a job and enter a variation title."); return; }
+    if (!variationForm.jobId || !variationForm.title.trim() || !variationForm.description.trim()) { setMessage("Choose a job and record the requested change and scope."); return; }
+    if (variationFormSell <= 0) { setMessage("Enter a positive fixed price or itemised selling value before saving the variation."); return; }
     const now = new Date().toISOString();
-    const number = `VAR-${String(variations.items.filter((item) => item.jobId === variationForm.jobId).length + 1).padStart(3, "0")}`;
-    const photos = await Promise.all(variationPhotos.map(async (file): Promise<RecordAttachment | null> => {
+    const number = nextJobVariationNumber(variations.items, variationForm.jobId);
+    const photoDocuments = await Promise.all(variationPhotos.map(async (file): Promise<JobDocument | null> => {
       const dataUrl = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result ?? ""));
         reader.onerror = () => resolve("");
         reader.readAsDataURL(file);
       });
-      return dataUrl ? { id: makeId("attachment"), name: file.name.replace(/\.[^/.]+$/, ""), fileName: file.name, mimeType: file.type, dataUrl, notes: variationForm.customerNotes.trim(), createdAt: now } : null;
+      if (!dataUrl) return null;
+      return { id: makeId("document"), jobId: variationForm.jobId, name: `${number} evidence · ${file.name.replace(/\.[^/.]+$/, "")}`, category: "Photo", fileName: file.name, mimeType: file.type, dataUrl, externalUrl: "", notes: variationForm.customerNotes.trim(), uploadedBy: "JR OS Site Management", uploadedAt: now, createdAt: now };
     }));
-    const savedPhotos = photos.filter((photo): photo is RecordAttachment => Boolean(photo));
+    const savedPhotos = photoDocuments.filter((photo): photo is JobDocument => Boolean(photo));
     const fixedPrice = variationForm.pricingMode === "Fixed price" ? Math.max(0, Number(variationForm.fixedPrice || 0)) : undefined;
-    const variation: JobVariation = { id: makeId("variation"), jobId: variationForm.jobId, number, title: variationForm.title.trim(), description: variationForm.description.trim(), pricingMode: variationForm.pricingMode, labourHours: Math.max(0, Number(variationForm.labourHours || 0)), labourRate: Math.max(0, Number(variationForm.labourRate || 0)), labourCostRate: Math.max(0, Number(variationForm.labourCostRate || 0)), materialCost: Math.max(0, Number(variationForm.materialCost || 0)), materialCharge: Math.max(0, Number(variationForm.materialCharge || 0)), otherCost: Math.max(0, Number(variationForm.otherCost || 0)), otherCharge: Math.max(0, Number(variationForm.otherCharge || 0)), fixedPrice, status: "Draft", approvalMethod: variationForm.approvalMethod, approvalReference: variationForm.approvalReference.trim(), requestedBy: variationForm.requestedBy.trim(), photos: savedPhotos, customerNotes: variationForm.customerNotes.trim(), internalNotes: variationForm.internalNotes.trim(), presentation: { recipient: "Customer", showLabourBreakdown: false, showMaterialBreakdown: false, showInternalCosts: false, showProfit: false }, auditHistory: [{ id: makeId("variation-audit"), action: "Variation created", toStatus: "Draft", detail: `${number} recorded as a draft fixed-price change.`, completedBy: "JR OS Site Management", completedAt: now }], createdAt: now, updatedAt: now };
+    const variation: JobVariation = { id: makeId("variation"), jobId: variationForm.jobId, number, title: variationForm.title.trim(), description: variationForm.description.trim(), pricingMode: variationForm.pricingMode, labourHours: Math.max(0, Number(variationForm.labourHours || 0)), labourRate: Math.max(0, Number(variationForm.labourRate || 0)), labourCostRate: Math.max(0, Number(variationForm.labourCostRate || 0)), materialCost: Math.max(0, Number(variationForm.materialCost || 0)), materialCharge: Math.max(0, Number(variationForm.materialCharge || 0)), otherCost: Math.max(0, Number(variationForm.otherCost || 0)), otherCharge: Math.max(0, Number(variationForm.otherCharge || 0)), fixedPrice, status: "Draft", approvalMethod: variationForm.approvalMethod, approvalReference: variationForm.approvalReference.trim(), requestedBy: variationForm.requestedBy.trim(), photos: [], photoDocumentIds: savedPhotos.map((photo) => photo.id), customerNotes: variationForm.customerNotes.trim(), internalNotes: variationForm.internalNotes.trim(), presentation: { recipient: "Customer", showLabourBreakdown: false, showMaterialBreakdown: false, showInternalCosts: false, showProfit: false }, auditHistory: [{ id: makeId("variation-audit"), action: "Variation created", toStatus: "Draft", detail: `${number} recorded as a draft ${variationForm.pricingMode.toLowerCase()} change.`, completedBy: "JR OS Site Management", completedAt: now }], createdAt: now, updatedAt: now };
     variations.setItems((current) => [variation, ...current]);
+    if (savedPhotos.length) documents.setItems((current) => [...savedPhotos, ...current]);
     timeline.setItems((current) => [{ id: makeId("timeline"), jobId: variation.jobId, milestone: "Custom update", eventType: "Variation", sourceId: variation.id, sourceType: "JobVariation", note: `${number} · ${variation.title} recorded as a draft variation.`, completedBy: "JR OS Site Management", completedAt: now, createdAt: now }, ...current]);
     setVariationForm({ ...blankVariation, jobId: selectedJobId || variationForm.jobId });
     setVariationPhotos([]);
@@ -122,7 +125,13 @@ export default function SiteManagementPage() {
   function changeVariationStatus(variation: JobVariation, nextStatus: CanonicalVariationStatus, recipient?: "Customer" | "Builder") {
     if (nextStatus === "Accepted" && variation.approvalMethod === "Not approved") { setMessage(`Record how ${variation.number} was approved before accepting it.`); return; }
     const now = new Date().toISOString();
-    const updated = transitionVariation({ variation, nextStatus, now, auditId: makeId("variation-audit"), completedBy: "JR OS Site Management", recipient });
+    let updated: JobVariation;
+    try {
+      updated = transitionVariation({ variation, nextStatus, now, auditId: makeId("variation-audit"), completedBy: "JR OS Site Management", recipient });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The variation status could not be changed.");
+      return;
+    }
     variations.setItems((current) => current.map((item) => item.id === variation.id ? updated : item));
     jobs.setItems((current) => current.map((job) => job.id === variation.jobId ? applyVariationContractValue({ job, variation, nextStatus, now }) : job));
     if (normaliseVariationStatus(variation.status) !== nextStatus) timeline.setItems((current) => [variationTimelineEntry({ variation: updated, fromStatus: variation.status, toStatus: nextStatus, timelineId: makeId("timeline"), completedBy: "JR OS Site Management", now }), ...current]);
@@ -140,6 +149,10 @@ export default function SiteManagementPage() {
     } catch { setMessage(`${variation.number} was not marked sent because sharing was cancelled.`); }
   }
 
+  function updateVariationApproval(variationId: string, changes: Pick<JobVariation, "approvalMethod"> | Pick<JobVariation, "approvalReference">) {
+    variations.setItems((current) => current.map((variation) => variation.id === variationId ? { ...variation, ...changes, updatedAt: new Date().toISOString() } : variation));
+  }
+
   function addVariationToInvoice(variation: JobVariation) {
     if (!isAcceptedVariationStatus(variation.status)) { setMessage("Only an accepted variation can be added to an invoice."); return; }
     const invoice = invoices.items.find((item) => item.jobId === variation.jobId && item.status !== "Cancelled");
@@ -155,7 +168,10 @@ export default function SiteManagementPage() {
 
   function deleteVariation(variation: JobVariation) {
     if (isAcceptedVariationStatus(variation.status) || normaliseVariationStatus(variation.status) === "Sent") { setMessage("Sent, accepted and invoiced variations must be declined or retained for the audit history; they cannot be deleted."); return; }
-    if (window.confirm(`Delete draft ${variation.number}?`)) variations.remove((item) => item.id === variation.id);
+    if (!window.confirm(`Delete draft ${variation.number}?`)) return;
+    const photoIds = new Set(variation.photoDocumentIds ?? []);
+    variations.remove((item) => item.id === variation.id);
+    if (photoIds.size) documents.remove((document) => photoIds.has(document.id));
   }
 
   const ready = jobs.isReady && diaries.isReady && variations.isReady && timeline.isReady && team.isReady && documents.isReady && invoices.isReady;
@@ -238,11 +254,13 @@ export default function SiteManagementPage() {
         const financials = variationFinancials(variation);
         const status = normaliseVariationStatus(variation.status);
         const showingPreview = variationPreviewId === variation.id;
+        const photoCount = variation.photoDocumentIds?.length ?? variation.photos?.length ?? 0;
         return <Card key={variation.id} className={status === "Accepted" ? "border-emerald-500/25" : undefined}>
           <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{variation.number} · {jobName(variation.jobId)}</p><h3 className="mt-1 font-bold">{variation.title}</h3><p className="mt-1 text-sm text-slate-500">{status} · Requested by {variation.requestedBy || "not recorded"}</p></div><button type="button" onClick={() => deleteVariation(variation)} className="grid min-h-11 min-w-11 place-items-center rounded-xl text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label={`Delete ${variation.number}`}><Trash2 className="size-4" /></button></div>
           <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{variation.description || "No description added."}</p>
           <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-950 p-3 text-sm sm:grid-cols-4"><div><p className="text-slate-500">Fixed price</p><strong>{money.format(financials.sellingPrice)}</strong></div><div><p className="text-slate-500">Cost</p><strong>{money.format(financials.costPrice)}</strong></div><div><p className="text-slate-500">Gross profit</p><strong className={financials.grossProfit < 0 ? "text-rose-300" : "text-emerald-300"}>{money.format(financials.grossProfit)}</strong></div><div><p className="text-slate-500">Margin</p><strong>{financials.grossMargin.toFixed(1)}%</strong></div></div>
-          <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500"><span>Approval: {variation.approvalMethod}</span>{variation.sentTo ? <span>Sent to: {variation.sentTo}</span> : null}{variation.photos?.length ? <span>{variation.photos.length} photo{variation.photos.length === 1 ? "" : "s"}</span> : null}{variation.invoiceId ? <span>Invoice linked</span> : null}</div>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500"><span>Approval: {variation.approvalMethod}</span>{variation.sentTo ? <span>Sent to: {variation.sentTo}</span> : null}{photoCount ? <span>{photoCount} photo{photoCount === 1 ? "" : "s"}</span> : null}{variation.invoiceId ? <span>Invoice linked</span> : null}</div>
+          {status === "Sent" ? <div className="mt-4 grid gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 sm:grid-cols-2"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Acceptance method</span><select value={variation.approvalMethod} onChange={(event) => updateVariationApproval(variation.id, { approvalMethod: event.target.value as JobVariation["approvalMethod"] })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Not approved</option><option>Signature</option><option>Email</option><option>WhatsApp</option><option>Verbal</option></select></label><InputField label="Acceptance reference" value={variation.approvalReference} onChange={(event) => updateVariationApproval(variation.id, { approvalReference: event.target.value })} /></div> : null}
           <div className="mt-4 grid grid-cols-2 gap-2">
             <Button type="button" variant="secondary" onClick={() => setVariationPreviewId(showingPreview ? null : variation.id)}><Eye className="mr-2 size-4" />{showingPreview ? "Hide preview" : "Customer view"}</Button>
             {status === "Draft" ? <><Button type="button" onClick={() => void shareVariation(variation, "Customer")}><Send className="mr-2 size-4" />Send customer</Button><Button type="button" variant="secondary" onClick={() => void shareVariation(variation, "Builder")}><Send className="mr-2 size-4" />Send builder</Button></> : null}

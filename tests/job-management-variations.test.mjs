@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
+  acceptedVariationValue,
   applyVariationContractValue,
+  currentJobContractValue,
   isAcceptedVariationStatus,
+  nextJobVariationNumber,
   normaliseVariationStatus,
   transitionVariation,
   variationFinancials,
   variationInvoiceLine,
+  variationPresentationView,
   variationTimelineEntry,
 } from "../lib/jobManagement-core.mjs";
 import { cloudRowsToCache, linkedSourceIds } from "../lib/cloud/repository-core.mjs";
@@ -104,6 +108,28 @@ test("variation transitions retain immutable audit history and safe recipient pr
   assert.equal(sent.auditHistory[0].toStatus, "Sent");
   assert.throws(() => transitionVariation({ variation, nextStatus: "Accepted", now: "", auditId: "audit-skip" }), /cannot move from Draft to Accepted/);
   assert.throws(() => transitionVariation({ variation, nextStatus: "Unknown", now: "", auditId: "audit-x" }), /Unsupported variation status/);
+  const accepted = transitionVariation({ variation: sent, nextStatus: "Accepted", now: "2026-08-04T11:00:00.000Z", auditId: "audit-2", completedBy: "Jake" });
+  assert.equal(accepted.status, "Accepted");
+  assert.equal(accepted.auditHistory.length, 2);
+  assert.throws(() => transitionVariation({ variation: accepted, nextStatus: "Invoiced", now: "", auditId: "audit-3" }), /Link the invoice/);
+});
+
+test("contract roll-ups, numbering and outward documents are deterministic and hide internal figures", () => {
+  const accepted = { ...variation, status: "Accepted", presentation: { recipient: "Customer", showLabourBreakdown: true, showMaterialBreakdown: true, showInternalCosts: true, showProfit: true } };
+  assert.equal(acceptedVariationValue([variation, accepted]), 450);
+  assert.equal(currentJobContractValue(5_000, [variation, accepted]), 5_450);
+  assert.equal(nextJobVariationNumber([{ ...variation, number: "VAR-001" }, { ...variation, id: "variation-3", number: "VAR-003" }], "job-1"), "VAR-004");
+
+  const customerView = variationPresentationView(accepted, "Customer");
+  assert.equal(customerView.sellingPrice, 450);
+  assert.equal(customerView.labour.total, 260);
+  assert.equal(customerView.internalCost, undefined);
+  assert.equal(customerView.grossProfit, undefined);
+  assert.equal(customerView.internalNotes, undefined);
+  const internalView = variationPresentationView(accepted, "Internal");
+  assert.equal(internalView.internalCost, 208);
+  assert.equal(internalView.grossProfit, 242);
+  assert.equal(internalView.internalNotes, "Allow half a day.");
 });
 
 test("variation activity and invoice lines retain stable source links", () => {
@@ -124,12 +150,22 @@ test("variation activity and invoice lines retain stable source links", () => {
 test("production workflow includes accepted variations once and exposes audited mobile actions", async () => {
   const workflow = await readFile(new URL("../lib/workflow.ts", import.meta.url), "utf8");
   const siteManagement = await readFile(new URL("../app/site-management/page.tsx", import.meta.url), "utf8");
+  const jobWorkspace = await readFile(new URL("../app/jobs/[id]/page.tsx", import.meta.url), "utf8");
+  const aiCommandCentre = await readFile(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
   assert.match(workflow, /isAcceptedVariationStatus\(variation\.status\)/);
   assert.match(workflow, /!invoiceItems\.some\(\(item\) => item\.variationId === variation\.id\)/);
+  assert.match(workflow, /job\.originalContractValue \?\? job\.value/);
+  assert.match(workflow, /variationIds: acceptedVariations\.map/);
   assert.match(siteManagement, /applyVariationContractValue/);
   assert.match(siteManagement, /variationTimelineEntry/);
   assert.match(siteManagement, /Send customer/);
   assert.match(siteManagement, /Send builder/);
   assert.match(siteManagement, /Add to invoice/);
+  assert.match(siteManagement, /photoDocumentIds: savedPhotos\.map/);
+  assert.match(siteManagement, /useJobDocumentsCollection/);
   assert.match(siteManagement, /Internal labour, material cost, markup and profit are hidden/);
+  assert.match(jobWorkspace, /variations: linkedVariations/);
+  assert.match(jobWorkspace, /nextStatus: "Invoiced"/);
+  assert.match(aiCommandCentre, /variations: linkedVariations/);
+  assert.match(aiCommandCentre, /nextStatus: "Invoiced"/);
 });

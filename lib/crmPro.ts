@@ -17,6 +17,7 @@ import type {
   SiteDiaryEntry,
 } from "./models";
 import type { ComplianceCertificate } from "./complianceCertificates";
+import { variationFinancials } from "./jobManagement-core.mjs";
 import { paymentEffect, type PaymentRecord } from "./payments";
 import {
   ageInDays,
@@ -197,7 +198,7 @@ export function buildCustomerTimeline(input: CustomerTimelineInput) {
     occurredAt: recordDate(variation.updatedAt || variation.createdAt),
     href: `/site-management?job=${encodeURIComponent(variation.jobId)}`,
     status: variation.status,
-    value: variation.labourHours * variation.labourRate + variation.materialCharge + variation.otherCharge,
+    value: variationFinancials(variation).sellingPrice,
   }));
 
   linkedInvoices.forEach((invoice) => timeline.push({

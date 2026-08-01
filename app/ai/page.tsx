@@ -32,6 +32,8 @@ import {
   defaultBankDetails,
   defaultPaymentTermsTemplates,
 } from "../../lib/businessSettings";
+import { useJobVariationsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../lib/jobManagement-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import {
   createInvoiceFromCompletedJob,
@@ -90,6 +92,7 @@ export default function AiPage() {
   const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
   const materials = useLocalStorageCollection<Material>("jr-os-materials");
   const purchaseLists = useLocalStorageCollection<PurchaseList>("jr-os-purchase-lists");
+  const variations = useJobVariationsCollection();
   const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
   const bankStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
   const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
@@ -108,7 +111,7 @@ export default function AiPage() {
   }, labourSettings);
   const ready = [
     jobs, customers, builders, pricing, invoices, planner, profiles, interactions, reminders, certificates,
-    surveys, timeline, jobDocuments, materials, purchaseLists, labourSettingsStore, bankStore, paymentTermsStore,
+    surveys, timeline, jobDocuments, materials, purchaseLists, variations, labourSettingsStore, bankStore, paymentTermsStore,
   ].every((store) => store.isReady) && learning.isReady;
 
   const recommendations = useMemo(
@@ -262,9 +265,11 @@ export default function AiPage() {
     const defaultPaymentTerms = paymentTermsStore.items.find((template) => template.active && template.isDefault)
       ?? paymentTermsStore.items.find((template) => template.active);
     const now = new Date().toISOString();
+    const linkedVariations = variations.items.filter((variation) => variation.jobId === job.id);
     const generated = createInvoiceFromCompletedJob({
       job,
       quote,
+      variations: linkedVariations,
       invoices: invoices.items,
       invoiceId: makeId("invoice"),
       now,
@@ -273,7 +278,16 @@ export default function AiPage() {
       defaultPaymentTerms,
     });
     invoices.setItems((current) => [generated.invoice, ...current]);
-    timeline.setItems((current) => [generated.timelineEntry, ...current]);
+    const includedVariationIds = new Set(generated.invoice.variationIds ?? []);
+    const includedVariations = linkedVariations.filter((variation) => includedVariationIds.has(variation.id) && isAcceptedVariationStatus(variation.status));
+    variations.setItems((current) => current.map((variation) => includedVariationIds.has(variation.id)
+      ? transitionVariation({ variation, nextStatus: "Invoiced", now, auditId: makeId("variation-audit"), completedBy: "JR OS", invoiceId: generated.invoice.id, detail: `${variation.number} included on ${generated.invoice.number}.` })
+      : variation));
+    timeline.setItems((current) => [
+      generated.timelineEntry,
+      ...includedVariations.map((variation) => variationTimelineEntry({ variation, fromStatus: variation.status, toStatus: "Invoiced", timelineId: makeId("timeline"), completedBy: "JR OS", now })),
+      ...current,
+    ]);
     setMessage(`${generated.invoice.number} created as a linked draft invoice for ${job.title}.`);
   }
 
