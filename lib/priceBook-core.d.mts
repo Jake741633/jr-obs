@@ -58,7 +58,7 @@ export interface PriceBookSelectionFinancials {
 export interface PriceBookQuoteLine {
   id: string;
   description: string;
-  category: string;
+  category: "Other";
   quantity: number;
   unit: string;
   unitCost: number;
