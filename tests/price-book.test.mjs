@@ -27,8 +27,8 @@ const calculatedSpotlight = {
   notes: "Includes standard white fitting.",
 };
 
-function assertClose(actual, expected, precision = 1e-9) {
-  assert.ok(Math.abs(actual - expected) <= precision, `Expected ${actual} to be within ${precision} of ${expected}`);
+function assertClose(actual, expected, tolerance = 1e-9) {
+  assert.ok(Math.abs(actual - expected) <= tolerance, `Expected ${actual} to be within ${tolerance} of ${expected}`);
 }
 
 test("price book normalisation preserves valid electrical pricing data and removes unsafe values", () => {
@@ -56,8 +56,8 @@ test("calculated price per point includes labour material markup overhead and co
   assert.equal(result.totalCost, 44.5);
   assert.equal(result.sellingPrice, 78.65);
   assertClose(result.grossProfit, 34.15);
-  assert.equal(result.vat, 15.73);
-  assert.equal(result.sellingPriceIncludingVat, 94.38);
+  assertClose(result.vat, 15.73);
+  assertClose(result.sellingPriceIncludingVat, 94.38);
 });
 
 test("fixed prices remain authoritative while retaining underlying cost and profit evidence", () => {
