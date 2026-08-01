@@ -82,18 +82,20 @@ export default function QuotesPage() {
   const branding = brandingStore.items[0] ?? defaultDocumentBranding;
 
   useEffect(() => {
-    if (deepLinkHandled.current || !customers.isReady || !quoteSettingsStore.isReady || !paymentTermsTemplates.isReady || !vatStore.isReady) return;
+    if (deepLinkHandled.current || !customers.isReady || !builders.isReady || !quoteSettingsStore.isReady || !paymentTermsTemplates.isReady || !vatStore.isReady) return;
     const frame = window.requestAnimationFrame(() => {
       const parameters = new URLSearchParams(window.location.search);
       const customerId = parameters.get("customerId") || "";
-      if (parameters.get("action") === "create" && customerId) {
+      const builderId = parameters.get("builderId") || "";
+      if (parameters.get("action") === "create" && (customerId || builderId)) {
         const customer = customers.items.find((item) => item.id === customerId);
-        if (customer) {
+        const builder = builders.items.find((item) => item.id === builderId);
+        if (customer || builder) {
           const savedPricing = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
           const savedVat = vatStore.items[0] ?? defaultVatSettings;
           const defaultPayment = paymentTermsTemplates.items.find((item) => item.active && item.isDefault)
             ?? paymentTermsTemplates.items.find((item) => item.active);
-          setForm({ ...blankForm, customerId: customer.id, siteAddress: customer.address, vatEnabled: savedVat.registrationStatus === "VAT registered", vatRate: String(savedVat.defaultRate) });
+          setForm({ ...blankForm, customerId: customer?.id || "", builderId: builder?.id || "", siteAddress: customer?.address || builder?.address || "", vatEnabled: savedVat.registrationStatus === "VAT registered", vatRate: String(savedVat.defaultRate) });
           setItems([]);
           setPricing(savedPricing);
           setLabour({ ...blankLabour, rateId: savedPricing.defaultLabourRateId ?? "" });
@@ -102,14 +104,14 @@ export default function QuotesPage() {
           setAttachments([]);
           setEditingId(null);
           setError("");
-          setSuccess(`New quote prepared for ${customer.name}.`);
+          setSuccess(`New quote prepared for ${customer?.name || builder?.companyName}.`);
           setShowForm(true);
         }
       }
       deepLinkHandled.current = true;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [customers.isReady, customers.items, paymentTermsTemplates.isReady, paymentTermsTemplates.items, quoteSettingsStore.isReady, quoteSettingsStore.items, vatStore.isReady, vatStore.items]);
+  }, [builders.isReady, builders.items, customers.isReady, customers.items, paymentTermsTemplates.isReady, paymentTermsTemplates.items, quoteSettingsStore.isReady, quoteSettingsStore.items, vatStore.isReady, vatStore.items]);
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),
