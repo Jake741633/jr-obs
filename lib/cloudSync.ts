@@ -6,6 +6,16 @@ import { importLocalCollection } from "./cloud/repository";
 import { readSupabaseSession, saveSupabaseSession, supabaseFetch, type SupabaseSession } from "./supabase/client";
 
 export interface CloudSyncResult { uploaded: number; skipped: number; errors: string[]; }
+export interface TypedMigrationProgress {
+  currentCollection: string;
+  completedCollections: number;
+  totalCollections: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  latestError?: string;
+}
+export type TypedMigrationProgressHandler = (progress: TypedMigrationProgress) => void;
 
 const cloudInternalKeys = [
   "jr-os-cloud-session",
@@ -74,7 +84,7 @@ export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
   return result;
 }
 
-export async function migrateTypedLocalDataToCloud(): Promise<CloudSyncResult> {
+export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationProgressHandler): Promise<CloudSyncResult> {
   const { user, organisationId, role } = await getCloudContext();
   if (!["owner", "admin", "office"].includes(role)) throw new Error("Only owner, admin or office users can run the collection migration.");
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
@@ -82,21 +92,43 @@ export async function migrateTypedLocalDataToCloud(): Promise<CloudSyncResult> {
     .filter((key): key is string => Boolean(key?.startsWith(JR_OS_STORAGE_PREFIX)))
     .filter((key) => !cloudInternalKeys.includes(key) && !key.startsWith("jr-os-cloud-versions:"));
 
-  for (const storageKey of storageKeys) {
+  const report = (currentCollection: string, completedCollections: number, latestError?: string) => onProgress?.({
+    currentCollection,
+    completedCollections,
+    totalCollections: storageKeys.length,
+    imported: result.uploaded,
+    skipped: result.skipped,
+    failed: result.errors.length,
+    latestError,
+  });
+
+  for (const [index, storageKey] of storageKeys.entries()) {
+    report(storageKey, index);
     const target = collectionCloudTarget(storageKey);
-    if (!target) { result.skipped += 1; continue; }
+    if (!target) {
+      result.skipped += 1;
+      report(storageKey, index + 1);
+      continue;
+    }
     try {
       const parsed = JSON.parse(window.localStorage.getItem(storageKey) || "[]") as unknown;
       if (!Array.isArray(parsed) || parsed.some((record) => !record || typeof record !== "object" || typeof (record as { id?: unknown }).id !== "string")) {
         result.skipped += 1;
+        report(storageKey, index + 1);
         continue;
       }
       const migrated = await importLocalCollection(storageKey, target.table, organisationId, target.collectionKey, user.id);
       result.uploaded += migrated.imported;
       result.skipped += migrated.skipped;
-    } catch (error) { result.errors.push(`${storageKey}: ${error instanceof Error ? error.message : "Migration failed"}`); }
+      report(storageKey, index + 1);
+    } catch (error) {
+      const detail = `${storageKey}: ${error instanceof Error ? error.message : "Migration failed"}`;
+      result.errors.push(detail);
+      report(storageKey, index + 1, detail);
+    }
   }
   if (!result.errors.length) window.localStorage.setItem("jr-os-last-typed-cloud-sync", new Date().toISOString());
+  report("Complete", storageKeys.length, result.errors.at(-1));
   return result;
 }
 
