@@ -24,6 +24,7 @@ test("mobile navigation has accessible touch targets and current-page state", ()
   assert.match(navigation, /aria-current=/);
   assert.match(navigation, /min-h-14/);
   assert.match(navigation, /safe-area-inset-bottom/);
+  assert.match(navigation, /label: "Quotes", href: "\/quotes\/mobile"/);
 });
 
 test("mobile form controls avoid iOS zoom and horizontal overflow", () => {

@@ -1,3 +1,4 @@
+import { Children } from "react";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 interface MobileActionDockProps {
@@ -7,11 +8,14 @@ interface MobileActionDockProps {
 }
 
 export function MobileActionDock({ children, summary, className = "" }: MobileActionDockProps) {
+  const actionCount = Children.count(children);
+  const actionColumns = actionCount >= 5 ? "grid-cols-5" : actionCount === 4 ? "grid-cols-4" : actionCount === 2 ? "grid-cols-2" : "grid-cols-3";
+
   return (
     <div className={`fixed inset-x-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-30 px-3 lg:hidden ${className}`}>
       <div className="mx-auto flex w-full max-w-lg items-center gap-2 rounded-2xl border border-slate-700/80 bg-slate-950/95 p-2 shadow-2xl shadow-black/40 backdrop-blur">
-        {summary ? <div className="min-w-0 flex-1 px-2">{summary}</div> : null}
-        <div className={`grid min-w-0 gap-2 ${summary ? "grid-cols-2" : "flex-1 grid-cols-3"}`}>{children}</div>
+        {summary ? <div className="min-w-0 max-w-28 flex-1 px-2">{summary}</div> : null}
+        <div className={`grid min-w-0 flex-[2] gap-1 ${actionColumns}`}>{children}</div>
       </div>
     </div>
   );

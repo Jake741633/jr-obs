@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BriefcaseBusiness, Building2, Cloud, LayoutDashboard, Menu, Users } from "lucide-react";
+import { BriefcaseBusiness, Cloud, FileText, LayoutDashboard, Menu, Users } from "lucide-react";
 import { canAccessPath } from "../lib/cloud/permissions";
 import { useCloudIdentity } from "../lib/cloud/useCloudIdentity";
 
 const mobileNavigation = [
   { label: "Home", href: "/", icon: LayoutDashboard },
-  { label: "Customers", href: "/customers", icon: Users },
-  { label: "Builders", href: "/builders", icon: Building2 },
   { label: "Jobs", href: "/jobs", icon: BriefcaseBusiness },
+  { label: "Quotes", href: "/quotes/mobile", icon: FileText },
+  { label: "Customers", href: "/customers", icon: Users },
   { label: "More", href: "/menu", icon: Menu },
 ] as const;
 
@@ -29,7 +29,14 @@ export function MobileNav() {
       className={`fixed inset-x-0 bottom-0 z-40 grid border-t border-slate-800/90 bg-slate-950/95 px-1.5 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-12px_32px_rgba(2,6,23,.55)] backdrop-blur-xl lg:hidden ${navigation.length === 2 ? "grid-cols-2" : "grid-cols-5"}`}
     >
       {navigation.map(({ label, href, icon: Icon }) => {
-        const active = pathname === href || (href === "/menu" && !["/", "/customers", "/builders", "/jobs"].some((item) => pathname === item || (item !== "/" && pathname.startsWith(`${item}/`))));
+        const primaryMatch = (itemHref: string) => itemHref === "/"
+          ? pathname === "/"
+          : itemHref === "/quotes/mobile"
+            ? pathname.startsWith("/quotes") || pathname.startsWith("/estimates")
+            : pathname === itemHref || pathname.startsWith(`${itemHref}/`);
+        const active = href === "/menu"
+          ? !mobileNavigation.filter((item) => item.href !== "/menu").some((item) => primaryMatch(item.href))
+          : primaryMatch(href);
         return (
           <Link
             key={href}

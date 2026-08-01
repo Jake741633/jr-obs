@@ -14,10 +14,12 @@ test("mobile action dock stays above the bottom navigation and iPhone safe area"
 
 test("mobile pricing lines use stacked touch-friendly controls", () => {
   assert.match(lineSource, /md:hidden/);
+  assert.match(lineSource, /<details/);
+  assert.match(lineSource, /<summary/);
+  assert.match(lineSource, /group-open:rotate-180/);
   assert.match(lineSource, /Customer price \(£\)/);
   assert.match(lineSource, /grid grid-cols-2 gap-3/);
-  assert.match(lineSource, /size-11/);
-  assert.match(lineSource, /aria-label=\{`Remove/);
+  assert.match(lineSource, /Remove pricing line/);
 });
 
 test("mobile pricing line editor preserves every quote cost field", () => {
@@ -26,4 +28,16 @@ test("mobile pricing line editor preserves every quote cost field", () => {
   assert.match(lineSource, /quantity: Number\(event\.target\.value\)/);
   assert.match(lineSource, /unitCost: Number\(event\.target\.value\)/);
   assert.match(lineSource, /unitPrice: Number\(event\.target\.value\)/);
+});
+
+test("full quote builder exposes one-handed sticky actions and floating add", async () => {
+  const pageSource = await readFile(new URL("../app/quotes/page.tsx", import.meta.url), "utf8");
+  assert.match(pageSource, /id="quote-builder-form"/);
+  assert.match(pageSource, /aria-label="Add pricing line"/);
+  assert.match(pageSource, /MobilePricingLineCard/);
+  assert.match(pageSource, /MobileDockAction icon=\{<Save/);
+  assert.match(pageSource, /label="Preview"/);
+  assert.match(pageSource, /label="AI"/);
+  assert.match(pageSource, /label="Convert"/);
+  assert.match(pageSource, /env\(safe-area-inset-bottom\)/);
 });
