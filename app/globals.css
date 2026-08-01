@@ -10,6 +10,12 @@ button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 input, textarea, select { min-width: 0; }
 img, video, canvas, svg { max-width: 100%; }
 @media (max-width: 639px) {
-  input, textarea, select { font-size: 16px; }
+  input, textarea, select { width: 100%; font-size: 16px; }
   table { font-size: .8125rem; }
+  form, form > *, form .grid, form .flex { min-width: 0; }
+  form button:not([aria-label]) { width: 100%; }
+  form [role="group"] { width: 100%; }
+}
+@media (min-width: 640px) {
+  form button:not([aria-label]) { width: auto; }
 }
