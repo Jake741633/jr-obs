@@ -80,7 +80,7 @@ export function recurringDates(startDate: string, frequency: RecurrenceFrequency
 
 export function entryCustomer(entry: ScheduledPlannerEntry, jobs: Job[], customers: Customer[]) {
   const job = jobs.find((item) => item.id === entry.jobId);
-  return customers.find((item) => item.id === job?.customerId);
+  return customers.find((item) => item.id === (entry.customerId || job?.customerId));
 }
 
 export function dateWithinView(date: string, anchor: string, view: DiaryView) {

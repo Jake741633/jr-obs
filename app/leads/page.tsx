@@ -6,14 +6,15 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { crmLeadStages, normaliseLeadStage } from "../../lib/crmPro";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import type { LeadActivity, LeadPriority, LeadSource, LeadStage, SalesLead } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
-const stages: LeadStage[] = ["New enquiry", "Contacted", "Survey booked", "Quote required", "Quote sent", "Won", "Lost"];
-const sources: LeadSource[] = ["Website", "Google", "Referral", "Builder", "Repeat customer", "Social media", "MyBuilder", "Checkatrade", "Other"];
+const stages: readonly LeadStage[] = crmLeadStages;
+const sources: LeadSource[] = ["Website", "Google", "Referral", "Builder", "Repeat customer", "Social media", "MyJobsQuote", "MyBuilder", "Checkatrade", "Other"];
 const priorities: LeadPriority[] = ["Low", "Normal", "High", "Urgent"];
-const blank = { name: "", company: "", email: "", phone: "", siteAddress: "", workRequired: "", source: "Website" as LeadSource, stage: "New enquiry" as LeadStage, priority: "Normal" as LeadPriority, estimatedValue: "0", nextAction: "Call customer", followUpDate: "", notes: "" };
+const blank = { name: "", company: "", email: "", phone: "", siteAddress: "", workRequired: "", source: "Website" as LeadSource, stage: "New Lead" as LeadStage, priority: "Normal" as LeadPriority, estimatedValue: "0", nextAction: "Call customer", followUpDate: "", notes: "" };
 const today = new Date().toISOString().slice(0, 10);
 
 export default function LeadsPage() {
@@ -25,12 +26,12 @@ export default function LeadsPage() {
   const [sourceFilter, setSourceFilter] = useState("");
   const [activityText, setActivityText] = useState<Record<string, string>>({});
 
-  const openLeads = leads.items.filter((lead) => lead.stage !== "Won" && lead.stage !== "Lost");
+  const openLeads = leads.items.filter((lead) => !["Accepted", "Lost", "Completed", "Cancelled"].includes(normaliseLeadStage(lead.stage)));
   const pipelineValue = openLeads.reduce((sum, lead) => sum + lead.estimatedValue, 0);
-  const wonValue = leads.items.filter((lead) => lead.stage === "Won").reduce((sum, lead) => sum + lead.estimatedValue, 0);
+  const wonValue = leads.items.filter((lead) => ["Accepted", "Completed"].includes(normaliseLeadStage(lead.stage))).reduce((sum, lead) => sum + lead.estimatedValue, 0);
   const dueFollowUps = openLeads.filter((lead) => lead.followUpDate && lead.followUpDate <= today).length;
 
-  const filtered = useMemo(() => leads.items.filter((lead) => (!stageFilter || lead.stage === stageFilter) && (!sourceFilter || lead.source === sourceFilter)), [leads.items, sourceFilter, stageFilter]);
+  const filtered = useMemo(() => leads.items.filter((lead) => (!stageFilter || normaliseLeadStage(lead.stage) === stageFilter) && (!sourceFilter || lead.source === sourceFilter)), [leads.items, sourceFilter, stageFilter]);
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -92,7 +93,7 @@ export default function LeadsPage() {
         const leadActivities = activities.items.filter((activity) => activity.leadId === lead.id).slice(-3).reverse();
         return <Card key={lead.id}><div className="flex flex-wrap items-start justify-between gap-4">
           <div><div className="flex flex-wrap items-center gap-2"><h2 className="text-xl font-semibold">{lead.name}</h2><span className="rounded-full bg-slate-800 px-2 py-1 text-xs">{lead.priority}</span></div><p className="text-sm text-slate-400">{lead.company || lead.source} · {lead.phone || lead.email || "No contact details"}</p><p className="mt-3">{lead.workRequired}</p><p className="mt-2 text-sm text-slate-400">Next: {lead.nextAction || "Not set"}{lead.followUpDate ? ` · ${lead.followUpDate}` : ""}</p></div>
-          <div className="text-right"><p className="text-xl font-semibold">{money.format(lead.estimatedValue)}</p><select className="mt-2 rounded-lg border border-slate-700 bg-slate-950 p-2" value={lead.stage} onChange={(event) => changeStage(lead, event.target.value as LeadStage)}>{stages.map((stage) => <option key={stage}>{stage}</option>)}</select></div>
+          <div className="text-right"><p className="text-xl font-semibold">{money.format(lead.estimatedValue)}</p><select className="mt-2 rounded-lg border border-slate-700 bg-slate-950 p-2" value={normaliseLeadStage(lead.stage)} onChange={(event) => changeStage(lead, event.target.value as LeadStage)}>{stages.map((stage) => <option key={stage}>{stage}</option>)}</select></div>
         </div>
         <div className="mt-4 flex gap-2"><input className="min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-950 p-2" placeholder="Add call, WhatsApp or follow-up note" value={activityText[lead.id] || ""} onChange={(event) => setActivityText((current) => ({ ...current, [lead.id]: event.target.value }))} /><Button onClick={() => addActivity(lead)}>Add note</Button><Button variant="secondary" onClick={() => leads.remove((item) => item.id === lead.id)} aria-label="Delete lead"><Trash2 className="h-4 w-4" /></Button></div>
         {leadActivities.length > 0 && <div className="mt-4 space-y-2 border-t border-slate-800 pt-4">{leadActivities.map((activity) => <p key={activity.id} className="text-sm text-slate-400"><span className="font-medium text-slate-200">{activity.type}:</span> {activity.summary}</p>)}</div>}

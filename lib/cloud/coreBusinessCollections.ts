@@ -3,7 +3,7 @@
 import type { ComplianceCertificate } from "../complianceCertificates";
 import type { PortalApprovalRecord, PortalRequest } from "../customerPortal";
 import type { ElectricalTestingRecord } from "../electricalTesting";
-import type { AiLearningEvidence, AiLearningMemory, BusinessExpense, Customer, Invoice, Job, JobDocument, JobPack, Material, PricingDocument, PurchaseList, RamsDocument, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
+import type { AiLearningEvidence, AiLearningMemory, AiReminder, Builder, BusinessExpense, CrmFollowUpSettings, Customer, CustomerInteraction, CustomerProfile, Invoice, Job, JobDocument, JobPack, JobTimelineEntry, JobVariation, LeadActivity, Material, PricingDocument, PurchaseList, RamsDocument, SalesLead, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -11,6 +11,7 @@ import type { PrivateUploadState } from "./privateFiles";
 
 export const coreBusinessStorageKeys = {
   customers: "jr-os-customers",
+  builders: "jr-os-builders",
   jobs: "jr-os-jobs",
   planner: "jr-os-planner",
   pricingDocuments: "jr-os-pricing-documents",
@@ -34,6 +35,14 @@ export const coreBusinessStorageKeys = {
   jobPacks: "jr-os-job-packs",
   aiRecommendationEvidence: "jr-os-ai-recommendation-evidence",
   aiLearningMemory: "jr-os-ai-learning-memory",
+  customerProfiles: "jr-os-customer-profiles",
+  customerInteractions: "jr-os-customer-interactions",
+  salesLeads: "jr-os-leads",
+  leadActivities: "jr-os-lead-activities",
+  jobVariations: "jr-os-job-variations",
+  jobTimeline: "jr-os-job-timeline",
+  aiReminders: "jr-os-ai-reminders",
+  crmFollowUpSettings: "jr-os-crm-follow-up-settings",
 } as const;
 
 export interface CloudJobDocument extends JobDocument {
@@ -44,6 +53,7 @@ export interface CloudJobDocument extends JobDocument {
 }
 
 export function useCustomersCollection() { return useCloudLocalCollection<Customer>(coreBusinessStorageKeys.customers); }
+export function useBuildersCollection() { return useCloudLocalCollection<Builder>(coreBusinessStorageKeys.builders); }
 export function useJobsCollection() { return useCloudLocalCollection<Job>(coreBusinessStorageKeys.jobs); }
 export function usePlannerCollection() { return useCloudLocalCollection<ScheduledPlannerEntry>(coreBusinessStorageKeys.planner); }
 export function usePricingDocumentsCollection() { return useCloudLocalCollection<PricingDocument>(coreBusinessStorageKeys.pricingDocuments); }
@@ -67,3 +77,11 @@ export function useRamsCollection() { return useCloudLocalCollection<RamsDocumen
 export function useJobPacksCollection() { return useCloudLocalCollection<JobPack>(coreBusinessStorageKeys.jobPacks); }
 export function useAiRecommendationEvidenceCollection() { return useCloudLocalCollection<AiLearningEvidence>(coreBusinessStorageKeys.aiRecommendationEvidence); }
 export function useAiLearningMemoryCollection() { return useCloudLocalCollection<AiLearningMemory>(coreBusinessStorageKeys.aiLearningMemory); }
+export function useCustomerProfilesCollection() { return useCloudLocalCollection<CustomerProfile>(coreBusinessStorageKeys.customerProfiles); }
+export function useCustomerInteractionsCollection() { return useCloudLocalCollection<CustomerInteraction>(coreBusinessStorageKeys.customerInteractions); }
+export function useSalesLeadsCollection() { return useCloudLocalCollection<SalesLead>(coreBusinessStorageKeys.salesLeads); }
+export function useLeadActivitiesCollection() { return useCloudLocalCollection<LeadActivity>(coreBusinessStorageKeys.leadActivities); }
+export function useJobVariationsCollection() { return useCloudLocalCollection<JobVariation>(coreBusinessStorageKeys.jobVariations); }
+export function useJobTimelineCollection() { return useCloudLocalCollection<JobTimelineEntry>(coreBusinessStorageKeys.jobTimeline); }
+export function useAiRemindersCollection() { return useCloudLocalCollection<AiReminder>(coreBusinessStorageKeys.aiReminders); }
+export function useCrmFollowUpSettingsCollection() { return useCloudLocalCollection<CrmFollowUpSettings>(coreBusinessStorageKeys.crmFollowUpSettings); }
