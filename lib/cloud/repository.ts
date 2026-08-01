@@ -60,15 +60,15 @@ export async function flushSyncQueue() {
         const record = {
           organisation_id: item.organisationId,
           source_id: item.sourceId,
-          collection_key: item.collectionKey,
-          customer_source_id: links.customerSourceId,
-          job_source_id: links.jobSourceId,
+          collection_key: item.collectionKey ?? null,
+          customer_source_id: links.customerSourceId ?? null,
+          job_source_id: links.jobSourceId ?? null,
           version: nextVersion,
           source_updated_at: (item.payload as { updatedAt?: string } | undefined)?.updatedAt || new Date().toISOString(),
-          payload: item.payload,
+          payload: item.payload ?? null,
           deleted_at: null,
-          created_by: current ? undefined : item.userId,
-          updated_by: item.userId,
+          created_by: current ? null : item.userId ?? null,
+          updated_by: item.userId ?? null,
         };
         await cloudUpsert(item.table, [record], item.collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
         updateCachedVersion(item.storageKey, item.sourceId, nextVersion);
@@ -85,7 +85,23 @@ export async function importLocalCollection<T extends { id: string; updatedAt?: 
   const filter = collectionFilter(collectionKey);
   const existing = await cloudSelect<{ source_id: string; source_updated_at?: string; version?: number; deleted_at?: string | null }>(table, `select=source_id,source_updated_at,version,deleted_at&organisation_id=eq.${encodeURIComponent(organisationId)}${filter}`);
   const pending = pendingImports(records, existing);
-  if (pending.length) await cloudUpsert(table, pending.map((record) => ({ organisation_id: organisationId, collection_key: collectionKey, source_id: record.id, customer_source_id: record.customerId, job_source_id: record.jobId, version: 1, source_updated_at: record.updatedAt || new Date().toISOString(), payload: record, deleted_at: null, created_by: userId, updated_by: userId })), collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
+  if (pending.length) {
+    const importedAt = new Date().toISOString();
+    const rows = pending.map((record) => ({
+      organisation_id: organisationId,
+      collection_key: collectionKey ?? null,
+      source_id: record.id,
+      customer_source_id: record.customerId ?? null,
+      job_source_id: record.jobId ?? null,
+      version: 1,
+      source_updated_at: record.updatedAt || importedAt,
+      payload: record,
+      deleted_at: null,
+      created_by: userId ?? null,
+      updated_by: userId ?? null,
+    }));
+    await cloudUpsert(table, rows, collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
+  }
   const versions = Object.fromEntries(existing.map((row) => [row.source_id, row.version || 1]));
   for (const record of pending) versions[record.id] = 1;
   write(`jr-os-cloud-versions:${storageKey}`, versions);
