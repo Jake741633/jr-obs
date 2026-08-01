@@ -35,7 +35,16 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     mode: effectiveCloudMode(),
     async list(): Promise<T[]> {
       const local = readLocal<T>(storageKey);
-      if (effectiveCloudMode() !== "cloud" || !navigator.onLine) return local;
+      const mode = effectiveCloudMode();
+
+      if (mode === "local" || !navigator.onLine) return local;
+
+      // Migration mode keeps an existing browser's local records authoritative,
+      // but a fresh/private browser has no cache to display. In that case it may
+      // safely hydrate from the already-migrated tenant records without changing
+      // the operating mode or uploading anything.
+      if (mode === "migration" && local.length > 0) return local;
+
       try {
         const rows = await cloudSelect<CloudEnvelope<T>>(table, `select=*&organisation_id=eq.${organisationId}${collectionFilter}&deleted_at=is.null`);
         const cloudRecords = rows.map((row) => row.payload);
