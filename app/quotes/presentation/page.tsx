@@ -27,8 +27,10 @@ const sectionOptions: Array<{ key: keyof QuotePresentationSettings; label: strin
 const detailOptions: Array<{ key: keyof QuotePresentationSettings; label: string }> = [
   { key: "showQuantities", label: "Quantities" },
   { key: "showUnitPrices", label: "Unit prices" },
+  { key: "showLineTotals", label: "Line totals" },
   { key: "showSubtotal", label: "Subtotal" },
   { key: "showVatLine", label: "VAT line" },
+  { key: "showTotal", label: "Total price" },
 ];
 
 export default function QuotePresentationPage() {

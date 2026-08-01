@@ -15,7 +15,7 @@ test("per-quote presentation overrides use a cloud/local collection", () => {
 
 test("quote previews prefer an explicit or saved document override before defaults", () => {
   assert.match(preview, /presentationOverrideFor\(overrides\.items, number\)/);
-  assert.match(preview, /presentation \?\? savedOverride \?\? defaults\.settings/);
+  assert.match(preview, /presentation \?\? presentationForAudience\(savedOverride, audience, defaults\.settings/);
 });
 
 test("override page supports fixed-price and requested-breakdown presets", () => {
@@ -23,7 +23,7 @@ test("override page supports fixed-price and requested-breakdown presets", () =>
   assert.match(page, /Labour only/);
   assert.match(page, /Labour \+ materials/);
   assert.match(page, /Full breakdown/);
-  assert.match(page, /Use business default/);
+  assert.match(page, /Reset all versions/);
 });
 
 test("default presentation page links to per-quote controls", () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CheckCircle2, Eye, RotateCcw, Save } from "lucide-react";
+import { CheckCircle2, Eye, FileDown, RotateCcw, Save } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "../../../../components/ui/Button";
 import { Card } from "../../../../components/ui/Card";
@@ -9,11 +9,16 @@ import { PageHeader } from "../../../../components/ui/PageHeader";
 import { usePricingDocumentsCollection } from "../../../../lib/cloud/coreBusinessCollections";
 import {
   defaultQuotePresentationSettings,
+  engineerQuotePresentationSettings,
+  internalQuotePresentationSettings,
+  presentationForAudience,
   presentationOverrideFor,
+  quotePresentationAudiences,
   quotePresentationOverridesStorageKey,
   quotePresentationPresets,
   quotePresentationSummary,
   type QuotePresentationOverrideRecord,
+  type QuotePresentationAudience,
   type QuotePresentationSettings,
 } from "../../../../lib/quotePresentation";
 import { useQuotePresentationDefaults } from "../../../../lib/useQuotePresentationDefaults";
@@ -32,8 +37,17 @@ const sectionOptions: Array<{ key: keyof QuotePresentationSettings; label: strin
 const detailOptions: Array<{ key: keyof QuotePresentationSettings; label: string }> = [
   { key: "showQuantities", label: "Quantities" },
   { key: "showUnitPrices", label: "Unit prices" },
+  { key: "showLineTotals", label: "Line totals" },
   { key: "showSubtotal", label: "Subtotal" },
   { key: "showVatLine", label: "VAT line" },
+  { key: "showTotal", label: "Total price" },
+];
+
+const privateOptions: Array<{ key: keyof QuotePresentationSettings; label: string }> = [
+  { key: "showCostPrices", label: "Material / labour costs" },
+  { key: "showOverheads", label: "Allocated overheads" },
+  { key: "showMarkup", label: "Material markup" },
+  { key: "showInternalNotes", label: "Internal notes" },
 ];
 
 export default function QuotePresentationOverridesPage() {
@@ -41,6 +55,7 @@ export default function QuotePresentationOverridesPage() {
   const defaults = useQuotePresentationDefaults();
   const overrides = useCloudLocalCollection<QuotePresentationOverrideRecord>(quotePresentationOverridesStorageKey);
   const [documentNumber, setDocumentNumber] = useState("");
+  const [audience, setAudience] = useState<QuotePresentationAudience>("Customer");
   const [draft, setDraft] = useState<QuotePresentationSettings>(defaults.settings ?? defaultQuotePresentationSettings);
   const [saved, setSaved] = useState(false);
 
@@ -53,7 +68,13 @@ export default function QuotePresentationOverridesPage() {
   function selectDocument(nextNumber: string) {
     setDocumentNumber(nextNumber);
     const existing = presentationOverrideFor(overrides.items, nextNumber);
-    setDraft(existing ?? defaults.settings ?? defaultQuotePresentationSettings);
+    setDraft(presentationForAudience(existing, audience, defaults.settings ?? defaultQuotePresentationSettings));
+    setSaved(false);
+  }
+
+  function selectAudience(nextAudience: QuotePresentationAudience) {
+    setAudience(nextAudience);
+    setDraft(presentationForAudience(selectedOverride, nextAudience, defaults.settings ?? defaultQuotePresentationSettings));
     setSaved(false);
   }
 
@@ -64,10 +85,14 @@ export default function QuotePresentationOverridesPage() {
 
   function save() {
     if (!selectedDocument) return;
+    const customerSettings = audience === "Customer"
+      ? draft
+      : presentationForAudience(selectedOverride, "Customer", defaults.settings ?? defaultQuotePresentationSettings);
     const record: QuotePresentationOverrideRecord = {
       id: `quote-presentation-${selectedDocument.id}`,
       documentNumber: selectedDocument.number,
-      ...draft,
+      ...customerSettings,
+      profiles: { ...(selectedOverride?.profiles ?? {}), [audience]: draft },
       updatedAt: new Date().toISOString(),
     };
     overrides.setItems((current) => [record, ...current.filter((item) => item.documentNumber !== record.documentNumber)]);
@@ -77,15 +102,20 @@ export default function QuotePresentationOverridesPage() {
   function removeOverride() {
     if (!selectedDocument) return;
     overrides.remove((item) => item.documentNumber === selectedDocument.number);
-    setDraft(defaults.settings ?? defaultQuotePresentationSettings);
+    setDraft(presentationForAudience(undefined, audience, defaults.settings ?? defaultQuotePresentationSettings));
+    setSaved(false);
+  }
+
+  function applyRecommendedVersion() {
+    setDraft({ ...(audience === "Customer" ? defaultQuotePresentationSettings : audience === "Internal" ? internalQuotePresentationSettings : engineerQuotePresentationSettings) });
     setSaved(false);
   }
 
   return <div className="space-y-6">
     <PageHeader
       eyebrow="Quote Engine 3.0"
-      title="Per-quote customer view"
-      description="Keep fixed price as your normal default, then give an individual customer a breakdown only when needed."
+      title="Per-quote document versions"
+      description="Control the Customer, Internal and Engineer versions independently without changing the quote calculation."
       action={<Link href="/quotes/presentation"><Button variant="secondary">Default settings</Button></Link>}
     />
 
@@ -99,12 +129,17 @@ export default function QuotePresentationOverridesPage() {
       </label>
       {selectedDocument ? <div className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-4 text-sm">
         <p className="font-semibold">{selectedDocument.title}</p>
-        <p className="mt-1 text-slate-400">{selectedOverride ? "This document has its own customer-view override." : "This document currently follows the saved business default."}</p>
+        <p className="mt-1 text-slate-400">{selectedOverride ? "This document has saved presentation versions." : "This document currently uses the recommended Customer, Internal and Engineer versions."}</p>
       </div> : null}
     </Card>
 
     {selectedDocument ? <Card>
-      <div className="flex flex-wrap gap-2">
+      <div className="grid grid-cols-3 gap-2" role="tablist" aria-label="Quote presentation version">
+        {quotePresentationAudiences.map((item) => <button key={item} type="button" role="tab" aria-selected={audience === item} onClick={() => selectAudience(item)} className={`min-h-12 rounded-xl border px-2 text-xs font-semibold sm:text-sm ${audience === item ? "border-cyan-400 bg-cyan-400/10 text-cyan-200" : "border-slate-700 bg-slate-950 text-slate-400"}`}>{item}</button>)}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        <Button type="button" onClick={applyRecommendedVersion}>{audience} recommended</Button>
         <Button type="button" variant="secondary" onClick={() => setDraft({ ...quotePresentationPresets.fixedPrice })}>Fixed price</Button>
         <Button type="button" variant="secondary" onClick={() => setDraft({ ...quotePresentationPresets.labourOnly })}>Labour only</Button>
         <Button type="button" variant="secondary" onClick={() => setDraft({ ...quotePresentationPresets.materialsAndLabour })}>Labour + materials</Button>
@@ -120,19 +155,21 @@ export default function QuotePresentationOverridesPage() {
         <div>
           <h3 className="font-semibold">Price detail</h3>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">{detailOptions.map((option) => <label key={option.key} className="flex min-h-12 items-center gap-3 rounded-xl border border-slate-700 bg-slate-950 px-4 text-sm text-slate-200"><input type="checkbox" checked={Boolean(draft[option.key])} onChange={(event) => update(option.key, event.target.checked)} />{option.label}</label>)}</div>
+          {audience !== "Customer" ? <><h3 className="mt-5 font-semibold">Private information</h3><div className="mt-3 grid gap-2 sm:grid-cols-2">{privateOptions.map((option) => <label key={option.key} className="flex min-h-12 items-center gap-3 rounded-xl border border-violet-500/20 bg-violet-500/5 px-4 text-sm text-slate-200"><input type="checkbox" checked={Boolean(draft[option.key])} onChange={(event) => update(option.key, event.target.checked)} />{option.label}</label>)}</div></> : null}
         </div>
       </div>
 
       <div className="mt-6 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
-        <div className="flex items-center gap-2 text-cyan-200"><Eye className="size-4" /><span className="text-sm font-semibold">Customer view</span></div>
+        <div className="flex items-center gap-2 text-cyan-200"><Eye className="size-4" /><span className="text-sm font-semibold">{audience} version</span></div>
         <p className="mt-2 text-sm text-slate-300">{quotePresentationSummary(draft)}</p>
-        <p className="mt-2 text-xs text-slate-500">Your internal costs, markups and expected profit remain private.</p>
+        <p className="mt-2 text-xs text-slate-500">{audience === "Customer" ? "Internal costs, markups, overheads and private notes remain hidden." : "This is a private operational version and is never sent through the Customer Portal."}</p>
       </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
         {saved ? <span className="flex items-center gap-2 text-sm font-semibold text-emerald-300"><CheckCircle2 className="size-4" />Override saved</span> : null}
-        {selectedOverride ? <Button type="button" variant="secondary" onClick={removeOverride}><RotateCcw className="mr-2 size-4" />Use business default</Button> : null}
-        <Button type="button" onClick={save}><Save className="mr-2 size-4" />Save for {selectedDocument.number}</Button>
+        <Link href={`/quotes/${selectedDocument.id}`}><Button type="button" variant="secondary"><FileDown className="mr-2 size-4" />Preview all PDFs</Button></Link>
+        {selectedOverride ? <Button type="button" variant="secondary" onClick={removeOverride}><RotateCcw className="mr-2 size-4" />Reset all versions</Button> : null}
+        <Button type="button" onClick={save}><Save className="mr-2 size-4" />Save {audience.toLowerCase()} version</Button>
       </div>
     </Card> : null}
   </div>;

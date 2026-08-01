@@ -19,3 +19,8 @@ img, video, canvas, svg { max-width: 100%; }
 @media (min-width: 640px) {
   form button:not([aria-label]) { width: auto; }
 }
+@media print {
+  body.quote-printing * { visibility: hidden; }
+  body.quote-printing [data-quote-print-root], body.quote-printing [data-quote-print-root] * { visibility: visible; }
+  body.quote-printing [data-quote-print-root] { position: absolute; inset: 0; width: 100%; }
+}

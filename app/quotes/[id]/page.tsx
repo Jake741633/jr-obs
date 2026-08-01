@@ -3,27 +3,30 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, BriefcaseBusiness, CalendarDays, Download, ExternalLink, FileText, History, Paperclip, RotateCcw, TrendingUp, UserRound } from "lucide-react";
+import { ArrowLeft, BriefcaseBusiness, CalendarDays, Download, ExternalLink, FileDown, FileText, History, Paperclip, RotateCcw, Settings2, TrendingUp, UserRound } from "lucide-react";
 import { QuotePreview } from "../../../components/quotes/QuotePreview";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { businessStorageKeys, defaultBusinessProfile, defaultDocumentBranding, defaultVatSettings } from "../../../lib/businessSettings";
-import { useLocalStorageCollection } from "../../../lib/storage";
-import type { Builder, BusinessProfile, Customer, DocumentBrandingSettings, Job, PricingDocument, VatSettings } from "../../../lib/models";
+import { usePricingDocumentsCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { quotePresentationAudiences, type QuotePresentationAudience } from "../../../lib/quotePresentation";
+import { useCloudLocalCollection } from "../../../lib/storage";
+import type { Builder, BusinessProfile, Customer, DocumentBrandingSettings, Job, VatSettings } from "../../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 
 export default function PricingDocumentDetailPage() {
   const params = useParams<{ id: string }>();
-  const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const builders = useLocalStorageCollection<Builder>("jr-os-builders");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const profileStore = useLocalStorageCollection<BusinessProfile>(businessStorageKeys.profile, [defaultBusinessProfile]);
-  const vatStore = useLocalStorageCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
-  const brandingStore = useLocalStorageCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
+  const documents = usePricingDocumentsCollection();
+  const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const builders = useCloudLocalCollection<Builder>("jr-os-builders");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
+  const profileStore = useCloudLocalCollection<BusinessProfile>(businessStorageKeys.profile, [defaultBusinessProfile]);
+  const vatStore = useCloudLocalCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
+  const brandingStore = useCloudLocalCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
   const [message, setMessage] = useState("");
+  const [activeAudience, setActiveAudience] = useState<QuotePresentationAudience>("Customer");
 
   if (!documents.isReady || !customers.isReady || !builders.isReady || !jobs.isReady || !profileStore.isReady || !vatStore.isReady || !brandingStore.isReady) return <Card>Loading pricing document…</Card>;
 
@@ -93,6 +96,15 @@ export default function PricingDocumentDetailPage() {
     setMessage(`Revision ${revision.revisionNumber} restored.`);
   }
 
+  function printActivePreview() {
+    const body = window.document.body;
+    const cleanup = () => body.classList.remove("quote-printing");
+    body.classList.add("quote-printing");
+    window.addEventListener("afterprint", cleanup, { once: true });
+    window.print();
+    window.setTimeout(cleanup, 5_000);
+  }
+
   return <div className="space-y-6">
     <Link href="/quotes" className="inline-flex items-center gap-2 text-sm text-slate-400 hover:text-cyan-300"><ArrowLeft className="size-4" />Back to quotes & estimates</Link>
     {message ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{message}</div> : null}
@@ -130,7 +142,11 @@ export default function PricingDocumentDetailPage() {
 
     {document.attachments?.length ? <Card><div className="flex items-center gap-2 text-cyan-300"><Paperclip className="size-5" /><div><h2 className="font-semibold">Quote attachments</h2><p className="text-sm text-slate-500">These files and links follow the quote into its live job.</p></div></div><div className="mt-4 grid gap-2 md:grid-cols-2">{document.attachments.map((attachment) => <div key={attachment.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-800 p-3"><div className="min-w-0"><p className="truncate font-semibold">{attachment.name}</p><p className="mt-1 truncate text-xs text-slate-500">{attachment.fileName || attachment.externalUrl}</p></div><div className="flex shrink-0">{attachment.dataUrl ? <a href={attachment.dataUrl} download={attachment.fileName || attachment.name} aria-label={`Download ${attachment.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Download className="size-4" /></a> : null}{attachment.externalUrl ? <a href={attachment.externalUrl} target="_blank" rel="noreferrer" aria-label={`Open ${attachment.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><ExternalLink className="size-4" /></a> : null}</div></div>)}</div></Card> : null}
 
-    <section><div className="mb-3 flex items-center gap-2"><FileText className="size-5 text-cyan-300" /><div><h2 className="text-xl font-bold">Final document preview</h2><p className="text-sm text-slate-500">Customer-facing layout used for the quote PDF.</p></div></div><QuotePreview number={document.number} documentType={document.type} title={document.title} customer={customer} builder={builder} siteAddress={document.siteAddress} validUntil={document.validUntil} items={document.items} notes={document.notes} exclusions={document.exclusions} terms={document.terms} paymentTerms={document.paymentTerms} vatEnabled={document.vatEnabled} vatRate={document.vatRate} subtotal={subtotal} businessProfile={businessProfile} vatSettings={vatSettings} branding={branding} /></section>
+    <section className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div className="flex items-start gap-2"><FileText className="mt-1 size-5 text-cyan-300" /><div><h2 className="text-xl font-bold">PDF-ready document versions</h2><p className="text-sm text-slate-500">Switch between the customer, office and site-engineer layouts without changing the saved quote price.</p></div></div><div className="flex flex-wrap gap-2"><Link href="/quotes/presentation/overrides"><Button type="button" variant="secondary"><Settings2 className="mr-2 size-4" />Manage versions</Button></Link><Button type="button" onClick={printActivePreview}><FileDown className="mr-2 size-4" />Print / save PDF</Button></div></div>
+      <div className="grid grid-cols-3 gap-2" role="tablist" aria-label="Quote PDF version">{quotePresentationAudiences.map((audience) => <button key={audience} type="button" role="tab" aria-selected={activeAudience === audience} onClick={() => setActiveAudience(audience)} className={`min-h-12 rounded-xl border px-2 text-xs font-semibold sm:text-sm ${activeAudience === audience ? "border-cyan-400 bg-cyan-400/10 text-cyan-200" : "border-slate-700 bg-slate-900 text-slate-400"}`}>{audience}</button>)}</div>
+      <QuotePreview number={document.number} documentType={document.type} title={document.title} customer={customer} builder={builder} siteAddress={document.siteAddress} validUntil={document.validUntil} items={document.items} notes={document.notes} exclusions={document.exclusions} internalNotes={document.internalNotes} terms={document.terms} paymentTerms={document.paymentTerms} vatEnabled={document.vatEnabled} vatRate={document.vatRate} subtotal={subtotal} businessProfile={businessProfile} vatSettings={vatSettings} branding={branding} audience={activeAudience} pricingSettings={document.pricingSettings} profitability={document.profitability} />
+    </section>
 
     <Card>
       <div className="flex items-center gap-2 text-violet-300"><History className="size-5" /><div><h2 className="font-semibold">Version history</h2><p className="text-sm text-slate-500">Every saved edit keeps the previous customer-facing version.</p></div></div>

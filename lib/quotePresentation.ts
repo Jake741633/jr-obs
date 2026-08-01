@@ -1,6 +1,7 @@
 import type { PricingLineItem } from "./models";
 
 export type QuotePresentationMode = "Fixed price" | "Itemised";
+export type QuotePresentationAudience = "Customer" | "Internal" | "Engineer";
 
 export interface QuotePresentationSettings {
   mode: QuotePresentationMode;
@@ -13,8 +14,14 @@ export interface QuotePresentationSettings {
   showOther: boolean;
   showQuantities: boolean;
   showUnitPrices: boolean;
+  showLineTotals?: boolean;
   showSubtotal: boolean;
   showVatLine: boolean;
+  showTotal?: boolean;
+  showCostPrices?: boolean;
+  showOverheads?: boolean;
+  showMarkup?: boolean;
+  showInternalNotes?: boolean;
 }
 
 export interface QuotePresentationDefaultsRecord extends QuotePresentationSettings {
@@ -25,6 +32,7 @@ export interface QuotePresentationDefaultsRecord extends QuotePresentationSettin
 export interface QuotePresentationOverrideRecord extends QuotePresentationSettings {
   id: string;
   documentNumber: string;
+  profiles?: Partial<Record<QuotePresentationAudience, QuotePresentationSettings>>;
   updatedAt: string;
 }
 
@@ -41,8 +49,14 @@ export const defaultQuotePresentationSettings: QuotePresentationSettings = {
   showOther: false,
   showQuantities: false,
   showUnitPrices: false,
+  showLineTotals: false,
   showSubtotal: false,
   showVatLine: true,
+  showTotal: true,
+  showCostPrices: false,
+  showOverheads: false,
+  showMarkup: false,
+  showInternalNotes: false,
 };
 
 export const defaultQuotePresentationRecord: QuotePresentationDefaultsRecord = {
@@ -57,6 +71,7 @@ export const quotePresentationPresets = {
     ...defaultQuotePresentationSettings,
     mode: "Itemised",
     showLabour: true,
+    showLineTotals: true,
     showSubtotal: true,
   },
   materialsAndLabour: {
@@ -65,6 +80,7 @@ export const quotePresentationPresets = {
     showLabour: true,
     showMaterials: true,
     showQuantities: true,
+    showLineTotals: true,
     showSubtotal: true,
   },
   fullBreakdown: {
@@ -78,10 +94,39 @@ export const quotePresentationPresets = {
     showOther: true,
     showQuantities: true,
     showUnitPrices: true,
+    showLineTotals: true,
     showSubtotal: true,
     showVatLine: true,
+    showTotal: true,
+    showCostPrices: false,
+    showOverheads: false,
+    showMarkup: false,
+    showInternalNotes: false,
   },
 } satisfies Record<string, QuotePresentationSettings>;
+
+export const internalQuotePresentationSettings: QuotePresentationSettings = {
+  ...quotePresentationPresets.fullBreakdown,
+  showCostPrices: true,
+  showOverheads: true,
+  showMarkup: true,
+  showInternalNotes: true,
+};
+
+export const engineerQuotePresentationSettings: QuotePresentationSettings = {
+  ...defaultQuotePresentationSettings,
+  mode: "Itemised",
+  showLabour: true,
+  showMaterials: true,
+  showPlantHire: true,
+  showOther: true,
+  showQuantities: true,
+  showLineTotals: false,
+  showVatLine: false,
+  showTotal: false,
+};
+
+export const quotePresentationAudiences: QuotePresentationAudience[] = ["Customer", "Internal", "Engineer"];
 
 const categoryVisibility: Record<PricingLineItem["category"], keyof QuotePresentationSettings> = {
   Labour: "showLabour",
@@ -102,15 +147,27 @@ export function visibleQuoteItems(
 }
 
 export function quotePresentationSummary(settings: QuotePresentationSettings) {
-  if (settings.mode === "Fixed price") return "Customer sees one fixed total without internal cost breakdowns.";
+  if (settings.mode === "Fixed price") return "One fixed total is shown without internal cost breakdowns.";
 
   const shown = Object.entries(categoryVisibility)
     .filter(([, key]) => settings[key])
     .map(([category]) => category);
 
   return shown.length
-    ? `Customer sees: ${shown.join(", ")}.`
-    : "Customer sees the total only; all sections are hidden.";
+    ? `Visible sections: ${shown.join(", ")}.`
+    : "All item sections are hidden.";
+}
+
+export function presentationForAudience(
+  record: QuotePresentationOverrideRecord | undefined,
+  audience: QuotePresentationAudience,
+  customerFallback: QuotePresentationSettings = defaultQuotePresentationSettings,
+) {
+  if (audience === "Customer") {
+    return { ...defaultQuotePresentationSettings, ...customerFallback, ...(record ?? {}), ...(record?.profiles?.Customer ?? {}) };
+  }
+  const fallback = audience === "Internal" ? internalQuotePresentationSettings : engineerQuotePresentationSettings;
+  return { ...fallback, ...(record?.profiles?.[audience] ?? {}) };
 }
 
 export function presentationOverrideFor(
