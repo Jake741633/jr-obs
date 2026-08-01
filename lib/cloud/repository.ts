@@ -2,10 +2,12 @@
 
 import { cloudPatch, cloudSelect, cloudUpsert } from "./client";
 import { effectiveCloudMode } from "./config";
-import { coalesceQueue, hasVersionConflict, linkedSourceIds, makeTombstone, pendingImports, tenantRecordQuery } from "./repository-core.mjs";
+import { buildCloudEnvelope, coalesceQueue, hasVersionConflict, makeTombstone, pendingImports, tenantRecordQuery } from "./repository-core.mjs";
 
 export type SyncState = "Synced" | "Pending" | "Offline" | "Conflict" | "Failed";
-export interface CloudEnvelope<T> { organisation_id: string; source_id: string; collection_key?: string; customer_source_id?: string; job_source_id?: string; version: number; source_updated_at?: string; payload: T; updated_at?: string; deleted_at?: string | null; }
+export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: string; customer_source_id?: string | null; job_source_id?: string | null; version: number; source_updated_at?: string; payload: T; updated_at?: string; deleted_at?: string | null; }
+export interface GenericCloudEnvelope<T> extends TypedCloudEnvelope<T> { collection_key: string; }
+export type CloudEnvelope<T> = TypedCloudEnvelope<T> | GenericCloudEnvelope<T>;
 export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; payload?: T; expectedVersion?: number; queuedAt: string; attempts: number; state: SyncState; error?: string; }
 
 const QUEUE_KEY = "jr-os-cloud-sync-queue";
@@ -55,23 +57,19 @@ export async function flushSyncQueue() {
         await cloudPatch(item.table, query, { ...tombstone, source_updated_at: deletedAt });
         updateCachedVersion(item.storageKey, item.sourceId, tombstone.version);
       } else {
-        const nextVersion = (current?.version || 0) + 1;
-        const links = linkedSourceIds(item.payload);
-        const record = {
-          organisation_id: item.organisationId,
-          source_id: item.sourceId,
-          collection_key: item.collectionKey ?? null,
-          customer_source_id: links.customerSourceId ?? null,
-          job_source_id: links.jobSourceId ?? null,
-          version: nextVersion,
-          source_updated_at: (item.payload as { updatedAt?: string } | undefined)?.updatedAt || new Date().toISOString(),
-          payload: item.payload ?? null,
-          deleted_at: null,
-          created_by: current ? null : item.userId ?? null,
-          updated_by: item.userId ?? null,
-        };
+        const sourceUpdatedAt = (item.payload as { updatedAt?: string } | undefined)?.updatedAt || new Date().toISOString();
+        const record = buildCloudEnvelope({
+          organisationId: item.organisationId,
+          sourceId: item.sourceId,
+          collectionKey: item.collectionKey,
+          payload: item.payload,
+          version: (current?.version || 0) + 1,
+          sourceUpdatedAt,
+          createdBy: current ? null : item.userId,
+          updatedBy: item.userId,
+        });
         await cloudUpsert(item.table, [record], item.collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
-        updateCachedVersion(item.storageKey, item.sourceId, nextVersion);
+        updateCachedVersion(item.storageKey, item.sourceId, record.version);
       }
     } catch (error) { remaining.push({ ...item, attempts: item.attempts + 1, state: "Failed", error: error instanceof Error ? error.message : "Sync failed" }); }
   }
@@ -79,7 +77,7 @@ export async function flushSyncQueue() {
   syncStatus.set(remaining.some((item) => item.state === "Conflict") ? "Conflict" : remaining.length ? "Failed" : "Synced");
 }
 
-export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; jobId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string) {
+export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; customerSourceId?: string; jobId?: string; jobSourceId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string) {
   const records = read<T[]>(storageKey, []);
   if (!records.length) return { imported: 0, skipped: 0 };
   const filter = collectionFilter(collectionKey);
@@ -87,18 +85,15 @@ export async function importLocalCollection<T extends { id: string; updatedAt?: 
   const pending = pendingImports(records, existing);
   if (pending.length) {
     const importedAt = new Date().toISOString();
-    const rows = pending.map((record) => ({
-      organisation_id: organisationId,
-      collection_key: collectionKey ?? null,
-      source_id: record.id,
-      customer_source_id: record.customerId ?? null,
-      job_source_id: record.jobId ?? null,
-      version: 1,
-      source_updated_at: record.updatedAt || importedAt,
+    const rows = pending.map((record) => buildCloudEnvelope({
+      organisationId,
+      sourceId: record.id,
+      collectionKey,
       payload: record,
-      deleted_at: null,
-      created_by: userId ?? null,
-      updated_by: userId ?? null,
+      version: 1,
+      sourceUpdatedAt: record.updatedAt || importedAt,
+      createdBy: userId,
+      updatedBy: userId,
     }));
     await cloudUpsert(table, rows, collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
   }
