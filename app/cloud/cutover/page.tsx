@@ -5,6 +5,7 @@ import { AlertTriangle, CheckCircle2, CloudCog, RefreshCw } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { runCloudCutoverCheck, type CloudCutoverReport } from "../../../lib/cloud/cutover";
+import { flushSyncQueue, getSyncQueue } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 
 function statusClass(status: string) {
@@ -18,6 +19,8 @@ export default function CloudCutoverPage() {
   const [report, setReport] = useState<CloudCutoverReport | null>(null);
   const [busy, setBusy] = useState(false);
   const [identityBusy, setIdentityBusy] = useState(false);
+  const [repairBusy, setRepairBusy] = useState(false);
+  const [repairMessage, setRepairMessage] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -55,6 +58,28 @@ export default function CloudCutoverPage() {
     }
   }
 
+  async function repairPendingQueue() {
+    if (!identity?.organisationId) return;
+    setRepairBusy(true);
+    setRepairMessage("");
+    setError("");
+    try {
+      const before = getSyncQueue().length;
+      const result = await flushSyncQueue();
+      const refreshedReport = await runCloudCutoverCheck(identity.organisationId);
+      setReport(refreshedReport);
+      setRepairMessage(
+        result.remaining === 0
+          ? `Sync repair complete. ${result.cleared} of ${before} queued changes were safely cleared and the queue is now empty.`
+          : `Sync repair processed ${result.processed} changes. ${result.remaining} remain (${result.conflicts} conflicts, ${result.failed} failed).`,
+      );
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The pending sync queue could not be repaired.");
+    } finally {
+      setRepairBusy(false);
+    }
+  }
+
   return <div className="space-y-6">
     <div>
       <p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Cloud readiness</p>
@@ -73,7 +98,7 @@ export default function CloudCutoverPage() {
         <div><h2 className="text-xl font-bold">Run readiness check</h2><p className="mt-2 text-sm text-slate-400">The check reads cloud IDs directly even while JR OS remains in migration mode.</p></div>
         <div className="flex flex-wrap gap-3">
           <Button type="button" disabled={identityBusy} onClick={() => void refreshIdentity()}><RefreshCw className={`mr-2 size-4 ${identityBusy ? "animate-spin" : ""}`} />{identityBusy ? "Refreshing account…" : "Refresh signed-in account"}</Button>
-          <Button type="button" disabled={busy || identityBusy || !identity?.organisationId} onClick={() => void runCheck()}><RefreshCw className={`mr-2 size-4 ${busy ? "animate-spin" : ""}`} />{busy ? "Checking…" : "Check local against cloud"}</Button>
+          <Button type="button" disabled={busy || identityBusy || repairBusy || !identity?.organisationId} onClick={() => void runCheck()}><RefreshCw className={`mr-2 size-4 ${busy ? "animate-spin" : ""}`} />{busy ? "Checking…" : "Check local against cloud"}</Button>
         </div>
       </div>
       {error ? <p className="mt-4 whitespace-pre-wrap rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-200">{error}</p> : null}
@@ -99,13 +124,17 @@ export default function CloudCutoverPage() {
       </div>
 
       <Card>
-        <h2 className="text-xl font-bold">Queue and file checks</h2>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div><h2 className="text-xl font-bold">Queue and file checks</h2><p className="mt-2 text-sm text-slate-400">Retry queued changes safely. Entries already identical in Supabase are cleared without creating another version.</p></div>
+          <Button type="button" disabled={repairBusy || report.pendingQueueCount + report.failedQueueCount === 0} onClick={() => void repairPendingQueue()}><RefreshCw className={`mr-2 size-4 ${repairBusy ? "animate-spin" : ""}`} />{repairBusy ? "Repairing queue…" : "Retry and clear pending changes"}</Button>
+        </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-4 text-sm">
           <div className="rounded-xl border border-slate-800 p-3"><p className="text-slate-400">Pending/offline</p><p className="mt-1 text-xl font-bold">{report.pendingQueueCount}</p></div>
           <div className="rounded-xl border border-slate-800 p-3"><p className="text-slate-400">Conflicts</p><p className="mt-1 text-xl font-bold">{report.conflictQueueCount}</p></div>
           <div className="rounded-xl border border-slate-800 p-3"><p className="text-slate-400">Failed</p><p className="mt-1 text-xl font-bold">{report.failedQueueCount}</p></div>
           <div className="rounded-xl border border-slate-800 p-3"><p className="text-slate-400">Files queued</p><p className="mt-1 text-xl font-bold">{report.privateUploadQueueCount}</p></div>
         </div>
+        {repairMessage ? <p className="mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-200">{repairMessage}</p> : null}
       </Card>
 
       <Card>
