@@ -5,7 +5,9 @@ import {
   electricalRoomTemplates,
   normaliseRoomEstimate,
   roomEstimateFinancials,
+  roomEstimateToQuoteLines,
   wholePropertyEstimateFinancials,
+  wholePropertyEstimateToQuoteLines,
 } from "../lib/roomEstimating.mjs";
 
 const socket = {
@@ -110,6 +112,47 @@ test("room financials calculate linked price-book quantities and ignore deleted 
   assert.equal(summary.lines.length, 2);
   assert.deepEqual(summary.lines.map((line) => line.priceBookItemId), ["socket", "downlight"]);
   assert.equal(summary.lines[0].notes, "Above worktop");
+});
+
+test("room quote lines expose selling values without leaking internal costs", () => {
+  const lines = roomEstimateToQuoteLines({
+    id: "kitchen-1",
+    templateKey: "kitchen",
+    internalNotes: "Allow extra time for stone worktops",
+    points: [{ id: "p1", priceBookItemId: "socket", quantity: 4, notes: "Above worktop" }],
+  }, [socket], (value) => `quote-${value}`);
+
+  assert.deepEqual(lines, [{
+    id: "quote-kitchen-1-p1",
+    description: "Kitchen: Double socket point — Above worktop",
+    category: "Other",
+    quantity: 4,
+    unit: "point",
+    unitCost: 0,
+    unitPrice: 95,
+    priceBookItemId: "socket",
+    internalNotes: "Room estimate: Kitchen. Allow extra time for stone worktops",
+  }]);
+  assert.equal("labourCost" in lines[0], false);
+  assert.equal("materialCost" in lines[0], false);
+  assert.equal("grossProfit" in lines[0], false);
+});
+
+test("whole-property quote lines retain room separation and stable generated ids", () => {
+  const lines = wholePropertyEstimateToQuoteLines([
+    { id: "bed-1", templateKey: "bedroom", points: [{ id: "socket-a", priceBookItemId: "socket", quantity: 3 }] },
+    { id: "bath-1", templateKey: "bathroom", points: [{ id: "light-a", priceBookItemId: "downlight", quantity: 4 }] },
+  ], [socket, downlight], (value) => `line-${value}`);
+
+  assert.deepEqual(lines.map((line) => line.id), [
+    "line-1-bed-1-socket-a",
+    "line-2-bath-1-light-a",
+  ]);
+  assert.deepEqual(lines.map((line) => line.description), [
+    "Bedroom: Double socket point",
+    "Bathroom: LED downlight",
+  ]);
+  assert.deepEqual(lines.map((line) => line.unitPrice), [95, 80]);
 });
 
 test("whole-property totals aggregate rooms without mutating their source records", () => {
