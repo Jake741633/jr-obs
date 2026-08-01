@@ -16,9 +16,13 @@ export interface AiLearningEvidence { id: EntityId; kind: AiLearningEvidenceKind
 export interface AiLearningJobPattern { jobType: QuoteTemplateType; successfulRecords: number; completedJobs: number; acceptedQuotes: number; paidInvoices: number; decidedQuotes: number; conversionRate: number; averageSellingPrice: number; averageLabourHours: number; averageNetMargin: number; averageMaterialMarkup: number; averageContingency: number; evidence: AiLearningEvidence[]; }
 export interface AiLearningMaterialPattern { key: string; materialId?: EntityId; description: string; uses: number; completedJobUses: number; averageQuantity: number; averageUnitCost: number; averageUnitPrice: number; lastUsedAt: string; confidenceScore: number; evidence: AiLearningEvidence[]; }
 export interface AiLearningMemory { id: EntityId; schemaVersion: 1; sourceSignature: string; learnedAt: string; completedJobs: number; acceptedQuotes: number; paidInvoices: number; customerHistories: number; builderHistories: number; pricingSignals: number; materialSignals: number; confidence: AiConfidenceBreakdown; jobPatterns: AiLearningJobPattern[]; frequentMaterials: AiLearningMaterialPattern[]; influentialRecords: AiLearningEvidence[]; }
-export type JobStatus = "Lead" | "Quoted" | "Scheduled" | "In progress" | "Complete" | "On hold";
+export type CanonicalJobStatus = "Enquiry" | "Survey required" | "Quoted" | "Accepted" | "Awaiting deposit" | "Scheduled" | "First fix" | "Awaiting builder" | "Second fix" | "Testing" | "Snagging" | "Complete" | "Invoiced" | "Paid" | "On hold" | "Cancelled";
+export type LegacyJobStatus = "Lead" | "In progress";
+export type JobStatus = CanonicalJobStatus | LegacyJobStatus;
 export type JobPriority = "Low" | "Normal" | "High" | "Urgent";
-export interface Job { id: EntityId; title: string; customerId?: EntityId; builderId?: EntityId; sourceQuoteId?: EntityId; quoteSnapshot?: JobQuoteSnapshot; siteAddress: string; status: JobStatus; startDate: string; targetCompletionDate?: string; priority?: JobPriority; assignedTo?: string[]; value: number; notes: string; createdAt: string; updatedAt: string; }
+export type JobContactRole = "Customer" | "Builder" | "Site contact" | "Project manager" | "Other";
+export interface JobContact { id: EntityId; name: string; role: JobContactRole; phone: string; email: string; notes: string; }
+export interface Job { id: EntityId; title: string; customerId?: EntityId; builderId?: EntityId; sourceQuoteId?: EntityId; quoteSnapshot?: JobQuoteSnapshot; siteAddress: string; status: JobStatus; startDate: string; targetCompletionDate?: string; priority?: JobPriority; assignedTo?: string[]; contacts?: JobContact[]; retentionPercent?: number; retentionDueDate?: string; requiredCertificateTypes?: CertificateType[]; value: number; notes: string; createdAt: string; updatedAt: string; }
 
 export type LeadStage = "New Lead" | "Contacted" | "Survey Booked" | "Survey Complete" | "Quote Sent" | "Follow-up Due" | "Accepted" | "Lost" | "Completed" | "Cancelled";
 export type LegacyLeadStage = "New enquiry" | "Survey booked" | "Quote required" | "Quote sent" | "Won";
@@ -29,11 +33,34 @@ export interface LeadActivity { id: EntityId; leadId: EntityId; type: "Call" | "
 export interface CrmFollowUpSettings { id: EntityId; quoteAgeDays: number; noResponseDays: number; lostOpportunityDays: number; highValueThreshold: number; updatedAt: string; }
 
 export type JobMilestoneType = "Enquiry received" | "Site survey booked" | "Quote prepared" | "Quote sent" | "Quote accepted" | "Job created" | "Deposit received" | "Materials ordered" | "Materials delivered" | "First fix complete" | "Second fix complete" | "Testing complete" | "Job completed" | "Certificate uploaded" | "Invoice created" | "Invoice sent" | "Payment received" | "Review requested" | "Custom update";
-export interface JobTimelineEntry { id: EntityId; jobId: EntityId; milestone: JobMilestoneType; note: string; completedBy: string; completedAt: string; createdAt: string; }
+export type JobActivityType = "Milestone" | "Status change" | "Site diary" | "Variation" | "Task" | "Snag" | "Document" | "Material" | "Time" | "Testing" | "Certificate" | "Financial" | "Completion" | "Note";
+export interface JobTimelineEntry { id: EntityId; jobId: EntityId; milestone: JobMilestoneType; eventType?: JobActivityType; sourceId?: EntityId; sourceType?: string; fromStatus?: CanonicalJobStatus; toStatus?: CanonicalJobStatus; note: string; completedBy: string; completedAt: string; createdAt: string; }
 
-export interface SiteDiaryEntry { id: EntityId; jobId: EntityId; workDate: string; startedAt: string; finishedAt: string; breakMinutes: number; completedBy: string; workCompleted: string; delays: string; customerRequests: string; materialsUsed: string; voiceNotes: string; createdAt: string; updatedAt: string; }
-export type VariationStatus = "Draft" | "Awaiting approval" | "Approved" | "Declined" | "Invoiced";
-export interface JobVariation { id: EntityId; jobId: EntityId; number: string; title: string; description: string; labourHours: number; labourRate: number; materialCost: number; materialCharge: number; otherCharge: number; status: VariationStatus; approvalMethod: "Not approved" | "Signature" | "Email" | "WhatsApp" | "Verbal"; approvalReference: string; requestedBy: string; createdAt: string; updatedAt: string; }
+export interface SiteDiaryEntry { id: EntityId; jobId: EntityId; workDate: string; startedAt: string; finishedAt: string; breakMinutes: number; completedBy: string; staffPresent?: EntityId[]; otherStaffPresent?: string; workCompleted: string; delays: string; builderInstructions?: string; customerRequests: string; customerInstructions?: string; materialsUsed: string; materialsRequired?: string; photos?: RecordAttachment[]; voiceNotes: string; voiceNoteTranscript?: string; weather?: string; issuesAndRisks?: string; followUpActions?: string; createdAt: string; updatedAt: string; }
+export type CanonicalVariationStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Invoiced";
+export type LegacyVariationStatus = "Awaiting approval" | "Approved";
+export type VariationStatus = CanonicalVariationStatus | LegacyVariationStatus;
+export interface JobVariationAuditEntry { id: EntityId; action: string; fromStatus?: CanonicalVariationStatus; toStatus?: CanonicalVariationStatus; detail: string; completedBy: string; completedAt: string; }
+export interface JobVariationPresentation { recipient: "Customer" | "Builder"; showLabourBreakdown: boolean; showMaterialBreakdown: boolean; showInternalCosts: boolean; showProfit: boolean; }
+export interface JobVariation { id: EntityId; jobId: EntityId; number: string; title: string; description: string; labourHours: number; labourRate: number; labourCostRate?: number; materialCost: number; materialCharge: number; otherCost?: number; otherCharge: number; fixedPrice?: number; status: VariationStatus; approvalMethod: "Not approved" | "Signature" | "Email" | "WhatsApp" | "Verbal"; approvalReference: string; requestedBy: string; sentTo?: "Customer" | "Builder"; sentAt?: string; decidedAt?: string; decidedBy?: string; invoiceId?: EntityId; photos?: RecordAttachment[]; customerNotes?: string; internalNotes?: string; presentation?: JobVariationPresentation; auditHistory?: JobVariationAuditEntry[]; createdAt: string; updatedAt: string; }
+
+export type JobTaskType = "Task" | "Snag";
+export type JobTaskCategory = "General" | "Survey" | "First fix" | "Second fix" | "Testing" | "Certificate" | "Materials" | "Handover" | "Safety" | "Other";
+export type JobTaskStatus = "Open" | "In progress" | "Completed" | "Customer confirmed";
+export interface JobTask { id: EntityId; jobId: EntityId; type: JobTaskType; title: string; description: string; category: JobTaskCategory; priority: JobPriority; assignedTo?: EntityId; dueDate: string; status: JobTaskStatus; photos: RecordAttachment[]; notes: string; completedAt?: string; customerConfirmedAt?: string; createdAt: string; updatedAt: string; }
+
+export interface JobProgressMetrics { overall: number; firstFix: number; secondFix: number; testing: number; certificate: number; materials: number; payment: number; }
+export type JobProgressMetric = keyof JobProgressMetrics;
+export interface JobProgressSuggestion { metric: JobProgressMetric; value: number; reason: string; calculatedAt: string; }
+export interface JobProgressRecord { id: EntityId; jobId: EntityId; manual: JobProgressMetrics; suggestions: JobProgressSuggestion[]; updatedBy: string; createdAt: string; updatedAt: string; }
+
+export type JobPaymentStageStatus = "Not due" | "Due" | "Invoiced" | "Part paid" | "Paid" | "Held retention";
+export interface JobPaymentStage { id: EntityId; jobId: EntityId; name: string; sequence: number; percentage?: number; amount: number; dueDate: string; status: JobPaymentStageStatus; invoiceId?: EntityId; paidAt?: string; notes: string; createdAt: string; updatedAt: string; }
+
+export interface JobMaterialUsage { id: EntityId; jobId: EntityId; materialId?: EntityId; description: string; quantity: number; unit: string; unitCost: number; supplier: string; usedAt: string; recordedBy: string; notes: string; createdAt: string; updatedAt: string; }
+
+export type JobCompletionCheck = "Tasks reviewed" | "Snags reviewed" | "Testing completed" | "Certificate issued" | "Photos attached" | "Materials recorded" | "Timesheets complete" | "Variations resolved" | "Final invoice created" | "Customer sign-off" | "Review request scheduled";
+export interface JobCompletionRecord { id: EntityId; jobId: EntityId; confirmedChecks: JobCompletionCheck[]; acknowledgedWarnings: string[]; customerSignOffName: string; customerSignOffNotes: string; customerSignedAt?: string; finalInvoiceId?: EntityId; reviewRequestDate?: string; completedBy: string; completedAt?: string; createdAt: string; updatedAt: string; }
 
 export type RamsStatus = "Draft" | "Ready for review" | "Approved" | "Superseded";
 export type RiskLikelihood = 1 | 2 | 3 | 4 | 5;
@@ -127,4 +154,4 @@ export interface ElectricalCertificate { id: EntityId; number: string; type: Cer
 export type JobDocumentCategory = "Certificate" | "Photo" | "Drawing" | "RAMS" | "Site note" | "Material order" | "Handover" | "Other";
 export interface JobDocument { id: EntityId; jobId: EntityId; name: string; category: JobDocumentCategory; fileName: string; mimeType: string; dataUrl?: string; externalUrl?: string; notes: string; uploadedBy: string; uploadedAt: string; createdAt: string; }
 
-export type EntityBase = Customer | Builder | CustomerProfile | CustomerInteraction | CrmFollowUpSettings | AiReminder | AiLearningMemory | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | RamsDocument | TeamMember | TimesheetEntry | LabourRate | BusinessOverhead | LabourCostSettings | BusinessProfile | VatSettings | BusinessBankDetails | PaymentTermsTemplate | DocumentBrandingSettings | CertificateDefaults | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;
+export type EntityBase = Customer | Builder | CustomerProfile | CustomerInteraction | CrmFollowUpSettings | AiReminder | AiLearningMemory | Job | SalesLead | LeadActivity | JobTimelineEntry | SiteDiaryEntry | JobVariation | JobTask | JobProgressRecord | JobPaymentStage | JobMaterialUsage | JobCompletionRecord | RamsDocument | TeamMember | TimesheetEntry | LabourRate | BusinessOverhead | LabourCostSettings | BusinessProfile | VatSettings | BusinessBankDetails | PaymentTermsTemplate | DocumentBrandingSettings | CertificateDefaults | PlannerEntry | FleetVehicle | ToolAsset | BusinessExpense | PricingDocument | Invoice | Material | StockLocation | StockItem | StockMovement | JobPack | PurchaseList | SiteSurvey | ElectricalCertificate | JobDocument;

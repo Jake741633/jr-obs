@@ -1,6 +1,7 @@
 import { BadgePoundSterling, BriefcaseBusiness, CheckCircle2, Circle, FileCheck2, ReceiptText } from "lucide-react";
 import { invoiceTotal } from "../../lib/workflow";
 import type { Invoice, Job, PricingDocument } from "../../lib/models";
+import { isJobClosedStatus } from "../../lib/jobManagement-core.mjs";
 
 interface ProjectTimelineProps {
   job: Job;
@@ -37,7 +38,7 @@ export function ProjectTimeline({ job, quote, invoices }: ProjectTimelineProps) 
       label: "Job",
       detail: job.status,
       date: job.createdAt,
-      state: (job.status === "Complete" ? "complete" : "current") as StageState,
+      state: (isJobClosedStatus(job.status) && job.status !== "Cancelled" ? "complete" : "current") as StageState,
       icon: BriefcaseBusiness,
     },
     {

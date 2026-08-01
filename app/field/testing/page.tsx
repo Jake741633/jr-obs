@@ -8,6 +8,7 @@ import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useElectricalTestingCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { isJobOnSiteStatus, normaliseJobStatus } from "../../../lib/jobManagement-core.mjs";
 import { makeId, useCloudLocalCollection } from "../../../lib/storage";
 import type { Customer, ElectricalCertificate, Job } from "../../../lib/models";
 import {
@@ -42,7 +43,7 @@ export default function MobileTestingPage() {
   const [actionText, setActionText] = useState("");
   const [message, setMessage] = useState("");
 
-  const activeJobs = useMemo(() => jobs.items.filter((job) => job.status === "In progress" || job.status === "Scheduled"), [jobs.items]);
+  const activeJobs = useMemo(() => jobs.items.filter((job) => normaliseJobStatus(job.status) === "Scheduled" || isJobOnSiteStatus(job.status)), [jobs.items]);
   const selectedJob = jobs.items.find((job) => job.id === form.jobId);
   const selectedCustomer = customers.items.find((customer) => customer.id === form.customerId);
   const linkedCertificate = certificates.items.find((certificate) => certificate.id === form.certificateId);

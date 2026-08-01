@@ -1,4 +1,5 @@
 import type { Job, PurchaseList } from "./models";
+import { isJobClosedStatus } from "./jobManagement-core.mjs";
 
 export interface CertificateSignal {
   jobId?: string;
@@ -7,7 +8,7 @@ export interface CertificateSignal {
 
 export function outstandingCertificateJobs(jobs: Job[], certificates: CertificateSignal[]) {
   const completeStatuses = new Set(["Complete", "Issued", "Archived"]);
-  return jobs.filter((job) => job.status === "Complete" && !certificates.some((certificate) => certificate.jobId === job.id && completeStatuses.has(certificate.status)));
+  return jobs.filter((job) => isJobClosedStatus(job.status) && job.status !== "Cancelled" && !certificates.some((certificate) => certificate.jobId === job.id && completeStatuses.has(certificate.status)));
 }
 
 export function materialOrderLists(purchaseLists: PurchaseList[]) {

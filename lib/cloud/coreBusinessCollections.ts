@@ -3,7 +3,7 @@
 import type { ComplianceCertificate } from "../complianceCertificates";
 import type { PortalApprovalRecord, PortalRequest } from "../customerPortal";
 import type { ElectricalTestingRecord } from "../electricalTesting";
-import type { AiLearningEvidence, AiLearningMemory, AiReminder, Builder, BusinessExpense, CrmFollowUpSettings, Customer, CustomerInteraction, CustomerProfile, Invoice, Job, JobDocument, JobPack, JobTimelineEntry, JobVariation, LeadActivity, Material, PricingDocument, PurchaseList, RamsDocument, SalesLead, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
+import type { AiLearningEvidence, AiLearningMemory, AiReminder, Builder, BusinessExpense, CrmFollowUpSettings, Customer, CustomerInteraction, CustomerProfile, Invoice, Job, JobCompletionRecord, JobDocument, JobMaterialUsage, JobPack, JobPaymentStage, JobProgressRecord, JobTask, JobTimelineEntry, JobVariation, LeadActivity, Material, PricingDocument, PurchaseList, RamsDocument, SalesLead, SiteDiaryEntry, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -41,6 +41,12 @@ export const coreBusinessStorageKeys = {
   leadActivities: "jr-os-lead-activities",
   jobVariations: "jr-os-job-variations",
   jobTimeline: "jr-os-job-timeline",
+  siteDiaries: "jr-os-site-diaries",
+  jobTasks: "jr-os-job-tasks",
+  jobProgress: "jr-os-job-progress",
+  jobPaymentStages: "jr-os-job-payment-stages",
+  jobMaterialUsage: "jr-os-job-material-usage",
+  jobCompletion: "jr-os-job-completion",
   aiReminders: "jr-os-ai-reminders",
   crmFollowUpSettings: "jr-os-crm-follow-up-settings",
 } as const;
@@ -83,5 +89,11 @@ export function useSalesLeadsCollection() { return useCloudLocalCollection<Sales
 export function useLeadActivitiesCollection() { return useCloudLocalCollection<LeadActivity>(coreBusinessStorageKeys.leadActivities); }
 export function useJobVariationsCollection() { return useCloudLocalCollection<JobVariation>(coreBusinessStorageKeys.jobVariations); }
 export function useJobTimelineCollection() { return useCloudLocalCollection<JobTimelineEntry>(coreBusinessStorageKeys.jobTimeline); }
+export function useSiteDiariesCollection() { return useCloudLocalCollection<SiteDiaryEntry>(coreBusinessStorageKeys.siteDiaries); }
+export function useJobTasksCollection() { return useCloudLocalCollection<JobTask>(coreBusinessStorageKeys.jobTasks); }
+export function useJobProgressCollection() { return useCloudLocalCollection<JobProgressRecord>(coreBusinessStorageKeys.jobProgress); }
+export function useJobPaymentStagesCollection() { return useCloudLocalCollection<JobPaymentStage>(coreBusinessStorageKeys.jobPaymentStages); }
+export function useJobMaterialUsageCollection() { return useCloudLocalCollection<JobMaterialUsage>(coreBusinessStorageKeys.jobMaterialUsage); }
+export function useJobCompletionCollection() { return useCloudLocalCollection<JobCompletionRecord>(coreBusinessStorageKeys.jobCompletion); }
 export function useAiRemindersCollection() { return useCloudLocalCollection<AiReminder>(coreBusinessStorageKeys.aiReminders); }
 export function useCrmFollowUpSettingsCollection() { return useCloudLocalCollection<CrmFollowUpSettings>(coreBusinessStorageKeys.crmFollowUpSettings); }

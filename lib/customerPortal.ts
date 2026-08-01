@@ -1,4 +1,5 @@
 import type { ElectricalCertificate, Invoice, Job, JobDocument, PlannerEntry, PricingDocument } from "./models";
+import { normaliseJobStatus } from "./jobManagement-core.mjs";
 
 export type PortalDecision = "Accepted" | "Declined";
 export type PortalRequestType = "Appointment change" | "Question" | "Additional work" | "General message";
@@ -18,10 +19,14 @@ export function invoicePortalStatus(invoice: Invoice, today = new Date().toISOSt
 }
 
 export function jobProgress(job: Job, timelineCount: number) {
-  if (job.status === "Complete") return 100;
-  if (job.status === "In progress") return Math.min(90, 45 + timelineCount * 8);
-  if (job.status === "Scheduled") return 25;
-  if (job.status === "Quoted") return 10;
+  const status = normaliseJobStatus(job.status);
+  if (["Complete", "Invoiced", "Paid"].includes(status)) return 100;
+  if (status === "Snagging") return Math.min(95, 80 + timelineCount * 2);
+  if (status === "Testing") return Math.min(90, 72 + timelineCount * 2);
+  if (status === "Second fix") return Math.min(80, 60 + timelineCount * 3);
+  if (["First fix", "Awaiting builder"].includes(status)) return Math.min(60, 35 + timelineCount * 4);
+  if (status === "Scheduled") return 25;
+  if (["Quoted", "Accepted", "Awaiting deposit"].includes(status)) return 10;
   return 5;
 }
 
