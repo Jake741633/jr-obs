@@ -9,6 +9,13 @@ const identityHook = await readFile(new URL("../lib/cloud/useCloudIdentity.ts", 
 const cloudSync = await readFile(new URL("../lib/cloudSync.ts", import.meta.url), "utf8");
 const repository = await readFile(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 
+function functionBody(source, name) {
+  const start = source.indexOf(`export function ${name}`);
+  assert.notEqual(start, -1, `${name} must exist`);
+  const nextExport = source.indexOf("\nexport ", start + 1);
+  return source.slice(start, nextExport === -1 ? source.length : nextExport);
+}
+
 test("cutover check reads Supabase directly while preserving local data", () => {
   assert.match(helper, /cloudSelect/);
   assert.match(helper, /organisation_id=eq\./);
@@ -59,11 +66,12 @@ test("failed queue items show their exact record and error before any marker is 
 });
 
 test("stale marker removal updates only the queue and recalculates sync status", () => {
-  assert.match(repository, /discardSyncQueueItem/);
-  assert.match(repository, /queue\.filter\(\(entry\) => entry\.id !== itemId\)/);
-  assert.match(repository, /statusForQueue\(next\)/);
-  assert.doesNotMatch(repository, /discardSyncQueueItem[\s\S]*cloudPatch/);
-  assert.doesNotMatch(repository, /discardSyncQueueItem[\s\S]*cloudUpsert/);
+  const discardBody = functionBody(repository, "discardSyncQueueItem");
+  assert.match(discardBody, /queue\.filter\(\(entry\) => entry\.id !== itemId\)/);
+  assert.match(discardBody, /statusForQueue\(next\)/);
+  assert.doesNotMatch(discardBody, /cloudPatch/);
+  assert.doesNotMatch(discardBody, /cloudUpsert/);
+  assert.doesNotMatch(discardBody, /cloudSelect/);
 });
 
 test("failed marker can only be cleared after readiness confirms the record exists in cloud", () => {
