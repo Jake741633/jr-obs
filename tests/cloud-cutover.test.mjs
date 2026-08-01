@@ -49,6 +49,30 @@ test("queue repair clears already-synchronised operations without rewriting clou
   assert.match(repository, /getSyncQueue/);
 });
 
+test("failed queue items show their exact record and error before any marker is cleared", () => {
+  assert.match(page, /queueItemLabel/);
+  assert.match(page, /item\.sourceId/);
+  assert.match(page, /item\.table/);
+  assert.match(page, /item\.error/);
+  assert.match(page, /Clear stale marker/);
+  assert.match(page, /No local or cloud business record was deleted/);
+});
+
+test("stale marker removal updates only the queue and recalculates sync status", () => {
+  assert.match(repository, /discardSyncQueueItem/);
+  assert.match(repository, /queue\.filter\(\(entry\) => entry\.id !== itemId\)/);
+  assert.match(repository, /statusForQueue\(next\)/);
+  assert.doesNotMatch(repository, /discardSyncQueueItem[\s\S]*cloudPatch/);
+  assert.doesNotMatch(repository, /discardSyncQueueItem[\s\S]*cloudUpsert/);
+});
+
+test("failed marker can only be cleared after readiness confirms the record exists in cloud", () => {
+  assert.match(page, /cloudContainsRecord/);
+  assert.match(page, /collection\.cloudCount > 0/);
+  assert.match(page, /!collection\.localOnlyIds\.includes\(item\.sourceId\)/);
+  assert.match(page, /cannot be cleared safely/);
+});
+
 test("shared identity reloads a persisted session and observes account changes", () => {
   assert.match(identityHook, /readSupabaseSession/);
   assert.match(identityHook, /hasPersistedSession/);
