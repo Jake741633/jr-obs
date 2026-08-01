@@ -30,6 +30,20 @@ function identityChanged() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
 }
 
+/**
+ * Removes all JR OS browser-resident business data before an account boundary
+ * changes. Cloud records remain untouched and reload after the next authorised
+ * identity is resolved. This prevents one account seeing another account's
+ * cached records or replaying another account's pending sync queue.
+ */
+export function clearLocalJrOsAccountData() {
+  if (typeof window === "undefined") return 0;
+  const keys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
+    .filter((key): key is string => Boolean(key?.startsWith(JR_OS_STORAGE_PREFIX)));
+  for (const key of keys) window.localStorage.removeItem(key);
+  return keys.length;
+}
+
 function recordSuccessfulCloudUpload() {
   const completedAt = new Date().toISOString();
   window.localStorage.setItem("jr-os-last-cloud-sync", completedAt);
@@ -47,23 +61,34 @@ export async function getCurrentCloudUser() {
   const session = readSupabaseSession();
   if (!session?.access_token) return null;
   try { return await supabaseFetch("/auth/v1/user", { method: "GET" }) as { id: string; email?: string }; }
-  catch { saveSupabaseSession(null); identityChanged(); return null; }
+  catch { clearLocalJrOsAccountData(); saveSupabaseSession(null); identityChanged(); return null; }
 }
 
 export async function signInWithEmail(email: string, password: string) {
   const session = await supabaseFetch("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email, password }) }, false) as SupabaseSession;
-  saveSupabaseSession(session); identityChanged(); return session.user ?? null;
+  clearLocalJrOsAccountData();
+  saveSupabaseSession(session);
+  identityChanged();
+  return session.user ?? null;
 }
 
 export async function signUpWithEmail(email: string, password: string) {
   const result = await supabaseFetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password, data: { full_name: "Jake Rinaldi", business_name: "JR Electrical Services" } }) }, false) as SupabaseSession;
-  if (result.access_token) { saveSupabaseSession(result); identityChanged(); }
+  if (result.access_token) {
+    clearLocalJrOsAccountData();
+    saveSupabaseSession(result);
+    identityChanged();
+  }
   return result.user ?? null;
 }
 
 export async function signOutCloudUser() {
   try { await supabaseFetch("/auth/v1/logout", { method: "POST" }); }
-  finally { saveSupabaseSession(null); identityChanged(); }
+  finally {
+    clearLocalJrOsAccountData();
+    saveSupabaseSession(null);
+    identityChanged();
+  }
 }
 
 export async function getCloudContext() {
