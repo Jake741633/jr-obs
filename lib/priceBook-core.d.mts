@@ -4,7 +4,7 @@ export type PriceBookPricingMethod = "Fixed" | "Calculated";
 export interface PriceBookItem {
   id: string;
   name: string;
-  description?: string;
+  description: string;
   category: string;
   sector: PriceBookSector;
   unitLabel: string;
