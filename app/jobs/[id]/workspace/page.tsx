@@ -79,6 +79,7 @@ export default function JobWorkspacePage() {
   const currentStatus = canonicalJobStatuses.includes(job.status) ? job.status as CanonicalJobStatus : "Enquiry";
 
   function updateStatus() {
+    if (!job) return;
     const nextStatus = selectedStatus === "Enquiry" && currentStatus !== "Enquiry" ? currentStatus : selectedStatus;
     if (nextStatus === currentStatus) { setStatusMessage("Choose a different status before saving."); return; }
     const now = new Date().toISOString();
