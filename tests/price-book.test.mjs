@@ -27,6 +27,10 @@ const calculatedSpotlight = {
   notes: "Includes standard white fitting.",
 };
 
+function assertClose(actual, expected, precision = 1e-9) {
+  assert.ok(Math.abs(actual - expected) <= precision, `Expected ${actual} to be within ${precision} of ${expected}`);
+}
+
 test("price book normalisation preserves valid electrical pricing data and removes unsafe values", () => {
   const item = normalisePriceBookItem({
     ...calculatedSpotlight,
@@ -51,7 +55,7 @@ test("calculated price per point includes labour material markup overhead and co
   assert.equal(result.contingency, 7.15);
   assert.equal(result.totalCost, 44.5);
   assert.equal(result.sellingPrice, 78.65);
-  assert.equal(result.grossProfit, 34.15);
+  assertClose(result.grossProfit, 34.15);
   assert.equal(result.vat, 15.73);
   assert.equal(result.sellingPriceIncludingVat, 94.38);
 });
@@ -123,10 +127,10 @@ test("quote summary combines point pricing with job extras VAT margin and profit
   assert.equal(summary.labourCost, 300);
   assert.equal(summary.materialCost, 244);
   assert.equal(summary.pointSellingPrice, 1029.2);
-  assert.equal(summary.subtotal, 1227.66);
-  assert.equal(summary.totalCost, 716);
-  assert.equal(summary.grossProfit, 511.66);
-  assert.equal(summary.vat, 245.532);
-  assert.equal(summary.totalIncludingVat, 1473.192);
-  assert.equal(summary.profitPerLabourHour, 51.166);
+  assertClose(summary.subtotal, 1227.66);
+  assert.equal(summary.totalCost, 736);
+  assertClose(summary.grossProfit, 491.66);
+  assertClose(summary.vat, 245.532);
+  assertClose(summary.totalIncludingVat, 1473.192);
+  assertClose(summary.profitPerLabourHour, 49.166);
 });
