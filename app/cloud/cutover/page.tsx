@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, CloudCog, RefreshCw } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -14,13 +14,36 @@ function statusClass(status: string) {
 }
 
 export default function CloudCutoverPage() {
-  const { identity, isReady, mode } = useCloudIdentity();
+  const { identity, isReady, mode, refresh } = useCloudIdentity();
   const [report, setReport] = useState<CloudCutoverReport | null>(null);
   const [busy, setBusy] = useState(false);
+  const [identityBusy, setIdentityBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (mode !== "local" && isReady && !identity) {
+      setIdentityBusy(true);
+      void refresh().finally(() => setIdentityBusy(false));
+    }
+  }, [identity, isReady, mode, refresh]);
+
+  async function refreshIdentity() {
+    setIdentityBusy(true);
+    setError("");
+    try {
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The signed-in account could not be refreshed.");
+    } finally {
+      setIdentityBusy(false);
+    }
+  }
+
   async function runCheck() {
-    if (!identity?.organisationId) return;
+    if (!identity?.organisationId) {
+      setError("Your account session exists, but the organisation profile has not loaded. Refresh the signed-in account first.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -41,14 +64,17 @@ export default function CloudCutoverPage() {
 
     <div className="grid gap-4 md:grid-cols-3">
       <Card><CloudCog className="size-6 text-cyan-300" /><p className="mt-3 font-bold">Current mode</p><p className="mt-2 capitalize text-slate-400">{mode}</p></Card>
-      <Card><p className="text-sm text-slate-400">Organisation</p><p className="mt-2 break-all font-semibold">{identity?.organisationId || (isReady ? "Not signed in" : "Loading identity…")}</p></Card>
+      <Card><p className="text-sm text-slate-400">Organisation</p><p className="mt-2 break-all font-semibold">{identity?.organisationId || (!isReady || identityBusy ? "Loading identity…" : "Account profile unavailable")}</p></Card>
       <Card><p className="text-sm text-slate-400">Signed-in role</p><p className="mt-2 capitalize font-semibold">{identity?.role || "—"}</p></Card>
     </div>
 
     <Card>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div><h2 className="text-xl font-bold">Run readiness check</h2><p className="mt-2 text-sm text-slate-400">The check reads cloud IDs directly even while JR OS remains in migration mode.</p></div>
-        <Button type="button" disabled={busy || !identity?.organisationId} onClick={() => void runCheck()}><RefreshCw className={`mr-2 size-4 ${busy ? "animate-spin" : ""}`} />{busy ? "Checking…" : "Check local against cloud"}</Button>
+        <div className="flex flex-wrap gap-3">
+          <Button type="button" disabled={identityBusy} onClick={() => void refreshIdentity()}><RefreshCw className={`mr-2 size-4 ${identityBusy ? "animate-spin" : ""}`} />{identityBusy ? "Refreshing account…" : "Refresh signed-in account"}</Button>
+          <Button type="button" disabled={busy || identityBusy || !identity?.organisationId} onClick={() => void runCheck()}><RefreshCw className={`mr-2 size-4 ${busy ? "animate-spin" : ""}`} />{busy ? "Checking…" : "Check local against cloud"}</Button>
+        </div>
       </div>
       {error ? <p className="mt-4 whitespace-pre-wrap rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-200">{error}</p> : null}
     </Card>
