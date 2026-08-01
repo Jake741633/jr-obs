@@ -22,6 +22,14 @@ export interface QuotePresentationDefaultsRecord extends QuotePresentationSettin
   updatedAt: string;
 }
 
+export interface QuotePresentationOverrideRecord extends QuotePresentationSettings {
+  id: string;
+  documentNumber: string;
+  updatedAt: string;
+}
+
+export const quotePresentationOverridesStorageKey = "jr-os-quote-presentation-overrides";
+
 export const defaultQuotePresentationSettings: QuotePresentationSettings = {
   mode: "Fixed price",
   showLabour: false,
@@ -103,4 +111,11 @@ export function quotePresentationSummary(settings: QuotePresentationSettings) {
   return shown.length
     ? `Customer sees: ${shown.join(", ")}.`
     : "Customer sees the total only; all sections are hidden.";
+}
+
+export function presentationOverrideFor(
+  records: QuotePresentationOverrideRecord[],
+  documentNumber: string,
+) {
+  return records.find((record) => record.documentNumber === documentNumber);
 }
