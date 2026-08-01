@@ -18,8 +18,8 @@ test("customer quote presentation defaults to fixed price and hidden internal se
 
 test("fixed-price preview exposes one customer total without item rows", () => {
   assert.match(preview, /Fixed price for the described works/);
-  assert.match(preview, /visibleQuoteItems\(items, presentation\)/);
-  assert.match(preview, /presentation\.mode === "Fixed price"/);
+  assert.match(preview, /visibleQuoteItems\(items, effectivePresentation\)/);
+  assert.match(preview, /effectivePresentation\.mode === "Fixed price"/);
   assert.match(preview, /subtotal \+ vat/);
 });
 
@@ -27,7 +27,7 @@ test("itemised presentation supports independent category and VAT visibility", (
   assert.match(helper, /Labour: "showLabour"/);
   assert.match(helper, /Materials: "showMaterials"/);
   assert.match(helper, /Travel: "showTravel"/);
-  assert.match(preview, /presentation\.showVatLine/);
-  assert.match(preview, /presentation\.showQuantities/);
-  assert.match(preview, /presentation\.showUnitPrices/);
+  assert.match(preview, /effectivePresentation\.showVatLine/);
+  assert.match(preview, /effectivePresentation\.showQuantities/);
+  assert.match(preview, /effectivePresentation\.showUnitPrices/);
 });
