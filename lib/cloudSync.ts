@@ -30,6 +30,12 @@ function identityChanged() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
 }
 
+function recordSuccessfulCloudUpload() {
+  const completedAt = new Date().toISOString();
+  window.localStorage.setItem("jr-os-last-cloud-sync", completedAt);
+  window.localStorage.setItem("jr-os-last-typed-cloud-sync", completedAt);
+}
+
 async function getProfile(userId: string) {
   const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&select=organisation_id,role,customer_source_id`);
   const profile = Array.isArray(rows) ? rows[0] : null;
@@ -80,7 +86,7 @@ export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
       result.uploaded += 1;
     } catch (error) { result.errors.push(`${storageKey}: ${error instanceof Error ? error.message : "Upload failed"}`); }
   }
-  if (result.errors.length === 0) window.localStorage.setItem("jr-os-last-cloud-sync", new Date().toISOString());
+  if (result.errors.length === 0) recordSuccessfulCloudUpload();
   return result;
 }
 
@@ -127,7 +133,7 @@ export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationPr
       report(storageKey, index + 1, detail);
     }
   }
-  if (!result.errors.length) window.localStorage.setItem("jr-os-last-typed-cloud-sync", new Date().toISOString());
+  if (!result.errors.length) recordSuccessfulCloudUpload();
   report("Complete", storageKeys.length, result.errors.at(-1));
   return result;
 }
