@@ -23,7 +23,7 @@ test("quote presentation defaults use the cloud/local collection adapter", () =>
 
 test("quote previews apply saved defaults when no per-document override is supplied", () => {
   assert.match(previewSource, /useQuotePresentationDefaults\(\)/);
-  assert.match(previewSource, /presentation \?\? defaults\.settings/);
+  assert.match(previewSource, /presentation \?\? savedOverride \?\? defaults\.settings \?\? defaultQuotePresentationSettings/);
   assert.match(previewSource, /Fixed price for the described works/);
 });
 
