@@ -105,7 +105,7 @@ export default function MobileQuotesPage() {
 
     const now = new Date().toISOString();
     const number = nextPricingDocumentNumber(documents.items, "Quote");
-    const items = hasPriceBookLines
+    const items: PricingDocument["items"] = hasPriceBookLines
       ? selectedPriceBookLines.map(({ item, quantity }) => priceBookSelectionToQuoteLine(item, quantity, makeId("line")))
       : [{
           id: makeId("line"),
