@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node --test tests/*.test.mjs",
-    "test:rls": "node --test tests/supabase-rls.integration.mjs"
+    "test:rls": "node tests/run-supabase-rls.integration.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
