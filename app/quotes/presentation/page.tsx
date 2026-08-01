@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { CheckCircle2, Eye, LayoutList, ReceiptText, Save } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -55,6 +56,7 @@ export default function QuotePresentationPage() {
       eyebrow="Quote Engine 3.0"
       title="Customer quote presentation"
       description="Choose what customers see without changing your internal costs, markups, margins or profitability calculations."
+      action={<Link href="/quotes/presentation/overrides"><Button variant="secondary">Per-quote overrides</Button></Link>}
     />
 
     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -68,7 +70,7 @@ export default function QuotePresentationPage() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold">Default customer view</h2>
-          <p className="mt-2 max-w-3xl text-sm text-slate-400">New and existing quote previews use this setting unless a later per-quote override is selected.</p>
+          <p className="mt-2 max-w-3xl text-sm text-slate-400">New and existing quote previews use this setting unless a per-quote override is selected.</p>
         </div>
         <label className="grid gap-2 text-sm font-medium text-slate-300">
           <span>Presentation mode</span>
