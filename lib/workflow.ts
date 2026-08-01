@@ -128,6 +128,9 @@ export function createJobFromAcceptedQuote({
       vatEnabled: document.vatEnabled,
       vatRate: document.vatRate,
       notes: document.notes,
+      exclusions: document.exclusions,
+      internalNotes: document.internalNotes,
+      fixedPriceWorkflow: document.fixedPriceWorkflow ? { ...document.fixedPriceWorkflow } : undefined,
       terms: document.terms,
       paymentTerms: document.paymentTerms ? { ...document.paymentTerms } : undefined,
       convertedAt: now,
@@ -139,6 +142,8 @@ export function createJobFromAcceptedQuote({
     notes: [
       `Created from ${document.type.toLowerCase()} ${document.number}.`,
       document.notes,
+      document.exclusions ? `Exclusions:\n${document.exclusions}` : "",
+      document.internalNotes ? `Internal quote notes:\n${document.internalNotes}` : "",
       `Agreed scope:\n${scope}`,
       `Terms:\n${document.terms}`,
     ].filter(Boolean).join("\n\n"),

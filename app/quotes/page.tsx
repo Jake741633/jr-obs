@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { BriefcaseBusiness, Calculator, Clock3, Download, ExternalLink, Eye, FileText, LayoutTemplate, PackagePlus, Paperclip, Pencil, Plus, Save, Search, Sparkles, TrendingUp, Trash2 } from "lucide-react";
 import { MobileActionDock, MobileDockAction } from "../../components/mobile/MobileActionDock";
+import { FixedPriceWorkflowCard } from "../../components/quotes/FixedPriceWorkflowCard";
 import { MobilePricingLineCard } from "../../components/quotes/MobilePricingLineCard";
 import { QuotePreview } from "../../components/quotes/QuotePreview";
 import { Button } from "../../components/ui/Button";
@@ -24,15 +25,16 @@ import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
 import { createJobFromAcceptedQuote, nextPricingDocumentNumber, pricingDocumentTotal } from "../../lib/workflow";
-import type { Builder, BusinessOverhead, BusinessProfile, BusinessTermsTemplate, Customer, DocumentBrandingSettings, Job, JobDocument, JobPack, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsTemplate, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment, VatSettings } from "../../lib/models";
+import type { Builder, BusinessOverhead, BusinessProfile, BusinessTermsTemplate, Customer, DocumentBrandingSettings, FixedPriceWorkflow, Job, JobDocument, JobPack, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsTemplate, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment, VatSettings } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const defaultTerms = "This document is based on the described scope. Variations, unforeseen work and making good are excluded unless stated otherwise.";
 const blankItem = { description: "", category: "Labour" as PricingLineItem["category"], quantity: "1", unitPrice: "", unitCost: "" };
-const blankForm = { type: "Quote" as PricingDocumentType, title: "", customerId: "", builderId: "", jobId: "", siteAddress: "", validUntil: "", vatEnabled: false, vatRate: "20", notes: "", terms: defaultTerms, termsTemplateId: "", templateType: undefined as QuoteTemplateType | undefined };
+const blankForm = { type: "Quote" as PricingDocumentType, title: "", customerId: "", builderId: "", jobId: "", siteAddress: "", validUntil: "", vatEnabled: false, vatRate: "20", notes: "", exclusions: "", internalNotes: "", terms: defaultTerms, termsTemplateId: "", templateType: undefined as QuoteTemplateType | undefined };
 const statuses: PricingDocumentStatus[] = ["Draft", "Sent", "Accepted", "Declined", "Expired"];
 const defaultLabourSettings: LabourCostSettings = { id: "labour-cost-settings", workingDaysPerYear: 220, billableHoursPerDay: 7.5, targetNetMargin: 25, contingencyPercent: 10, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
 const blankLabour = { rateId: "", mode: "Hours" as QuoteLabourMode, quantity: "1", fixedCost: "", fixedPrice: "", fixedHours: "" };
+const blankFixedPriceWorkflow: FixedPriceWorkflow = { type: "Direct fixed price", initialVisitCompleted: false, faultFindingCompleted: false, recommendation: "" };
 
 export default function QuotesPage() {
   const documents = usePricingDocumentsCollection();
@@ -70,6 +72,7 @@ export default function QuotesPage() {
   const [labour, setLabour] = useState(blankLabour);
   const [pricing, setPricing] = useState<QuotePricingSettings>(defaultQuotePricingSettings);
   const [paymentTerms, setPaymentTerms] = useState<QuotePaymentTerms>({ type: "Due on completion" });
+  const [fixedPriceWorkflow, setFixedPriceWorkflow] = useState<FixedPriceWorkflow>(blankFixedPriceWorkflow);
   const [attachments, setAttachments] = useState<RecordAttachment[]>([]);
   const [attachmentLink, setAttachmentLink] = useState({ name: "", url: "" });
   const [attachmentError, setAttachmentError] = useState("");
@@ -122,6 +125,7 @@ export default function QuotesPage() {
     setLabour(blankLabour);
     setPricing(quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
     setPaymentTerms({ type: "Due on completion" });
+    setFixedPriceWorkflow(blankFixedPriceWorkflow);
     setAttachments([]);
     setAttachmentLink({ name: "", url: "" });
     setAttachmentError("");
@@ -143,6 +147,7 @@ export default function QuotesPage() {
     setPricing(savedPricing);
     setLabour({ ...blankLabour, rateId: savedPricing.defaultLabourRateId ?? "" });
     setPaymentTerms(defaultPayment ? paymentTermsFromTemplate(defaultPayment) : { type: "Due on completion" });
+    setFixedPriceWorkflow(blankFixedPriceWorkflow);
     setAttachments([]);
     setEditingId(null);
     setError("");
@@ -151,10 +156,11 @@ export default function QuotesPage() {
   }
 
   function startEdit(document: PricingDocument) {
-    setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", siteAddress: document.siteAddress ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId ?? "", templateType: document.templateType });
+    setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", siteAddress: document.siteAddress ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, exclusions: document.exclusions ?? "", internalNotes: document.internalNotes ?? "", terms: document.terms, termsTemplateId: document.termsTemplateId ?? "", templateType: document.templateType });
     setItems(document.items);
     setPricing(document.pricingSettings ?? quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
     setPaymentTerms(document.paymentTerms ?? { type: "Due on completion" });
+    setFixedPriceWorkflow(document.fixedPriceWorkflow ?? blankFixedPriceWorkflow);
     setAttachments(document.attachments ?? []);
     setEditingId(document.id);
     setSavePackName(document.title);
@@ -426,7 +432,7 @@ export default function QuotesPage() {
       title: form.title.trim(), siteAddress: form.siteAddress.trim() || undefined, validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items,
       pricingSettings: pricing,
       profitability: { directCost: profitability.directCost, overheadCost: profitability.overheadCost, costPrice: profitability.costPrice, sellingPrice: profitability.sellingPrice, grossProfit: profitability.grossProfit, expectedProfit: profitability.expectedProfit, grossMargin: profitability.grossMargin, netMargin: profitability.netMargin, calculatedAt: now },
-      attachments, notes: form.notes, terms: form.terms, termsTemplateId: form.termsTemplateId || undefined, paymentTerms, templateType: form.templateType, updatedAt: now,
+      attachments, notes: form.notes, exclusions: form.exclusions, internalNotes: form.internalNotes, fixedPriceWorkflow, terms: form.terms, termsTemplateId: form.termsTemplateId || undefined, paymentTerms, templateType: form.templateType, updatedAt: now,
     };
     documents.setItems((current) => editingId ? current.map((document) => {
       if (document.id !== editingId) return document;
@@ -434,7 +440,7 @@ export default function QuotesPage() {
         id: makeId("revision"), revisionNumber: (document.revisions?.length ?? 0) + 1, savedAt: now,
         title: document.title, siteAddress: document.siteAddress, validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: document.vatRate,
         items: document.items, pricingSettings: document.pricingSettings, profitability: document.profitability,
-        attachments: document.attachments, notes: document.notes, terms: document.terms, termsTemplateId: document.termsTemplateId,
+        attachments: document.attachments, notes: document.notes, exclusions: document.exclusions, internalNotes: document.internalNotes, fixedPriceWorkflow: document.fixedPriceWorkflow, terms: document.terms, termsTemplateId: document.termsTemplateId,
         paymentTerms: document.paymentTerms, templateType: document.templateType,
       };
       return { ...document, ...payload, revisions: [...(document.revisions ?? []), revision] };
@@ -474,6 +480,7 @@ export default function QuotesPage() {
         <div className="flex items-start gap-3"><LayoutTemplate className="mt-0.5 size-5 text-cyan-300" /><div><h2 className="font-semibold">Quote templates</h2><p className="mt-1 text-sm text-slate-400">Start with the right sections, wording and payment structure, then edit everything for the actual job.</p></div></div>
         <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">{quoteTemplates.map((template) => <button key={template.type} type="button" onClick={() => applyTemplate(template.type)} className={`min-h-11 rounded-xl border px-3 text-sm font-semibold transition ${form.templateType === template.type ? "border-cyan-400 bg-cyan-400/15 text-cyan-200" : "border-slate-700 bg-slate-950 text-slate-300 hover:border-cyan-500/50"}`}>{template.type}</button>)}</div>
       </div>
+      <FixedPriceWorkflowCard value={fixedPriceWorkflow} onChange={setFixedPriceWorkflow} quoteSaved={Boolean(editingDocument)} convertedToJob={Boolean(editingDocument?.jobId)} />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Document type</span><select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value as PricingDocumentType })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Quote</option><option>Estimate</option></select></label>
         <InputField required label="Title / scope" value={form.title} onChange={(e) => { setForm({ ...form, title: e.target.value }); if (!savePackName) setSavePackName(e.target.value); }} />
@@ -545,7 +552,7 @@ export default function QuotesPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <TextareaField label="Notes / scope shown to customer" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+        <div className="space-y-4"><TextareaField label="Scope shown to customer" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /><TextareaField label="Optional exclusions shown to customer" value={form.exclusions} onChange={(e) => setForm({ ...form, exclusions: e.target.value })} /><TextareaField label="Internal notes (never shown to customer)" value={form.internalNotes} onChange={(e) => setForm({ ...form, internalNotes: e.target.value })} /></div>
         <div className="space-y-3"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Saved terms & conditions template</span><select value={form.termsTemplateId} onChange={(event) => selectTermsTemplate(event.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Custom terms</option>{termsTemplates.items.filter((template) => template.active).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select></label><TextareaField label="Terms & conditions" value={form.terms} onChange={(e) => setForm({ ...form, terms: e.target.value, termsTemplateId: "" })} /></div>
       </div>
       <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4">
@@ -558,7 +565,7 @@ export default function QuotesPage() {
           <div className="md:col-span-3"><TextareaField label="Payment wording" value={paymentTerms.description ?? ""} onChange={(event) => setPaymentTerms({ ...paymentTerms, description: event.target.value })} /></div>
         </div>
       </div>
-      <div id="quote-preview" className="scroll-mt-4"><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Full quote preview</h2><p className="text-sm text-slate-500">This customer-facing layout matches the saved document and final PDF structure.</p></div><Eye className="size-5 text-cyan-300" /></div><QuotePreview number={editingId ? documents.items.find((item) => item.id === editingId)?.number ?? "DRAFT" : "DRAFT"} documentType={form.type} title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} siteAddress={form.siteAddress} validUntil={form.validUntil} items={items} notes={form.notes} terms={form.terms} paymentTerms={paymentTerms} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} subtotal={profitability.sellingPrice} businessProfile={businessProfile} vatSettings={vatSettings} branding={branding} /></div>
+      <div id="quote-preview" className="scroll-mt-4"><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Full quote preview</h2><p className="text-sm text-slate-500">This customer-facing layout matches the saved document and final PDF structure.</p></div><Eye className="size-5 text-cyan-300" /></div><QuotePreview number={editingId ? documents.items.find((item) => item.id === editingId)?.number ?? "DRAFT" : "DRAFT"} documentType={form.type} title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} siteAddress={form.siteAddress} validUntil={form.validUntil} items={items} notes={form.notes} exclusions={form.exclusions} terms={form.terms} paymentTerms={paymentTerms} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} subtotal={profitability.sellingPrice} businessProfile={businessProfile} vatSettings={vatSettings} branding={branding} /></div>
       <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4"><h2 className="font-semibold">Save this version as a new job pack</h2><p className="mt-1 text-sm text-slate-400">Material links are retained so future quotes can use current library prices.</p><div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]"><InputField label="New pack name" value={savePackName} onChange={(e) => setSavePackName(e.target.value)} /><InputField label="Category" value={savePackCategory} onChange={(e) => setSavePackCategory(e.target.value)} /><Button type="button" className="self-end" onClick={saveAsJobPack}><Save className="mr-2 size-4" />Save as job pack</Button></div></div>
       <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}{success ? <p className="text-sm text-emerald-300">{success}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Selling price {money.format(profitability.sellingPrice)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Customer total {money.format(profitability.sellingPrice + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
     </form></Card> : null}
