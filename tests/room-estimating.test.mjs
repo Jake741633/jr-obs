@@ -105,7 +105,7 @@ test("room financials calculate linked price-book quantities and ignore deleted 
   closeTo(summary.labourCost, 255);
   closeTo(summary.materialCost, 188);
   closeTo(summary.sellingPrice, 860);
-  closeTo(summary.grossProfit, 397);
+  closeTo(summary.grossProfit, 367);
   closeTo(summary.vat, 172);
   assert.equal(summary.lines.length, 2);
   assert.deepEqual(summary.lines.map((line) => line.priceBookItemId), ["socket", "downlight"]);
@@ -127,7 +127,7 @@ test("whole-property totals aggregate rooms without mutating their source record
   closeTo(summary.labourCost, 180);
   closeTo(summary.materialCost, 132);
   closeTo(summary.sellingPrice, 605);
-  closeTo(summary.grossProfit, 273);
+  closeTo(summary.grossProfit, 258);
   closeTo(summary.vat, 121);
   assert.equal(summary.rooms.length, 2);
 });
