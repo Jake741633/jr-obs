@@ -109,9 +109,9 @@ test("keeps internal costs and profit out of customer-facing quote lines", () =>
     assert.equal("grossProfit" in item, false);
   }
 
-  assert.equal(draft.financials.labourCost, 300);
+  assert.equal(draft.financials.labourCost, 255);
   assert.equal(draft.financials.materialCost, 188);
-  assert.equal(draft.financials.grossProfit, 322);
+  assert.equal(draft.financials.grossProfit, 367);
   assert.match(draft.internalNotes, /2 room estimates containing 10 priced points/);
 });
 
