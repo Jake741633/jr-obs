@@ -17,6 +17,11 @@ export interface QuotePresentationSettings {
   showVatLine: boolean;
 }
 
+export interface QuotePresentationDefaultsRecord extends QuotePresentationSettings {
+  id: "quote-presentation-defaults";
+  updatedAt: string;
+}
+
 export const defaultQuotePresentationSettings: QuotePresentationSettings = {
   mode: "Fixed price",
   showLabour: false,
@@ -31,6 +36,44 @@ export const defaultQuotePresentationSettings: QuotePresentationSettings = {
   showSubtotal: false,
   showVatLine: true,
 };
+
+export const defaultQuotePresentationRecord: QuotePresentationDefaultsRecord = {
+  id: "quote-presentation-defaults",
+  ...defaultQuotePresentationSettings,
+  updatedAt: new Date(0).toISOString(),
+};
+
+export const quotePresentationPresets = {
+  fixedPrice: defaultQuotePresentationSettings,
+  labourOnly: {
+    ...defaultQuotePresentationSettings,
+    mode: "Itemised",
+    showLabour: true,
+    showSubtotal: true,
+  },
+  materialsAndLabour: {
+    ...defaultQuotePresentationSettings,
+    mode: "Itemised",
+    showLabour: true,
+    showMaterials: true,
+    showQuantities: true,
+    showSubtotal: true,
+  },
+  fullBreakdown: {
+    mode: "Itemised",
+    showLabour: true,
+    showMaterials: true,
+    showTravel: true,
+    showParking: true,
+    showPlantHire: true,
+    showContingency: true,
+    showOther: true,
+    showQuantities: true,
+    showUnitPrices: true,
+    showSubtotal: true,
+    showVatLine: true,
+  },
+} satisfies Record<string, QuotePresentationSettings>;
 
 const categoryVisibility: Record<PricingLineItem["category"], keyof QuotePresentationSettings> = {
   Labour: "showLabour",
