@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { AlertTriangle, CheckCircle2, CloudCog, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -27,13 +27,6 @@ export default function CloudCutoverPage() {
   const [repairBusy, setRepairBusy] = useState(false);
   const [repairMessage, setRepairMessage] = useState("");
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (mode !== "local" && isReady && !identity) {
-      setIdentityBusy(true);
-      void refresh().finally(() => setIdentityBusy(false));
-    }
-  }, [identity, isReady, mode, refresh]);
 
   function refreshQueueItems(organisationId: string) {
     setQueueItems(getOrganisationSyncQueue(organisationId));
