@@ -5,17 +5,17 @@ import test from "node:test";
 const page = readFileSync(new URL("../app/cloud/page.tsx", import.meta.url), "utf8");
 const cloudSync = readFileSync(new URL("../lib/cloudSync.ts", import.meta.url), "utf8");
 
-function functionBody(source, name, nextName) {
+function functionBody(source, name, nextMarker) {
   const start = source.indexOf(`function ${name}`);
   assert.notEqual(start, -1, `${name} must exist`);
-  const end = nextName ? source.indexOf(`function ${nextName}`, start) : source.length;
-  assert.notEqual(end, -1, `${nextName} must exist after ${name}`);
+  const end = nextMarker ? source.indexOf(nextMarker, start) : source.length;
+  assert.notEqual(end, -1, `${nextMarker} must exist after ${name}`);
   return source.slice(start, end);
 }
 
 test("typed import and legacy copy use distinct handlers", () => {
-  const typed = functionBody(page, "importTypedRecords", "copyLegacyBackup");
-  const legacy = functionBody(page, "copyLegacyBackup", "restoreLegacyBackup");
+  const typed = functionBody(page, "importTypedRecords", "function copyLegacyBackup");
+  const legacy = functionBody(page, "copyLegacyBackup", "function restoreLegacyBackup");
   assert.match(typed, /migrateTypedLocalDataToCloud\(setImportProgress\)/);
   assert.doesNotMatch(typed, /migrateLocalDataToCloud\(/);
   assert.match(legacy, /migrateLocalDataToCloud\(\)/);
@@ -23,8 +23,14 @@ test("typed import and legacy copy use distinct handlers", () => {
 });
 
 test("migration controls are non-submit actions and prevent reloads", () => {
-  for (const handler of ["importTypedRecords", "copyLegacyBackup", "restoreLegacyBackup", "retryPendingChanges"]) {
-    const body = functionBody(page, handler, handler === "importTypedRecords" ? "copyLegacyBackup" : handler === "copyLegacyBackup" ? "restoreLegacyBackup" : handler === "restoreLegacyBackup" ? "retryPendingChanges" : "const unavailable");
+  const boundaries = {
+    importTypedRecords: "function copyLegacyBackup",
+    copyLegacyBackup: "function restoreLegacyBackup",
+    restoreLegacyBackup: "function retryPendingChanges",
+    retryPendingChanges: "const unavailable",
+  };
+  for (const [handler, boundary] of Object.entries(boundaries)) {
+    const body = functionBody(page, handler, boundary);
     assert.match(body, /event\.preventDefault\(\)/, `${handler} must prevent default browser submission`);
   }
   assert.match(page, /type="button"[^>]*onClick=\{importTypedRecords\}/);
@@ -50,7 +56,7 @@ test("typed import displays live collection progress and counts", () => {
   assert.match(page, /importProgress\.imported/);
   assert.match(page, /importProgress\.skipped/);
   assert.match(page, /importProgress\.failed/);
-  assert.match(cloudSync, /currentCollection: storageKey/);
+  assert.match(cloudSync, /report\(storageKey, index\)/);
   assert.match(cloudSync, /failed: result\.errors\.length/);
 });
 
