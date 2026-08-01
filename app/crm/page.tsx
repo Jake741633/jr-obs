@@ -109,7 +109,7 @@ export default function CrmPage() {
 
   return (
     <main className="space-y-6">
-      <PageHeader title="CRM & Customer Care" description="Keep customer history, follow-ups, reviews, jobs and account value together." />
+      <PageHeader title="CRM & Customer Care" description="Keep customer history, follow-ups, reviews, jobs and account value together." action={<Link href="/crm/follow-ups" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-amber-400/30 bg-amber-500/5 px-4 text-sm font-semibold text-amber-200"><CalendarClock className="size-4" />Follow-up Centre</Link>} />
 
       <section className="grid gap-4 md:grid-cols-4">
         <Card><UsersRound className="h-5 w-5" /><p className="mt-3 text-3xl font-semibold">{customers.items.length}</p><p className="text-sm text-slate-400">Customers</p></Card>

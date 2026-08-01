@@ -324,7 +324,7 @@ export default function LeadsPage() {
   if (!ready) return <Card>Loading sales pipeline…</Card>;
 
   return <main className="space-y-6 pb-8">
-    <PageHeader eyebrow="CRM Pro" title="Sales Pipeline" description="Move every enquiry from first contact through survey, quote, acceptance and completion." action={<Button onClick={() => showForm ? resetForm() : setShowForm(true)}><Plus className="size-4" />{showForm ? "Close form" : "New lead"}</Button>} />
+    <PageHeader eyebrow="CRM Pro" title="Sales Pipeline" description="Move every enquiry from first contact through survey, quote, acceptance and completion." action={<div className="grid gap-2 sm:grid-cols-2"><Link href="/crm/follow-ups" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-amber-400/30 px-4 text-sm font-semibold text-amber-200">Follow-ups</Link><Button onClick={() => showForm ? resetForm() : setShowForm(true)}><Plus className="size-4" />{showForm ? "Close form" : "New lead"}</Button></div>} />
     {message ? <div role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{message}</div> : null}
 
     <section className="grid grid-cols-2 gap-3 xl:grid-cols-6 xl:gap-4">

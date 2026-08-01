@@ -482,7 +482,8 @@ export function buildFollowUpCentre({
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
   const today = now.toISOString().slice(0, 10);
   documents.filter((document) => document.type === "Quote" && document.status === "Sent").forEach((quote) => {
-    const ageDays = ageInDays(quote.updatedAt || quote.createdAt, now);
+    if (quote.nextFollowUpDate && quote.nextFollowUpDate > today) return;
+    const ageDays = ageInDays(quote.lastFollowUpAt || quote.updatedAt || quote.createdAt, now);
     if (ageDays < 1) return;
     const reason: CrmFollowUpReason = ageDays >= settings.quoteAgeDays ? "Quote ageing" : "Awaiting acceptance";
     const contact = quoteContact(quote, customerMap);
@@ -514,8 +515,8 @@ export function buildFollowUpCentre({
       || lead.createdAt;
     const ageDays = ageInDays(lastContact, now);
     let reason: CrmFollowUpReason | null = null;
-    if (stage === "Lost" && ageInDays(lead.updatedAt, now) <= settings.lostOpportunityDays) reason = "Lost opportunity";
-    else if (stage === "Quote Sent" && !lead.quoteId) reason = "Awaiting acceptance";
+    if (stage === "Lost" && !lead.lostFollowUpCompletedAt && (!lead.followUpDate || lead.followUpDate <= today) && ageInDays(lead.updatedAt, now) <= settings.lostOpportunityDays) reason = "Lost opportunity";
+    else if (stage === "Quote Sent" && !lead.quoteId && ageDays >= settings.noResponseDays) reason = "Awaiting acceptance";
     else if (stage === "Follow-up Due" || (stage === "Contacted" && ageDays >= settings.noResponseDays)) reason = "No response";
     else if (stage === "New Lead" || (stage === "Contacted" && lead.followUpDate && lead.followUpDate <= today)) reason = "Survey not booked";
     if (!reason) return;
