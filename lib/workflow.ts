@@ -4,6 +4,7 @@ import type {
   Job,
   JobDocument,
   JobTimelineEntry,
+  JobVariation,
   Material,
   PaymentTermsTemplate,
   PricingDocument,
@@ -14,6 +15,7 @@ import type {
   RecordAttachment,
 } from "./models";
 import { bankDetailsText, paymentTermsFromTemplate, paymentTermsText } from "./businessSettings";
+import { isAcceptedVariationStatus, variationInvoiceLine } from "./jobManagement-core.mjs";
 
 interface CreateJobFromQuoteInput {
   document: PricingDocument;
@@ -27,6 +29,7 @@ interface CreateJobFromQuoteInput {
 interface CreateInvoiceFromJobInput {
   job: Job;
   quote?: PricingDocument;
+  variations?: JobVariation[];
   invoices: Invoice[];
   invoiceId: string;
   now: string;
@@ -196,6 +199,7 @@ export function createJobFromAcceptedQuote({
 export function createInvoiceFromCompletedJob({
   job,
   quote,
+  variations = [],
   invoices,
   invoiceId,
   now,
@@ -223,6 +227,10 @@ export function createInvoiceFromCompletedJob({
   if (pricingSettings?.travelPrice) invoiceItems.push({ id: createId("invoice-line"), description: "Travel allowance", category: "Travel", quantity: 1, unitPrice: pricingSettings.travelPrice, unitCost: pricingSettings.travelCost });
   if (pricingSettings?.parkingPrice) invoiceItems.push({ id: createId("invoice-line"), description: "Parking allowance", category: "Parking", quantity: 1, unitPrice: pricingSettings.parkingPrice, unitCost: pricingSettings.parkingCost });
   if (pricingSettings?.contingencyPercent) invoiceItems.push({ id: createId("invoice-line"), description: `Contingency (${pricingSettings.contingencyPercent}%)`, category: "Contingency", quantity: 1, unitPrice: baseSellingPrice * pricingSettings.contingencyPercent / 100 });
+  variations
+    .filter((variation) => variation.jobId === job.id && isAcceptedVariationStatus(variation.status))
+    .filter((variation) => !invoiceItems.some((item) => item.variationId === variation.id))
+    .forEach((variation) => invoiceItems.push(variationInvoiceLine(variation, createId("invoice-line"))));
 
   const invoice: Invoice = {
     id: invoiceId,
@@ -232,6 +240,7 @@ export function createInvoiceFromCompletedJob({
     builderId: job.builderId,
     jobId: job.id,
     quoteId,
+    variationIds: variations.filter((variation) => variation.jobId === job.id && isAcceptedVariationStatus(variation.status)).map((variation) => variation.id),
     paymentTermsTemplateId: paymentTerms?.templateId,
     paymentTermsText: paymentTermsText(paymentTerms),
     title: job.title,
@@ -244,6 +253,7 @@ export function createInvoiceFromCompletedJob({
     notes: [
       `Generated from completed job ${job.title}.`,
       quoteNumber ? `Based on accepted quote ${quoteNumber}.` : "",
+      variations.some((variation) => variation.jobId === job.id && isAcceptedVariationStatus(variation.status)) ? "Includes accepted job variations." : "",
       snapshot?.notes ?? quote?.notes ?? "",
     ].filter(Boolean).join("\n\n"),
     paymentDetails: bankDetails ? bankDetailsText(bankDetails) : "",

@@ -1,20 +1,19 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
-import { Camera, ClipboardList, Clock3, FileWarning, Mic, Plus, ShieldAlert, Trash2, UsersRound, WalletCards } from "lucide-react";
+import { Camera, CheckCircle2, ClipboardList, Clock3, Eye, FileWarning, History, Mic, Plus, ReceiptText, Send, ShieldAlert, Trash2, UsersRound, WalletCards, XCircle } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { useJobDocumentsCollection, useJobsCollection, useJobTimelineCollection, useJobVariationsCollection, useSiteDiariesCollection, useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
-import { isJobInactiveStatus, normaliseSiteDiaryEntry, siteDiaryDurationHours, siteDiaryTimelineEntry } from "../../lib/jobManagement-core.mjs";
+import { useInvoicesCollection, useJobDocumentsCollection, useJobsCollection, useJobTimelineCollection, useJobVariationsCollection, useSiteDiariesCollection, useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
+import { applyVariationContractValue, isAcceptedVariationStatus, isJobInactiveStatus, normaliseSiteDiaryEntry, normaliseVariationStatus, siteDiaryDurationHours, siteDiaryTimelineEntry, transitionVariation, variationFinancials, variationInvoiceLine, variationTimelineEntry } from "../../lib/jobManagement-core.mjs";
 import { makeId } from "../../lib/storage";
-import type { JobDocument, JobVariation, SiteDiaryEntry, VariationStatus } from "../../lib/models";
+import type { CanonicalVariationStatus, JobDocument, JobVariation, RecordAttachment, SiteDiaryEntry } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
-const variationStatuses: VariationStatus[] = ["Draft", "Awaiting approval", "Approved", "Declined", "Invoiced"];
 const blankDiary = { jobId: "", workDate: "", startedAt: "", finishedAt: "", breakMinutes: "0", completedBy: "Jake", staffPresent: [] as string[], otherStaffPresent: "", workCompleted: "", delays: "", builderInstructions: "", customerInstructions: "", materialsUsed: "", materialsRequired: "", voiceNoteTranscript: "", weather: "", issuesAndRisks: "", followUpActions: "" };
-const blankVariation = { jobId: "", title: "", description: "", labourHours: "0", labourRate: "0", materialCost: "0", materialCharge: "0", otherCharge: "0", status: "Draft" as VariationStatus, approvalMethod: "Not approved" as JobVariation["approvalMethod"], approvalReference: "", requestedBy: "" };
+const blankVariation = { jobId: "", title: "", description: "", pricingMode: "Fixed price" as "Fixed price" | "Itemised", labourHours: "0", labourRate: "0", labourCostRate: "0", materialCost: "0", materialCharge: "0", otherCost: "0", otherCharge: "0", fixedPrice: "", approvalMethod: "Not approved" as JobVariation["approvalMethod"], approvalReference: "", requestedBy: "", customerNotes: "", internalNotes: "" };
 
 export default function SiteManagementPage() {
   const jobs = useJobsCollection();
@@ -23,20 +22,27 @@ export default function SiteManagementPage() {
   const timeline = useJobTimelineCollection();
   const team = useTeamCollection();
   const documents = useJobDocumentsCollection();
+  const invoices = useInvoicesCollection();
   const [selectedJobId, setSelectedJobId] = useState("");
   const [showDiaryForm, setShowDiaryForm] = useState(false);
   const [showVariationForm, setShowVariationForm] = useState(false);
   const [diaryForm, setDiaryForm] = useState(blankDiary);
   const [variationForm, setVariationForm] = useState(blankVariation);
   const [diaryPhotos, setDiaryPhotos] = useState<File[]>([]);
+  const [variationPhotos, setVariationPhotos] = useState<File[]>([]);
   const [photoInputKey, setPhotoInputKey] = useState(0);
+  const [variationPhotoInputKey, setVariationPhotoInputKey] = useState(0);
+  const [variationPreviewId, setVariationPreviewId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
 
   const activeJobs = useMemo(() => jobs.items.filter((job) => !isJobInactiveStatus(job.status)), [jobs.items]);
   const visibleDiaries = useMemo(() => diaries.items.filter((entry) => !selectedJobId || entry.jobId === selectedJobId).toSorted((a, b) => new Date(b.workDate).getTime() - new Date(a.workDate).getTime()), [diaries.items, selectedJobId]);
   const visibleVariations = useMemo(() => variations.items.filter((entry) => !selectedJobId || entry.jobId === selectedJobId).toSorted((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()), [variations.items, selectedJobId]);
-  const approvedVariationValue = visibleVariations.filter((variation) => variation.status === "Approved" || variation.status === "Invoiced").reduce((sum, variation) => sum + variation.labourHours * variation.labourRate + variation.materialCharge + variation.otherCharge, 0);
+  const approvedVariationValue = visibleVariations.filter((variation) => isAcceptedVariationStatus(variation.status)).reduce((sum, variation) => sum + variationFinancials(variation).sellingPrice, 0);
   const totalHours = visibleDiaries.reduce((sum, entry) => sum + siteDiaryDurationHours(entry), 0);
+  const variationFormCost = Math.max(0, Number(variationForm.labourHours || 0)) * Math.max(0, Number(variationForm.labourCostRate || 0)) + Math.max(0, Number(variationForm.materialCost || 0)) + Math.max(0, Number(variationForm.otherCost || 0));
+  const variationFormItemisedSell = Math.max(0, Number(variationForm.labourHours || 0)) * Math.max(0, Number(variationForm.labourRate || 0)) + Math.max(0, Number(variationForm.materialCharge || 0)) + Math.max(0, Number(variationForm.otherCharge || 0));
+  const variationFormSell = variationForm.pricingMode === "Fixed price" ? Math.max(0, Number(variationForm.fixedPrice || 0)) : variationFormItemisedSell;
 
   function jobName(jobId: string) { return jobs.items.find((job) => job.id === jobId)?.title || "Unknown job"; }
 
@@ -45,6 +51,13 @@ export default function SiteManagementPage() {
     const oversized = files.find((file) => file.size > 2_000_000);
     if (oversized) { setDiaryPhotos([]); setMessage(`${oversized.name} is larger than 2 MB. Choose smaller site photos for reliable offline capture.`); return; }
     setDiaryPhotos(files);
+  }
+
+  function chooseVariationPhotos(event: ChangeEvent<HTMLInputElement>) {
+    const files = [...(event.target.files ?? [])];
+    const oversized = files.find((file) => file.size > 2_000_000);
+    if (oversized) { setVariationPhotos([]); setMessage(`${oversized.name} is larger than 2 MB. Choose smaller variation photos.`); return; }
+    setVariationPhotos(files);
   }
 
   async function addDiary(event: FormEvent) {
@@ -80,23 +93,72 @@ export default function SiteManagementPage() {
     if (photoIds.size) documents.remove((document) => photoIds.has(document.id));
   }
 
-  function addVariation(event: FormEvent) {
+  async function addVariation(event: FormEvent) {
     event.preventDefault();
     if (!variationForm.jobId || !variationForm.title.trim()) { setMessage("Choose a job and enter a variation title."); return; }
     const now = new Date().toISOString();
     const number = `VAR-${String(variations.items.filter((item) => item.jobId === variationForm.jobId).length + 1).padStart(3, "0")}`;
-    const variation: JobVariation = { id: makeId("variation"), jobId: variationForm.jobId, number, title: variationForm.title.trim(), description: variationForm.description.trim(), labourHours: Number(variationForm.labourHours || 0), labourRate: Number(variationForm.labourRate || 0), materialCost: Number(variationForm.materialCost || 0), materialCharge: Number(variationForm.materialCharge || 0), otherCharge: Number(variationForm.otherCharge || 0), status: variationForm.status, approvalMethod: variationForm.approvalMethod, approvalReference: variationForm.approvalReference.trim(), requestedBy: variationForm.requestedBy.trim(), createdAt: now, updatedAt: now };
+    const photos = await Promise.all(variationPhotos.map(async (file): Promise<RecordAttachment | null> => {
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => resolve("");
+        reader.readAsDataURL(file);
+      });
+      return dataUrl ? { id: makeId("attachment"), name: file.name.replace(/\.[^/.]+$/, ""), fileName: file.name, mimeType: file.type, dataUrl, notes: variationForm.customerNotes.trim(), createdAt: now } : null;
+    }));
+    const savedPhotos = photos.filter((photo): photo is RecordAttachment => Boolean(photo));
+    const fixedPrice = variationForm.pricingMode === "Fixed price" ? Math.max(0, Number(variationForm.fixedPrice || 0)) : undefined;
+    const variation: JobVariation = { id: makeId("variation"), jobId: variationForm.jobId, number, title: variationForm.title.trim(), description: variationForm.description.trim(), pricingMode: variationForm.pricingMode, labourHours: Math.max(0, Number(variationForm.labourHours || 0)), labourRate: Math.max(0, Number(variationForm.labourRate || 0)), labourCostRate: Math.max(0, Number(variationForm.labourCostRate || 0)), materialCost: Math.max(0, Number(variationForm.materialCost || 0)), materialCharge: Math.max(0, Number(variationForm.materialCharge || 0)), otherCost: Math.max(0, Number(variationForm.otherCost || 0)), otherCharge: Math.max(0, Number(variationForm.otherCharge || 0)), fixedPrice, status: "Draft", approvalMethod: variationForm.approvalMethod, approvalReference: variationForm.approvalReference.trim(), requestedBy: variationForm.requestedBy.trim(), photos: savedPhotos, customerNotes: variationForm.customerNotes.trim(), internalNotes: variationForm.internalNotes.trim(), presentation: { recipient: "Customer", showLabourBreakdown: false, showMaterialBreakdown: false, showInternalCosts: false, showProfit: false }, auditHistory: [{ id: makeId("variation-audit"), action: "Variation created", toStatus: "Draft", detail: `${number} recorded as a draft fixed-price change.`, completedBy: "JR OS Site Management", completedAt: now }], createdAt: now, updatedAt: now };
     variations.setItems((current) => [variation, ...current]);
+    timeline.setItems((current) => [{ id: makeId("timeline"), jobId: variation.jobId, milestone: "Custom update", eventType: "Variation", sourceId: variation.id, sourceType: "JobVariation", note: `${number} · ${variation.title} recorded as a draft variation.`, completedBy: "JR OS Site Management", completedAt: now, createdAt: now }, ...current]);
     setVariationForm({ ...blankVariation, jobId: selectedJobId || variationForm.jobId });
+    setVariationPhotos([]);
+    setVariationPhotoInputKey((current) => current + 1);
     setShowVariationForm(false);
-    setMessage(`${number} saved.`);
+    setMessage(`${number} saved as a draft and added to the job timeline.`);
   }
 
-  function updateVariation(id: string, status: VariationStatus) {
-    variations.setItems((current) => current.map((variation) => variation.id === id ? { ...variation, status, updatedAt: new Date().toISOString() } : variation));
+  function changeVariationStatus(variation: JobVariation, nextStatus: CanonicalVariationStatus, recipient?: "Customer" | "Builder") {
+    if (nextStatus === "Accepted" && variation.approvalMethod === "Not approved") { setMessage(`Record how ${variation.number} was approved before accepting it.`); return; }
+    const now = new Date().toISOString();
+    const updated = transitionVariation({ variation, nextStatus, now, auditId: makeId("variation-audit"), completedBy: "JR OS Site Management", recipient });
+    variations.setItems((current) => current.map((item) => item.id === variation.id ? updated : item));
+    jobs.setItems((current) => current.map((job) => job.id === variation.jobId ? applyVariationContractValue({ job, variation, nextStatus, now }) : job));
+    if (normaliseVariationStatus(variation.status) !== nextStatus) timeline.setItems((current) => [variationTimelineEntry({ variation: updated, fromStatus: variation.status, toStatus: nextStatus, timelineId: makeId("timeline"), completedBy: "JR OS Site Management", now }), ...current]);
+    setMessage(`${variation.number} marked ${nextStatus.toLowerCase()}${recipient ? ` for ${recipient.toLowerCase()}` : ""}.`);
   }
 
-  const ready = jobs.isReady && diaries.isReady && variations.isReady && timeline.isReady && team.isReady && documents.isReady;
+  async function shareVariation(variation: JobVariation, recipient: "Customer" | "Builder") {
+    const financials = variationFinancials(variation);
+    const text = `${variation.number} · ${variation.title}\n\n${variation.description}\n\nFixed price: ${money.format(financials.sellingPrice)}${variation.customerNotes ? `\n\nNotes: ${variation.customerNotes}` : ""}`;
+    try {
+      if (navigator.share) await navigator.share({ title: `${variation.number} · ${variation.title}`, text });
+      else if (navigator.clipboard) await navigator.clipboard.writeText(text);
+      else { setMessage("Sharing is unavailable in this browser. Open the customer view and send it manually."); return; }
+      changeVariationStatus(variation, "Sent", recipient);
+    } catch { setMessage(`${variation.number} was not marked sent because sharing was cancelled.`); }
+  }
+
+  function addVariationToInvoice(variation: JobVariation) {
+    if (!isAcceptedVariationStatus(variation.status)) { setMessage("Only an accepted variation can be added to an invoice."); return; }
+    const invoice = invoices.items.find((item) => item.jobId === variation.jobId && item.status !== "Cancelled");
+    if (!invoice) { setMessage("Create the final job invoice first. Accepted variations are also included automatically when it is generated."); return; }
+    if (invoice.items.some((item) => item.variationId === variation.id)) { setMessage(`${variation.number} is already on ${invoice.number}.`); return; }
+    const now = new Date().toISOString();
+    invoices.setItems((current) => current.map((item) => item.id === invoice.id ? { ...item, variationIds: [...new Set([...(item.variationIds ?? []), variation.id])], items: [...item.items, variationInvoiceLine(variation, makeId("invoice-line"))], updatedAt: now } : item));
+    const updated = transitionVariation({ variation, nextStatus: "Invoiced", now, auditId: makeId("variation-audit"), completedBy: "JR OS Site Management", invoiceId: invoice.id, detail: `${variation.number} added to ${invoice.number}.` });
+    variations.setItems((current) => current.map((item) => item.id === variation.id ? updated : item));
+    timeline.setItems((current) => [variationTimelineEntry({ variation: updated, fromStatus: variation.status, toStatus: "Invoiced", timelineId: makeId("timeline"), completedBy: "JR OS Site Management", now }), ...current]);
+    setMessage(`${variation.number} added to ${invoice.number} once and marked invoiced.`);
+  }
+
+  function deleteVariation(variation: JobVariation) {
+    if (isAcceptedVariationStatus(variation.status) || normaliseVariationStatus(variation.status) === "Sent") { setMessage("Sent, accepted and invoiced variations must be declined or retained for the audit history; they cannot be deleted."); return; }
+    if (window.confirm(`Delete draft ${variation.number}?`)) variations.remove((item) => item.id === variation.id);
+  }
+
+  const ready = jobs.isReady && diaries.isReady && variations.isReady && timeline.isReady && team.isReady && documents.isReady && invoices.isReady;
   if (!ready) return <Card>Loading site management…</Card>;
 
   return <div className="space-y-6">
@@ -113,7 +175,7 @@ export default function SiteManagementPage() {
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Card><ClipboardList className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Diary entries</p><p className="mt-2 text-3xl font-bold">{visibleDiaries.length}</p></Card>
       <Card><Clock3 className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Logged labour</p><p className="mt-2 text-3xl font-bold">{totalHours.toFixed(1)}h</p></Card>
-      <Card><FileWarning className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Open variations</p><p className="mt-2 text-3xl font-bold">{visibleVariations.filter((item) => item.status === "Draft" || item.status === "Awaiting approval").length}</p></Card>
+      <Card><FileWarning className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Open variations</p><p className="mt-2 text-3xl font-bold">{visibleVariations.filter((item) => normaliseVariationStatus(item.status) === "Draft" || normaliseVariationStatus(item.status) === "Sent").length}</p></Card>
       <Card><WalletCards className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Approved extras</p><p className="mt-2 text-3xl font-bold">{money.format(approvedVariationValue)}</p></Card>
     </section>
 
@@ -139,7 +201,28 @@ export default function SiteManagementPage() {
       <div className="md:col-span-2 flex justify-end"><Button type="submit">Save diary entry</Button></div>
     </form></Card> : null}
 
-    {showVariationForm ? <Card><form onSubmit={addVariation} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select value={variationForm.jobId} onChange={(event) => setVariationForm({ ...variationForm, jobId: event.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose job</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label><InputField required label="Variation title" value={variationForm.title} onChange={(event) => setVariationForm({ ...variationForm, title: event.target.value })} /><InputField label="Requested by" value={variationForm.requestedBy} onChange={(event) => setVariationForm({ ...variationForm, requestedBy: event.target.value })} /><div className="md:col-span-2 xl:col-span-3"><TextareaField label="Description and scope" value={variationForm.description} onChange={(event) => setVariationForm({ ...variationForm, description: event.target.value })} /></div><InputField label="Labour hours" type="number" min="0" step="0.25" value={variationForm.labourHours} onChange={(event) => setVariationForm({ ...variationForm, labourHours: event.target.value })} /><InputField label="Labour charge rate (£)" type="number" min="0" step="0.01" value={variationForm.labourRate} onChange={(event) => setVariationForm({ ...variationForm, labourRate: event.target.value })} /><InputField label="Material cost (£)" type="number" min="0" step="0.01" value={variationForm.materialCost} onChange={(event) => setVariationForm({ ...variationForm, materialCost: event.target.value })} /><InputField label="Material charge (£)" type="number" min="0" step="0.01" value={variationForm.materialCharge} onChange={(event) => setVariationForm({ ...variationForm, materialCharge: event.target.value })} /><InputField label="Other charge (£)" type="number" min="0" step="0.01" value={variationForm.otherCharge} onChange={(event) => setVariationForm({ ...variationForm, otherCharge: event.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Status</span><select value={variationForm.status} onChange={(event) => setVariationForm({ ...variationForm, status: event.target.value as VariationStatus })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{variationStatuses.map((status) => <option key={status}>{status}</option>)}</select></label><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Approval method</span><select value={variationForm.approvalMethod} onChange={(event) => setVariationForm({ ...variationForm, approvalMethod: event.target.value as JobVariation["approvalMethod"] })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Not approved</option><option>Signature</option><option>Email</option><option>WhatsApp</option><option>Verbal</option></select></label><InputField label="Approval reference / note" value={variationForm.approvalReference} onChange={(event) => setVariationForm({ ...variationForm, approvalReference: event.target.value })} /><div className="xl:col-span-3 flex justify-end"><Button type="submit">Save variation</Button></div></form></Card> : null}
+    {showVariationForm ? <Card><form onSubmit={addVariation} className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={variationForm.jobId} onChange={(event) => setVariationForm({ ...variationForm, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
+      <InputField required label="Requested change" value={variationForm.title} onChange={(event) => setVariationForm({ ...variationForm, title: event.target.value })} />
+      <InputField label="Requested by" value={variationForm.requestedBy} onChange={(event) => setVariationForm({ ...variationForm, requestedBy: event.target.value })} />
+      <div className="md:col-span-2 xl:col-span-3"><TextareaField required label="Description and scope" value={variationForm.description} onChange={(event) => setVariationForm({ ...variationForm, description: event.target.value })} /></div>
+      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Pricing method</span><select value={variationForm.pricingMode} onChange={(event) => setVariationForm({ ...variationForm, pricingMode: event.target.value as "Fixed price" | "Itemised" })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Fixed price</option><option>Itemised</option></select></label>
+      <InputField label="Labour hours" type="number" min="0" step="0.25" value={variationForm.labourHours} onChange={(event) => setVariationForm({ ...variationForm, labourHours: event.target.value })} />
+      <InputField label="Labour internal rate (£)" type="number" min="0" step="0.01" value={variationForm.labourCostRate} onChange={(event) => setVariationForm({ ...variationForm, labourCostRate: event.target.value })} />
+      <InputField label="Labour selling rate (£)" type="number" min="0" step="0.01" value={variationForm.labourRate} onChange={(event) => setVariationForm({ ...variationForm, labourRate: event.target.value })} />
+      <InputField label="Material cost (£)" type="number" min="0" step="0.01" value={variationForm.materialCost} onChange={(event) => setVariationForm({ ...variationForm, materialCost: event.target.value })} />
+      <InputField label="Material selling price (£)" type="number" min="0" step="0.01" value={variationForm.materialCharge} onChange={(event) => setVariationForm({ ...variationForm, materialCharge: event.target.value })} />
+      <InputField label="Other cost (£)" type="number" min="0" step="0.01" value={variationForm.otherCost} onChange={(event) => setVariationForm({ ...variationForm, otherCost: event.target.value })} />
+      <InputField label="Other selling price (£)" type="number" min="0" step="0.01" value={variationForm.otherCharge} onChange={(event) => setVariationForm({ ...variationForm, otherCharge: event.target.value })} />
+      {variationForm.pricingMode === "Fixed price" ? <InputField label="Customer fixed price (£)" type="number" min="0" step="0.01" value={variationForm.fixedPrice} onChange={(event) => setVariationForm({ ...variationForm, fixedPrice: event.target.value })} /> : null}
+      <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-800 bg-slate-950 p-3 text-sm md:col-span-2 xl:col-span-3"><div><p className="text-slate-500">Cost</p><strong>{money.format(variationFormCost)}</strong></div><div><p className="text-slate-500">Selling</p><strong>{money.format(variationFormSell)}</strong></div><div><p className="text-slate-500">Profit</p><strong className={variationFormSell - variationFormCost < 0 ? "text-rose-300" : "text-emerald-300"}>{money.format(variationFormSell - variationFormCost)}</strong></div></div>
+      <TextareaField label="Customer-facing notes" value={variationForm.customerNotes} onChange={(event) => setVariationForm({ ...variationForm, customerNotes: event.target.value })} />
+      <TextareaField label="Internal notes (hidden)" value={variationForm.internalNotes} onChange={(event) => setVariationForm({ ...variationForm, internalNotes: event.target.value })} />
+      <label className="grid gap-2 text-sm font-medium text-slate-300 md:col-span-2 xl:col-span-3"><span className="flex items-center gap-2"><Camera className="size-4 text-cyan-300" />Variation photos</span><input key={variationPhotoInputKey} type="file" accept="image/*" capture="environment" multiple onChange={chooseVariationPhotos} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1 file:text-slate-200" /><span className="text-xs font-normal text-slate-500">{variationPhotos.length ? `${variationPhotos.length} photo${variationPhotos.length === 1 ? "" : "s"} ready` : "Attach evidence before sending the change."}</span></label>
+      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Approval method</span><select value={variationForm.approvalMethod} onChange={(event) => setVariationForm({ ...variationForm, approvalMethod: event.target.value as JobVariation["approvalMethod"] })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Not approved</option><option>Signature</option><option>Email</option><option>WhatsApp</option><option>Verbal</option></select></label>
+      <InputField label="Approval reference / note" value={variationForm.approvalReference} onChange={(event) => setVariationForm({ ...variationForm, approvalReference: event.target.value })} />
+      <div className="xl:col-span-3 flex justify-end"><Button type="submit">Save draft variation</Button></div>
+    </form></Card> : null}
 
     <section className="grid gap-6 xl:grid-cols-2">
       <div className="space-y-3"><h2 className="text-xl font-bold">Daily site diary</h2>{visibleDiaries.length === 0 ? <Card><p className="text-sm text-slate-400">No diary entries for this selection.</p></Card> : visibleDiaries.map((rawEntry) => { const entry = normaliseSiteDiaryEntry(rawEntry); const staffNames = entry.staffPresent.map((id) => team.items.find((member) => member.id === id)?.name || id); return <Card key={entry.id}><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{jobName(entry.jobId)}</p><h3 className="mt-1 font-bold">{new Date(`${entry.workDate}T12:00:00`).toLocaleDateString("en-GB")}</h3><p className="text-sm text-slate-500">{entry.completedBy}{entry.startedAt ? ` · ${entry.startedAt}-${entry.finishedAt || "ongoing"}` : ""}{siteDiaryDurationHours(entry) ? ` · ${siteDiaryDurationHours(entry).toFixed(1)}h` : ""}</p></div><button type="button" onClick={() => deleteDiary(entry)} className="grid min-h-11 min-w-11 place-items-center rounded-xl text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label="Delete diary entry"><Trash2 className="size-4" /></button></div>
@@ -151,7 +234,26 @@ export default function SiteManagementPage() {
         <div className="mt-3 grid gap-2 text-sm text-slate-400">{entry.builderInstructions ? <p><strong className="text-slate-200">Builder:</strong> {entry.builderInstructions}</p> : null}{entry.customerInstructions ? <p><strong className="text-slate-200">Customer:</strong> {entry.customerInstructions}</p> : null}{entry.materialsUsed ? <p><strong className="text-slate-200">Used:</strong> {entry.materialsUsed}</p> : null}{entry.materialsRequired ? <p><strong className="text-slate-200">Required:</strong> {entry.materialsRequired}</p> : null}{entry.followUpActions ? <p><strong className="text-slate-200">Follow-up:</strong> {entry.followUpActions}</p> : null}{entry.voiceNoteTranscript ? <p><strong className="text-slate-200">Voice transcript:</strong> {entry.voiceNoteTranscript}</p> : null}</div>
         {entry.photoDocumentIds.length ? <p className="mt-3 flex items-center gap-2 text-xs font-semibold text-fuchsia-300"><Camera className="size-4" />{entry.photoDocumentIds.length} linked site photo{entry.photoDocumentIds.length === 1 ? "" : "s"}</p> : null}
       </Card>; })}</div>
-      <div className="space-y-3"><h2 className="text-xl font-bold">Variations</h2>{visibleVariations.length === 0 ? <Card><p className="text-sm text-slate-400">No variations for this selection.</p></Card> : visibleVariations.map((variation) => { const sellValue = variation.labourHours * variation.labourRate + variation.materialCharge + variation.otherCharge; const cost = variation.materialCost; return <Card key={variation.id}><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{variation.number} · {jobName(variation.jobId)}</p><h3 className="mt-1 font-bold">{variation.title}</h3><p className="text-sm text-slate-500">Requested by {variation.requestedBy || "not recorded"}</p></div><button onClick={() => variations.remove((item) => item.id === variation.id)} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label="Delete variation"><Trash2 className="size-4" /></button></div><p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{variation.description || "No description added."}</p><div className="mt-4 grid grid-cols-3 gap-3 rounded-xl bg-slate-950 p-3 text-sm"><div><p className="text-slate-500">Charge</p><strong>{money.format(sellValue)}</strong></div><div><p className="text-slate-500">Known cost</p><strong>{money.format(cost)}</strong></div><div><p className="text-slate-500">Gross profit</p><strong>{money.format(sellValue - cost)}</strong></div></div><div className="mt-4 flex flex-wrap items-center gap-3"><select value={variation.status} onChange={(event) => updateVariation(variation.id, event.target.value as VariationStatus)} className="min-h-10 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm">{variationStatuses.map((status) => <option key={status}>{status}</option>)}</select><span className="text-xs text-slate-500">Approval: {variation.approvalMethod}</span></div></Card>; })}</div>
+      <div className="space-y-3"><h2 className="text-xl font-bold">Variations</h2>{visibleVariations.length === 0 ? <Card><p className="text-sm text-slate-400">No variations for this selection.</p></Card> : visibleVariations.map((variation) => {
+        const financials = variationFinancials(variation);
+        const status = normaliseVariationStatus(variation.status);
+        const showingPreview = variationPreviewId === variation.id;
+        return <Card key={variation.id} className={status === "Accepted" ? "border-emerald-500/25" : undefined}>
+          <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{variation.number} · {jobName(variation.jobId)}</p><h3 className="mt-1 font-bold">{variation.title}</h3><p className="mt-1 text-sm text-slate-500">{status} · Requested by {variation.requestedBy || "not recorded"}</p></div><button type="button" onClick={() => deleteVariation(variation)} className="grid min-h-11 min-w-11 place-items-center rounded-xl text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label={`Delete ${variation.number}`}><Trash2 className="size-4" /></button></div>
+          <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{variation.description || "No description added."}</p>
+          <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-950 p-3 text-sm sm:grid-cols-4"><div><p className="text-slate-500">Fixed price</p><strong>{money.format(financials.sellingPrice)}</strong></div><div><p className="text-slate-500">Cost</p><strong>{money.format(financials.costPrice)}</strong></div><div><p className="text-slate-500">Gross profit</p><strong className={financials.grossProfit < 0 ? "text-rose-300" : "text-emerald-300"}>{money.format(financials.grossProfit)}</strong></div><div><p className="text-slate-500">Margin</p><strong>{financials.grossMargin.toFixed(1)}%</strong></div></div>
+          <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500"><span>Approval: {variation.approvalMethod}</span>{variation.sentTo ? <span>Sent to: {variation.sentTo}</span> : null}{variation.photos?.length ? <span>{variation.photos.length} photo{variation.photos.length === 1 ? "" : "s"}</span> : null}{variation.invoiceId ? <span>Invoice linked</span> : null}</div>
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <Button type="button" variant="secondary" onClick={() => setVariationPreviewId(showingPreview ? null : variation.id)}><Eye className="mr-2 size-4" />{showingPreview ? "Hide preview" : "Customer view"}</Button>
+            {status === "Draft" ? <><Button type="button" onClick={() => void shareVariation(variation, "Customer")}><Send className="mr-2 size-4" />Send customer</Button><Button type="button" variant="secondary" onClick={() => void shareVariation(variation, "Builder")}><Send className="mr-2 size-4" />Send builder</Button></> : null}
+            {status === "Sent" ? <><Button type="button" onClick={() => changeVariationStatus(variation, "Accepted")}><CheckCircle2 className="mr-2 size-4" />Accept</Button><Button type="button" variant="secondary" onClick={() => changeVariationStatus(variation, "Declined")}><XCircle className="mr-2 size-4" />Decline</Button></> : null}
+            {status === "Accepted" ? <><Button type="button" onClick={() => addVariationToInvoice(variation)}><ReceiptText className="mr-2 size-4" />Add to invoice</Button><Button type="button" variant="secondary" onClick={() => changeVariationStatus(variation, "Declined")}><XCircle className="mr-2 size-4" />Reverse acceptance</Button></> : null}
+            {status === "Declined" ? <Button type="button" onClick={() => changeVariationStatus(variation, "Draft")}><ClipboardList className="mr-2 size-4" />Return to draft</Button> : null}
+          </div>
+          {showingPreview ? <div className="mt-4 rounded-2xl border border-cyan-500/20 bg-white p-5 text-slate-950"><p className="text-xs font-bold uppercase tracking-widest text-slate-500">{variation.presentation?.recipient ?? variation.sentTo ?? "Customer"} variation</p><h4 className="mt-2 text-xl font-bold">{variation.number} · {variation.title}</h4><p className="mt-4 whitespace-pre-wrap text-sm text-slate-700">{variation.description}</p>{variation.customerNotes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{variation.customerNotes}</p> : null}<div className="mt-5 border-t border-slate-200 pt-4"><p className="text-sm text-slate-500">Agreed fixed price</p><p className="text-3xl font-black">{money.format(financials.sellingPrice)}</p></div><p className="mt-3 text-xs text-slate-500">Internal labour, material cost, markup and profit are hidden.</p></div> : null}
+          {(variation.auditHistory?.length ?? 0) > 0 ? <details className="mt-4 rounded-xl border border-slate-800 p-3"><summary className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold"><History className="size-4 text-cyan-300" />Audit history ({variation.auditHistory?.length})</summary><div className="mt-2 space-y-2">{variation.auditHistory?.map((entry) => <div key={entry.id} className="border-t border-slate-800 pt-2 text-xs text-slate-400"><p className="font-semibold text-slate-200">{entry.action}</p><p>{entry.detail}</p><p>{new Date(entry.completedAt).toLocaleString("en-GB")} · {entry.completedBy}</p></div>)}</div></details> : null}
+        </Card>;
+      })}</div>
     </section>
   </div>;
 }

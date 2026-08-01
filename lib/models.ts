@@ -22,7 +22,7 @@ export type JobStatus = CanonicalJobStatus | LegacyJobStatus;
 export type JobPriority = "Low" | "Normal" | "High" | "Urgent";
 export type JobContactRole = "Customer" | "Builder" | "Site contact" | "Project manager" | "Other";
 export interface JobContact { id: EntityId; name: string; role: JobContactRole; phone: string; email: string; notes: string; }
-export interface Job { id: EntityId; title: string; customerId?: EntityId; builderId?: EntityId; sourceQuoteId?: EntityId; quoteSnapshot?: JobQuoteSnapshot; siteAddress: string; status: JobStatus; startDate: string; targetCompletionDate?: string; priority?: JobPriority; assignedTo?: string[]; contacts?: JobContact[]; retentionPercent?: number; retentionDueDate?: string; requiredCertificateTypes?: CertificateType[]; value: number; notes: string; createdAt: string; updatedAt: string; }
+export interface Job { id: EntityId; title: string; customerId?: EntityId; builderId?: EntityId; sourceQuoteId?: EntityId; quoteSnapshot?: JobQuoteSnapshot; siteAddress: string; status: JobStatus; startDate: string; targetCompletionDate?: string; priority?: JobPriority; assignedTo?: string[]; contacts?: JobContact[]; retentionPercent?: number; retentionDueDate?: string; requiredCertificateTypes?: CertificateType[]; originalContractValue?: number; value: number; notes: string; createdAt: string; updatedAt: string; }
 
 export type LeadStage = "New Lead" | "Contacted" | "Survey Booked" | "Survey Complete" | "Quote Sent" | "Follow-up Due" | "Accepted" | "Lost" | "Completed" | "Cancelled";
 export type LegacyLeadStage = "New enquiry" | "Survey booked" | "Quote required" | "Quote sent" | "Won";
@@ -40,9 +40,10 @@ export interface SiteDiaryEntry { id: EntityId; jobId: EntityId; workDate: strin
 export type CanonicalVariationStatus = "Draft" | "Sent" | "Accepted" | "Declined" | "Invoiced";
 export type LegacyVariationStatus = "Awaiting approval" | "Approved";
 export type VariationStatus = CanonicalVariationStatus | LegacyVariationStatus;
+export type JobVariationPricingMode = "Fixed price" | "Itemised";
 export interface JobVariationAuditEntry { id: EntityId; action: string; fromStatus?: CanonicalVariationStatus; toStatus?: CanonicalVariationStatus; detail: string; completedBy: string; completedAt: string; }
 export interface JobVariationPresentation { recipient: "Customer" | "Builder"; showLabourBreakdown: boolean; showMaterialBreakdown: boolean; showInternalCosts: boolean; showProfit: boolean; }
-export interface JobVariation { id: EntityId; jobId: EntityId; number: string; title: string; description: string; labourHours: number; labourRate: number; labourCostRate?: number; materialCost: number; materialCharge: number; otherCost?: number; otherCharge: number; fixedPrice?: number; status: VariationStatus; approvalMethod: "Not approved" | "Signature" | "Email" | "WhatsApp" | "Verbal"; approvalReference: string; requestedBy: string; sentTo?: "Customer" | "Builder"; sentAt?: string; decidedAt?: string; decidedBy?: string; invoiceId?: EntityId; photos?: RecordAttachment[]; customerNotes?: string; internalNotes?: string; presentation?: JobVariationPresentation; auditHistory?: JobVariationAuditEntry[]; createdAt: string; updatedAt: string; }
+export interface JobVariation { id: EntityId; jobId: EntityId; number: string; title: string; description: string; pricingMode?: JobVariationPricingMode; labourHours: number; labourRate: number; labourCostRate?: number; materialCost: number; materialCharge: number; otherCost?: number; otherCharge: number; fixedPrice?: number; status: VariationStatus; approvalMethod: "Not approved" | "Signature" | "Email" | "WhatsApp" | "Verbal"; approvalReference: string; requestedBy: string; sentTo?: "Customer" | "Builder"; sentAt?: string; decidedAt?: string; decidedBy?: string; invoiceId?: EntityId; photos?: RecordAttachment[]; photoDocumentIds?: EntityId[]; customerNotes?: string; internalNotes?: string; presentation?: JobVariationPresentation; auditHistory?: JobVariationAuditEntry[]; createdAt: string; updatedAt: string; }
 
 export type JobTaskType = "Task" | "Snag";
 export type JobTaskCategory = "General" | "Survey" | "First fix" | "Second fix" | "Testing" | "Certificate" | "Materials" | "Handover" | "Safety" | "Other";
@@ -109,7 +110,7 @@ export type QuoteTemplateType = "Domestic" | "Commercial" | "Rewire" | "EICR" | 
 export type FixedPriceWorkflowType = "Direct fixed price" | "Fault finding to fixed price";
 export interface FixedPriceWorkflow { type: FixedPriceWorkflowType; initialVisitCompleted: boolean; faultFindingCompleted: boolean; recommendation: string; }
 export type PaymentTermsType = "Deposit" | "Staged payments" | "Due on completion";
-export interface PricingLineItem { id: EntityId; description: string; category: QuoteSection | "Other"; quantity: number; unitPrice: number; unitCost?: number; materialId?: EntityId; supplier?: string; stockCode?: string; labourRateId?: EntityId; labourMode?: QuoteLabourMode; labourHours?: number; }
+export interface PricingLineItem { id: EntityId; description: string; category: QuoteSection | "Other"; quantity: number; unitPrice: number; unitCost?: number; materialId?: EntityId; variationId?: EntityId; supplier?: string; stockCode?: string; labourRateId?: EntityId; labourMode?: QuoteLabourMode; labourHours?: number; }
 export interface QuotePricingSettings { defaultLabourRateId?: EntityId; contingencyPercent: number; materialMarkupPercent: number; travelCost: number; travelPrice: number; parkingCost: number; parkingPrice: number; }
 export interface QuoteProfitabilitySnapshot { directCost: number; overheadCost: number; costPrice: number; sellingPrice: number; grossProfit: number; expectedProfit: number; grossMargin: number; netMargin: number; calculatedAt: string; }
 export interface BusinessTermsTemplate { id: EntityId; name: string; content: string; active: boolean; createdAt: string; updatedAt: string; }
@@ -119,7 +120,7 @@ export interface PricingDocument { id: EntityId; number: string; type: PricingDo
 export interface JobQuoteSnapshot { quoteId: EntityId; quoteNumber: string; items: PricingLineItem[]; pricingSettings?: QuotePricingSettings; profitability?: QuoteProfitabilitySnapshot; attachments: RecordAttachment[]; vatEnabled: boolean; vatRate: number; notes: string; exclusions?: string; internalNotes?: string; fixedPriceWorkflow?: FixedPriceWorkflow; terms: string; paymentTerms?: QuotePaymentTerms; convertedAt: string; }
 
 export type InvoiceStatus = "Draft" | "Sent" | "Part paid" | "Paid" | "Overdue" | "Cancelled";
-export interface Invoice { id: EntityId; number: string; status: InvoiceStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; quoteId?: EntityId; paymentTermsTemplateId?: EntityId; paymentTermsText?: string; title: string; issueDate: string; dueDate: string; vatEnabled: boolean; vatRate: number; items: PricingLineItem[]; amountPaid: number; notes: string; paymentDetails: string; createdAt: string; updatedAt: string; }
+export interface Invoice { id: EntityId; number: string; status: InvoiceStatus; customerId?: EntityId; builderId?: EntityId; jobId?: EntityId; quoteId?: EntityId; variationIds?: EntityId[]; paymentTermsTemplateId?: EntityId; paymentTermsText?: string; title: string; issueDate: string; dueDate: string; vatEnabled: boolean; vatRate: number; items: PricingLineItem[]; amountPaid: number; notes: string; paymentDetails: string; createdAt: string; updatedAt: string; }
 
 export type MaterialCategory = "Cable" | "Protection" | "Accessories" | "Lighting" | "Containment" | "EV" | "Testing" | "Fire alarm" | "Emergency lighting" | "Other";
 export type MaterialUnit = "Each" | "Metre" | "Drum" | "Box" | "Pack";

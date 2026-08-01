@@ -26,6 +26,8 @@ import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
+import { useJobVariationsCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../../lib/jobManagement-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { createInvoiceFromCompletedJob } from "../../../lib/workflow";
 import type {
@@ -105,6 +107,7 @@ export default function JobDetailPage() {
   const documents = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
   const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const variations = useJobVariationsCollection();
   const bankDetailsStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
   const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
   const [showTimelineForm, setShowTimelineForm] = useState(false);
@@ -127,8 +130,9 @@ export default function JobDetailPage() {
     .toSorted((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
   const linkedQuotes = quotes.items.filter((item) => item.jobId === jobId);
   const linkedInvoices = invoices.items.filter((item) => item.jobId === jobId);
+  const linkedVariations = variations.items.filter((item) => item.jobId === jobId);
 
-  const isReady = jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady && bankDetailsStore.isReady && paymentTermsStore.isReady;
+  const isReady = jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady && variations.isReady && bankDetailsStore.isReady && paymentTermsStore.isReady;
   if (!isReady) return <Card>Loading job…</Card>;
 
   if (!job) {
@@ -230,6 +234,7 @@ export default function JobDetailPage() {
     const generated = createInvoiceFromCompletedJob({
       job,
       quote: sourceQuote,
+      variations: linkedVariations,
       invoices: invoices.items,
       invoiceId: makeId("invoice"),
       now,
@@ -238,8 +243,14 @@ export default function JobDetailPage() {
       defaultPaymentTerms: paymentTermsStore.items.find((item) => item.active && item.isDefault),
     });
     invoices.setItems((current) => [generated.invoice, ...current]);
+    const includedVariationIds = new Set(generated.invoice.items.map((item) => item.variationId).filter(Boolean));
+    const includedVariations = linkedVariations.filter((variation) => includedVariationIds.has(variation.id) && isAcceptedVariationStatus(variation.status));
+    variations.setItems((current) => current.map((variation) => {
+      if (!includedVariationIds.has(variation.id)) return variation;
+      return transitionVariation({ variation, nextStatus: "Invoiced", now, auditId: makeId("variation-audit"), completedBy: "JR OS", invoiceId: generated.invoice.id, detail: `${variation.number} included on ${generated.invoice.number}.` });
+    }));
     timeline.setItems((current) => {
-      const additions: JobTimelineEntry[] = [generated.timelineEntry];
+      const additions: JobTimelineEntry[] = [generated.timelineEntry, ...includedVariations.map((variation) => variationTimelineEntry({ variation, fromStatus: variation.status, toStatus: "Invoiced", timelineId: makeId("timeline"), completedBy: "JR OS", now }))];
       if (!current.some((entry) => entry.jobId === jobId && entry.milestone === "Job completed")) {
         additions.push({ id: makeId("timeline"), jobId, milestone: "Job completed", note: "Job marked complete before final invoice generation.", completedBy: "JR OS", completedAt: now, createdAt: now });
       }

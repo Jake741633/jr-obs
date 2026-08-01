@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, BriefcaseBusiness, Clock3, FileWarning, ReceiptText, ShoppingCart, TrendingUp, WalletCards } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { isAcceptedVariationStatus, variationFinancials } from "../../lib/jobManagement-core.mjs";
 import { useLocalStorageCollection } from "../../lib/storage";
 import type { Invoice, Job, JobVariation, PricingDocument, PurchaseList, SiteDiaryEntry } from "../../lib/models";
 
@@ -38,11 +39,11 @@ export default function JobFinancePage() {
   const rows = useMemo(() => jobs.items.map((job) => {
     const jobQuotes = pricing.items.filter((item) => item.jobId === job.id);
     const acceptedQuote = jobQuotes.find((item) => item.status === "Accepted") || jobQuotes[0];
-    const contractValue = acceptedQuote ? documentTotal(acceptedQuote) : job.value;
+    const contractValue = acceptedQuote ? documentTotal(acceptedQuote) : (job.originalContractValue ?? job.value);
     const jobVariations = variations.items.filter((item) => item.jobId === job.id);
-    const approvedVariations = jobVariations.filter((item) => item.status === "Approved" || item.status === "Invoiced");
-    const variationRevenue = approvedVariations.reduce((sum, item) => sum + item.labourHours * item.labourRate + item.materialCharge + item.otherCharge, 0);
-    const variationCost = approvedVariations.reduce((sum, item) => sum + item.materialCost, 0);
+    const approvedVariations = jobVariations.filter((item) => isAcceptedVariationStatus(item.status));
+    const variationRevenue = approvedVariations.reduce((sum, item) => sum + variationFinancials(item).sellingPrice, 0);
+    const variationCost = approvedVariations.reduce((sum, item) => sum + variationFinancials(item).costPrice, 0);
     const jobPurchases = purchases.items.filter((item) => item.jobId === job.id);
     const materialSpend = jobPurchases.flatMap((item) => item.items).filter((item) => item.status === "Ordered" || item.status === "Delivered").reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
     const quotedInternalCost = acceptedQuote?.items.reduce((sum, item) => sum + item.quantity * (item.unitCost ?? item.unitPrice), 0) ?? 0;
@@ -57,7 +58,7 @@ export default function JobFinancePage() {
     const margin = forecastRevenue > 0 ? forecastProfit / forecastRevenue * 100 : 0;
     const outstanding = Math.max(0, invoiced - paid);
     const uninvoiced = Math.max(0, forecastRevenue - invoiced);
-    return { job, contractValue, variationRevenue, forecastRevenue, knownCost, forecastProfit, margin, invoiced, paid, outstanding, uninvoiced, loggedHours, openVariations: jobVariations.filter((item) => item.status === "Draft" || item.status === "Awaiting approval").length };
+    return { job, contractValue, variationRevenue, forecastRevenue, knownCost, forecastProfit, margin, invoiced, paid, outstanding, uninvoiced, loggedHours, openVariations: jobVariations.filter((item) => item.status === "Draft" || item.status === "Sent" || item.status === "Awaiting approval").length };
   }), [diaries.items, invoices.items, jobs.items, pricing.items, purchases.items, variations.items]);
 
   const visibleRows = selectedJobId ? rows.filter((row) => row.job.id === selectedJobId) : rows;
