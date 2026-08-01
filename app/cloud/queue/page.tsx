@@ -13,7 +13,7 @@ function stateClass(state: string) {
 }
 
 export default function CloudQueuePage() {
-  const [items, setItems] = useState<SyncQueueItem[]>([]);
+  const [items, setItems] = useState<SyncQueueItem[]>(() => getSyncQueue());
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -22,7 +22,6 @@ export default function CloudQueuePage() {
   }
 
   useEffect(() => {
-    refresh();
     window.addEventListener("jr-os-sync-status", refresh);
     return () => window.removeEventListener("jr-os-sync-status", refresh);
   }, []);
