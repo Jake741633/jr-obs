@@ -9,7 +9,8 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusBadge } from "../../components/ui/StatusBadge";
-import { isJobInactiveStatus, isJobOnSiteStatus, transitionJobStatus } from "../../lib/jobManagement-core.mjs";
+import { useSiteDiariesCollection } from "../../lib/cloud/coreBusinessCollections";
+import { isJobInactiveStatus, isJobOnSiteStatus, siteDiaryTimelineEntry, transitionJobStatus } from "../../lib/jobManagement-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import type { CanonicalJobStatus, Customer, Job, JobDocument, JobTimelineEntry, SiteDiaryEntry } from "../../lib/models";
 
@@ -21,7 +22,7 @@ const checklistItems = ["Work area left safe and tidy", "Installation visually c
 export default function FieldWorkspacePage() {
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const diary = useLocalStorageCollection<SiteDiaryEntry>("jr-os-site-diary");
+  const diary = useSiteDiariesCollection();
   const documents = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
   const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
   const [form, setForm] = useState(blankDiary);
@@ -62,7 +63,9 @@ export default function FieldWorkspacePage() {
     if (!form.jobId) return setMessage("Choose a job before saving the site record.");
     if (!form.startedAt) return setMessage("Add the time work started.");
     const now = new Date().toISOString();
-    diary.setItems((current) => [{ id: makeId("site-diary"), jobId: form.jobId, workDate: form.workDate, startedAt: form.startedAt, finishedAt: form.finishedAt, breakMinutes: Math.max(0, Number(form.breakMinutes || 0)), completedBy: form.completedBy.trim() || "Jake", workCompleted: form.workCompleted.trim(), delays: form.delays.trim(), customerRequests: form.customerRequests.trim(), materialsUsed: form.materialsUsed.trim(), voiceNotes: form.voiceNotes.trim(), createdAt: now, updatedAt: now }, ...current]);
+    const entry: SiteDiaryEntry = { id: makeId("site-diary"), jobId: form.jobId, workDate: form.workDate, startedAt: form.startedAt, finishedAt: form.finishedAt, breakMinutes: Math.max(0, Number(form.breakMinutes || 0)), completedBy: form.completedBy.trim() || "Jake", staffPresent: [], workCompleted: form.workCompleted.trim(), delays: form.delays.trim(), builderInstructions: "", customerRequests: form.customerRequests.trim(), customerInstructions: form.customerRequests.trim(), materialsUsed: form.materialsUsed.trim(), materialsRequired: "", photoDocumentIds: [], voiceNotes: form.voiceNotes.trim(), voiceNoteTranscript: form.voiceNotes.trim(), weather: "", issuesAndRisks: form.delays.trim(), followUpActions: "", createdAt: now, updatedAt: now };
+    diary.setItems((current) => [entry, ...current]);
+    timeline.setItems((current) => [siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: entry.completedBy, now }), ...current]);
     setMessage("Site diary entry saved to the job record.");
     setForm(blankDiary);
   }

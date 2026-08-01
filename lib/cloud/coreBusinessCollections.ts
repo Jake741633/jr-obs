@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useMemo } from "react";
 import type { ComplianceCertificate } from "../complianceCertificates";
 import type { PortalApprovalRecord, PortalRequest } from "../customerPortal";
 import type { ElectricalTestingRecord } from "../electricalTesting";
@@ -42,6 +43,7 @@ export const coreBusinessStorageKeys = {
   jobVariations: "jr-os-job-variations",
   jobTimeline: "jr-os-job-timeline",
   siteDiaries: "jr-os-site-diaries",
+  legacySiteDiaries: "jr-os-site-diary",
   jobTasks: "jr-os-job-tasks",
   jobProgress: "jr-os-job-progress",
   jobPaymentStages: "jr-os-job-payment-stages",
@@ -89,7 +91,36 @@ export function useSalesLeadsCollection() { return useCloudLocalCollection<Sales
 export function useLeadActivitiesCollection() { return useCloudLocalCollection<LeadActivity>(coreBusinessStorageKeys.leadActivities); }
 export function useJobVariationsCollection() { return useCloudLocalCollection<JobVariation>(coreBusinessStorageKeys.jobVariations); }
 export function useJobTimelineCollection() { return useCloudLocalCollection<JobTimelineEntry>(coreBusinessStorageKeys.jobTimeline); }
-export function useSiteDiariesCollection() { return useCloudLocalCollection<SiteDiaryEntry>(coreBusinessStorageKeys.siteDiaries); }
+export function useSiteDiariesCollection() {
+  const canonical = useCloudLocalCollection<SiteDiaryEntry>(coreBusinessStorageKeys.siteDiaries);
+  const legacy = useCloudLocalCollection<SiteDiaryEntry>(coreBusinessStorageKeys.legacySiteDiaries);
+  const canonicalItems = canonical.items;
+  const canonicalReady = canonical.isReady;
+  const setCanonicalItems = canonical.setItems;
+  const removeCanonical = canonical.remove;
+  const legacyItems = legacy.items;
+  const legacyReady = legacy.isReady;
+  const removeLegacy = legacy.remove;
+  const mergedItems = useMemo(() => {
+    const byId = new Map(canonicalItems.map((entry) => [entry.id, entry]));
+    legacyItems.forEach((entry) => { if (!byId.has(entry.id)) byId.set(entry.id, entry); });
+    return [...byId.values()];
+  }, [canonicalItems, legacyItems]);
+
+  useEffect(() => {
+    if (!canonicalReady || !legacyReady) return;
+    const canonicalIds = new Set(canonicalItems.map((entry) => entry.id));
+    const missing = legacyItems.filter((entry) => !canonicalIds.has(entry.id));
+    if (missing.length) setCanonicalItems((current) => [...missing, ...current]);
+  }, [canonicalItems, canonicalReady, legacyItems, legacyReady, setCanonicalItems]);
+
+  const remove = useCallback((predicate: (entry: SiteDiaryEntry) => boolean) => {
+    removeCanonical(predicate);
+    removeLegacy(predicate);
+  }, [removeCanonical, removeLegacy]);
+
+  return { ...canonical, items: mergedItems, remove, isReady: canonicalReady && legacyReady };
+}
 export function useJobTasksCollection() { return useCloudLocalCollection<JobTask>(coreBusinessStorageKeys.jobTasks); }
 export function useJobProgressCollection() { return useCloudLocalCollection<JobProgressRecord>(coreBusinessStorageKeys.jobProgress); }
 export function useJobPaymentStagesCollection() { return useCloudLocalCollection<JobPaymentStage>(coreBusinessStorageKeys.jobPaymentStages); }

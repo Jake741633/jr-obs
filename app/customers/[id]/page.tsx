@@ -37,6 +37,7 @@ import {
   usePaymentsCollection,
   usePricingDocumentsCollection,
   useSalesLeadsCollection,
+  useSiteDiariesCollection,
 } from "../../../lib/cloud/coreBusinessCollections";
 import {
   buildCustomerIntelligence,
@@ -55,6 +56,7 @@ const timelineStyles: Record<CustomerTimelineKind, string> = {
   Estimate: "bg-violet-500/15 text-violet-300",
   Quote: "bg-cyan-500/15 text-cyan-300",
   Job: "bg-amber-500/15 text-amber-300",
+  "Site diary": "bg-sky-500/15 text-sky-300",
   Variation: "bg-orange-500/15 text-orange-300",
   Invoice: "bg-emerald-500/15 text-emerald-300",
   Payment: "bg-green-500/15 text-green-300",
@@ -86,8 +88,9 @@ export default function CustomerDetailPage() {
   const jobDocuments = useJobDocumentsCollection();
   const reminders = useAiRemindersCollection();
   const jobTimeline = useJobTimelineCollection();
+  const diaries = useSiteDiariesCollection();
   const [message, setMessage] = useState("");
-  const stores = [customers, builders, jobs, documents, invoices, payments, profiles, interactions, leads, variations, certificates, jobDocuments, reminders, jobTimeline];
+  const stores = [customers, builders, jobs, documents, invoices, payments, profiles, interactions, leads, variations, certificates, jobDocuments, reminders, jobTimeline, diaries];
   const isReady = stores.every((store) => store.isReady);
 
   if (!isReady) return <Card>Loading customer CRM…</Card>;
@@ -121,6 +124,7 @@ export default function CustomerDetailPage() {
     leads: leads.items,
     documents: documents.items,
     jobs: jobs.items,
+    diaries: diaries.items,
     variations: variations.items,
     invoices: invoices.items,
     payments: payments.items,

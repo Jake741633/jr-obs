@@ -14,6 +14,7 @@ import type {
   PlannerEntry,
   PricingDocument,
   SalesLead,
+  SiteDiaryEntry,
 } from "./models";
 import type { ComplianceCertificate } from "./complianceCertificates";
 import { paymentEffect, type PaymentRecord } from "./payments";
@@ -52,6 +53,7 @@ export type CustomerTimelineKind =
   | "Quote"
   | "Estimate"
   | "Job"
+  | "Site diary"
   | "Variation"
   | "Invoice"
   | "Payment"
@@ -78,6 +80,7 @@ interface CustomerTimelineInput {
   leads: SalesLead[];
   documents: PricingDocument[];
   jobs: Job[];
+  diaries?: SiteDiaryEntry[];
   variations: JobVariation[];
   invoices: Invoice[];
   payments: PaymentRecord[];
@@ -175,6 +178,15 @@ export function buildCustomerTimeline(input: CustomerTimelineInput) {
     href: `/jobs/${job.id}`,
     status: job.status,
     value: job.value,
+  }));
+
+  (input.diaries ?? []).filter((entry) => jobIds.has(entry.jobId)).forEach((entry) => timeline.push({
+    id: `site-diary-${entry.id}`,
+    kind: "Site diary",
+    title: `Site diary · ${entry.workDate ? new Date(`${entry.workDate}T12:00:00`).toLocaleDateString("en-GB") : "Date not recorded"}`,
+    detail: [entry.workCompleted, entry.delays ? `Delay: ${entry.delays}` : "", entry.followUpActions ? `Follow-up: ${entry.followUpActions}` : ""].filter(Boolean).join(" · "),
+    occurredAt: recordDate(entry.updatedAt || entry.workDate || entry.createdAt),
+    href: `/jobs/${entry.jobId}`,
   }));
 
   input.variations.filter((variation) => jobIds.has(variation.jobId)).forEach((variation) => timeline.push({
