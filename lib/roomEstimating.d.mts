@@ -1,4 +1,4 @@
-import type { PriceBookItem } from "./priceBook-core.mjs";
+import type { PriceBookItem, PriceBookQuoteLine } from "./priceBook-core.mjs";
 
 export type ElectricalRoomTemplateKey =
   | "kitchen"
@@ -45,6 +45,7 @@ export interface RoomEstimateLine {
   quantity: number;
   description: string;
   unitLabel: string;
+  unitSellingPrice: number;
   sellingPrice: number;
   notes: string;
 }
@@ -75,14 +76,27 @@ export interface WholePropertyEstimateFinancials {
   rooms: RoomEstimateFinancials[];
 }
 
+export type RoomEstimateInput = Partial<RoomEstimate> & { points?: Array<Partial<RoomEstimatePoint>> };
+export type RoomEstimateIdFactory = (value: string) => string;
+
 export const electricalRoomTemplates: readonly ElectricalRoomTemplate[];
 
-export function normaliseRoomEstimate(room?: Partial<RoomEstimate> & { points?: Array<Partial<RoomEstimatePoint>> }): RoomEstimate;
+export function normaliseRoomEstimate(room?: RoomEstimateInput): RoomEstimate;
 export function roomEstimateFinancials(
-  room: Partial<RoomEstimate> & { points?: Array<Partial<RoomEstimatePoint>> },
+  room: RoomEstimateInput,
   priceBookItems?: PriceBookItem[],
 ): RoomEstimateFinancials;
+export function roomEstimateToQuoteLines(
+  room: RoomEstimateInput,
+  priceBookItems?: PriceBookItem[],
+  makeId?: RoomEstimateIdFactory,
+): PriceBookQuoteLine[];
 export function wholePropertyEstimateFinancials(
-  rooms: Array<Partial<RoomEstimate> & { points?: Array<Partial<RoomEstimatePoint>> }>,
+  rooms: RoomEstimateInput[],
   priceBookItems?: PriceBookItem[],
 ): WholePropertyEstimateFinancials;
+export function wholePropertyEstimateToQuoteLines(
+  rooms: RoomEstimateInput[],
+  priceBookItems?: PriceBookItem[],
+  makeId?: RoomEstimateIdFactory,
+): PriceBookQuoteLine[];
