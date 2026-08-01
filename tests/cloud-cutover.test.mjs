@@ -7,6 +7,7 @@ const page = await readFile(new URL("../app/cloud/cutover/page.tsx", import.meta
 const navigation = await readFile(new URL("../components/navigation.ts", import.meta.url), "utf8");
 const identityHook = await readFile(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
 const cloudSync = await readFile(new URL("../lib/cloudSync.ts", import.meta.url), "utf8");
+const repository = await readFile(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 
 test("cutover check reads Supabase directly while preserving local data", () => {
   assert.match(helper, /cloudSelect/);
@@ -31,6 +32,21 @@ test("cutover page refreshes and exposes the authenticated organisation", () => 
   assert.match(page, /runCloudCutoverCheck/);
   assert.match(page, /Check local against cloud/);
   assert.match(page, /Not ready for cloud mode/);
+});
+
+test("cutover page can retry the queue and immediately rerun readiness", () => {
+  assert.match(page, /repairPendingQueue/);
+  assert.match(page, /flushSyncQueue/);
+  assert.match(page, /Retry and clear pending changes/);
+  assert.match(page, /runCloudCutoverCheck\(identity\.organisationId\)/);
+});
+
+test("queue repair clears already-synchronised operations without rewriting cloud records", () => {
+  assert.match(repository, /samePayload\(current\.payload, item\.payload\)/);
+  assert.match(repository, /current && !current\.deleted_at/);
+  assert.match(repository, /item\.operation === "delete" && \(!current \|\| current\.deleted_at\)/);
+  assert.match(repository, /SyncQueueFlushResult/);
+  assert.match(repository, /getSyncQueue/);
 });
 
 test("shared identity reloads a persisted session and observes account changes", () => {
