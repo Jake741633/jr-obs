@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ButtonHTMLAttributes, ReactNode } from "react";
 
 interface MobileActionDockProps {
   children: ReactNode;
@@ -17,7 +17,7 @@ export function MobileActionDock({ children, summary, className = "" }: MobileAc
   );
 }
 
-export function MobileDockAction({ icon, label, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { icon: ReactNode; label: string }) {
+export function MobileDockAction({ icon, label, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & { icon: ReactNode; label: string }) {
   return (
     <button
       type="button"
