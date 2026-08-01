@@ -5,7 +5,6 @@ import type {
   Customer,
   CustomerInteraction,
   CustomerProfile,
-  ElectricalCertificate,
   Invoice,
   Job,
   JobDocument,
@@ -16,6 +15,7 @@ import type {
   PricingDocument,
   SalesLead,
 } from "./models";
+import type { ComplianceCertificate } from "./complianceCertificates";
 import { paymentEffect, type PaymentRecord } from "./payments";
 import {
   ageInDays,
@@ -81,7 +81,7 @@ interface CustomerTimelineInput {
   variations: JobVariation[];
   invoices: Invoice[];
   payments: PaymentRecord[];
-  certificates: ElectricalCertificate[];
+  certificates: ComplianceCertificate[];
   jobDocuments: JobDocument[];
   interactions: CustomerInteraction[];
   reminders: AiReminder[];

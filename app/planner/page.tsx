@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CalendarDays, CarFront, ChevronLeft, ChevronRight, Clock3, MapPin, Navigation, Phone, Plus, Users } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -10,7 +10,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { useCustomersCollection, useJobsCollection, usePlannerCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
-import type { Customer, FleetVehicle, Job, PlannerEntryType, TeamMember } from "../../lib/models";
+import type { FleetVehicle, Job, PlannerEntryType, TeamMember } from "../../lib/models";
 
 const types: PlannerEntryType[] = ["Job", "Survey", "Delivery", "Training", "Holiday", "Office", "Other"];
 const statuses: ScheduledPlannerEntry["status"][] = ["Planned", "Confirmed", "Complete", "Cancelled"];
@@ -18,7 +18,7 @@ const phases: VisitPhase[] = ["General", "First fix", "Second fix", "Maintenance
 const recurrences: RecurrenceFrequency[] = ["None", "Weekly", "Monthly"];
 const today = () => new Date().toISOString().slice(0, 10);
 const fieldClass = "min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm";
-const blankForm = { title: "", type: "Job" as PlannerEntryType, date: today(), endDate: today(), startTime: "08:00", endTime: "16:30", estimatedDurationMinutes: "510", jobId: "", teamMemberIds: [] as string[], vehicleId: "", visitPhase: "General" as VisitPhase, recurrence: "None" as RecurrenceFrequency, recurrenceCount: "1", location: "", notes: "", status: "Planned" as ScheduledPlannerEntry["status"] };
+const blankForm = { title: "", type: "Job" as PlannerEntryType, date: today(), endDate: today(), startTime: "08:00", endTime: "16:30", estimatedDurationMinutes: "510", customerId: "", jobId: "", teamMemberIds: [] as string[], vehicleId: "", visitPhase: "General" as VisitPhase, recurrence: "None" as RecurrenceFrequency, recurrenceCount: "1", location: "", notes: "", status: "Planned" as ScheduledPlannerEntry["status"] };
 
 function displayDate(value: string) { return new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }); }
 function shiftDate(value: string, amount: number, view: DiaryView) { const date = new Date(`${value}T12:00:00`); if (view === "month") date.setMonth(date.getMonth() + amount); else date.setDate(date.getDate() + amount * (view === "week" ? 7 : 1)); return date.toISOString().slice(0, 10); }
@@ -30,6 +30,7 @@ export default function PlannerPage() {
   const customers = useCustomersCollection();
   const team = useCloudLocalCollection<TeamMember>("jr-os-team");
   const vehicles = useCloudLocalCollection<FleetVehicle>("jr-os-fleet");
+  const deepLinkHandled = useRef(false);
   const [view, setView] = useState<DiaryView>("week");
   const [anchor, setAnchor] = useState(today());
   const [form, setForm] = useState(blankForm);
@@ -41,9 +42,41 @@ export default function PlannerPage() {
   const allocatedJobIds = useMemo(() => new Set(entries.items.filter((entry) => entry.status !== "Cancelled").map((entry) => entry.jobId).filter(Boolean)), [entries.items]);
   const unallocatedJobs = jobs.items.filter((job) => !allocatedJobIds.has(job.id) && job.status !== "Complete" && job.status !== "On hold");
 
+  useEffect(() => {
+    if (deepLinkHandled.current || !customers.isReady || !jobs.isReady) return;
+    const frame = window.requestAnimationFrame(() => {
+      const parameters = new URLSearchParams(window.location.search);
+      if (parameters.get("action") === "create") {
+        const customerId = parameters.get("customerId") || "";
+        const jobId = parameters.get("jobId") || "";
+        const requestedType = parameters.get("type");
+        const customer = customers.items.find((item) => item.id === customerId);
+        const job = jobs.items.find((item) => item.id === jobId);
+        const type = types.includes(requestedType as PlannerEntryType) ? requestedType as PlannerEntryType : "Job";
+        setForm({
+          ...blankForm,
+          type,
+          customerId: customer?.id || job?.customerId || "",
+          jobId: job?.id || "",
+          title: job?.title || (customer ? `${type} · ${customer.name}` : type),
+          location: job?.siteAddress || customer?.address || "",
+          date: job?.startDate || today(),
+          endDate: job?.targetCompletionDate || job?.startDate || today(),
+          visitPhase: type === "Survey" ? "Inspection" : "General",
+          estimatedDurationMinutes: type === "Survey" ? "90" : blankForm.estimatedDurationMinutes,
+        });
+        setShowForm(true);
+        setMessage(`${type} booking prepared${customer ? ` for ${customer.name}` : ""}. Choose the date and save.`);
+      }
+      deepLinkHandled.current = true;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [customers.isReady, customers.items, jobs.isReady, jobs.items]);
+
   function toggleMember(id: string) { setForm((current) => ({ ...current, teamMemberIds: current.teamMemberIds.includes(id) ? current.teamMemberIds.filter((value) => value !== id) : [...current.teamMemberIds, id] })); }
-  function selectJob(jobId: string) { const job = jobs.items.find((item) => item.id === jobId); setForm((current) => ({ ...current, jobId, title: current.title || job?.title || "", location: current.location || job?.siteAddress || "", date: current.date || job?.startDate || today(), endDate: current.endDate || job?.targetCompletionDate || current.date })); }
-  function addUnallocated(job: Job) { setForm({ ...blankForm, jobId: job.id, title: job.title, location: job.siteAddress, date: job.startDate || today(), endDate: job.targetCompletionDate || job.startDate || today() }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function selectCustomer(customerId: string) { const customer = customers.items.find((item) => item.id === customerId); setForm((current) => ({ ...current, customerId, title: current.title || (customer ? `${current.type} · ${customer.name}` : ""), location: current.location || customer?.address || "" })); }
+  function selectJob(jobId: string) { const job = jobs.items.find((item) => item.id === jobId); setForm((current) => ({ ...current, customerId: job?.customerId || current.customerId, jobId, title: current.title || job?.title || "", location: current.location || job?.siteAddress || "", date: current.date || job?.startDate || today(), endDate: current.endDate || job?.targetCompletionDate || current.date })); }
+  function addUnallocated(job: Job) { setForm({ ...blankForm, customerId: job.customerId || "", jobId: job.id, title: job.title, location: job.siteAddress, date: job.startDate || today(), endDate: job.targetCompletionDate || job.startDate || today() }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
   function saveEntry(event: FormEvent) {
     event.preventDefault();
@@ -54,7 +87,7 @@ export default function PlannerPage() {
     const durationDays = Math.max(0, Math.round((new Date(`${form.endDate}T12:00:00`).getTime() - new Date(`${form.date}T12:00:00`).getTime()) / 86400000));
     const records: ScheduledPlannerEntry[] = dates.map((date) => {
       const end = new Date(`${date}T12:00:00`); end.setDate(end.getDate() + durationDays);
-      return { id: makeId("planner"), title: form.title.trim(), type: form.type, date, endDate: end.toISOString().slice(0, 10), startTime: form.startTime, endTime: form.endTime, estimatedDurationMinutes: Math.max(0, Number(form.estimatedDurationMinutes || 0)), jobId: form.jobId || undefined, teamMemberIds: form.teamMemberIds, vehicleId: form.vehicleId || undefined, visitPhase: form.visitPhase, recurrence: form.recurrence, recurrenceCount: dates.length, recurrenceGroupId: groupId, location: form.location.trim(), notes: form.notes.trim(), status: form.status, createdAt: now, updatedAt: now };
+      return { id: makeId("planner"), title: form.title.trim(), type: form.type, date, endDate: end.toISOString().slice(0, 10), startTime: form.startTime, endTime: form.endTime, estimatedDurationMinutes: Math.max(0, Number(form.estimatedDurationMinutes || 0)), customerId: form.customerId || undefined, jobId: form.jobId || undefined, teamMemberIds: form.teamMemberIds, vehicleId: form.vehicleId || undefined, visitPhase: form.visitPhase, recurrence: form.recurrence, recurrenceCount: dates.length, recurrenceGroupId: groupId, location: form.location.trim(), notes: form.notes.trim(), status: form.status, createdAt: now, updatedAt: now };
     });
     entries.setItems((current) => [...current, ...records]);
     setForm(blankForm); setShowForm(false); setMessage(`${records.length} diary entr${records.length === 1 ? "y" : "ies"} saved. Any clashes remain visible below.`);
@@ -88,6 +121,7 @@ export default function PlannerPage() {
 
     {showForm ? <Card><form onSubmit={saveEntry} className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       <InputField required label="Entry title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
+      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Customer</span><select className={fieldClass} value={form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="">No linked customer</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select className={fieldClass} value={form.jobId} onChange={(event) => selectJob(event.target.value)}><option value="">Appointment only</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Entry type</span><select className={fieldClass} value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as PlannerEntryType })}>{types.map((type) => <option key={type}>{type}</option>)}</select></label>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Visit phase</span><select className={fieldClass} value={form.visitPhase} onChange={(event) => setForm({ ...form, visitPhase: event.target.value as VisitPhase })}>{phases.map((phase) => <option key={phase}>{phase}</option>)}</select></label>

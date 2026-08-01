@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { BriefcaseBusiness, Calculator, Clock3, Download, ExternalLink, Eye, FileText, LayoutTemplate, PackagePlus, Paperclip, Pencil, Plus, Save, Search, Sparkles, TrendingUp, Trash2 } from "lucide-react";
 import { MobileActionDock, MobileDockAction } from "../../components/mobile/MobileActionDock";
 import { FixedPriceWorkflowCard } from "../../components/quotes/FixedPriceWorkflowCard";
@@ -54,6 +54,7 @@ export default function QuotesPage() {
   const brandingStore = useCloudLocalCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
   const timeline = useCloudLocalCollection<JobTimelineEntry>("jr-os-job-timeline");
   const jobDocuments = useCloudLocalCollection<JobDocument>("jr-os-job-documents");
+  const deepLinkHandled = useRef(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedJobPackId, setSelectedJobPackId] = useState("");
@@ -79,6 +80,36 @@ export default function QuotesPage() {
   const businessProfile = profileStore.items[0] ?? defaultBusinessProfile;
   const vatSettings = vatStore.items[0] ?? defaultVatSettings;
   const branding = brandingStore.items[0] ?? defaultDocumentBranding;
+
+  useEffect(() => {
+    if (deepLinkHandled.current || !customers.isReady || !quoteSettingsStore.isReady || !paymentTermsTemplates.isReady || !vatStore.isReady) return;
+    const frame = window.requestAnimationFrame(() => {
+      const parameters = new URLSearchParams(window.location.search);
+      const customerId = parameters.get("customerId") || "";
+      if (parameters.get("action") === "create" && customerId) {
+        const customer = customers.items.find((item) => item.id === customerId);
+        if (customer) {
+          const savedPricing = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
+          const savedVat = vatStore.items[0] ?? defaultVatSettings;
+          const defaultPayment = paymentTermsTemplates.items.find((item) => item.active && item.isDefault)
+            ?? paymentTermsTemplates.items.find((item) => item.active);
+          setForm({ ...blankForm, customerId: customer.id, siteAddress: customer.address, vatEnabled: savedVat.registrationStatus === "VAT registered", vatRate: String(savedVat.defaultRate) });
+          setItems([]);
+          setPricing(savedPricing);
+          setLabour({ ...blankLabour, rateId: savedPricing.defaultLabourRateId ?? "" });
+          setPaymentTerms(defaultPayment ? paymentTermsFromTemplate(defaultPayment) : { type: "Due on completion" });
+          setFixedPriceWorkflow(blankFixedPriceWorkflow);
+          setAttachments([]);
+          setEditingId(null);
+          setError("");
+          setSuccess(`New quote prepared for ${customer.name}.`);
+          setShowForm(true);
+        }
+      }
+      deepLinkHandled.current = true;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [customers.isReady, customers.items, paymentTermsTemplates.isReady, paymentTermsTemplates.items, quoteSettingsStore.isReady, quoteSettingsStore.items, vatStore.isReady, vatStore.items]);
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),

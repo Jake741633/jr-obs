@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Plus, Search, Trash2 } from "lucide-react";
 import { InvoicePreview } from "../../components/invoices/InvoicePreview";
 import { Button } from "../../components/ui/Button";
@@ -46,6 +46,7 @@ export default function InvoicesPage() {
   const bankStore = useCloudLocalCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
   const brandingStore = useCloudLocalCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
   const paymentTermsStore = useCloudLocalCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
+  const deepLinkHandled = useRef(false);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [items, setItems] = useState<PricingLineItem[]>([]);
@@ -58,6 +59,44 @@ export default function InvoicesPage() {
   const branding = brandingStore.items[0] ?? defaultDocumentBranding;
   const ready = invoices.isReady && customers.isReady && builders.isReady && jobs.isReady && quotes.isReady && timeline.isReady
     && profileStore.isReady && vatStore.isReady && bankStore.isReady && brandingStore.isReady && paymentTermsStore.isReady;
+
+  useEffect(() => {
+    if (deepLinkHandled.current || !ready) return;
+    const frame = window.requestAnimationFrame(() => {
+      const parameters = new URLSearchParams(window.location.search);
+      const customerId = parameters.get("customerId") || "";
+      if (parameters.get("action") === "create" && customerId) {
+        const customer = customers.items.find((item) => item.id === customerId);
+        if (customer) {
+          const issueDate = new Date().toISOString().slice(0, 10);
+          const template = paymentTermsStore.items.find((item) => item.active && item.isDefault)
+            ?? paymentTermsStore.items.find((item) => item.active);
+          setForm({
+            ...blankForm,
+            title: `Electrical works for ${customer.name}`,
+            customerId: customer.id,
+            issueDate,
+            dueDate: addDays(issueDate, template?.dueDays ?? 0),
+            vatEnabled: vatSettings.registrationStatus === "VAT registered",
+            vatRate: String(vatSettings.defaultRate),
+            paymentTermsTemplateId: template?.id ?? "",
+            paymentTermsText: template ? paymentTermsText({ type: template.type, name: template.name, description: template.description, dueDays: template.dueDays, depositPercent: template.depositPercent, stages: template.stages }) : "Payment due on completion",
+            paymentDetails: bankDetailsText(bankDetails),
+          });
+          setItems([]);
+          setLine(blankLine);
+          setError("");
+          setShowForm(true);
+        }
+      } else {
+        const invoiceId = parameters.get("invoice") || "";
+        const invoice = invoices.items.find((item) => item.id === invoiceId);
+        if (invoice) setSearch(invoice.number);
+      }
+      deepLinkHandled.current = true;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [bankDetails, customers.items, invoices.items, paymentTermsStore.items, ready, vatSettings]);
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),

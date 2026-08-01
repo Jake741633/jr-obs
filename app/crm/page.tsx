@@ -1,18 +1,20 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { CalendarClock, MessageSquareText, Plus, Star, UsersRound } from "lucide-react";
+import Link from "next/link";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarClock, ExternalLink, MessageSquareText, Plus, Star, UsersRound } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { Customer, CustomerInteraction, CustomerInteractionType, CustomerProfile, CustomerTag, Invoice, Job } from "../../lib/models";
+import { useCustomerInteractionsCollection, useCustomerProfilesCollection, useCustomersCollection, useInvoicesCollection, useJobsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId } from "../../lib/storage";
+import type { CustomerInteraction, CustomerInteractionType, CustomerProfile, CustomerTag, Invoice } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const today = new Date().toISOString().slice(0, 10);
 const tags: CustomerTag[] = ["Domestic", "Landlord", "Commercial", "Builder", "Repeat customer", "VIP", "Maintenance", "Other"];
-const interactionTypes: CustomerInteractionType[] = ["Call", "Email", "WhatsApp", "Site visit", "Review request", "Note"];
+const interactionTypes: CustomerInteractionType[] = ["Call", "Text", "Email", "WhatsApp", "Site visit", "Review request", "Note"];
 
 function invoiceTotal(invoice: Invoice) {
   const net = invoice.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
@@ -20,17 +22,28 @@ function invoiceTotal(invoice: Invoice) {
 }
 
 export default function CrmPage() {
-  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
-  const profiles = useLocalStorageCollection<CustomerProfile>("jr-os-customer-profiles");
-  const interactions = useLocalStorageCollection<CustomerInteraction>("jr-os-customer-interactions");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
-  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const customers = useCustomersCollection();
+  const profiles = useCustomerProfilesCollection();
+  const interactions = useCustomerInteractionsCollection();
+  const jobs = useJobsCollection();
+  const invoices = useInvoicesCollection();
+  const deepLinkHandled = useRef(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [search, setSearch] = useState("");
   const [interactionType, setInteractionType] = useState<CustomerInteractionType>("Call");
   const [summary, setSummary] = useState("");
   const [outcome, setOutcome] = useState("");
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (deepLinkHandled.current || !customers.isReady) return;
+    const customerId = new URLSearchParams(window.location.search).get("customer") || "";
+    const frame = window.requestAnimationFrame(() => {
+      if (customerId && customers.items.some((customer) => customer.id === customerId)) setSelectedCustomerId(customerId);
+      deepLinkHandled.current = true;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [customers.isReady, customers.items]);
 
   const selectedCustomer = customers.items.find((customer) => customer.id === selectedCustomerId);
   const selectedProfile = profiles.items.find((profile) => profile.customerId === selectedCustomerId);
@@ -144,6 +157,8 @@ export default function CrmPage() {
               <label className="space-y-1 text-sm"><span>Preferred contact</span><select className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3" value={selectedProfile?.preferredContact || "Phone"} onChange={(event) => updateProfile({ preferredContact: event.target.value as CustomerProfile["preferredContact"] })}><option>Phone</option><option>Email</option><option>WhatsApp</option></select></label>
               <InputField label="Next follow-up" type="date" value={selectedProfile?.nextFollowUpDate || ""} onChange={(event) => updateProfile({ nextFollowUpDate: event.target.value })} />
               <InputField label="Follow-up reason" value={selectedProfile?.followUpReason || ""} onChange={(event) => updateProfile({ followUpReason: event.target.value })} />
+              <InputField label="Referral source" value={selectedProfile?.referralSource || ""} onChange={(event) => updateProfile({ referralSource: event.target.value })} placeholder="Google, builder, previous customer..." />
+              <InputField label="Builder relationship" value={selectedProfile?.builderRelationship || ""} onChange={(event) => updateProfile({ builderRelationship: event.target.value })} placeholder="Introduced by, contractor account..." />
               <label className="space-y-1 text-sm"><span>Review status</span><select className="w-full rounded-lg border border-slate-700 bg-slate-950 p-3" value={selectedProfile?.reviewStatus || "Not requested"} onChange={(event) => updateProfile({ reviewStatus: event.target.value as CustomerProfile["reviewStatus"] })}><option>Not requested</option><option>Requested</option><option>Received</option></select></label>
               <label className="flex items-center gap-3 rounded-lg border border-slate-800 p-3 text-sm"><input type="checkbox" checked={selectedProfile?.portalEnabled || false} onChange={(event) => updateProfile({ portalEnabled: event.target.checked })} />Customer portal enabled</label>
               <InputField label="Portal note" value={selectedProfile?.portalNote || ""} onChange={(event) => updateProfile({ portalNote: event.target.value })} placeholder="What the customer should see next" />
@@ -162,7 +177,7 @@ export default function CrmPage() {
           </Card>
 
           <Card>
-            <h3 className="text-lg font-semibold">Customer timeline</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-lg font-semibold">Recent contact</h3><Link href={`/customers/${selectedCustomer.id}`} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-semibold text-cyan-300"><ExternalLink className="size-4" />Full CRM timeline</Link></div>
             <div className="mt-4 space-y-3">
               {customerInteractions.map((interaction) => <div key={interaction.id} className="rounded-lg border border-slate-800 bg-slate-950 p-4"><div className="flex items-center justify-between gap-3"><p className="font-medium">{interaction.type}</p><p className="text-xs text-slate-500">{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(interaction.interactionAt))}</p></div><p className="mt-2 text-sm">{interaction.summary}</p>{interaction.outcome && <p className="mt-1 text-sm text-slate-400">Outcome: {interaction.outcome}</p>}</div>)}
               {customerInteractions.length === 0 && <p className="text-sm text-slate-400">No customer interactions recorded yet.</p>}
