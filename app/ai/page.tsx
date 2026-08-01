@@ -40,6 +40,7 @@ import {
   pricingDocumentTotal,
 } from "../../lib/workflow";
 import { useAiLearningMemory } from "../../lib/useAiLearningMemory";
+import { materialOrderLists, operationalHealthScore, outstandingCertificateJobs } from "../../lib/dashboardIntelligence";
 import type {
   AiReminder,
   AiReminderPriority,
@@ -181,6 +182,23 @@ export default function AiPage() {
     && document.items.some((item) => item.category === "Materials")
     && !purchaseLists.items.some((list) => list.pricingDocumentId === document.id),
   );
+  const outstandingCertificates = outstandingCertificateJobs(jobs.items, certificates.items);
+  const pendingMaterialLists = materialOrderLists(purchaseLists.items);
+  const operationalHealth = operationalHealthScore({
+    overdueInvoices: today.overdueInvoices.length,
+    quoteFollowUps: today.quoteFollowUps.length,
+    outstandingCertificates: outstandingCertificates.length,
+    materialItemsNeeded: pendingMaterialLists.reduce((sum, list) => sum + list.items.filter((item) => item.status === "Needed").length, 0),
+    urgentRecommendations: recommendations.filter((item) => item.severity === "Urgent" || item.severity === "Warning").length,
+  });
+  const todaySnapshot = {
+    ...today,
+    todaysSurveys: today.todaysPlanner.filter((entry) => entry.type === "Survey"),
+    materialsToOrder: pendingMaterialLists,
+    certificatesOutstanding: outstandingCertificates,
+    businessHealthScore: operationalHealth.score,
+    businessHealthLabel: operationalHealth.label,
+  };
 
   function addReminder(input: {
     title: string;
@@ -362,7 +380,7 @@ export default function AiPage() {
         </div>
       </section>
 
-      <TodaysAssistant snapshot={today} customers={customers.items} onAddReminder={addReminder} onToggleReminder={toggleReminder} />
+      <TodaysAssistant snapshot={todaySnapshot} customers={customers.items} onAddReminder={addReminder} onToggleReminder={toggleReminder} />
 
       <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
         <SmartRecommendations recommendations={recommendations} />

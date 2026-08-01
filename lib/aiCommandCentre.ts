@@ -10,7 +10,6 @@ import type {
   AiReminder,
   BusinessOverhead,
   CustomerProfile,
-  ElectricalCertificate,
   Invoice,
   Job,
   JobPack,
@@ -24,6 +23,7 @@ import type {
   QuotePricingSettings,
   QuoteTemplateType,
 } from "./models";
+import { outstandingCertificateJobs, type CertificateSignal } from "./dashboardIntelligence";
 
 export type AiRecommendationSeverity = "Urgent" | "Warning" | "Opportunity" | "Good";
 export type AiRecommendationKind = "Margin" | "Certificate" | "Invoice" | "Quote" | "Workflow" | "Reminder";
@@ -640,7 +640,7 @@ export function buildSmartRecommendations({
   jobs: Job[];
   documents: PricingDocument[];
   invoices: Invoice[];
-  certificates: ElectricalCertificate[];
+  certificates: CertificateSignal[];
   reminders?: AiReminder[];
   labourSettings: LabourCostSettings;
   now?: Date;
@@ -663,9 +663,7 @@ export function buildSmartRecommendations({
     });
   }
 
-  const completedWithoutCertificate = jobs.filter((job) =>
-    job.status === "Complete" && !certificates.some((certificate) => certificate.jobId === job.id && !["Draft", "Superseded"].includes(certificate.status)),
-  );
+  const completedWithoutCertificate = outstandingCertificateJobs(jobs, certificates);
   if (completedWithoutCertificate.length) {
     recommendations.push({
       id: "missing-certificates",
@@ -833,7 +831,7 @@ export function buildBusinessCoach({
   documents: PricingDocument[];
   invoices: Invoice[];
   jobs: Job[];
-  certificates: ElectricalCertificate[];
+  certificates: CertificateSignal[];
   reminders?: AiReminder[];
   labourSettings: LabourCostSettings;
   now?: Date;

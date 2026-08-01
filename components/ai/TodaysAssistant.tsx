@@ -8,15 +8,18 @@ import {
   CalendarDays,
   Check,
   CircleAlert,
+  CircleGauge,
+  ClipboardCheck,
   Clock3,
   FileText,
+  PackageOpen,
   Plus,
   ReceiptText,
   UserRound,
 } from "lucide-react";
 import { invoiceTotal } from "../../lib/workflow";
 import type { AiRecommendation } from "../../lib/aiCommandCentre";
-import type { AiReminder, AiReminderPriority, Customer, CustomerProfile, Invoice, Job, PlannerEntry, PricingDocument } from "../../lib/models";
+import type { AiReminder, AiReminderPriority, Customer, CustomerProfile, Invoice, Job, PlannerEntry, PricingDocument, PurchaseList } from "../../lib/models";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { InputField, TextareaField } from "../ui/FormField";
@@ -30,6 +33,11 @@ interface TodaySnapshot {
   dueReminders: AiReminder[];
   customerFollowUps: CustomerProfile[];
   urgentActions: AiRecommendation[];
+  todaysSurveys?: PlannerEntry[];
+  materialsToOrder?: PurchaseList[];
+  certificatesOutstanding?: Job[];
+  businessHealthScore?: number;
+  businessHealthLabel?: string;
 }
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -57,6 +65,8 @@ export function TodaysAssistant({
   });
   const customerNames = new Map(customers.map((customer) => [customer.id, customer.name]));
   const overdueValue = snapshot.overdueInvoices.reduce((sum, invoice) => sum + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
+  const materialItemsNeeded = snapshot.materialsToOrder?.reduce((sum, list) => sum + list.items.filter((item) => item.status === "Needed").length, 0) ?? 0;
+  const extendedOperations = snapshot.todaysSurveys !== undefined || snapshot.materialsToOrder !== undefined || snapshot.certificatesOutstanding !== undefined || snapshot.businessHealthScore !== undefined;
 
   function submitReminder(event: FormEvent) {
     event.preventDefault();
@@ -129,7 +139,7 @@ export function TodaysAssistant({
 
         <Card>
           <div className="flex items-center justify-between"><ReceiptText className="size-5 text-red-300" /><span className="text-lg font-bold text-red-300">{money.format(overdueValue)}</span></div>
-          <h3 className="mt-3 font-semibold">Overdue invoices</h3>
+          <h3 className="mt-3 font-semibold">Urgent invoices</h3>
           <div className="mt-3 space-y-2">
             {snapshot.overdueInvoices.slice(0, 4).map((invoice) => (
               <Link key={invoice.id} href="/invoices" className="flex items-center justify-between gap-3 rounded-lg bg-slate-950 px-3 py-2 text-sm hover:bg-slate-800">
@@ -166,7 +176,7 @@ export function TodaysAssistant({
               </button>
             ))}
             {snapshot.customerFollowUps.slice(0, 2).map((profile) => (
-              <Link key={profile.id} href="/crm" className="flex items-start gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm hover:bg-slate-800">
+              <Link key={profile.id} href="/crm/follow-ups" className="flex items-start gap-2 rounded-lg bg-slate-950 px-3 py-2 text-sm hover:bg-slate-800">
                 <UserRound className="mt-0.5 size-4 shrink-0 text-cyan-300" />
                 <span><span className="block font-medium">{customerNames.get(profile.customerId) || "Customer follow-up"}</span><span className="mt-1 block text-xs text-slate-500">{profile.followUpReason || "CRM follow-up due"}</span></span>
               </Link>
@@ -175,6 +185,32 @@ export function TodaysAssistant({
           </div>
         </Card>
       </div>
+
+      {extendedOperations ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <div className="flex items-center justify-between"><ClipboardCheck className="size-5 text-indigo-300" /><span className="text-2xl font-bold">{snapshot.todaysSurveys?.length ?? 0}</span></div>
+          <h3 className="mt-3 font-semibold">Today&apos;s surveys</h3>
+          <div className="mt-3 space-y-2">{snapshot.todaysSurveys?.slice(0, 4).map((survey) => <Link key={survey.id} href="/planner" className="block rounded-lg bg-slate-950 px-3 py-2 text-sm"><span className="block font-medium">{survey.startTime || "TBC"} · {survey.title}</span><span className="mt-1 block truncate text-xs text-slate-500">{survey.location || "No address"}</span></Link>)}{!snapshot.todaysSurveys?.length ? <p className="text-sm text-slate-500">No surveys booked today.</p> : null}</div>
+        </Card>
+        <Card>
+          <div className="flex items-center justify-between"><PackageOpen className="size-5 text-amber-300" /><span className="text-2xl font-bold">{materialItemsNeeded}</span></div>
+          <h3 className="mt-3 font-semibold">Materials to order</h3>
+          <div className="mt-3 space-y-2">{snapshot.materialsToOrder?.slice(0, 4).map((list) => <Link key={list.id} href="/purchases" className="block rounded-lg bg-slate-950 px-3 py-2 text-sm"><span className="block font-medium">{list.number} · {list.title}</span><span className="mt-1 block text-xs text-slate-500">{list.items.filter((item) => item.status === "Needed").length} item{list.items.filter((item) => item.status === "Needed").length === 1 ? "" : "s"} needed</span></Link>)}{!snapshot.materialsToOrder?.length ? <p className="text-sm text-slate-500">No material orders waiting.</p> : null}</div>
+        </Card>
+        <Card>
+          <div className="flex items-center justify-between"><ClipboardCheck className="size-5 text-rose-300" /><span className="text-2xl font-bold">{snapshot.certificatesOutstanding?.length ?? 0}</span></div>
+          <h3 className="mt-3 font-semibold">Certificates outstanding</h3>
+          <div className="mt-3 space-y-2">{snapshot.certificatesOutstanding?.slice(0, 4).map((job) => <Link key={job.id} href={`/jobs/${job.id}`} className="block rounded-lg bg-slate-950 px-3 py-2 text-sm"><span className="block font-medium">{job.title}</span><span className="mt-1 block truncate text-xs text-slate-500">Completed job · check certification</span></Link>)}{!snapshot.certificatesOutstanding?.length ? <p className="text-sm text-emerald-300">No completed jobs waiting.</p> : null}</div>
+        </Card>
+        <Link href="/business" className="block">
+          <Card className="h-full border-cyan-400/20">
+            <div className="flex items-center justify-between"><CircleGauge className="size-5 text-cyan-300" /><span className={`text-3xl font-black ${(snapshot.businessHealthScore ?? 100) >= 80 ? "text-emerald-300" : (snapshot.businessHealthScore ?? 100) >= 60 ? "text-amber-300" : "text-rose-300"}`}>{snapshot.businessHealthScore ?? 100}</span></div>
+            <h3 className="mt-3 font-semibold">Business health score</h3>
+            <p className="mt-2 text-sm text-slate-500">{snapshot.businessHealthLabel || "Operational health"}</p>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-400" style={{ width: `${snapshot.businessHealthScore ?? 100}%` }} /></div>
+          </Card>
+        </Link>
+      </div> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="border-cyan-400/20">
