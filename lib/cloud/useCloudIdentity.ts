@@ -2,7 +2,7 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { getCurrentCloudUser } from "../cloudSync";
-import { supabaseFetch } from "../supabase/client";
+import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { effectiveCloudMode } from "./config";
 import type { JrRole } from "./permissions";
 
@@ -41,12 +41,16 @@ function getServerSnapshot(): IdentitySnapshot {
   return { identity: null, isReady: effectiveCloudMode() === "local" };
 }
 
+function hasPersistedSession() {
+  return Boolean(readSupabaseSession()?.access_token);
+}
+
 async function loadIdentity(force = false) {
   if (effectiveCloudMode() === "local") {
     emit({ identity: null, isReady: true });
     return null;
   }
-  if (!force && snapshot.isReady) return snapshot.identity;
+  if (!force && snapshot.isReady && (snapshot.identity || !hasPersistedSession())) return snapshot.identity;
   if (!force && identityRequest) return identityRequest;
 
   identityRequest = (async () => {
@@ -73,9 +77,23 @@ async function loadIdentity(force = false) {
   }
 }
 
-function refreshIdentity() {
+export function refreshCloudIdentity() {
   emit({ identity: null, isReady: false });
-  void loadIdentity(true);
+  return loadIdentity(true);
+}
+
+function handleIdentityChange() {
+  void refreshCloudIdentity();
+}
+
+function handleStorageChange(event: StorageEvent) {
+  if (event.key === "jr-os-supabase-session") void refreshCloudIdentity();
+}
+
+function handleVisibilityChange() {
+  if (document.visibilityState === "visible" && hasPersistedSession() && !snapshot.identity) {
+    void refreshCloudIdentity();
+  }
 }
 
 export function useCloudIdentity() {
@@ -83,10 +101,16 @@ export function useCloudIdentity() {
   const current = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   useEffect(() => {
-    if (mode !== "local" && !current.isReady) void loadIdentity();
-    window.addEventListener("jr-os-cloud-identity-changed", refreshIdentity);
-    return () => window.removeEventListener("jr-os-cloud-identity-changed", refreshIdentity);
-  }, [current.isReady, mode]);
+    if (mode !== "local" && (!current.isReady || (!current.identity && hasPersistedSession()))) void loadIdentity();
+    window.addEventListener("jr-os-cloud-identity-changed", handleIdentityChange);
+    window.addEventListener("storage", handleStorageChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("jr-os-cloud-identity-changed", handleIdentityChange);
+      window.removeEventListener("storage", handleStorageChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [current.identity, current.isReady, mode]);
 
-  return { identity: current.identity, isReady: current.isReady, mode };
+  return { identity: current.identity, isReady: current.isReady, mode, refresh: refreshCloudIdentity };
 }
