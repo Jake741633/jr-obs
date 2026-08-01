@@ -91,7 +91,15 @@ export default function JobTasksPage() {
       const updated = transitionJobTask({ task, nextStatus, now });
       tasks.setItems((current) => current.map((item) => item.id === task.id ? updated : item));
       if (task.status !== nextStatus) {
-        timeline.setItems((current) => [jobTaskTimelineEntry({ task: updated, fromStatus: task.status, toStatus: nextStatus, timelineId: makeId("timeline"), completedBy: "JR OS", now }), ...current]);
+        const timelineEntry = jobTaskTimelineEntry({
+          task: updated,
+          fromStatus: task.status,
+          toStatus: nextStatus,
+          timelineId: makeId("timeline"),
+          completedBy: "JR OS",
+          now,
+        });
+        timeline.setItems((current) => [timelineEntry, ...current]);
       }
       setMessage(`${task.type} updated to ${nextStatus}.`);
     } catch (error) {
