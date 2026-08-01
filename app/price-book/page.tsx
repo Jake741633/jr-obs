@@ -14,7 +14,7 @@ import {
   type PriceBookPricingMethod,
   type PriceBookSector,
 } from "../../lib/priceBook-core.mjs";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { makeId, useCloudLocalCollection } from "../../lib/storage";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const sectors: PriceBookSector[] = ["Domestic", "Commercial", "Industrial"];
@@ -40,7 +40,7 @@ const blankForm = {
 };
 
 export default function PriceBookPage() {
-  const priceBook = useLocalStorageCollection<PriceBookItem>("jr-os-price-book");
+  const priceBook = useCloudLocalCollection<PriceBookItem>("jr-os-price-book");
   const [form, setForm] = useState(blankForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -216,8 +216,7 @@ export default function PriceBookPage() {
           </div>
         </Card>;
       })}
+      {!filtered.length ? <Card className="lg:col-span-2"><p className="text-sm text-slate-400">No electrical price-book items match this filter.</p></Card> : null}
     </section>
-
-    {!filtered.length ? <Card><p className="font-semibold">No matching price-book items</p><p className="mt-2 text-sm text-slate-400">Add your first fixed price for a socket, spotlight, consumer unit, test or any custom electrical point.</p></Card> : null}
   </div>;
 }
