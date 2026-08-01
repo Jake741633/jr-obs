@@ -26,6 +26,10 @@ const baseItem = {
   vatRate: 20,
 };
 
+function assertClose(actual, expected, tolerance = 1e-9) {
+  assert.ok(Math.abs(actual - expected) <= tolerance, `Expected ${actual} to be within ${tolerance} of ${expected}`);
+}
+
 test("normalises configurable price book profiles safely", () => {
   const profile = normalisePriceBookProfile({
     id: "profile-1",
@@ -80,8 +84,8 @@ test("applies a profile without mutating the source item", () => {
   assert.equal(profiled.labourCostRate, 35);
   assert.equal(profiled.materialMarkupPercent, 30);
   assert.equal(profiled.contingencyPercent, 8);
-  assert.equal(profiled.fixedSellingPrice, 115);
-  assert.equal(profiled.overheadAllowance, 7.5);
+  assertClose(profiled.fixedSellingPrice, 115);
+  assertClose(profiled.overheadAllowance, 7.5);
   assert.equal(profiled.pricingProfileId, "profile-2");
   assert.equal(profiled.pricingProfileName, "Commercial uplift");
 });
@@ -129,12 +133,12 @@ test("reports profile impact for preview before applying", () => {
   });
 
   assert.equal(impact.originalFixedSellingPrice, 100);
-  assert.equal(impact.adjustedFixedSellingPrice, 90);
-  assert.equal(impact.sellingPriceDifference, -10);
+  assertClose(impact.adjustedFixedSellingPrice, 90);
+  assertClose(impact.sellingPriceDifference, -10);
   assert.equal(impact.labourSellRate, 50);
   assert.equal(impact.labourCostRate, 28);
   assert.equal(impact.materialMarkupPercent, 15);
-  assert.equal(impact.overheadAllowance, 7);
+  assertClose(impact.overheadAllowance, 7);
   assert.equal(impact.contingencyPercent, 4);
   assert.equal(impact.vatRate, 20);
 });
