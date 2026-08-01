@@ -409,7 +409,7 @@ export function buildBuilderCrmIntelligence({
   const linkedLeads = leads.filter((lead) => lead.builderId === builderId);
   const terminal = new Set(["Lost", "Completed", "Cancelled"]);
   const upcomingProjects = linkedLeads.filter((lead) => !terminal.has(normaliseLeadStage(lead.stage))).toSorted((left, right) => (left.followUpDate || "9999").localeCompare(right.followUpDate || "9999"));
-  const referralOpportunities = linkedLeads.filter((lead) => lead.source === "Builder" && !["Completed", "Cancelled"].includes(normaliseLeadStage(lead.stage)));
+  const referralOpportunities = linkedLeads.filter((lead) => lead.source === "Builder" && !terminal.has(normaliseLeadStage(lead.stage)));
   const averagePaymentDays = paidDays.length ? paidDays.reduce((sum, days) => sum + days, 0) / paidDays.length : null;
   const overdueInvoices = linkedInvoices.filter((invoice) => invoice.dueDate && invoice.dueDate < new Date().toISOString().slice(0, 10) && paidAgainstInvoice(invoice, linkedPayments) < documentTotal(invoice));
 

@@ -8,14 +8,15 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
-import { makeId, useLocalStorageCollection } from "../../lib/storage";
-import type { Builder, Job } from "../../lib/models";
+import { useBuildersCollection, useJobsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { makeId } from "../../lib/storage";
+import type { Builder } from "../../lib/models";
 
 const blank = { companyName: "", contactName: "", email: "", phone: "", address: "", notes: "" };
 
 export default function BuildersPage() {
-  const { items, setItems, remove, isReady } = useLocalStorageCollection<Builder>("jr-os-builders");
-  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const { items, setItems, remove, isReady } = useBuildersCollection();
+  const jobs = useJobsCollection();
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
