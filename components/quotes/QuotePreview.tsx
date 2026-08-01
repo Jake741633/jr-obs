@@ -1,8 +1,16 @@
 "use client";
 
 import { defaultBusinessProfile, defaultDocumentBranding, defaultVatSettings, paymentTermsText } from "../../lib/businessSettings";
-import { defaultQuotePresentationSettings, visibleQuoteItems, type QuotePresentationSettings } from "../../lib/quotePresentation";
+import {
+  defaultQuotePresentationSettings,
+  presentationOverrideFor,
+  quotePresentationOverridesStorageKey,
+  visibleQuoteItems,
+  type QuotePresentationOverrideRecord,
+  type QuotePresentationSettings,
+} from "../../lib/quotePresentation";
 import { useQuotePresentationDefaults } from "../../lib/useQuotePresentationDefaults";
+import { useCloudLocalCollection } from "../../lib/storage";
 import type { Builder, BusinessProfile, Customer, DocumentBrandingSettings, PricingLineItem, QuotePaymentTerms, VatSettings } from "../../lib/models";
 import { BusinessDocumentFooter, BusinessDocumentHeader } from "../documents/BusinessDocumentHeader";
 
@@ -32,7 +40,9 @@ interface QuotePreviewProps {
 
 export function QuotePreview({ number, documentType, title, customer, builder, siteAddress, validUntil, items, notes, terms, paymentTerms, vatEnabled, vatRate, subtotal, businessProfile = defaultBusinessProfile, vatSettings = defaultVatSettings, branding = defaultDocumentBranding, presentation }: QuotePreviewProps) {
   const defaults = useQuotePresentationDefaults();
-  const effectivePresentation = presentation ?? defaults.settings ?? defaultQuotePresentationSettings;
+  const overrides = useCloudLocalCollection<QuotePresentationOverrideRecord>(quotePresentationOverridesStorageKey);
+  const savedOverride = presentationOverrideFor(overrides.items, number);
+  const effectivePresentation = presentation ?? savedOverride ?? defaults.settings ?? defaultQuotePresentationSettings;
   const recipient = customer?.name || builder?.companyName || "Customer name";
   const address = customer?.address || builder?.address || "Customer address";
   const vat = vatEnabled ? subtotal * vatRate / 100 : 0;
