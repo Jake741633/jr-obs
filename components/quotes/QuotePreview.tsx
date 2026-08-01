@@ -1,5 +1,8 @@
+"use client";
+
 import { defaultBusinessProfile, defaultDocumentBranding, defaultVatSettings, paymentTermsText } from "../../lib/businessSettings";
 import { defaultQuotePresentationSettings, visibleQuoteItems, type QuotePresentationSettings } from "../../lib/quotePresentation";
+import { useQuotePresentationDefaults } from "../../lib/useQuotePresentationDefaults";
 import type { Builder, BusinessProfile, Customer, DocumentBrandingSettings, PricingLineItem, QuotePaymentTerms, VatSettings } from "../../lib/models";
 import { BusinessDocumentFooter, BusinessDocumentHeader } from "../documents/BusinessDocumentHeader";
 
@@ -27,15 +30,17 @@ interface QuotePreviewProps {
   presentation?: QuotePresentationSettings;
 }
 
-export function QuotePreview({ number, documentType, title, customer, builder, siteAddress, validUntil, items, notes, terms, paymentTerms, vatEnabled, vatRate, subtotal, businessProfile = defaultBusinessProfile, vatSettings = defaultVatSettings, branding = defaultDocumentBranding, presentation = defaultQuotePresentationSettings }: QuotePreviewProps) {
+export function QuotePreview({ number, documentType, title, customer, builder, siteAddress, validUntil, items, notes, terms, paymentTerms, vatEnabled, vatRate, subtotal, businessProfile = defaultBusinessProfile, vatSettings = defaultVatSettings, branding = defaultDocumentBranding, presentation }: QuotePreviewProps) {
+  const defaults = useQuotePresentationDefaults();
+  const effectivePresentation = presentation ?? defaults.settings ?? defaultQuotePresentationSettings;
   const recipient = customer?.name || builder?.companyName || "Customer name";
   const address = customer?.address || builder?.address || "Customer address";
   const vat = vatEnabled ? subtotal * vatRate / 100 : 0;
-  const visibleItems = visibleQuoteItems(items, presentation);
+  const visibleItems = visibleQuoteItems(items, effectivePresentation);
   const grouped = sectionOrder
     .map((section) => ({ section, items: visibleItems.filter((item) => item.category === section) }))
     .filter((group) => group.items.length);
-  const fixedPrice = presentation.mode === "Fixed price";
+  const fixedPrice = effectivePresentation.mode === "Fixed price";
 
   return <div className="overflow-hidden rounded-2xl border border-slate-300 bg-white text-slate-900 shadow-2xl print:rounded-none print:border-0 print:shadow-none">
     <BusinessDocumentHeader documentLabel={documentType === "Quote" ? branding.quoteHeading : "Estimate"} number={number} profile={businessProfile} vat={vatSettings} branding={branding} />
@@ -48,14 +53,14 @@ export function QuotePreview({ number, documentType, title, customer, builder, s
       {fixedPrice ? <section className="rounded-xl border border-slate-200 bg-slate-50 p-5">
         <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Fixed price for the described works</p>
         <div className="mt-3 flex items-end justify-between gap-4"><span className="text-sm text-slate-600">Complete scope as described above</span><strong className="text-2xl">{money.format(subtotal + vat)}</strong></div>
-        {vatEnabled && presentation.showVatLine ? <p className="mt-2 text-right text-xs text-slate-500">Includes {money.format(vat)} VAT at {vatRate}%</p> : null}
+        {vatEnabled && effectivePresentation.showVatLine ? <p className="mt-2 text-right text-xs text-slate-500">Includes {money.format(vat)} VAT at {vatRate}%</p> : null}
       </section> : grouped.length ? grouped.map((group) => <section key={group.section}>
         <h3 className="border-b-2 pb-2 text-sm font-bold uppercase tracking-wider" style={{ borderColor: branding.primaryColour, color: branding.primaryColour }}>{group.section}</h3>
-        <div className="divide-y divide-slate-200">{group.items.map((item) => <div key={item.id} className="grid grid-cols-[1fr_auto] gap-4 py-3 text-sm"><div><p className="font-medium">{item.description}</p>{presentation.showQuantities || presentation.showUnitPrices ? <p className="mt-0.5 text-xs text-slate-500">{presentation.showQuantities ? `${item.quantity}` : ""}{presentation.showQuantities && presentation.showUnitPrices ? " × " : ""}{presentation.showUnitPrices ? money.format(item.unitPrice) : ""}</p> : null}</div><p className="font-semibold">{money.format(item.quantity * item.unitPrice)}</p></div>)}</div>
+        <div className="divide-y divide-slate-200">{group.items.map((item) => <div key={item.id} className="grid grid-cols-[1fr_auto] gap-4 py-3 text-sm"><div><p className="font-medium">{item.description}</p>{effectivePresentation.showQuantities || effectivePresentation.showUnitPrices ? <p className="mt-0.5 text-xs text-slate-500">{effectivePresentation.showQuantities ? `${item.quantity}` : ""}{effectivePresentation.showQuantities && effectivePresentation.showUnitPrices ? " × " : ""}{effectivePresentation.showUnitPrices ? money.format(item.unitPrice) : ""}</p> : null}</div><p className="font-semibold">{money.format(item.quantity * item.unitPrice)}</p></div>)}</div>
       </section>) : <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">The customer-facing breakdown is hidden. The fixed total remains visible below.</p>}
       {!fixedPrice ? <div className="ml-auto max-w-sm border-t-2 border-slate-900 pt-3">
-        {presentation.showSubtotal ? <div className="flex justify-between py-1 text-sm"><span>Subtotal</span><strong>{money.format(subtotal)}</strong></div> : null}
-        {vatEnabled && presentation.showVatLine ? <div className="flex justify-between py-1 text-sm"><span>VAT ({vatRate}%)</span><strong>{money.format(vat)}</strong></div> : null}
+        {effectivePresentation.showSubtotal ? <div className="flex justify-between py-1 text-sm"><span>Subtotal</span><strong>{money.format(subtotal)}</strong></div> : null}
+        {vatEnabled && effectivePresentation.showVatLine ? <div className="flex justify-between py-1 text-sm"><span>VAT ({vatRate}%)</span><strong>{money.format(vat)}</strong></div> : null}
         <div className="mt-2 flex justify-between border-t border-slate-300 pt-3 text-lg"><span>Total</span><strong>{money.format(subtotal + vat)}</strong></div>
       </div> : null}
     </div>
