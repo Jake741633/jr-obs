@@ -26,12 +26,34 @@ function updateCachedVersion(storageKey: string | undefined, sourceId: string, v
   write(key, versions);
 }
 
+function statusForQueue(queue: SyncQueueItem[]): SyncState {
+  if (!queue.length) return "Synced";
+  if (queue.some((item) => item.state === "Conflict")) return "Conflict";
+  if (queue.some((item) => item.state === "Failed")) return "Failed";
+  if (queue.some((item) => item.state === "Offline")) return "Offline";
+  return "Pending";
+}
+
 export const syncStatus = {
   get(): SyncState { return read<SyncState>(STATUS_KEY, navigator.onLine ? "Synced" : "Offline"); },
   set(value: SyncState) { write(STATUS_KEY, value); window.dispatchEvent(new CustomEvent("jr-os-sync-status", { detail: value })); },
 };
 
 export function getSyncQueue() { return read<SyncQueueItem[]>(QUEUE_KEY, []); }
+
+export function getOrganisationSyncQueue(organisationId: string) {
+  return getSyncQueue().filter((item) => item.organisationId === organisationId);
+}
+
+export function discardSyncQueueItem(itemId: string) {
+  const queue = getSyncQueue();
+  const item = queue.find((entry) => entry.id === itemId);
+  if (!item) return { removed: false, remaining: queue.length };
+  const next = queue.filter((entry) => entry.id !== itemId);
+  write(QUEUE_KEY, next);
+  syncStatus.set(statusForQueue(next));
+  return { removed: true, remaining: next.length, item };
+}
 
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "queuedAt" | "attempts" | "state">) {
   const queue = getSyncQueue();
@@ -98,7 +120,7 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
   write(QUEUE_KEY, remaining);
   const conflicts = remaining.filter((item) => item.state === "Conflict").length;
   const failed = remaining.filter((item) => item.state === "Failed").length;
-  syncStatus.set(conflicts ? "Conflict" : remaining.length ? "Failed" : "Synced");
+  syncStatus.set(statusForQueue(remaining));
   return { processed: queue.length, cleared, remaining: remaining.length, conflicts, failed };
 }
 
