@@ -16,7 +16,7 @@ function loadPermissions(operatorEmails = "operator@example.com") {
 
   vm.runInNewContext(output, {
     exports: commonJsModule.exports,
-    module: commonJsModule,
+    "module": commonJsModule,
     process: {
       env: {
         NEXT_PUBLIC_JR_OS_OPERATOR_EMAILS: operatorEmails,
