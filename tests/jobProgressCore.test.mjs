@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  jobHandoverReadiness,
   jobProgressWarnings,
   normaliseJobProgress,
   suggestJobProgress,
@@ -56,4 +57,59 @@ test("progress warnings identify only incomplete handover areas", () => {
     "Required certificates may still be outstanding.",
     "The contract is not fully paid.",
   ]);
+});
+
+test("handover readiness blocks completion for every unresolved operational area", () => {
+  const readiness = jobHandoverReadiness({
+    progress: { testing: 75, certificates: 0, materials: 60 },
+    outstandingTasks: 2,
+    outstandingSnags: 1,
+    failedQa: 1,
+    pendingQa: 3,
+    requiredDocumentsMissing: 2,
+  });
+
+  assert.equal(readiness.ready, false);
+  assert.equal(readiness.status, "Handover blocked");
+  assert.equal(readiness.blockerCount, 8);
+  assert.deepEqual(readiness.blockers, [
+    "Complete and record final testing.",
+    "Issue all required certificates.",
+    "Confirm final materials and returns.",
+    "Complete all outstanding job tasks.",
+    "Close all outstanding snags.",
+    "Resolve all failed QA inspections.",
+    "Complete all pending QA inspections.",
+    "Attach all required handover documents.",
+  ]);
+});
+
+test("handover readiness passes only when operational evidence is complete", () => {
+  assert.deepEqual(jobHandoverReadiness({
+    progress: { testing: 100, certificates: 100, materials: 100 },
+    outstandingTasks: 0,
+    outstandingSnags: 0,
+    failedQa: 0,
+    pendingQa: 0,
+    requiredDocumentsMissing: 0,
+  }), {
+    ready: true,
+    status: "Ready for handover",
+    blockers: [],
+    blockerCount: 0,
+  });
+});
+
+test("handover readiness normalises malformed outstanding counts without inventing blockers", () => {
+  const readiness = jobHandoverReadiness({
+    progress: { testing: 100, certificates: 100, materials: 100 },
+    outstandingTasks: -2,
+    outstandingSnags: "invalid",
+    failedQa: Number.NaN,
+    pendingQa: null,
+    requiredDocumentsMissing: undefined,
+  });
+
+  assert.equal(readiness.ready, true);
+  assert.equal(readiness.blockerCount, 0);
 });
