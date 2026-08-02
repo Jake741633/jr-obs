@@ -24,6 +24,6 @@ test("genuine unresolved conflicts still take priority over other queued states"
 
 test("queue mutations continue recalculating and publishing active-organisation sync state", () => {
   assert.match(repositorySource, /syncStatus\.set\(statusForQueue\(activeRemaining\)\);/);
-  assert.match(repositorySource, /syncStatus\.set\(statusForQueue\(remaining\)\);/);
+  assert.match(repositorySource, /if \(activeOrganisationId\(\) === organisationId\) syncStatus\.set\(statusForQueue\(activeRemaining\)\);/);
   assert.match(repositorySource, /window\.dispatchEvent\(new CustomEvent\("jr-os-sync-status", \{ detail: value \}\)\);/);
 });
