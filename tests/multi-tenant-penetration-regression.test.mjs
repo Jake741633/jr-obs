@@ -10,6 +10,7 @@ const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import
 const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf8");
 const portal = readFileSync(new URL("../app/customer-portal/page.tsx", import.meta.url), "utf8");
 const guard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
+const client = readFileSync(new URL("../lib/cloud/client.ts", import.meta.url), "utf8");
 
 test("record enumeration cannot remove the organisation filter", () => {
   assert.match(adapter, /cloudSelect<CloudEnvelope<T>>\(table, `select=\*&organisation_id=eq\.\$\{organisationId\}\$\{collectionFilter\}&deleted_at=is\.null`\)/);
@@ -73,4 +74,13 @@ test("tenant-sensitive state is invalidated across identity and workspace change
   assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
   assert.match(guard, /<Fragment key=\{identity\.organisationId\}>/);
   assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
+});
+
+test("forged or expired browser sessions cannot reach cloud requests", () => {
+  assert.match(client, /if \(session\.expiresAt <= Date\.now\(\)\) \{/);
+  assert.match(client, /window\.localStorage\.removeItem\(SESSION_KEY\);\s*return null;/s);
+  assert.match(client, /catch \{\s*window\.localStorage\.removeItem\(SESSION_KEY\);\s*return null;\s*\}/s);
+  assert.match(client, /cloudSelect[\s\S]*cloudSession\.load\(\) \|\| undefined/);
+  assert.match(client, /createSignedUpload[\s\S]*cloudSession\.load\(\) \|\| undefined/);
+  assert.match(client, /createSignedDownload[\s\S]*cloudSession\.load\(\) \|\| undefined/);
 });
