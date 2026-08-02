@@ -10,6 +10,10 @@ import { electricalLoadSummary } from "../../lib/electricalCalculators-core.mjs"
 import { voltageDropSummary } from "../../lib/voltageDropCalculator-core.mjs";
 
 type Phase = "Single phase" | "Three phase";
+type CableOption = {
+  sizeMm2: number;
+  tabulatedCurrentAmps: number;
+};
 
 const number = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
 
@@ -46,17 +50,19 @@ export default function ElectricalCalculatorsPage() {
     maximumPercent: Number(maximumPercent),
   }), [maximumPercent, millivoltsPerAmpMetre, phase, result.currentAmps, routeLength, voltage]);
 
+  const cableOptions = useMemo<CableOption[]>(() => [{
+    sizeMm2: Number(cableSizeMm2),
+    tabulatedCurrentAmps: Number(tabulatedCurrentAmps),
+  }], [cableSizeMm2, tabulatedCurrentAmps]);
+
   const cableSizing = useMemo(() => cableSizingSummary({
     designCurrentAmps: result.currentAmps,
     ambientTemperatureFactor: Number(ambientTemperatureFactor),
     groupingFactor: Number(groupingFactor),
     insulationFactor: Number(insulationFactor),
     otherFactor: Number(otherFactor),
-    cableOptions: [{
-      sizeMm2: Number(cableSizeMm2),
-      tabulatedCurrentAmps: Number(tabulatedCurrentAmps),
-    }],
-  }), [ambientTemperatureFactor, cableSizeMm2, groupingFactor, insulationFactor, otherFactor, result.currentAmps, tabulatedCurrentAmps]);
+    cableOptions,
+  }), [ambientTemperatureFactor, cableOptions, groupingFactor, insulationFactor, otherFactor, result.currentAmps]);
 
   function selectPhase(nextPhase: Phase) {
     setPhase(nextPhase);
