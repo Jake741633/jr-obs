@@ -112,6 +112,24 @@ export default function CableSizingPage() {
     setLoadedConductors(next === "Three phase" ? "3" : "2");
   }
 
+  function resetForm() {
+    setPhase("Single phase");
+    setDesignCurrentAmps("20");
+    setInstallationMethod("Reference method C");
+    setCableMaterial("Copper");
+    setInsulationType("PVC 70°C");
+    setLoadedConductors("2");
+    setAmbientTemperature("30");
+    setAmbientFactor("1");
+    setGroupingFactor("1");
+    setCableLength("20");
+    setVoltage("230");
+    setMillivoltsPerAmpMetre("18");
+    setCableSizeMm2("2.5");
+    setTabulatedCurrentAmps("27");
+    setProtectiveDeviceAmps("20");
+  }
+
   function saveCalculation() {
     const next: RecentCalculation = {
       id: `${Date.now()}`,
@@ -173,7 +191,10 @@ export default function CableSizingPage() {
 
       <div className="grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
         <Card>
-          <div className="flex items-center gap-3"><Cable className="size-6 text-cyan-300" /><div><h2 className="font-semibold">User-entered design data</h2><p className="text-sm text-slate-500">Use values verified for the actual installation.</p></div></div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3"><Cable className="size-6 text-cyan-300" /><div><h2 className="font-semibold">User-entered design data</h2><p className="text-sm text-slate-500">Use values verified for the actual installation.</p></div></div>
+            <button type="button" onClick={resetForm} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 px-3 font-semibold text-slate-200"><RotateCcw className="size-4" />Reset defaults</button>
+          </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="grid gap-2 text-sm font-medium text-slate-300 sm:col-span-2"><span>Supply phase</span><span className="grid grid-cols-2 gap-2">{(["Single phase", "Three phase"] as const).map((option) => <button key={option} type="button" onClick={() => selectPhase(option)} className={`min-h-12 rounded-xl border px-3 font-semibold ${phase === option ? "border-cyan-400 bg-cyan-400/10 text-cyan-100" : "border-slate-700 bg-slate-950 text-slate-300"}`}>{option}</button>)}</span></label>
             <InputField label="Design current Ib (A)" type="number" inputMode="decimal" min="0" step="0.1" value={designCurrentAmps} onChange={(event) => setDesignCurrentAmps(event.target.value)} />
