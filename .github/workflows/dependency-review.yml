@@ -1,0 +1,19 @@
+name: JR OS Dependency Review
+
+on:
+  pull_request:
+    branches: [main, jr-os-v2]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Review dependency changes
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: always
