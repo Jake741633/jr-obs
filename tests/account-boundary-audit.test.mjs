@@ -8,6 +8,7 @@ const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url)
 const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf8");
 const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
+const aiPage = readFileSync(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
 
 test("account changes preserve browser-resident business records", () => {
   assert.match(cloudSync, /export function clearLocalJrOsAccountData\(\)\s*\{\s*return 0;\s*\}/);
@@ -60,4 +61,10 @@ test("suspended profiles cannot resolve an application identity or expose cached
   assert.match(identity, /active=eq\.true/);
   assert.match(identity, /select=organisation_id,role,customer_source_id,active/);
   assert.match(identity, /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) return null;/);
+});
+
+test("AI-created CRM interactions attribute the signed-in user instead of Jake", () => {
+  assert.match(aiPage, /useCloudIdentity\(\)/);
+  assert.match(aiPage, /completedBy: identity\?\.email \?\? "JR OS user"/);
+  assert.doesNotMatch(aiPage, /completedBy: "Jake"/);
 });

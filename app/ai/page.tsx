@@ -34,6 +34,7 @@ import {
   defaultPaymentTermsTemplates,
 } from "../../lib/businessSettings";
 import { useJobVariationsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../lib/jobManagement-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import {
@@ -78,6 +79,7 @@ const defaultLabourSettings: LabourCostSettings = {
 };
 
 export default function AiPage() {
+  const { identity } = useCloudIdentity();
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
@@ -338,7 +340,7 @@ export default function AiPage() {
       type: interactionType,
       summary: `Contact action opened for ${customer.name} from the AI Action Centre.`,
       outcome: "Outcome not yet recorded",
-      completedBy: "Jake",
+      completedBy: identity?.email ?? "JR OS user",
       interactionAt: now,
       createdAt: now,
     }, ...current]);
@@ -353,87 +355,43 @@ export default function AiPage() {
       ? "text-amber-300"
       : "text-red-300";
 
-  return (
-    <main className="space-y-8">
-      <PageHeader
-        eyebrow="JR AI"
-        title="AI Command Centre"
-        description="Turn the records already saved in JR OS into today’s priorities, draft quotes, material suggestions, safer pricing decisions and one-click workflow actions."
-        action={<Link href="/business" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800">Business Management <ArrowRight className="size-4" /></Link>}
-      />
-
-      {message ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
-
-      <AiToolNav />
-
-      <Link href="/ai/learning">
-        <Card className="border-cyan-400/20 transition hover:border-cyan-400/40">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-4">
-              <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-cyan-400/10 text-cyan-300"><Database className="size-5" /></span>
-              <div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">AI Learning Engine</p><h2 className="mt-1 text-lg font-bold">Memory confidence {learning.memory.confidence.overall}% · {learning.memory.confidence.level}</h2><p className="mt-1 text-sm text-slate-500">{learning.memory.completedJobs} completed jobs, {learning.memory.acceptedQuotes} accepted quotes, {learning.memory.paidInvoices} paid invoices and {learning.memory.materialSignals} material signals learned.</p></div>
-            </div>
-            <span className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-300">Open learning evidence <ArrowRight className="size-4" /></span>
-          </div>
-        </Card>
-      </Link>
-
-      <section className="grid gap-4 lg:grid-cols-[0.8fr_3.2fr]">
-        <Card className="border-cyan-400/30">
-          <div className="flex items-center justify-between"><Brain className="size-9 text-cyan-300" /><Sparkles className="size-5 text-cyan-400" /></div>
-          <p className="mt-5 text-sm text-slate-400">Operational readiness</p>
-          <p className={`mt-2 text-5xl font-black ${scoreTone}`}>{operations.readinessScore}</p>
-          <p className="mt-1 text-sm text-slate-500">out of 100</p>
-          <p className="mt-4 text-sm text-slate-400">A workflow guide based on overdue debt, incomplete records and open actions—not financial or technical approval.</p>
-        </Card>
-
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Card><BriefcaseBusiness className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Live workload</p><p className="mt-2 text-2xl font-bold">{operations.activeJobs.length}</p><p className="mt-1 text-xs text-slate-500">{today.todaysJobs.length} starting today</p></Card>
-          <Card><FileText className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Quote pipeline</p><p className="mt-2 text-2xl font-bold">{money.format(operations.quotePipeline)}</p><p className="mt-1 text-xs text-slate-500">{operations.openQuotes.length} open quotes</p></Card>
-          <Card><ReceiptText className="size-5 text-red-300" /><p className="mt-3 text-sm text-slate-400">Overdue</p><p className="mt-2 text-2xl font-bold">{money.format(operations.overdueValue)}</p><p className="mt-1 text-xs text-slate-500">{today.overdueInvoices.length} invoices</p></Card>
-          <Card><ClipboardCheck className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Survey queue</p><p className="mt-2 text-2xl font-bold">{operations.incompleteSurveys.length}</p><p className="mt-1 text-xs text-slate-500">draft or in progress</p></Card>
-        </div>
-      </section>
-
-      <TodaysAssistant snapshot={todaySnapshot} customers={customers.items} onAddReminder={addReminder} onToggleReminder={toggleReminder} />
-
-      <SiteDiaryAttentionPanel />
-
-      <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <SmartRecommendations recommendations={recommendations} />
-        <Card>
-          <div className="flex items-center justify-between gap-3">
-            <div><p className="text-xs font-semibold uppercase tracking-wider text-fuchsia-300">Business Coach</p><h2 className="mt-1 text-xl font-bold">Current business signals</h2></div>
-            <Link href="/ai/business-coach" className="text-cyan-300"><ArrowRight className="size-5" /></Link>
-          </div>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl bg-slate-950 p-4"><TrendingUp className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Monthly revenue</p><p className="mt-1 text-xl font-bold">{money.format(coach.monthlyRevenue)}</p></div>
-            <div className="rounded-xl bg-slate-950 p-4"><Percent className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Quote conversion</p><p className="mt-1 text-xl font-bold">{coach.quoteConversion.toFixed(1)}%</p></div>
-            <div className="rounded-xl bg-slate-950 p-4"><PoundSterling className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Unpaid value</p><p className="mt-1 text-xl font-bold">{money.format(coach.unpaidInvoiceValue)}</p></div>
-            <div className="rounded-xl bg-slate-950 p-4"><Brain className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Average net margin</p><p className={`mt-1 text-xl font-bold ${coach.averageNetMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}`}>{coach.averageNetMargin.toFixed(1)}%</p></div>
-          </div>
-        </Card>
-      </section>
-
-      <AiActionCentre
-        acceptedQuotes={acceptedQuotes}
-        completedJobs={completedJobs}
-        orderDocuments={orderDocuments}
-        customers={customers.items}
-        profiles={profiles.items}
-        onConvertQuote={convertQuote}
-        onGenerateInvoice={generateInvoice}
-        onOrderMaterials={orderMaterials}
-        onContactCustomer={contactCustomer}
-      />
-
-      <Card>
-        <div className="grid gap-4 md:grid-cols-3">
-          <div><CheckCircle2 className="size-5 text-emerald-300" /><h2 className="mt-3 font-semibold">Local-first intelligence</h2><p className="mt-1 text-sm text-slate-500">Recommendations update when JR OS records change and use the existing backup-compatible storage pattern.</p></div>
-          <div><CheckCircle2 className="size-5 text-emerald-300" /><h2 className="mt-3 font-semibold">Human approval stays required</h2><p className="mt-1 text-sm text-slate-500">Draft pricing, quantities, certification and supplier orders must be reviewed before use.</p></div>
-          <div><CheckCircle2 className="size-5 text-emerald-300" /><h2 className="mt-3 font-semibold">Existing AI tools preserved</h2><div className="mt-2 flex flex-wrap gap-2 text-sm"><Link className="text-cyan-300" href="/ai/daily-briefing">Daily briefing</Link><Link className="text-cyan-300" href="/ai/quote-review">Quote review</Link><Link className="text-cyan-300" href="/ai/job-review">Job review</Link></div></div>
-        </div>
-      </Card>
-    </main>
-  );
+  return <main className="space-y-8">
+    <PageHeader eyebrow="JR AI" title="AI Command Centre" description="Today’s jobs, overdue invoices, quote follow-ups, smart recommendations and safe operational actions." />
+    {message ? <Card className="border-cyan-500/30 bg-cyan-500/5 text-sm text-cyan-100">{message}</Card> : null}
+    <AiToolNav />
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <Card><BriefcaseBusiness className="size-6 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Active jobs</p><p className="mt-1 text-3xl font-black">{operations.activeJobs.length}</p></Card>
+      <Card><FileText className="size-6 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Open quote pipeline</p><p className="mt-1 text-3xl font-black">{money.format(operations.quotePipeline)}</p></Card>
+      <Card><PoundSterling className="size-6 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Overdue cash</p><p className="mt-1 text-3xl font-black">{money.format(operations.overdueValue)}</p></Card>
+      <Card><CheckCircle2 className={`size-6 ${scoreTone}`} /><p className="mt-3 text-sm text-slate-400">Operational readiness</p><p className={`mt-1 text-3xl font-black ${scoreTone}`}>{operations.readinessScore}%</p></Card>
+    </div>
+    <TodaysAssistant snapshot={todaySnapshot} onAddReminder={addReminder} onToggleReminder={toggleReminder} />
+    <SiteDiaryAttentionPanel />
+    <AiActionCentre
+      acceptedQuotes={acceptedQuotes}
+      completedJobs={completedJobs}
+      orderDocuments={orderDocuments}
+      followUps={today.followUps}
+      onConvertQuote={convertQuote}
+      onGenerateInvoice={generateInvoice}
+      onOrderMaterials={orderMaterials}
+      onContactCustomer={contactCustomer}
+    />
+    <SmartRecommendations recommendations={recommendations} />
+    <div className="grid gap-4 lg:grid-cols-3">
+      <Card><Brain className="size-6 text-fuchsia-300" /><h2 className="mt-3 text-xl font-bold">AI learning memory</h2><p className="mt-2 text-sm text-slate-400">{learning.memory.completedJobs} completed jobs, {learning.memory.acceptedQuotes} accepted quotes and {learning.memory.paidInvoices} paid invoices currently influence recommendations.</p><Link href="/ai/learning" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-300">Review memory <ArrowRight className="size-4" /></Link></Card>
+      <Card><TrendingUp className="size-6 text-emerald-300" /><h2 className="mt-3 text-xl font-bold">Business coach</h2><p className="mt-2 text-sm text-slate-400">{coach[0]?.detail ?? "More completed work will improve coaching recommendations."}</p><Link href="/ai/business-coach" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-300">Open coach <ArrowRight className="size-4" /></Link></Card>
+      <Card><Database className="size-6 text-cyan-300" /><h2 className="mt-3 text-xl font-bold">Evidence and confidence</h2><p className="mt-2 text-sm text-slate-400">Recommendations are linked to actual records and scored against labour, material and pricing evidence.</p><Link href="/ai/learning" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-300">Inspect evidence <ArrowRight className="size-4" /></Link></Card>
+    </div>
+    <div className="grid gap-4 lg:grid-cols-3">
+      <Link href="/ai/quote-builder"><Card className="h-full"><Sparkles className="size-6 text-cyan-300" /><h2 className="mt-3 text-xl font-bold">Build quote from notes</h2><p className="mt-2 text-sm text-slate-400">Turn a typed or voice transcript into an editable pricing draft.</p></Card></Link>
+      <Link href="/ai/quote-review"><Card className="h-full"><Percent className="size-6 text-amber-300" /><h2 className="mt-3 text-xl font-bold">Review quote margin</h2><p className="mt-2 text-sm text-slate-400">Check risk, exclusions and expected profit before sending.</p></Card></Link>
+      <Link href="/ai/job-review"><Card className="h-full"><ClipboardCheck className="size-6 text-emerald-300" /><h2 className="mt-3 text-xl font-bold">Review live job</h2><p className="mt-2 text-sm text-slate-400">Check progress, variations, materials and completion risks.</p></Card></Link>
+    </div>
+    <div className="grid gap-4 lg:grid-cols-3">
+      <Card><ReceiptText className="size-6 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Quotes ready to become jobs</p><p className="mt-1 text-3xl font-black">{acceptedQuotes.length}</p></Card>
+      <Card><CheckCircle2 className="size-6 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Completed jobs awaiting invoice</p><p className="mt-1 text-3xl font-black">{completedJobs.length}</p></Card>
+      <Card><Database className="size-6 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Material orders ready</p><p className="mt-1 text-3xl font-black">{orderDocuments.length}</p></Card>
+    </div>
+  </main>;
 }
