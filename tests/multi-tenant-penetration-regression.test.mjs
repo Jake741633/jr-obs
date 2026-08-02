@@ -1,0 +1,76 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url), "utf8");
+const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
+const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
+const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf8");
+const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
+const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf8");
+const portal = readFileSync(new URL("../app/customer-portal/page.tsx", import.meta.url), "utf8");
+const guard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
+
+test("record enumeration cannot remove the encoded organisation filter", () => {
+  assert.match(adapter, /organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}/);
+  assert.match(adapter, /source_id=eq\.\$\{encodeURIComponent\(sourceId\)\}/);
+  assert.match(adapter, /organisation_id: organisationId/);
+  assert.match(adapter, /organisationId,/);
+});
+
+test("browser cache tampering cannot alias two organisations or customer accounts", () => {
+  assert.match(adapter, /return `\$\{storageKey\}:organisation:\$\{organisationId\}`/);
+  assert.match(adapter, /:account:\$\{encodeURIComponent\(userId\)\}/);
+  assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId\)/);
+  assert.match(storage, /identity\?\.role === "customer" \? userId : undefined/);
+  assert.doesNotMatch(storage, /localStorage\.setItem\(key, JSON\.stringify\(items\)\)/);
+});
+
+test("offline queue replay cannot process another organisation after a switch", () => {
+  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId\)/);
+  assert.match(repository, /if \(activeOrganisationId\(\) !== organisationId\)/);
+  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| !originalIds\.has\(item\.id\)\)/);
+  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId/);
+  assert.doesNotMatch(repository, /readAllSyncQueue\(\)\.forEach/);
+});
+
+test("stale identity responses cannot restore an earlier tenant", () => {
+  assert.match(identity, /let identityRequestVersion = 0/);
+  assert.match(identity, /const requestVersion = \+\+identityRequestVersion/);
+  assert.match(identity, /requestVersion === identityRequestVersion/);
+  assert.match(identity, /identityRequestVersion \+= 1/);
+  assert.match(guard, /key=\{identity\.organisationId\}/);
+});
+
+test("backup payloads cannot inject another tenant or internal sync state", () => {
+  assert.match(appData, /parsed\.organisationId !== organisationId/);
+  assert.match(appData, /This backup belongs to a different JR OS organisation/);
+  assert.match(appData, /key\.includes\(ORGANISATION_MARKER\)/);
+  assert.match(appData, /excludedBackupKeys/);
+  assert.match(appData, /jr-os-cloud-sync-queue/);
+  assert.match(appData, /organisationStorageKey\(key, organisationId\)/);
+});
+
+test("private file path and signed URL tampering fail organisation checks", () => {
+  assert.match(privateFiles, /isOrganisationPrivateObjectPath/);
+  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
+  assert.match(privateFiles, /The private file does not belong to the active organisation/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
+  assert.match(privateFiles, /encodeURIComponent\(organisationId\).*encodeURIComponent\(sourceId\)/s);
+});
+
+test("customer sessions cannot select or mutate another customer record", () => {
+  assert.match(portal, /identity\?\.role === "customer"/);
+  assert.match(portal, /identity\.customerSourceId/);
+  assert.match(portal, /const activeCustomerId = customerSession \? authenticatedCustomerId : selectedCustomerId/);
+  assert.match(portal, /!customerPricing\.some\(\(item\) => item\.id === document\.id\)/);
+  assert.match(portal, /requestJobId && !jobIds\.has\(requestJobId\)/);
+  assert.doesNotMatch(portal, /customerSession \? selectedCustomerId/);
+});
+
+test("tenant-sensitive state is invalidated across identity and workspace changes", () => {
+  assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
+  assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
+  assert.match(guard, /<Fragment key=\{identity\.organisationId\}>/);
+  assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
+});
