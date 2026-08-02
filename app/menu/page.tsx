@@ -5,13 +5,18 @@ import { ArrowRight, Settings } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { secondaryNavigation } from "../../components/navigation";
-import { canAccessPath } from "../../lib/cloud/permissions";
+import { canAccessPath, isOperatorOnlyPath } from "../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 
 export default function MenuPage() {
   const { identity, mode } = useCloudIdentity();
   const unrestricted = mode === "local" || (mode === "migration" && !identity);
-  const visibleNavigation = secondaryNavigation.filter(([, href]) => href === "/cloud" || unrestricted || canAccessPath(identity?.role, href, identity?.email));
+  const permitted = (href: string) => {
+    if (href === "/cloud") return true;
+    if (isOperatorOnlyPath(href)) return canAccessPath(identity?.role, href, identity?.email);
+    return unrestricted || canAccessPath(identity?.role, href, identity?.email);
+  };
+  const visibleNavigation = secondaryNavigation.filter(([, href]) => permitted(href));
 
   return (
     <main className="space-y-6">
