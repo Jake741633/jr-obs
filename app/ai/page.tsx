@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { AiActionCentre } from "../../components/ai/AiActionCentre";
 import { AiToolNav } from "../../components/ai/AiToolNav";
+import { SiteDiaryAttentionPanel } from "../../components/ai/SiteDiaryAttentionPanel";
 import { SmartRecommendations } from "../../components/ai/SmartRecommendations";
 import { TodaysAssistant } from "../../components/ai/TodaysAssistant";
 import { Card } from "../../components/ui/Card";
@@ -395,6 +396,8 @@ export default function AiPage() {
       </section>
 
       <TodaysAssistant snapshot={todaySnapshot} customers={customers.items} onAddReminder={addReminder} onToggleReminder={toggleReminder} />
+
+      <SiteDiaryAttentionPanel />
 
       <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
         <SmartRecommendations recommendations={recommendations} />
