@@ -13,6 +13,7 @@ const requiredSuites = [
   "audit-policy-integrity.test.mjs",
   "multi-tenant-penetration-regression.test.mjs",
   "forged-browser-session-rejection.test.mjs",
+  "jobProgressCore.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
