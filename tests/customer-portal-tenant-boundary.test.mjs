@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const portal = readFileSync(new URL("../app/customer-portal/page.tsx", import.meta.url), "utf8");
+const guard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
+const permissions = readFileSync(new URL("../lib/cloud/permissions.ts", import.meta.url), "utf8");
 
 test("authenticated customer sessions are bound to the profile customer source id", () => {
   assert.match(portal, /const \{ identity \} = useCloudIdentity\(\)/);
@@ -45,4 +47,13 @@ test("customer selection and demo codes remain only in the locked preview flow",
   assert.ok(previewStart >= 0);
   assert.ok(selector > previewStart);
   assert.ok(demoCode > previewStart);
+});
+
+test("customer portal access fails closed before page data can render", () => {
+  assert.match(guard, /if \(!isReady\) return/);
+  assert.match(guard, /if \(!identity\) \{/);
+  assert.match(guard, /if \(!canAccessPath\(identity\.role, pathname, identity\.email\)\) \{/);
+  assert.match(permissions, /customer: \["\/customer-portal", "\/cloud"\]/);
+  assert.doesNotMatch(permissions, /office: \[[^\]]*"\/customer-portal"/s);
+  assert.doesNotMatch(permissions, /electrician: \[[^\]]*"\/customer-portal"/s);
 });
