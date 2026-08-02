@@ -28,7 +28,7 @@ export function isJrOsOperator(role: JrRole | undefined, email?: string) {
 
 export function canAccessPath(role: JrRole | undefined, path: string, email?: string) {
   if (!role) return false;
-  if (isOperatorOnlyPath(path) && email !== undefined && !isJrOsOperator(role, email)) return false;
+  if (isOperatorOnlyPath(path) && !isJrOsOperator(role, email)) return false;
   const allowed = rolePages[role];
   return allowed.includes("*") || allowed.some((entry) => path === entry || path.startsWith(`${entry}/`));
 }
