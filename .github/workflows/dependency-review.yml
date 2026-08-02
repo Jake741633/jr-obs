@@ -13,20 +13,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Review dependency changes
-        id: dependency-review
-        continue-on-error: true
         uses: actions/dependency-review-action@v4
         with:
           fail-on-severity: high
           comment-summary-in-pr: always
-
-      - name: Report dependency review availability
-        if: ${{ steps.dependency-review.outcome == 'failure' }}
-        run: |
-          echo "::warning title=Dependency review unavailable::Enable Dependency graph in repository Settings > Security > Advanced Security to enforce high-severity dependency review failures."
-          {
-            echo "## Dependency review not enforced"
-            echo
-            echo "GitHub Dependency graph is currently unavailable for this repository."
-            echo "Enable it in **Settings → Security → Advanced Security** so this workflow can block newly introduced high or critical vulnerabilities."
-          } >> "$GITHUB_STEP_SUMMARY"
