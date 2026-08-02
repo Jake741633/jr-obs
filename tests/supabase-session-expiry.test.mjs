@@ -37,7 +37,7 @@ test("valid unexpired stored sessions are returned", () => {
 test("authenticated cloud requests reject missing or expired sessions before fetch", () => {
   assert.match(
     source,
-    /const session = readSupabaseSession\(\);\s*if \(authenticated\) \{\s*if \(!session\) \{\s*throw new Error\("Your cloud session has expired\. Sign in again to continue\."\);\s*\}/,
+    /const session = readSupabaseSession\(\);[\s\S]*?if \(authenticated\) \{\s*if \(!session\) throw new Error\("Your cloud session has expired\. Sign in again to continue\."\);/,
   );
   assert.ok(
     source.indexOf("const session = readSupabaseSession();") < source.indexOf("const response = await fetch("),
@@ -48,7 +48,7 @@ test("authenticated cloud requests reject missing or expired sessions before fet
 test("valid authenticated sessions send the bearer token only inside the validated branch", () => {
   assert.match(
     source,
-    /if \(authenticated\) \{[\s\S]*?if \(!session\) \{[\s\S]*?throw new Error\([\s\S]*?\);[\s\S]*?\}[\s\S]*?headers\.set\("Authorization", `Bearer \$\{session\.access_token\}`\);[\s\S]*?\}/,
+    /if \(authenticated\) \{\s*if \(!session\) throw new Error\([\s\S]*?\);\s*headers\.set\("Authorization", `Bearer \$\{session\.access_token\}`\);\s*\}/,
   );
 });
 
