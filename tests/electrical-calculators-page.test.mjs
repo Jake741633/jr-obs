@@ -102,7 +102,7 @@ test("cable-sizing history can be cleared from state and local storage", async (
 test("cable-sizing form can reset every current input without clearing history", async () => {
   const page = await read(cableSizingPagePath);
 
-  assert.match(page, /function resetDefaults\(\)/);
+  assert.match(page, /function resetForm\(\)/);
 
   for (const reset of [
     'setPhase("Single phase")',
@@ -125,5 +125,5 @@ test("cable-sizing form can reset every current input without clearing history",
   }
 
   assert.match(page, /Reset defaults/);
-  assert.doesNotMatch(page.match(/function resetDefaults\(\)[\s\S]*?\n  }/)?.[0] ?? "", /setRecent|localStorage/);
+  assert.doesNotMatch(page.match(/function resetForm\(\)[\s\S]*?\n  }/)?.[0] ?? "", /setRecent|localStorage/);
 });
