@@ -365,7 +365,7 @@ export default function AiPage() {
       <Card><PoundSterling className="size-6 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Overdue cash</p><p className="mt-1 text-3xl font-black">{money.format(operations.overdueValue)}</p></Card>
       <Card><CheckCircle2 className={`size-6 ${scoreTone}`} /><p className="mt-3 text-sm text-slate-400">Operational readiness</p><p className={`mt-1 text-3xl font-black ${scoreTone}`}>{operations.readinessScore}%</p></Card>
     </div>
-    <TodaysAssistant snapshot={todaySnapshot} onAddReminder={addReminder} onToggleReminder={toggleReminder} />
+    <TodaysAssistant snapshot={todaySnapshot} customers={customers.items} onAddReminder={addReminder} onToggleReminder={toggleReminder} />
     <SiteDiaryAttentionPanel />
     <AiActionCentre
       acceptedQuotes={acceptedQuotes}
