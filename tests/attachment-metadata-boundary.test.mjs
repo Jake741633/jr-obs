@@ -22,7 +22,8 @@ test("attachment uploads and downloads validate object ownership before cloud ac
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(item\.organisationId, item\.objectPath\)/);
   assert.match(privateFiles, /export async function signedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
-  assert.match(privateFiles, /createSignedDownload\(objectPath, expiresIn\)/);
+  assert.match(privateFiles, /const boundedExpiry = Math\.min\(300, Math\.max\(60, Math\.floor\(expiresIn\)\)\)/);
+  assert.match(privateFiles, /createSignedDownload\(objectPath, boundedExpiry\)/);
 });
 
 test("signed attachment cache identity includes both organisation and source id", () => {
