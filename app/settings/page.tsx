@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useState } from "react";
 import { Brain, CheckCircle2, Cloud, Download, ShieldCheck, Upload } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -14,24 +14,25 @@ const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-
 
 export default function SettingsPage() {
   const { identity, isReady: identityReady } = useCloudIdentity();
-  const activeProfileKey = useMemo(
-    () => identity?.organisationId ? organisationStorageKey(profileKey, identity.organisationId) : profileKey,
-    [identity?.organisationId],
-  );
+  const activeProfileKey = identity?.organisationId ? organisationStorageKey(profileKey, identity.organisationId) : profileKey;
   const [profile, setProfile] = useState<JrAiProfile>(defaultAiProfile);
-  const [ready, setReady] = useState(false);
+  const [loadedProfileKey, setLoadedProfileKey] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const cloud = getCloudReadiness();
+  const ready = identityReady && loadedProfileKey === activeProfileKey;
 
   useEffect(() => {
     if (!identityReady) return;
-    setReady(false);
-    try {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
       const saved = window.localStorage.getItem(activeProfileKey);
       setProfile(saved ? { ...defaultAiProfile, ...(JSON.parse(saved) as Partial<JrAiProfile>) } : defaultAiProfile);
-    } finally {
-      setReady(true);
-    }
+      setLoadedProfileKey(activeProfileKey);
+    });
+    return () => {
+      active = false;
+    };
   }, [activeProfileKey, identityReady]);
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export default function SettingsPage() {
     }
   }
 
-  if (!identityReady || !ready) return <Card>Loading settings…</Card>;
+  if (!ready) return <Card>Loading settings…</Card>;
 
   return <div className="space-y-6">
     <div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Business control</p><h1 className="mt-1 text-3xl font-bold">Settings</h1><p className="mt-2 text-sm text-slate-400">Control how JR AI remembers your working preferences and protect the data stored in JR OS.</p></div>
@@ -98,7 +99,7 @@ export default function SettingsPage() {
         <label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><Upload className="mr-2 size-4" />Restore backup<input type="file" accept="application/json,.json" className="hidden" onChange={restoreBackup} /></label>
       </div>
       {message ? <p className="mt-4 text-sm text-cyan-300">{message}</p> : null}
-      <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100"><strong>Protected backup scope:</strong> active organisation business data only. Authentication sessions, sync queues, version markers and other organisations' caches are excluded.</div>
+      <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100"><strong>Protected backup scope:</strong> active organisation business data only. Authentication sessions, sync queues, version markers and other organisations&apos; caches are excluded.</div>
     </Card>
   </div>;
 }
