@@ -22,7 +22,19 @@ export function readSupabaseSession(): SupabaseSession | null {
   const raw = window.localStorage.getItem(sessionKey);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as SupabaseSession;
+    const session = JSON.parse(raw) as Partial<SupabaseSession>;
+    const hasAccessToken = typeof session.access_token === "string" && session.access_token.trim().length > 0;
+    const expiresAt = typeof session.expires_at === "number" && Number.isFinite(session.expires_at)
+      ? session.expires_at
+      : undefined;
+    const hasExpired = expiresAt !== undefined && expiresAt <= Math.floor(Date.now() / 1000);
+
+    if (!hasAccessToken || hasExpired) {
+      window.localStorage.removeItem(sessionKey);
+      return null;
+    }
+
+    return session as SupabaseSession;
   } catch {
     window.localStorage.removeItem(sessionKey);
     return null;
