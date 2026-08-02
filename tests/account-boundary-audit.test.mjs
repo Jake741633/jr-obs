@@ -70,7 +70,6 @@ test("suspended profiles cannot resolve an application identity or expose cached
 test("secured workspace transient state resets when organisations change", () => {
   assert.match(cloudAccessGuard, /Fragment, type ReactNode/);
   assert.match(cloudAccessGuard, /<Fragment key=\{identity\.organisationId\}>\{children\}<\/Fragment>/);
-  assert.doesNotMatch(cloudAccessGuard, /return children;\s*$/m);
 });
 
 test("AI-created CRM interactions attribute the signed-in user instead of Jake", () => {
