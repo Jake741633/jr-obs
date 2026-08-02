@@ -3,6 +3,11 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const requiredSuites = [
+  "shared-identity.test.mjs",
+  "supabase-session-validation.test.mjs",
+  "tenant-storage-isolation.test.mjs",
+  "operator-permissions.test.mjs",
+  "operator-navigation.test.mjs",
   "customer-portal-tenant-boundary.test.mjs",
   "offline-queue-tenant-isolation.test.mjs",
   "background-sync-tenant-isolation.test.mjs",
