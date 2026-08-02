@@ -9,6 +9,8 @@ const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf
 const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
 const aiPage = readFileSync(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
+const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf8");
+const settingsPage = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
 
 test("account changes preserve browser-resident business records", () => {
   assert.match(cloudSync, /export function clearLocalJrOsAccountData\(\)\s*\{\s*return 0;\s*\}/);
@@ -67,4 +69,24 @@ test("AI-created CRM interactions attribute the signed-in user instead of Jake",
   assert.match(aiPage, /useCloudIdentity\(\)/);
   assert.match(aiPage, /completedBy: identity\?\.email \?\? "JR OS user"/);
   assert.doesNotMatch(aiPage, /completedBy: "Jake"/);
+});
+
+test("authenticated backups include only the active organisation and exclude account internals", () => {
+  assert.match(appData, /organisationStorageKey/);
+  assert.match(appData, /organisationId\?: string/);
+  assert.match(appData, /if \(organisationId && !key\.includes\(ORGANISATION_MARKER\)\) continue;/);
+  assert.match(appData, /jr-os-supabase-session/);
+  assert.match(appData, /jr-os-cloud-sync-queue/);
+  assert.match(appData, /key\.startsWith\("jr-os-cloud-versions:"\)/);
+  assert.match(appData, /This backup belongs to a different JR OS organisation/);
+  assert.match(appData, /const destinationKey = organisationId \? organisationStorageKey\(key, organisationId\) : key/);
+});
+
+test("JR AI settings and backup actions use the resolved organisation identity", () => {
+  assert.match(settingsPage, /useCloudIdentity\(\)/);
+  assert.match(settingsPage, /organisationStorageKey\(profileKey, identity\.organisationId\)/);
+  assert.match(settingsPage, /downloadJrOsBackup\(identity\?\.organisationId\)/);
+  assert.match(settingsPage, /importJrOsBackup\(file, identity\?\.organisationId\)/);
+  assert.doesNotMatch(settingsPage, /window\.localStorage\.getItem\(profileKey\)/);
+  assert.doesNotMatch(settingsPage, /window\.localStorage\.setItem\(profileKey/);
 });
