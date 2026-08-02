@@ -21,6 +21,6 @@ test("rest and storage requests use the validated session loader", () => {
 });
 
 test("rejected sessions cannot supply an authorization bearer token", () => {
-  assert.match(client, /Authorization`, `Bearer \$\{session\?\.accessToken \|\| cloudConfig\.anonKey\}`/);
+  assert.match(client, /result\.set\("Authorization", `Bearer \$\{session\?\.accessToken \|\| cloudConfig\.anonKey\}`\);/);
   assert.doesNotMatch(client, /JSON\.parse\(window\.localStorage\.getItem\(SESSION_KEY\)[\s\S]*requestHeaders\(/);
 });
