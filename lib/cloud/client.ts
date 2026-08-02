@@ -53,7 +53,18 @@ function normalizeSignedStorageResponse(value: SignedStorageResponse) {
 export const cloudSession = {
   load(): CloudSession | null {
     if (typeof window === "undefined") return null;
-    try { return normalizeSession(JSON.parse(window.localStorage.getItem(SESSION_KEY) || "null") as StoredSupabaseSession | null); } catch { return null; }
+    try {
+      const session = normalizeSession(JSON.parse(window.localStorage.getItem(SESSION_KEY) || "null") as StoredSupabaseSession | null);
+      if (!session) return null;
+      if (session.expiresAt <= Date.now()) {
+        window.localStorage.removeItem(SESSION_KEY);
+        return null;
+      }
+      return session;
+    } catch {
+      window.localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
   },
   save(session: CloudSession | null) {
     if (typeof window === "undefined") return;
