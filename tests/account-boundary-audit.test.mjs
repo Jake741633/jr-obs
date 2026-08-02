@@ -53,8 +53,10 @@ test("sync queue visibility and retries are restricted to the active organisatio
   assert.match(repository, /const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation"/);
   assert.match(repository, /export function setActiveSyncOrganisation/);
   assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId\)/);
-  assert.match(repository, /const preserved = allQueue\.filter\(\(item\) => item\.organisationId !== organisationId\)/);
-  assert.match(repository, /write\(QUEUE_KEY, \[\.\.\.preserved, \.\.\.remaining\]\)/);
+  assert.match(repository, /const liveQueue = readAllSyncQueue\(\)/);
+  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| !originalIds\.has\(item\.id\)\)/);
+  assert.match(repository, /const retained = remaining\.filter\(\(item\) => liveIds\.has\(item\.id\)\)/);
+  assert.match(repository, /write\(QUEUE_KEY, nextQueue\)/);
   assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId/);
 });
 
