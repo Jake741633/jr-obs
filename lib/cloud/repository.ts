@@ -153,12 +153,6 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
     } catch (error) { remaining.push({ ...item, attempts: item.attempts + 1, state: "Failed", error: error instanceof Error ? error.message : "Sync failed" }); }
   }
 
-  // Historical source-audit signatures retained for compatibility only. Runtime
-  // reconciliation below is stronger because it preserves queue entries added
-  // while a flush is already in progress.
-  // const preserved = allQueue.filter((item) => item.organisationId !== organisationId);
-  // write(QUEUE_KEY, [...preserved, ...remaining]);
-  // syncStatus.set(statusForQueue(remaining));
   const liveQueue = readAllSyncQueue();
   const originalIds = new Set(queue.map((item) => item.id));
   const liveIds = new Set(liveQueue.map((item) => item.id));
