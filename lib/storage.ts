@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createCollectionRepository, organisationStorageKey, type RepositoryRecord } from "./cloud/adapter";
+import { accountStorageKey, createCollectionRepository, type RepositoryRecord } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
 import { cloudSafeFileRecord, usePrivateFileCollectionBridge } from "./cloud/privateFiles";
 import { useCloudIdentity } from "./cloud/useCloudIdentity";
@@ -35,7 +35,8 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   const target = useMemo(() => collectionCloudTarget(key), [key]);
   const organisationId = identity?.organisationId;
   const userId = identity?.userId;
-  const activeStorageKey = organisationId ? organisationStorageKey(key, organisationId) : key;
+  const cacheUserId = identity?.role === "customer" ? userId : undefined;
+  const activeStorageKey = organisationId ? accountStorageKey(key, organisationId, cacheUserId) : key;
 
   useEffect(() => {
     if (!identityReady) return;
@@ -56,6 +57,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
           collectionKey: target.collectionKey,
           organisationId,
           userId,
+          cacheUserId,
         });
         loaded = await repository.list() as T[];
       }
@@ -73,7 +75,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     return () => {
       active = false;
     };
-  }, [activeStorageKey, identityReady, key, mode, organisationId, target, userId]);
+  }, [activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -93,6 +95,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       collectionKey: target.collectionKey,
       organisationId,
       userId,
+      cacheUserId,
     });
 
     for (const [id, item] of nextById) {
@@ -105,7 +108,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       if (!nextById.has(id)) repository.remove(id);
     }
     previousRef.current = items;
-  }, [activeStorageKey, isReady, items, key, mode, organisationId, target, userId]);
+  }, [activeStorageKey, cacheUserId, isReady, items, key, mode, organisationId, target, userId]);
 
   const displayItems = usePrivateFileCollectionBridge({ storageKey: activeStorageKey, items, setItems, isReady, identity, mode });
 
