@@ -24,9 +24,9 @@ test("voltage-drop UI captures each required design input and result", async () 
 
   for (const text of [
     "Route length (m)",
-    "Cable value (mV/A/m)",
-    "Maximum voltage drop (%)",
-    "Voltage drop result",
+    "Conductor value (mV/A/m)",
+    "Selected maximum drop (%)",
+    "Calculated voltage drop",
     "Maximum permitted",
     "Remaining allowance",
   ]) {
@@ -43,7 +43,7 @@ test("calculator page keeps the design-aid and BS 7671 warning visible", async (
 
   assert.match(page, /Design aid only/);
   assert.match(page, /BS 7671/);
-  assert.match(page, /does not select a cable, protective device or confirm compliance/i);
+  assert.match(page, /do not select a cable, protective device or confirm compliance/i);
 });
 
 test("electrical calculators remain reachable from workspace navigation", async () => {
