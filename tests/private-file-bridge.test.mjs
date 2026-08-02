@@ -1,0 +1,25 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf8");
+const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
+
+test("private file bridge receives the base allowlisted collection key", () => {
+  assert.match(storage, /usePrivateFileCollectionBridge\(\{ storageKey: key, items, setItems, isReady, identity, mode \}\)/);
+  assert.doesNotMatch(storage, /usePrivateFileCollectionBridge\(\{ storageKey: activeStorageKey/);
+  assert.match(privateFiles, /\["jr-os-job-documents", "jr-os-expenses", "jr-os-surveys"\]\.includes\(storageKey\)/);
+});
+
+test("private file queues remain organisation scoped when using base collection keys", () => {
+  assert.match(privateFiles, /readPrivateUploadQueue\(identity\.organisationId\)/);
+  assert.match(privateFiles, /\.filter\(\(item\) => item\.storageKey === storageKey\)/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity\.organisationId/);
+  assert.match(privateFiles, /queued\.storageKey !== storageKey/);
+});
+
+test("signed URL cache remains organisation scoped independently of collection keys", () => {
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, queued\.sourceId\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, photo\.id\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, record\.id\)/);
+});
