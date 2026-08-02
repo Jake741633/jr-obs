@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowRight, Calculator, Cable, CircleAlert, Gauge, Route, Zap } from "lucide-react";
+import { ArrowRight, Calculator, Cable, CircleAlert, Gauge, Route, Scale, Zap } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { InputField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -78,16 +78,29 @@ export default function ElectricalCalculatorsPage() {
         description="Calculate design current, assess voltage drop and check a verified cable option against correction factors."
       />
 
-      <Link href="/electrical-calculators/cable-sizing" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-400/15">
-        <span className="flex items-center gap-3">
-          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-300/15"><Cable className="size-5" /></span>
-          <span>
-            <span className="block font-bold">Open dedicated Cable Sizing</span>
-            <span className="block text-sm text-cyan-100/70">Full mobile workflow with verified inputs and locally saved recent calculations.</span>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Link href="/electrical-calculators/cable-sizing" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-400/15">
+          <span className="flex items-center gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-300/15"><Cable className="size-5" /></span>
+            <span>
+              <span className="block font-bold">Open dedicated Cable Sizing</span>
+              <span className="block text-sm text-cyan-100/70">Full mobile workflow with verified inputs and locally saved recent calculations.</span>
+            </span>
           </span>
-        </span>
-        <ArrowRight className="size-5 shrink-0" />
-      </Link>
+          <ArrowRight className="size-5 shrink-0" />
+        </Link>
+
+        <Link href="/electrical-calculators/maximum-demand" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-violet-400/30 bg-violet-400/10 px-4 py-3 text-violet-100 transition hover:border-violet-300 hover:bg-violet-400/15">
+          <span className="flex items-center gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-violet-300/15"><Scale className="size-5" /></span>
+            <span>
+              <span className="block font-bold">Open Maximum Demand</span>
+              <span className="block text-sm text-violet-100/70">Build a diversified load schedule and review L1, L2, L3 and highest-phase demand.</span>
+            </span>
+          </span>
+          <ArrowRight className="size-5 shrink-0" />
+        </Link>
+      </div>
 
       <Card className="border-amber-400/20 bg-amber-400/5">
         <div className="flex items-start gap-3">
@@ -207,7 +220,7 @@ export default function ElectricalCalculatorsPage() {
       <Card>
         <h2 className="font-semibold">Assumptions used</h2>
         <div className="mt-3 grid gap-2 lg:grid-cols-2">
-          {[...result.assumptions, ...voltageDrop.assumptions, ...cableSizing.assumptions].map((assumption: string, index: number) => <p key={`${index}-${assumption}`} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-400">{assumption}</p>)}
+          {[...result.assumptions, ...voltageDrop.assumptions, ...cableSizing.assumptions].map((assumption: string, index: number) => <p key={`${index}-${assumption}`} className="text-sm text-slate-400">• {assumption}</p>)}
         </div>
       </Card>
     </main>
