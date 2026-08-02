@@ -67,8 +67,8 @@ export default function ElectricalCalculatorsPage() {
                 ))}
               </span>
             </label>
-            <InputField label="Active power" type="number" inputMode="decimal" min="0" step="0.1" value={powerKw} onChange={(event) => setPowerKw(event.target.value)} suffix="kW" />
-            <InputField label="Voltage" type="number" inputMode="decimal" min="0" step="1" value={voltage} onChange={(event) => setVoltage(event.target.value)} suffix="V" />
+            <InputField label="Active power (kW)" type="number" inputMode="decimal" min="0" step="0.1" value={powerKw} onChange={(event) => setPowerKw(event.target.value)} />
+            <InputField label="Voltage (V)" type="number" inputMode="decimal" min="0" step="1" value={voltage} onChange={(event) => setVoltage(event.target.value)} />
             <InputField label="Power factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={powerFactor} onChange={(event) => setPowerFactor(event.target.value)} />
             <InputField label="Efficiency" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={efficiency} onChange={(event) => setEfficiency(event.target.value)} />
           </div>
