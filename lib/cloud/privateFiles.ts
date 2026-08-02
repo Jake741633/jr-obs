@@ -244,7 +244,8 @@ export async function flushPrivateFileUploadQueue(
 
 export async function signedPrivateDownloadUrl(objectPath: string, organisationId: string, expiresIn = 300) {
   assertOrganisationPrivateObjectPath(organisationId, objectPath);
-  const result = await createSignedDownload(objectPath, expiresIn);
+  const boundedExpiry = Math.min(300, Math.max(60, Math.floor(expiresIn)));
+  const result = await createSignedDownload(objectPath, boundedExpiry);
   return signedObjectUrl(result.signedURL);
 }
 
@@ -370,45 +371,31 @@ export function usePrivateFileCollectionBridge<T>(input: {
     const missing = items.flatMap((item) => {
       const record = item as PrivateFileBackedRecord;
       if (storageKey === "jr-os-surveys") {
-        return (record.photos ?? []).filter((photo) => (
-          photo.privateStoragePath
-          && !signedUrls[privateSignedUrlCacheKey(identity.organisationId, photo.id)]
-        ));
+        return (record.photos ?? []).filter((photo) => photo.privateStoragePath && !signedUrls[privateSignedUrlCacheKey(identity.organisationId, photo.id)]);
       }
-      return record.privateStoragePath
-        && !signedUrls[privateSignedUrlCacheKey(identity.organisationId, record.id)]
-        ? [record]
-        : [];
+      return record.privateStoragePath && !signedUrls[privateSignedUrlCacheKey(identity.organisationId, record.id)] ? [record] : [];
     });
-    if (!missing.length) return;
-    void Promise.all(missing.map(async (record) => [
-      privateSignedUrlCacheKey(identity.organisationId, record.id),
-      await signedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId),
-    ] as const))
-      .then((entries) => { if (active) setSignedUrls((current) => ({ ...current, ...Object.fromEntries(entries) })); })
-      .catch(() => undefined);
+    if (missing.length === 0) return;
+    Promise.all(missing.map(async (record) => {
+      const url = await signedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId);
+      return [privateSignedUrlCacheKey(identity.organisationId, record.id), url] as const;
+    })).then((entries) => {
+      if (!active) return;
+      setSignedUrls((current) => ({ ...current, ...Object.fromEntries(entries) }));
+    }).catch(() => undefined);
     return () => { active = false; };
   }, [identity, isReady, items, mode, signedUrls, storageKey]);
 
-  return useMemo(() => items.map((item) => {
+  const hydratedItems = useMemo(() => items.map((item) => {
     const record = item as PrivateFileBackedRecord;
     if (storageKey === "jr-os-surveys") {
       return {
         ...record,
-        photos: (record.photos ?? []).map((photo) => {
-          const signedUrl = identity
-            ? signedUrls[privateSignedUrlCacheKey(identity.organisationId, photo.id)]
-            : undefined;
-          return !photo.dataUrl && signedUrl ? { ...photo, dataUrl: signedUrl } : photo;
-        }),
+        photos: (record.photos ?? []).map((photo) => ({ ...photo, signedDownloadUrl: signedUrls[privateSignedUrlCacheKey(identity?.organisationId ?? "", photo.id)] })),
       } as T;
     }
-    const signedUrl = identity
-      ? signedUrls[privateSignedUrlCacheKey(identity.organisationId, record.id)]
-      : undefined;
-    if (!signedUrl) return item;
-    if (storageKey === "jr-os-job-documents" && !record.dataUrl) return { ...record, dataUrl: signedUrl } as T;
-    if (storageKey === "jr-os-expenses" && !record.receiptDataUrl) return { ...record, receiptUrl: signedUrl } as T;
-    return item;
-  }), [identity, items, signedUrls, storageKey]);
+    return { ...record, signedDownloadUrl: signedUrls[privateSignedUrlCacheKey(identity?.organisationId ?? "", record.id)] } as T;
+  }), [identity?.organisationId, items, signedUrls, storageKey]);
+
+  return { items: hydratedItems };
 }
