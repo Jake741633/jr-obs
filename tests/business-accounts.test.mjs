@@ -99,6 +99,53 @@ test("accepts only pending invitations and links the user account", () => {
   assert.throws(() => acceptStaffInvite(invite, "   "), /User account is required/);
 });
 
+test("rejects expired invitations and honours explicit expiry dates", () => {
+  const invite = buildStaffInvite({
+    organisationId: "org-1",
+    email: "staff@example.com",
+    role: "office",
+    invitedBy: "owner-1",
+    now: "2026-08-01T12:00:00.000Z",
+  });
+
+  assert.throws(
+    () => acceptStaffInvite(invite, "user-2", "2026-08-08T12:00:00.000Z"),
+    /invitation has expired/,
+  );
+
+  const explicitlyExpired = {
+    ...invite,
+    expiresAt: "2026-08-02T09:00:00.000Z",
+  };
+  assert.throws(
+    () => acceptStaffInvite(explicitlyExpired, "user-2", "2026-08-02T09:00:00.000Z"),
+    /invitation has expired/,
+  );
+
+  const explicitlyValid = {
+    ...invite,
+    expires_at: "2026-08-10T09:00:00.000Z",
+  };
+  assert.equal(
+    acceptStaffInvite(explicitlyValid, "user-2", "2026-08-09T09:00:00.000Z").status,
+    "accepted",
+  );
+});
+
+test("accepted and revoked invitations cannot be replayed", () => {
+  const invite = buildStaffInvite({
+    organisationId: "org-1",
+    email: "staff@example.com",
+    role: "electrician",
+    invitedBy: "owner-1",
+    now: "2026-08-01T12:00:00.000Z",
+  });
+  const accepted = acceptStaffInvite(invite, "user-2", "2026-08-02T12:00:00.000Z");
+
+  assert.throws(() => acceptStaffInvite(accepted, "user-2", "2026-08-03T12:00:00.000Z"), /Only pending invites/);
+  assert.throws(() => acceptStaffInvite({ ...invite, status: "revoked" }, "user-2", "2026-08-03T12:00:00.000Z"), /Only pending invites/);
+});
+
 test("revokes staff access without allowing owner removal", () => {
   const profile = { userId: "staff-1", organisationId: "org-1", role: "electrician", status: "active" };
   const revoked = revokeStaffAccess(profile, "admin", "2026-08-01T14:00:00.000Z");
