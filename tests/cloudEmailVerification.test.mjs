@@ -16,11 +16,12 @@ test("email verification remains client guarded and completes from an effect", (
   assert.match(cloudSync, /if\s*\(typeof window === "undefined"\)\s*return null;/);
 });
 
-test("verification completion restores the saved session and publishes identity changes", () => {
+test("verification completion restores the saved session and clears auth details", () => {
   const helperStart = cloudSync.indexOf("export async function completeEmailVerificationFromUrl");
   assert.notEqual(helperStart, -1);
   const helperSource = cloudSync.slice(helperStart);
   assert.match(helperSource, /saveSupabaseSession\s*\(/);
   assert.match(helperSource, /identityChanged\s*\(\s*\)/);
-  assert.match(helperSource, /history\.replaceState/);
+  assert.match(helperSource, /clearAuthParamsFromUrl\s*\(\s*\)/);
+  assert.match(cloudSync, /function\s+clearAuthParamsFromUrl\s*\([\s\S]*window\.history\.replaceState/);
 });
