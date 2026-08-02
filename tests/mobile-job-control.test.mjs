@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import { buildMobileJobReadiness, mobileJobPriority } from "../lib/mobileJobControl-core.mjs";
+
+test("mobile readiness reports blockers and a percentage", () => {
+  const result = buildMobileJobReadiness({
+    hasSchedule: true,
+    hasContact: true,
+    hasAcceptedPricing: true,
+    hasMaterials: false,
+    hasRams: false,
+    hasTesting: true,
+    customerHref: "/customers/cus-1",
+    pricingHref: "/quotes/quote-1",
+  });
+  assert.equal(result.readyCount, 4);
+  assert.equal(result.totalCount, 6);
+  assert.equal(result.percentage, 67);
+  assert.deepEqual(result.blockers.map((item) => item.id), ["materials", "rams"]);
+  assert.equal(result.checks.find((item) => item.id === "contact").href, "/customers/cus-1");
+});
+
+test("today and on-site jobs sort before future work", () => {
+  assert.equal(mobileJobPriority({ startDate: "2026-08-02", status: "Scheduled" }, "2026-08-02"), 0);
+  assert.equal(mobileJobPriority({ startDate: "", status: "First fix" }, "2026-08-02"), 1);
+  assert.equal(mobileJobPriority({ startDate: "2026-08-09", status: "Scheduled" }, "2026-08-02"), 2);
+});
+
+test("mobile job control route and navigation exist", () => {
+  const page = readFileSync(new URL("../app/field/jobs/page.tsx", import.meta.url), "utf8");
+  const navigation = readFileSync(new URL("../components/navigation.ts", import.meta.url), "utf8");
+  assert.match(page, /title="Job control"/);
+  assert.match(page, /buildMobileJobReadiness/);
+  assert.match(page, /Navigate/);
+  assert.match(page, /type="button"|href="\/field"/);
+  assert.match(navigation, /\["Mobile Job Control", "\/field\/jobs"\]/);
+});
