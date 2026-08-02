@@ -78,6 +78,9 @@ async function loadIdentity(force = false) {
     const identity = await request;
     if (requestVersion === identityRequestVersion) emit({ identity, isReady: true });
     return identity;
+  } catch {
+    if (requestVersion === identityRequestVersion) emit({ identity: null, isReady: true });
+    return null;
   } finally {
     if (identityRequest === request) identityRequest = null;
   }
