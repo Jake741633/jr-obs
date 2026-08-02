@@ -39,6 +39,14 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   const activeStorageKey = organisationId ? accountStorageKey(key, organisationId, cacheUserId) : key;
 
   useEffect(() => {
+    if (identityReady) return;
+    suppressSyncRef.current = true;
+    previousRef.current = initialValueRef.current;
+    setItems(initialValueRef.current);
+    setIsReady(false);
+  }, [identityReady]);
+
+  useEffect(() => {
     if (!identityReady) return;
     let active = true;
     suppressSyncRef.current = true;
