@@ -55,3 +55,9 @@ test("resolved identity controls the active sync organisation and clears it duri
   assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
   assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
 });
+
+test("suspended profiles cannot resolve an application identity or expose cached tenant data", () => {
+  assert.match(identity, /active=eq\.true/);
+  assert.match(identity, /select=organisation_id,role,customer_source_id,active/);
+  assert.match(identity, /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) return null;/);
+});
