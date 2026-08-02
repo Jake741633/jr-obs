@@ -16,9 +16,8 @@ test("job handover summary maps operational evidence into readiness inputs", () 
 });
 
 test("job handover summary preserves the card status literal contract", () => {
-  assert.match(source, /status:\s*summary\.ready \? "Ready for handover" : "Handover blocked"/);
-  assert.match(source, /blockers:\s*summary\.blockers/);
-  assert.match(source, /blockerCount:\s*summary\.blockerCount/);
+  assert.match(source, /\.\.\.readiness/);
+  assert.match(source, /status:\s*readiness\.ready \? "Ready for handover" : "Handover blocked"/);
 });
 
 test("job handover summary remains page and storage agnostic", () => {
