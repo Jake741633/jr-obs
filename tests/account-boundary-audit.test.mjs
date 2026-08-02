@@ -8,6 +8,7 @@ const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url)
 const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf8");
 const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
+const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
 const aiPage = readFileSync(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
 const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf8");
 const settingsPage = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
@@ -89,4 +90,23 @@ test("JR AI settings and backup actions use the resolved organisation identity",
   assert.match(settingsPage, /importJrOsBackup\(file, identity\?\.organisationId\)/);
   assert.doesNotMatch(settingsPage, /window\.localStorage\.getItem\(profileKey\)/);
   assert.doesNotMatch(settingsPage, /window\.localStorage\.setItem\(profileKey/);
+});
+
+test("private upload queue retries preserve every other organisation", () => {
+  assert.match(privateFiles, /export function readPrivateUploadQueue\(organisationId\?: string\)/);
+  assert.match(privateFiles, /queue\.filter\(\(item\) => item\.organisationId === organisationId\)/);
+  assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => item\.organisationId !== organisationId\)/);
+  assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => item\.organisationId === organisationId\)/);
+  assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity\.organisationId/);
+});
+
+test("private uploads and signed downloads reject cross-organisation object paths", () => {
+  assert.match(privateFiles, /export function isOrganisationPrivateObjectPath/);
+  assert.match(privateFiles, /The private file does not belong to the active organisation/);
+  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(item\.organisationId, item\.objectPath\)/);
+  assert.match(privateFiles, /signedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
+  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
+  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(metadata\.organisation_id, metadata\.object_path\)/);
+  assert.match(privateFiles, /signedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId\)/);
 });
