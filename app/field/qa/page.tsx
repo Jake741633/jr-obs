@@ -12,7 +12,7 @@ import { buildQaInspection, completeQaInspection, failedQaTask, jobQaTypes, qaCo
 import { qaTaskCategory } from "../../../lib/jobQaTypes";
 import { makeId } from "../../../lib/storage";
 import type { JobQaInspection, JobQaInspectionType } from "../../../lib/jobQaTypes";
-import type { JobTask } from "../../../lib/models";
+import type { JobTask, JobTimelineEntry } from "../../../lib/models";
 
 const blankForm = { jobId: "", type: "First fix" as JobQaInspectionType, inspectorId: "", notes: "" };
 
@@ -59,7 +59,8 @@ export default function MobileQaPage() {
     try {
       const updated = completeQaInspection({ inspection, result, notes: inspection.notes, now }) as JobQaInspection;
       inspections.setItems((current) => current.map((item) => item.id === inspection.id ? updated : item));
-      timeline.setItems((current) => [qaTimelineEntry({ inspection: updated, timelineId: makeId("timeline"), completedBy: updated.inspectorName, now }), ...current]);
+      const timelineEntry = qaTimelineEntry({ inspection: updated, timelineId: makeId("timeline"), completedBy: updated.inspectorName, now }) as JobTimelineEntry;
+      timeline.setItems((current) => [timelineEntry, ...current]);
       const task = failedQaTask({ inspection: updated, taskId: makeId("snag"), now });
       if (task) {
         const typedTask: JobTask = { ...task, category: qaTaskCategory(updated.type) };
