@@ -97,9 +97,19 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
 
   const remaining: SyncQueueItem[] = [];
   let cleared = 0;
+  let processed = 0;
   for (const item of queue) {
+    if (activeOrganisationId() !== organisationId) {
+      remaining.push(...queue.slice(processed));
+      break;
+    }
+    processed += 1;
     try {
       const existing = await cloudSelect<CloudEnvelope<unknown>>(item.table, tenantRecordQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, includeDeleted: true }));
+      if (activeOrganisationId() !== organisationId) {
+        remaining.push(item, ...queue.slice(processed));
+        break;
+      }
       const current = existing[0];
 
       if (item.operation === "delete" && (!current || current.deleted_at)) {
@@ -146,8 +156,8 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
   write(QUEUE_KEY, [...preserved, ...remaining]);
   const conflicts = remaining.filter((item) => item.state === "Conflict").length;
   const failed = remaining.filter((item) => item.state === "Failed").length;
-  syncStatus.set(statusForQueue(remaining));
-  return { processed: queue.length, cleared, remaining: remaining.length, conflicts, failed };
+  if (activeOrganisationId() === organisationId) syncStatus.set(statusForQueue(remaining));
+  return { processed, cleared, remaining: remaining.length, conflicts, failed };
 }
 
 export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; customerSourceId?: string; jobId?: string; jobSourceId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string) {
