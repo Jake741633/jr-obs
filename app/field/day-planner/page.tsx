@@ -31,7 +31,7 @@ export default function EngineerDayPlannerPage() {
   const [notes, setNotes] = useState("");
   const [message, setMessage] = useState("");
 
-  const entries = useMemo(() => sequenceDayEntries(planner.items, date), [planner.items, date]);
+  const entries = useMemo<ScheduledPlannerEntry[]>(() => sequenceDayEntries(planner.items, date) as ScheduledPlannerEntry[], [planner.items, date]);
   const jobsById = useMemo(() => new Map(jobs.items.map((job) => [job.id, job])), [jobs.items]);
   const customersById = useMemo(() => new Map(customers.items.map((customer) => [customer.id, customer])), [customers.items]);
   const owner = team.items.find((member) => member.role === "Owner" && member.status === "Active") ?? team.items.find((member) => member.status === "Active");
