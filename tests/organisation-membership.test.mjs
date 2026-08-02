@@ -48,6 +48,15 @@ test("recognises only active members of the requested organisation", () => {
   assert.equal(isActiveOrganisationMember(null, "org-1"), false);
 });
 
+test("requires an explicit active membership state and user identity", () => {
+  assert.equal(isActiveOrganisationMember({ ...office, status: undefined }, "org-1"), false);
+  assert.equal(isActiveOrganisationMember({ ...office, status: "revoked" }, "org-1"), false);
+  assert.equal(isActiveOrganisationMember({ ...office, status: undefined, active: false }, "org-1"), false);
+  assert.equal(isActiveOrganisationMember({ ...office, status: undefined, active: true }, "org-1"), true);
+  assert.equal(isActiveOrganisationMember({ ...office, active: false }, "org-1"), false);
+  assert.equal(isActiveOrganisationMember({ ...office, id: "", status: "active" }, "org-1"), false);
+});
+
 test("asserts organisation access without mutating the profile", () => {
   const source = structuredClone(owner);
   assert.equal(assertOrganisationAccess(owner, "org-1"), owner);
@@ -92,4 +101,11 @@ test("limits staff management to the same organisation and role hierarchy", () =
   assert.equal(canManageOrganisationMember(owner, { ...office, organisationId: "org-2" }), false);
   assert.equal(canManageOrganisationMember(owner, owner), false);
   assert.equal(canManageOrganisationMember({ ...owner, status: "suspended" }, office), false);
+});
+
+test("rejects malformed or unscoped membership targets", () => {
+  assert.equal(canManageOrganisationMember(owner, { ...office, id: "" }), false);
+  assert.equal(canManageOrganisationMember(owner, { ...office, role: "unknown" }), false);
+  assert.equal(canManageOrganisationMember(owner, { ...office, organisationId: "" }), false);
+  assert.equal(canManageOrganisationMember(owner, { ...office, organisationId: "org-2" }), false);
 });
