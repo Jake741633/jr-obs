@@ -371,7 +371,8 @@ export default function AiPage() {
       acceptedQuotes={acceptedQuotes}
       completedJobs={completedJobs}
       orderDocuments={orderDocuments}
-      followUps={today.followUps}
+      customers={customers.items}
+      profiles={profiles.items}
       onConvertQuote={convertQuote}
       onGenerateInvoice={generateInvoice}
       onOrderMaterials={orderMaterials}
