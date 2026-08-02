@@ -71,7 +71,6 @@ export default function MobileQaPage() {
           description: task.description,
           category: qaTaskCategory(updated.type),
           priority: "High",
-          assignedTo: task.assignedTo,
           dueDate: task.dueDate,
           status: "Open",
           photos: task.photos,
