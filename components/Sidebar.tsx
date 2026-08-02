@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Zap } from "lucide-react";
-import { canAccessPath } from "../lib/cloud/permissions";
+import { canAccessPath, isOperatorOnlyPath } from "../lib/cloud/permissions";
 import { useCloudIdentity } from "../lib/cloud/useCloudIdentity";
 import { primaryNavigation, secondaryNavigation } from "./navigation";
 
@@ -11,7 +11,11 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { identity, mode } = useCloudIdentity();
   const unrestricted = mode === "local" || (mode === "migration" && !identity);
-  const permitted = (href: string) => href === "/cloud" || unrestricted || canAccessPath(identity?.role, href);
+  const permitted = (href: string) => {
+    if (href === "/cloud") return true;
+    if (isOperatorOnlyPath(href)) return canAccessPath(identity?.role, href, identity?.email);
+    return unrestricted || canAccessPath(identity?.role, href, identity?.email);
+  };
   const primary = primaryNavigation.slice(0, 4).filter((item) => permitted(item.href));
   const secondary = secondaryNavigation.filter(([, href]) => permitted(href));
 
