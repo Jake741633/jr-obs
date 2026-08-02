@@ -86,9 +86,23 @@ function mimeFromDataUrl(dataUrl: string) {
   return /^data:([^;,]+)[;,]/.exec(dataUrl)?.[1] || "application/octet-stream";
 }
 
+function organisationObjectPrefix(organisationId: string) {
+  return `${sanitizeSegment(organisationId)}/`;
+}
+
 export function privateObjectPath(organisationId: string, jobId: string | undefined, sourceId: string, fileName: string) {
   const scope = jobId ? `jobs/${sanitizeSegment(jobId)}` : "unassigned";
-  return `${organisationId}/${scope}/${sanitizeSegment(sourceId)}/${sanitizeSegment(fileName)}`;
+  return `${sanitizeSegment(organisationId)}/${scope}/${sanitizeSegment(sourceId)}/${sanitizeSegment(fileName)}`;
+}
+
+export function isOrganisationPrivateObjectPath(organisationId: string, objectPath: string) {
+  return objectPath.startsWith(organisationObjectPrefix(organisationId)) && !objectPath.includes("../") && !objectPath.startsWith("/");
+}
+
+function assertOrganisationPrivateObjectPath(organisationId: string, objectPath: string) {
+  if (!isOrganisationPrivateObjectPath(organisationId, objectPath)) {
+    throw new Error("The private file does not belong to the active organisation.");
+  }
 }
 
 export function validatePrivateFile(file: Pick<File, "name" | "size" | "type">) {
@@ -133,10 +147,15 @@ function dataUrlToBlob(dataUrl: string, mimeType: string) {
   return new Blob([bytes], { type: mimeType });
 }
 
-export function readPrivateUploadQueue() {
+function readAllPrivateUploadQueue() {
   if (typeof window === "undefined") return [] as PrivateFileUploadQueueItem[];
   try { return JSON.parse(window.localStorage.getItem(PRIVATE_FILE_UPLOAD_QUEUE_KEY) || "[]") as PrivateFileUploadQueueItem[]; }
   catch { return []; }
+}
+
+export function readPrivateUploadQueue(organisationId?: string) {
+  const queue = readAllPrivateUploadQueue();
+  return organisationId ? queue.filter((item) => item.organisationId === organisationId) : queue;
 }
 
 function writeQueue(items: PrivateFileUploadQueueItem[]) {
@@ -146,6 +165,7 @@ function writeQueue(items: PrivateFileUploadQueueItem[]) {
 }
 
 export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "id" | "state" | "createdAt" | "updatedAt">) {
+  assertOrganisationPrivateObjectPath(item.organisationId, item.objectPath);
   const now = new Date().toISOString();
   const queued: PrivateFileUploadQueueItem = {
     ...item,
@@ -154,7 +174,7 @@ export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "i
     createdAt: now,
     updatedAt: now,
   };
-  const current = readPrivateUploadQueue();
+  const current = readAllPrivateUploadQueue();
   writeQueue([queued, ...current.filter((entry) => entry.id !== queued.id)]);
   return queued;
 }
@@ -166,6 +186,7 @@ function signedObjectUrl(value: string) {
 }
 
 export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) {
+  assertOrganisationPrivateObjectPath(item.organisationId, item.objectPath);
   if (effectiveCloudMode() === "local") return { state: "Pending" as const };
   if (typeof navigator !== "undefined" && !navigator.onLine) return { state: "Offline" as const };
   const blob = dataUrlToBlob(item.dataUrl, item.mimeType);
@@ -196,28 +217,35 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
   return { state: "Synced" as const, metadata: rows[0] ?? metadata, signedDownloadUrl: signedObjectUrl(signedDownload.signedURL) };
 }
 
-export async function flushPrivateFileUploadQueue(onSynced?: (item: PrivateFileUploadQueueItem, result: Awaited<ReturnType<typeof uploadQueuedPrivateFile>>) => void) {
-  const queue = readPrivateUploadQueue();
-  const next: PrivateFileUploadQueueItem[] = [];
-  for (const item of queue) {
+export async function flushPrivateFileUploadQueue(
+  organisationId: string,
+  onSynced?: (item: PrivateFileUploadQueueItem, result: Awaited<ReturnType<typeof uploadQueuedPrivateFile>>) => void,
+) {
+  const allQueue = readAllPrivateUploadQueue();
+  const preserved = allQueue.filter((item) => item.organisationId !== organisationId);
+  const activeQueue = allQueue.filter((item) => item.organisationId === organisationId);
+  const remaining: PrivateFileUploadQueueItem[] = [];
+  for (const item of activeQueue) {
     try {
       const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() });
       if (result.state === "Synced") onSynced?.(item, result);
-      else next.push({ ...item, state: result.state, updatedAt: new Date().toISOString() });
+      else remaining.push({ ...item, state: result.state, updatedAt: new Date().toISOString() });
     } catch (error) {
-      next.push({ ...item, state: "Failed", error: error instanceof Error ? error.message : "Private upload failed.", updatedAt: new Date().toISOString() });
+      remaining.push({ ...item, state: "Failed", error: error instanceof Error ? error.message : "Private upload failed.", updatedAt: new Date().toISOString() });
     }
   }
-  writeQueue(next);
-  return next;
+  writeQueue([...preserved, ...remaining]);
+  return remaining;
 }
 
-export async function signedPrivateDownloadUrl(objectPath: string, expiresIn = 300) {
+export async function signedPrivateDownloadUrl(objectPath: string, organisationId: string, expiresIn = 300) {
+  assertOrganisationPrivateObjectPath(organisationId, objectPath);
   const result = await createSignedDownload(objectPath, expiresIn);
   return signedObjectUrl(result.signedURL);
 }
 
 export async function registerExistingPrivateFile(metadata: PrivateFileMetadata) {
+  assertOrganisationPrivateObjectPath(metadata.organisation_id, metadata.object_path);
   return cloudInsert<PrivateFileMetadata>("private_files", [metadata]);
 }
 
@@ -248,7 +276,11 @@ export function usePrivateFileCollectionBridge<T>(input: {
 
   useEffect(() => {
     if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
-    const queuedIds = new Set(readPrivateUploadQueue().filter((item) => item.storageKey === storageKey).map((item) => item.sourceId));
+    const queuedIds = new Set(
+      readPrivateUploadQueue(identity.organisationId)
+        .filter((item) => item.storageKey === storageKey)
+        .map((item) => item.sourceId),
+    );
     for (const item of items) {
       const record = item as PrivateFileBackedRecord;
       if (storageKey === "jr-os-surveys") {
@@ -294,7 +326,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
       });
     }
 
-    const flush = () => void flushPrivateFileUploadQueue((queued, result) => {
+    const flush = () => void flushPrivateFileUploadQueue(identity.organisationId, (queued, result) => {
       if (queued.storageKey !== storageKey || result.state !== "Synced") return;
       setItems((current) => current.map((item) => {
         const record = item as PrivateFileBackedRecord;
@@ -336,7 +368,10 @@ export function usePrivateFileCollectionBridge<T>(input: {
       return record.privateStoragePath && !signedUrls[record.id] ? [record] : [];
     });
     if (!missing.length) return;
-    void Promise.all(missing.map(async (record) => [record.id, await signedPrivateDownloadUrl(record.privateStoragePath!)] as const))
+    void Promise.all(missing.map(async (record) => [
+      record.id,
+      await signedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId),
+    ] as const))
       .then((entries) => { if (active) setSignedUrls((current) => ({ ...current, ...Object.fromEntries(entries) })); })
       .catch(() => undefined);
     return () => { active = false; };
