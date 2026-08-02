@@ -5,6 +5,7 @@ import { getCurrentCloudUser } from "../cloudSync";
 import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { effectiveCloudMode } from "./config";
 import type { JrRole } from "./permissions";
+import { setActiveSyncOrganisation } from "./repository";
 
 export interface CloudIdentity {
   userId: string;
@@ -25,6 +26,7 @@ const listeners = new Set<() => void>();
 
 function emit(next: IdentitySnapshot) {
   snapshot = next;
+  setActiveSyncOrganisation(next.identity?.organisationId ?? null);
   listeners.forEach((listener) => listener());
 }
 
