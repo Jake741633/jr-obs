@@ -43,7 +43,8 @@ test("calculator page keeps the design-aid and BS 7671 warning visible", async (
 
   assert.match(page, /Design aid only/);
   assert.match(page, /BS 7671/);
-  assert.match(page, /do not select a cable, protective device or confirm compliance/i);
+  assert.match(page, /do not confirm compliance/i);
+  assert.match(page, /manufacturer data/i);
 });
 
 test("electrical calculators remain reachable from workspace navigation", async () => {
