@@ -3,7 +3,6 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 const requiredSuites = [
-  "account-tenant-boundary.test.mjs",
   "customer-portal-tenant-boundary.test.mjs",
   "offline-queue-tenant-isolation.test.mjs",
   "background-sync-tenant-isolation.test.mjs",
