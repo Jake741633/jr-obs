@@ -9,11 +9,13 @@ import {
 } from "../lib/earthFaultLoopCalculator-core.mjs";
 
 test("calculates earth fault loop impedance from Ze plus R1 plus R2", () => {
-  assert.equal(calculateEarthFaultLoopImpedance({
+  const result = calculateEarthFaultLoopImpedance({
     externalEarthFaultLoopOhms: 0.35,
     lineConductorResistanceOhms: 0.18,
     cpcResistanceOhms: 0.3,
-  }), 0.83);
+  });
+
+  assert.ok(Math.abs(result - 0.83) < 1e-12);
 });
 
 test("invalid and negative impedance inputs fall back safely", () => {
@@ -70,7 +72,7 @@ test("summary passes when calculated Zs is below the selected limit", () => {
     permittedPercentage: 80,
   });
 
-  assert.equal(result.calculatedZsOhms, 0.83);
+  assert.ok(Math.abs(result.calculatedZsOhms - 0.83) < 1e-12);
   assert.equal(result.permittedMaximumZsOhms, 1.096);
   assert.equal(result.hasVerifiedLimit, true);
   assert.equal(result.withinSelectedLimit, true);
