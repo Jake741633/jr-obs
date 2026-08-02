@@ -35,7 +35,12 @@ function statusForQueue(queue: SyncQueueItem[]): SyncState {
 }
 
 export const syncStatus = {
-  get(): SyncState { return read<SyncState>(STATUS_KEY, navigator.onLine ? "Synced" : "Offline"); },
+  get(): SyncState {
+    const derived = navigator.onLine ? statusForQueue(getSyncQueue()) : "Offline";
+    const stored = read<SyncState>(STATUS_KEY, derived);
+    if (stored !== derived) write(STATUS_KEY, derived);
+    return derived;
+  },
   set(value: SyncState) { write(STATUS_KEY, value); window.dispatchEvent(new CustomEvent("jr-os-sync-status", { detail: value })); },
 };
 
