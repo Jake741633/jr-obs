@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 
 const pagePath = new URL("../app/electrical-calculators/page.tsx", import.meta.url);
+const cableSizingPagePath = new URL("../app/electrical-calculators/cable-sizing/page.tsx", import.meta.url);
 const navigationPath = new URL("../components/navigation.ts", import.meta.url);
 
 async function read(path) {
@@ -52,4 +53,39 @@ test("electrical calculators remain reachable from workspace navigation", async 
 
   const matches = navigation.match(/\["Electrical Calculators", "\/electrical-calculators"\]/g) ?? [];
   assert.equal(matches.length, 1);
+});
+
+test("workspace links to the dedicated cable-sizing route", async () => {
+  const page = await read(pagePath);
+
+  assert.match(page, /href="\/electrical-calculators\/cable-sizing"/);
+  assert.match(page, /Open Cable Sizing/);
+});
+
+test("dedicated cable-sizing route keeps deterministic calculations and local history", async () => {
+  const page = await read(cableSizingPagePath);
+
+  for (const text of [
+    "Design current Ib (A)",
+    "Installation method",
+    "Cable material",
+    "Insulation type",
+    "Loaded conductors",
+    "Ambient temperature (°C)",
+    "Verified grouping factor",
+    "Cable length (m)",
+    "Corrected current",
+    "Protective device",
+    "Earth fault loop impedance guidance",
+    "Recent calculations",
+  ]) {
+    assert.match(page, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+
+  assert.match(page, /cableSizingSummary/);
+  assert.match(page, /voltageDropSummary/);
+  assert.match(page, /window\.localStorage/);
+  assert.match(page, /jr-os:electrical-calculators:cable-sizing:recent:v1/);
+  assert.match(page, /BS 7671/);
+  assert.match(page, /manufacturer data/i);
 });
