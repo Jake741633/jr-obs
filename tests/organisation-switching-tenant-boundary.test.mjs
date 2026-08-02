@@ -44,9 +44,9 @@ test("browser collections and private-file caches change identity across tenants
 test("collections clear previous tenant data while identity is unresolved", () => {
   assert.match(
     storage,
-    /if \(!identityReady\) \{\s*suppressSyncRef\.current = true;\s*previousRef\.current = initialValueRef\.current;\s*setItems\(initialValueRef\.current\);\s*setIsReady\(false\);\s*return;\s*\}/,
+    /useEffect\(\(\) => \{\s*if \(identityReady\) return;\s*suppressSyncRef\.current = true;\s*previousRef\.current = initialValueRef\.current;\s*setItems\(initialValueRef\.current\);\s*setIsReady\(false\);\s*\}, \[identityReady\]\);/,
   );
-  const clearIndex = storage.indexOf("if (!identityReady) {");
+  const clearIndex = storage.indexOf("if (identityReady) return;");
   const loadIndex = storage.indexOf("async function loadCollection()");
   assert.ok(clearIndex !== -1 && loadIndex !== -1 && clearIndex < loadIndex, "collection state must clear before tenant loading begins");
 });
