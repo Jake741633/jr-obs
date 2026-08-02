@@ -11,9 +11,9 @@ export function CloudAccessGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { identity, isReady } = useCloudIdentity();
 
-  // The account page is the only public JR OS route. Every other route must
-  // resolve an authenticated profile before any business records are rendered.
-  if (pathname === "/cloud") return children;
+  // Account and password-recovery routes must remain reachable before a full
+  // organisation profile has resolved.
+  if (pathname === "/cloud" || pathname === "/auth/update-password") return children;
   if (!isReady) return <div className="grid min-h-[50vh] place-items-center text-sm text-slate-400">Checking secure account access…</div>;
 
   if (!identity) {
