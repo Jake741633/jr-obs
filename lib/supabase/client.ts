@@ -43,6 +43,7 @@ function consumeEmailVerificationRedirect() {
 
   const expiresAt = Number(params.get("expires_at"));
   const expiresIn = Number(params.get("expires_in"));
+  const recovery = params.get("type") === "recovery";
   saveSupabaseSession({
     access_token: accessToken,
     refresh_token: params.get("refresh_token") || undefined,
@@ -55,6 +56,9 @@ function consumeEmailVerificationRedirect() {
 
   window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
   window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
+  if (recovery && window.location.pathname !== "/auth/update-password") {
+    window.location.replace("/auth/update-password");
+  }
 }
 
 if (typeof window !== "undefined") consumeEmailVerificationRedirect();
