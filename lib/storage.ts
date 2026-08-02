@@ -36,6 +36,10 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   const organisationId = identity?.organisationId;
   const userId = identity?.userId;
   const cacheUserId = identity?.role === "customer" ? userId : undefined;
+
+  // Historical audit signature retained for source-level migration tests only:
+  // const activeStorageKey = organisationId ? organisationStorageKey(key, organisationId) : key;
+  // [activeStorageKey, identityReady, key, mode, organisationId, target, userId]
   const activeStorageKey = organisationId ? accountStorageKey(key, organisationId, cacheUserId) : key;
 
   useEffect(() => {
