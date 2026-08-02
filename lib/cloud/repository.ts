@@ -13,9 +13,12 @@ export interface SyncQueueFlushResult { processed: number; cleared: number; rema
 
 const QUEUE_KEY = "jr-os-cloud-sync-queue";
 const STATUS_KEY = "jr-os-cloud-sync-status";
+const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation";
 
 function read<T>(key: string, fallback: T): T { try { return JSON.parse(window.localStorage.getItem(key) || "") as T; } catch { return fallback; } }
 function write(key: string, value: unknown) { window.localStorage.setItem(key, JSON.stringify(value)); }
+function readAllSyncQueue() { return read<SyncQueueItem[]>(QUEUE_KEY, []); }
+function activeOrganisationId() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ORGANISATION_KEY); }
 function collectionFilter(collectionKey?: string) { return collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : ""; }
 function samePayload(left: unknown, right: unknown) { return JSON.stringify(left ?? null) === JSON.stringify(right ?? null); }
 function updateCachedVersion(storageKey: string | undefined, sourceId: string, version?: number) {
@@ -34,6 +37,13 @@ function statusForQueue(queue: SyncQueueItem[]): SyncState {
   return "Pending";
 }
 
+export function setActiveSyncOrganisation(organisationId: string | null) {
+  if (typeof window === "undefined") return;
+  if (organisationId) window.localStorage.setItem(ACTIVE_ORGANISATION_KEY, organisationId);
+  else window.localStorage.removeItem(ACTIVE_ORGANISATION_KEY);
+  syncStatus.set(navigator.onLine ? statusForQueue(getSyncQueue()) : "Offline");
+}
+
 export const syncStatus = {
   get(): SyncState {
     const derived = navigator.onLine ? statusForQueue(getSyncQueue()) : "Offline";
@@ -44,36 +54,47 @@ export const syncStatus = {
   set(value: SyncState) { write(STATUS_KEY, value); window.dispatchEvent(new CustomEvent("jr-os-sync-status", { detail: value })); },
 };
 
-export function getSyncQueue() { return read<SyncQueueItem[]>(QUEUE_KEY, []); }
+export function getSyncQueue() {
+  const organisationId = activeOrganisationId();
+  if (!organisationId) return [];
+  return readAllSyncQueue().filter((item) => item.organisationId === organisationId);
+}
 
 export function getOrganisationSyncQueue(organisationId: string) {
-  return getSyncQueue().filter((item) => item.organisationId === organisationId);
+  return readAllSyncQueue().filter((item) => item.organisationId === organisationId);
 }
 
 export function discardSyncQueueItem(itemId: string) {
-  const queue = getSyncQueue();
-  const item = queue.find((entry) => entry.id === itemId);
-  if (!item) return { removed: false, remaining: queue.length };
+  const organisationId = activeOrganisationId();
+  const queue = readAllSyncQueue();
+  const item = queue.find((entry) => entry.id === itemId && entry.organisationId === organisationId);
+  if (!item) return { removed: false, remaining: getSyncQueue().length };
   const next = queue.filter((entry) => entry.id !== itemId);
   write(QUEUE_KEY, next);
-  syncStatus.set(statusForQueue(next));
-  return { removed: true, remaining: next.length, item };
+  const activeRemaining = next.filter((entry) => entry.organisationId === organisationId);
+  syncStatus.set(statusForQueue(activeRemaining));
+  return { removed: true, remaining: activeRemaining.length, item };
 }
 
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "queuedAt" | "attempts" | "state">) {
-  const queue = getSyncQueue();
+  const queue = readAllSyncQueue();
   const next: SyncQueueItem<T> = { ...item, id: `${item.organisationId}:${item.table}:${item.collectionKey || "typed"}:${item.sourceId}:${Date.now()}`, queuedAt: new Date().toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
   write(QUEUE_KEY, coalesceQueue(queue, next));
-  syncStatus.set(navigator.onLine ? "Pending" : "Offline");
+  if (activeOrganisationId() === item.organisationId) syncStatus.set(navigator.onLine ? "Pending" : "Offline");
 }
 
 export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
+  const organisationId = activeOrganisationId();
+  const allQueue = readAllSyncQueue();
+  if (!organisationId) return { processed: 0, cleared: 0, remaining: 0, conflicts: 0, failed: 0 };
+
+  const queue = allQueue.filter((item) => item.organisationId === organisationId);
+  const preserved = allQueue.filter((item) => item.organisationId !== organisationId);
   if (!navigator.onLine) {
     syncStatus.set("Offline");
-    const offlineQueue = getSyncQueue();
-    return { processed: 0, cleared: 0, remaining: offlineQueue.length, conflicts: offlineQueue.filter((item) => item.state === "Conflict").length, failed: offlineQueue.filter((item) => item.state === "Failed").length };
+    return { processed: 0, cleared: 0, remaining: queue.length, conflicts: queue.filter((item) => item.state === "Conflict").length, failed: queue.filter((item) => item.state === "Failed").length };
   }
-  const queue = getSyncQueue();
+
   const remaining: SyncQueueItem[] = [];
   let cleared = 0;
   for (const item of queue) {
@@ -122,7 +143,7 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
       }
     } catch (error) { remaining.push({ ...item, attempts: item.attempts + 1, state: "Failed", error: error instanceof Error ? error.message : "Sync failed" }); }
   }
-  write(QUEUE_KEY, remaining);
+  write(QUEUE_KEY, [...preserved, ...remaining]);
   const conflicts = remaining.filter((item) => item.state === "Conflict").length;
   const failed = remaining.filter((item) => item.state === "Failed").length;
   syncStatus.set(statusForQueue(remaining));
