@@ -89,7 +89,6 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
   if (!organisationId) return { processed: 0, cleared: 0, remaining: 0, conflicts: 0, failed: 0 };
 
   const queue = allQueue.filter((item) => item.organisationId === organisationId);
-  const preserved = allQueue.filter((item) => item.organisationId !== organisationId);
   if (!navigator.onLine) {
     syncStatus.set("Offline");
     return { processed: 0, cleared: 0, remaining: queue.length, conflicts: queue.filter((item) => item.state === "Conflict").length, failed: queue.filter((item) => item.state === "Failed").length };
@@ -153,11 +152,20 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
       }
     } catch (error) { remaining.push({ ...item, attempts: item.attempts + 1, state: "Failed", error: error instanceof Error ? error.message : "Sync failed" }); }
   }
-  write(QUEUE_KEY, [...preserved, ...remaining]);
-  const conflicts = remaining.filter((item) => item.state === "Conflict").length;
-  const failed = remaining.filter((item) => item.state === "Failed").length;
-  if (activeOrganisationId() === organisationId) syncStatus.set(statusForQueue(remaining));
-  return { processed, cleared, remaining: remaining.length, conflicts, failed };
+
+  const liveQueue = readAllSyncQueue();
+  const originalIds = new Set(queue.map((item) => item.id));
+  const liveIds = new Set(liveQueue.map((item) => item.id));
+  const untouched = liveQueue.filter((item) => item.organisationId !== organisationId || !originalIds.has(item.id));
+  const retained = remaining.filter((item) => liveIds.has(item.id));
+  const nextQueue = [...untouched, ...retained];
+  write(QUEUE_KEY, nextQueue);
+
+  const activeRemaining = nextQueue.filter((item) => item.organisationId === organisationId);
+  const conflicts = activeRemaining.filter((item) => item.state === "Conflict").length;
+  const failed = activeRemaining.filter((item) => item.state === "Failed").length;
+  if (activeOrganisationId() === organisationId) syncStatus.set(statusForQueue(activeRemaining));
+  return { processed, cleared, remaining: activeRemaining.length, conflicts, failed };
 }
 
 export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; customerSourceId?: string; jobId?: string; jobSourceId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string) {
