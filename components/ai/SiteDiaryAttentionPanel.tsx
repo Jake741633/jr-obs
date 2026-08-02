@@ -6,6 +6,16 @@ import { useSiteDiariesCollection } from "../../lib/cloud/coreBusinessCollection
 import { siteDiaryAttentionSummary } from "../../lib/siteDiaryAttention-core.mjs";
 import { Card } from "../ui/Card";
 
+type SiteDiaryAttentionItem = {
+  id: string;
+  kind: string;
+  title: string;
+  detail: string;
+  priority: "Urgent" | "High" | "Normal";
+  dueDate: string;
+  href: string;
+};
+
 const priorityTone = {
   Urgent: "border-rose-400/30 bg-rose-400/5 text-rose-100",
   High: "border-amber-400/30 bg-amber-400/5 text-amber-100",
@@ -23,7 +33,12 @@ const kindIcon = {
 
 export function SiteDiaryAttentionPanel() {
   const diaries = useSiteDiariesCollection();
-  const summary = siteDiaryAttentionSummary(diaries.items);
+  const summary = siteDiaryAttentionSummary(diaries.items) as {
+    total: number;
+    urgent: number;
+    materials: number;
+    items: SiteDiaryAttentionItem[];
+  };
 
   if (!diaries.isReady) return <Card>Loading site diary actions…</Card>;
 
@@ -42,9 +57,9 @@ export function SiteDiaryAttentionPanel() {
       </div>
 
       <Card className="space-y-3">
-        {summary.items.slice(0, 8).map((item) => {
+        {summary.items.slice(0, 8).map((item: SiteDiaryAttentionItem) => {
           const Icon = kindIcon[item.kind as keyof typeof kindIcon] ?? ClipboardList;
-          const tone = priorityTone[item.priority as keyof typeof priorityTone] ?? priorityTone.Normal;
+          const tone = priorityTone[item.priority] ?? priorityTone.Normal;
           return (
             <Link key={item.id} href={item.href} className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition hover:border-cyan-400/30 ${tone}`}>
               <Icon className="mt-0.5 size-5 shrink-0" />
