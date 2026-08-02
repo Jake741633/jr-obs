@@ -15,7 +15,19 @@ type RecentCalculation = {
   savedAt: string;
   phase: Phase;
   designCurrentAmps: number;
+  installationMethod?: string;
+  cableMaterial?: string;
+  insulationType?: string;
+  loadedConductors?: number;
+  ambientTemperature?: number;
+  ambientFactor?: number;
+  groupingFactor?: number;
+  cableLength?: number;
+  voltage?: number;
+  millivoltsPerAmpMetre?: number;
   cableSizeMm2: number;
+  tabulatedCurrentAmps?: number;
+  protectiveDeviceAmps?: number;
   requiredTabulatedCurrentAmps: number;
   voltageDropVolts: number;
 };
@@ -106,7 +118,19 @@ export default function CableSizingPage() {
       savedAt: new Date().toISOString(),
       phase,
       designCurrentAmps: Number(designCurrentAmps),
+      installationMethod,
+      cableMaterial,
+      insulationType,
+      loadedConductors: Number(loadedConductors),
+      ambientTemperature: Number(ambientTemperature),
+      ambientFactor: Number(ambientFactor),
+      groupingFactor: Number(groupingFactor),
+      cableLength: Number(cableLength),
+      voltage: Number(voltage),
+      millivoltsPerAmpMetre: Number(millivoltsPerAmpMetre),
       cableSizeMm2: Number(cableSizeMm2),
+      tabulatedCurrentAmps: Number(tabulatedCurrentAmps),
+      protectiveDeviceAmps: Number(protectiveDeviceAmps),
       requiredTabulatedCurrentAmps: cableSizing.requiredTabulatedCurrentAmps,
       voltageDropVolts: voltageDrop.voltageDropVolts,
     };
@@ -117,10 +141,20 @@ export default function CableSizingPage() {
 
   function loadCalculation(item: RecentCalculation) {
     setPhase(item.phase);
-    setVoltage(item.phase === "Three phase" ? "400" : "230");
-    setLoadedConductors(item.phase === "Three phase" ? "3" : "2");
     setDesignCurrentAmps(String(item.designCurrentAmps));
+    setInstallationMethod(item.installationMethod ?? "Reference method C");
+    setCableMaterial(item.cableMaterial ?? "Copper");
+    setInsulationType(item.insulationType ?? "PVC 70°C");
+    setLoadedConductors(String(item.loadedConductors ?? (item.phase === "Three phase" ? 3 : 2)));
+    setAmbientTemperature(String(item.ambientTemperature ?? 30));
+    setAmbientFactor(String(item.ambientFactor ?? 1));
+    setGroupingFactor(String(item.groupingFactor ?? 1));
+    setCableLength(String(item.cableLength ?? 20));
+    setVoltage(String(item.voltage ?? (item.phase === "Three phase" ? 400 : 230)));
+    setMillivoltsPerAmpMetre(String(item.millivoltsPerAmpMetre ?? 18));
     setCableSizeMm2(String(item.cableSizeMm2));
+    setTabulatedCurrentAmps(String(item.tabulatedCurrentAmps ?? 27));
+    setProtectiveDeviceAmps(String(item.protectiveDeviceAmps ?? item.designCurrentAmps));
   }
 
   return (
