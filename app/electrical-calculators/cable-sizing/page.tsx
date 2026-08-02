@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Cable, CircleAlert, RotateCcw, Save } from "lucide-react";
+import { ArrowLeft, Cable, CircleAlert, RotateCcw, Save, Trash2 } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
@@ -139,6 +139,11 @@ export default function CableSizingPage() {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   }
 
+  function clearHistory() {
+    setRecent([]);
+    window.localStorage.removeItem(STORAGE_KEY);
+  }
+
   function loadCalculation(item: RecentCalculation) {
     setPhase(item.phase);
     setDesignCurrentAmps(String(item.designCurrentAmps));
@@ -209,7 +214,10 @@ export default function CableSizingPage() {
       </div>
 
       <Card>
-        <h2 className="font-semibold">Recent calculations</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold">Recent calculations</h2>
+          {recent.length > 0 ? <button type="button" onClick={clearHistory} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-rose-400/30 px-3 font-semibold text-rose-200"><Trash2 className="size-4" />Clear history</button> : null}
+        </div>
         {recent.length === 0 ? <p className="mt-2 text-sm text-slate-500">No locally saved calculations yet.</p> : <div className="mt-3 grid gap-3">{recent.map((item) => <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950 p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><span className="font-semibold">{item.phase} · {number.format(item.designCurrentAmps)} A</span><span className="text-slate-500">{new Date(item.savedAt).toLocaleString("en-GB")}</span></div><p className="mt-1 text-slate-400">{number.format(item.cableSizeMm2)} mm² · corrected {number.format(item.requiredTabulatedCurrentAmps)} A · drop {number.format(item.voltageDropVolts)} V</p><button type="button" onClick={() => loadCalculation(item)} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 px-3 font-semibold text-slate-200"><RotateCcw className="size-4" />Load into calculator</button></div>)}</div>}
       </Card>
     </main>
