@@ -59,7 +59,7 @@ test("workspace links to the dedicated cable-sizing route", async () => {
   const page = await read(pagePath);
 
   assert.match(page, /href="\/electrical-calculators\/cable-sizing"/);
-  assert.match(page, /Open Cable Sizing/);
+  assert.match(page, /Open dedicated Cable Sizing/);
 });
 
 test("dedicated cable-sizing route keeps deterministic calculations and local history", async () => {
