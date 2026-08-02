@@ -41,9 +41,12 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     if (!identityReady) return;
     let active = true;
     suppressSyncRef.current = true;
-    setIsReady(false);
 
     async function loadCollection() {
+      await Promise.resolve();
+      if (!active) return;
+      setIsReady(false);
+
       let loaded = readLocal(activeStorageKey, initialValueRef.current);
 
       if (target && organisationId && userId) {
