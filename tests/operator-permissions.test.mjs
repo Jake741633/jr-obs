@@ -12,11 +12,11 @@ function loadPermissions(operatorEmails = "operator@example.com") {
       target: ts.ScriptTarget.ES2022,
     },
   }).outputText;
-  const module = { exports: {} };
+  const commonJsModule = { exports: {} };
 
   vm.runInNewContext(output, {
-    exports: module.exports,
-    module,
+    exports: commonJsModule.exports,
+    module: commonJsModule,
     process: {
       env: {
         NEXT_PUBLIC_JR_OS_OPERATOR_EMAILS: operatorEmails,
@@ -24,7 +24,7 @@ function loadPermissions(operatorEmails = "operator@example.com") {
     },
   });
 
-  return module.exports;
+  return commonJsModule.exports;
 }
 
 test("operator-only routes fail closed without verified operator email", () => {
