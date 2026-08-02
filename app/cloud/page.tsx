@@ -5,6 +5,7 @@ import { CheckCircle2, Cloud, CloudDownload, CloudOff, CloudUpload, LogIn, LogOu
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import {
+  completeEmailVerificationFromUrl,
   getCurrentCloudUser,
   migrateLocalDataToCloud,
   migrateTypedLocalDataToCloud,
@@ -37,7 +38,18 @@ export default function CloudPage() {
 
   useEffect(() => {
     let active = true;
-    void getCurrentCloudUser().then((user) => { if (active) setUserEmail(user?.email ?? null); });
+    void (async () => {
+      try {
+        const verifiedUser = await completeEmailVerificationFromUrl();
+        const user = verifiedUser ?? await getCurrentCloudUser();
+        if (!active) return;
+        setUserEmail(user?.email ?? null);
+        if (verifiedUser) setAccountMessage("Email verified. You are now signed in securely.");
+      } catch (error) {
+        if (!active) return;
+        setAccountMessage(error instanceof Error ? error.message : "Email verification could not be completed.");
+      }
+    })();
     const listener = (event: Event) => setSync((event as CustomEvent<SyncState>).detail);
     window.addEventListener("jr-os-sync-status", listener);
     return () => { active = false; window.removeEventListener("jr-os-sync-status", listener); };
