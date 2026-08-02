@@ -12,7 +12,7 @@ test("authenticated collection caches are scoped by organisation", () => {
 });
 
 test("migration mode never trusts a legacy unscoped cache for an authenticated organisation", () => {
-  assert.match(adapter, /const scopedStorageKey = organisationStorageKey\(storageKey, organisationId\)/);
+  assert.match(adapter, /const scopedStorageKey = accountStorageKey\(storageKey, organisationId, cacheUserId\)/);
   assert.match(adapter, /const local = readLocal<T>\(scopedStorageKey\)/);
   assert.doesNotMatch(adapter, /const local = readLocal<T>\(storageKey\)/);
   assert.match(adapter, /legacy unscoped key is[\s\S]*never trusted/);
