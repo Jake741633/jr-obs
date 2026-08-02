@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Calculator, CircleAlert, Gauge, Zap } from "lucide-react";
+import { Calculator, CircleAlert, Gauge, Route, Zap } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { InputField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { electricalLoadSummary } from "../../lib/electricalCalculators-core.mjs";
+import { voltageDropSummary } from "../../lib/voltageDropCalculator-core.mjs";
 
 type Phase = "Single phase" | "Three phase";
 
@@ -17,6 +18,9 @@ export default function ElectricalCalculatorsPage() {
   const [voltage, setVoltage] = useState("230");
   const [powerFactor, setPowerFactor] = useState("1");
   const [efficiency, setEfficiency] = useState("1");
+  const [routeLength, setRouteLength] = useState("20");
+  const [millivoltsPerAmpMetre, setMillivoltsPerAmpMetre] = useState("18");
+  const [maximumPercent, setMaximumPercent] = useState("3");
 
   const result = useMemo(() => electricalLoadSummary({
     phase,
@@ -25,6 +29,15 @@ export default function ElectricalCalculatorsPage() {
     powerFactor: Number(powerFactor),
     efficiency: Number(efficiency),
   }), [efficiency, phase, powerFactor, powerKw, voltage]);
+
+  const voltageDrop = useMemo(() => voltageDropSummary({
+    phase,
+    nominalVoltage: Number(voltage),
+    designCurrentAmps: result.currentAmps,
+    routeLengthMetres: Number(routeLength),
+    millivoltsPerAmpMetre: Number(millivoltsPerAmpMetre),
+    maximumPercent: Number(maximumPercent),
+  }), [maximumPercent, millivoltsPerAmpMetre, phase, result.currentAmps, routeLength, voltage]);
 
   function selectPhase(nextPhase: Phase) {
     setPhase(nextPhase);
@@ -35,8 +48,8 @@ export default function ElectricalCalculatorsPage() {
     <main className="space-y-6">
       <PageHeader
         eyebrow="Electrical Calculators"
-        title="Load and current"
-        description="Calculate design current for single-phase and three-phase loads with visible assumptions."
+        title="Load, current and voltage drop"
+        description="Calculate design current and assess voltage drop for single-phase and three-phase loads with visible assumptions."
       />
 
       <Card className="border-amber-400/20 bg-amber-400/5">
@@ -44,7 +57,7 @@ export default function ElectricalCalculatorsPage() {
           <CircleAlert className="mt-0.5 size-5 shrink-0 text-amber-300" />
           <div>
             <h2 className="font-semibold text-amber-100">Design aid only</h2>
-            <p className="mt-1 text-sm text-amber-100/70">This calculator does not select a cable, protective device or confirm compliance. Verify all results against the current BS 7671 tables, manufacturer data and actual installation conditions.</p>
+            <p className="mt-1 text-sm text-amber-100/70">These calculators do not select a cable, protective device or confirm compliance. Verify all results against the current BS 7671 tables, manufacturer data and actual installation conditions.</p>
           </div>
         </div>
       </Card>
@@ -85,15 +98,47 @@ export default function ElectricalCalculatorsPage() {
             <Card><Zap className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Active power</p><p className="mt-1 text-2xl font-bold">{number.format(result.powerWatts / 1000)} kW</p></Card>
             <Card><Zap className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Apparent power</p><p className="mt-1 text-2xl font-bold">{number.format(result.apparentPowerVa / 1000)} kVA</p></Card>
           </div>
-
-          <Card>
-            <h2 className="font-semibold">Assumptions used</h2>
-            <div className="mt-3 space-y-2">
-              {result.assumptions.map((assumption: string) => <p key={assumption} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-400">{assumption}</p>)}
-            </div>
-          </Card>
         </div>
       </div>
+
+      <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+        <Card>
+          <div className="flex items-center gap-3">
+            <span className="grid size-10 place-items-center rounded-xl bg-violet-400/10 text-violet-300"><Route className="size-5" /></span>
+            <div><h2 className="font-semibold">Voltage drop</h2><p className="text-sm text-slate-500">Uses the calculated design current above.</p></div>
+          </div>
+
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <InputField label="Route length (m)" type="number" inputMode="decimal" min="0" step="0.1" value={routeLength} onChange={(event) => setRouteLength(event.target.value)} />
+            <InputField label="Conductor value (mV/A/m)" type="number" inputMode="decimal" min="0" step="0.1" value={millivoltsPerAmpMetre} onChange={(event) => setMillivoltsPerAmpMetre(event.target.value)} />
+            <InputField label="Selected maximum drop (%)" type="number" inputMode="decimal" min="0" step="0.1" value={maximumPercent} onChange={(event) => setMaximumPercent(event.target.value)} />
+            <InputField label="Design current (A)" type="number" value={number.format(result.currentAmps)} readOnly />
+          </div>
+        </Card>
+
+        <div className="space-y-4">
+          <Card className={voltageDrop.withinSelectedLimit ? "border-emerald-400/30" : "border-rose-400/30"}>
+            <div className="flex items-center justify-between"><Route className="size-6 text-violet-300" /><span className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">Calculated voltage drop</span></div>
+            <p className="mt-5 text-5xl font-black">{number.format(voltageDrop.voltageDropVolts)} V</p>
+            <p className="mt-2 text-sm text-slate-400">{number.format(voltageDrop.voltageDropPercent)}% of {number.format(voltageDrop.nominalVoltage)} V.</p>
+            <p className={`mt-4 text-sm font-semibold ${voltageDrop.withinSelectedLimit ? "text-emerald-300" : "text-rose-300"}`}>
+              {voltageDrop.withinSelectedLimit ? "Within selected limit" : "Exceeds selected limit"}
+            </p>
+          </Card>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Card><p className="text-sm text-slate-400">Maximum permitted</p><p className="mt-1 text-2xl font-bold">{number.format(voltageDrop.maximumVoltageDropVolts)} V</p></Card>
+            <Card><p className="text-sm text-slate-400">Remaining allowance</p><p className="mt-1 text-2xl font-bold">{number.format(voltageDrop.remainingVoltageDropVolts)} V</p></Card>
+          </div>
+        </div>
+      </div>
+
+      <Card>
+        <h2 className="font-semibold">Assumptions used</h2>
+        <div className="mt-3 grid gap-2 lg:grid-cols-2">
+          {[...result.assumptions, ...voltageDrop.assumptions].map((assumption: string, index: number) => <p key={`${index}-${assumption}`} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-400">{assumption}</p>)}
+        </div>
+      </Card>
     </main>
   );
 }
