@@ -6,6 +6,8 @@ const cloudSync = readFileSync(new URL("../lib/cloudSync.ts", import.meta.url), 
 const signupMigration = readFileSync(new URL("../supabase/migrations/20260802_009_neutral_signup_defaults.sql", import.meta.url), "utf8");
 const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url), "utf8");
 const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf8");
+const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
+const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
 
 test("account changes preserve browser-resident business records", () => {
   assert.match(cloudSync, /export function clearLocalJrOsAccountData\(\)\s*\{\s*return 0;\s*\}/);
@@ -38,4 +40,18 @@ test("legacy restore writes only to the authenticated organisation cache", () =>
 
 test("typed migration ignores already scoped tenant caches", () => {
   assert.match(cloudSync, /!key\.includes\(":organisation:"\)/);
+});
+
+test("sync queue visibility and retries are restricted to the active organisation", () => {
+  assert.match(repository, /const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation"/);
+  assert.match(repository, /export function setActiveSyncOrganisation/);
+  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId\)/);
+  assert.match(repository, /const preserved = allQueue\.filter\(\(item\) => item\.organisationId !== organisationId\)/);
+  assert.match(repository, /write\(QUEUE_KEY, \[\.\.\.preserved, \.\.\.remaining\]\)/);
+  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId/);
+});
+
+test("resolved identity controls the active sync organisation and clears it during account changes", () => {
+  assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
+  assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
 });
