@@ -112,6 +112,15 @@ test("cross-tab session changes still trigger the same identity revalidation pat
   assert.match(identityHook, /window\.removeEventListener\("storage", handleStorageChange\)/);
 });
 
+test("identity refresh errors fail closed without overwriting a newer request", () => {
+  assert.match(
+    identityHook,
+    /catch \{\s*if \(requestVersion === identityRequestVersion\) emit\(\{ identity: null, isReady: true \}\);\s*return null;\s*\}/,
+  );
+  assert.match(identityHook, /if \(requestVersion === identityRequestVersion\) emit\(\{ identity, isReady: true \}\)/);
+  assert.match(identityHook, /if \(identityRequest === request\) identityRequest = null/);
+});
+
 test("typed import records the common successful upload timestamp", () => {
   assert.match(cloudSync, /recordSuccessfulCloudUpload/);
   assert.match(cloudSync, /jr-os-last-cloud-sync/);
