@@ -57,3 +57,12 @@ test("customer portal access fails closed before page data can render", () => {
   assert.doesNotMatch(permissions, /office: \[[^\]]*"\/customer-portal"/s);
   assert.doesNotMatch(permissions, /electrician: \[[^\]]*"\/customer-portal"/s);
 });
+
+test("portal documents and photos stay within the active customer job set", () => {
+  assert.match(portal, /const jobIds = useMemo\(\(\) => new Set\(customerJobs\.map\(\(job\) => job\.id\)\)/);
+  assert.match(portal, /customerDocuments\(documents\.items, activeCustomerId, jobIds\)/);
+  assert.match(portal, /customerDocuments\(invoices\.items, activeCustomerId, jobIds\)/);
+  assert.match(portal, /customerDocuments\(certificates\.items, activeCustomerId, jobIds\)/);
+  assert.match(portal, /sharedPhotos\(jobDocuments\.items, jobIds, photoShares\.items\)/);
+  assert.doesNotMatch(portal, /sharedPhotos\(jobDocuments\.items, new Set\(jobs\.items\.map/);
+});
