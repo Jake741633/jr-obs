@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AppShell } from "../components/AppShell";
+import { PasswordRecoveryGate } from "../components/PasswordRecoveryGate";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -13,5 +14,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}><body><AppShell>{children}</AppShell></body></html>;
+  return <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}><body><PasswordRecoveryGate><AppShell>{children}</AppShell></PasswordRecoveryGate></body></html>;
 }
