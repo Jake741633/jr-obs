@@ -65,6 +65,13 @@ test("resolved identity controls the active sync organisation and clears it duri
   assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
 });
 
+test("cross-tab session replacement invalidates the previous tenant before loading the next identity", () => {
+  assert.match(identity, /function handleStorageChange\(event: StorageEvent\)/);
+  assert.match(identity, /if \(event\.key === "jr-os-supabase-session"\) void refreshCloudIdentity\(\);/);
+  assert.match(identity, /export function refreshCloudIdentity\(\) \{\s*emit\(\{ identity: null, isReady: false \}\);\s*return loadIdentity\(true\);\s*\}/);
+  assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
+});
+
 test("suspended profiles cannot resolve an application identity or expose cached tenant data", () => {
   assert.match(identity, /active=eq\.true/);
   assert.match(identity, /select=organisation_id,role,customer_source_id,active/);
