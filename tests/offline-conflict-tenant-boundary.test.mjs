@@ -80,13 +80,31 @@ test("offline import cannot resurrect a tenant tombstone", () => {
   assert.deepEqual(pendingImports(local, cloud), []);
 });
 
-test("background sync processes only the active organisation and preserves every other queue", () => {
+test("background sync merges results into the live queue without crossing tenants", () => {
   assert.match(repository, /const organisationId = activeOrganisationId\(\)/);
   assert.match(repository, /const queue = allQueue\.filter\(\(item\) => item\.organisationId === organisationId\)/);
-  assert.match(repository, /const preserved = allQueue\.filter\(\(item\) => item\.organisationId !== organisationId\)/);
-  assert.match(repository, /write\(QUEUE_KEY, \[\.\.\.preserved, \.\.\.remaining\]\)/);
+  assert.match(repository, /const liveQueue = readAllSyncQueue\(\)/);
+  assert.match(repository, /const originalIds = new Set\(queue\.map\(\(item\) => item\.id\)\)/);
+  assert.match(repository, /const liveIds = new Set\(liveQueue\.map\(\(item\) => item\.id\)\)/);
+  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| !originalIds\.has\(item\.id\)\)/);
+  assert.match(repository, /const retained = remaining\.filter\(\(item\) => liveIds\.has\(item\.id\)\)/);
+  assert.match(repository, /const nextQueue = \[\.\.\.untouched, \.\.\.retained\]/);
+  assert.match(repository, /write\(QUEUE_KEY, nextQueue\)/);
+  assert.match(repository, /const activeRemaining = nextQueue\.filter\(\(item\) => item\.organisationId === organisationId\)/);
   assert.match(repository, /tenantRecordQuery\(\{ organisationId: item\.organisationId/);
   assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId/);
+});
+
+test("live queue merge preserves new work and respects concurrent discards", () => {
+  assert.match(repository, /!originalIds\.has\(item\.id\)/);
+  assert.match(repository, /remaining\.filter\(\(item\) => liveIds\.has\(item\.id\)\)/);
+  assert.doesNotMatch(repository, /write\(QUEUE_KEY, \[\.\.\.preserved, \.\.\.remaining\]\)/);
+});
+
+test("background sync stops processing when the active organisation changes", () => {
+  assert.match(repository, /if \(activeOrganisationId\(\) !== organisationId\) \{\s*remaining\.push\(\.\.\.queue\.slice\(processed\)\);\s*break;/);
+  assert.match(repository, /const existing = await cloudSelect[\s\S]*if \(activeOrganisationId\(\) !== organisationId\) \{\s*remaining\.push\(item, \.\.\.queue\.slice\(processed\)\);\s*break;/);
+  assert.match(repository, /if \(activeOrganisationId\(\) === organisationId\) syncStatus\.set\(statusForQueue\(activeRemaining\)\)/);
 });
 
 test("online retries resolve the active organisation at execution time", () => {
