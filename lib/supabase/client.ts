@@ -35,6 +35,30 @@ export function saveSupabaseSession(session: SupabaseSession | null) {
   else window.localStorage.setItem(sessionKey, JSON.stringify(session));
 }
 
+function consumeEmailVerificationRedirect() {
+  if (typeof window === "undefined" || !window.location.hash) return;
+  const params = new URLSearchParams(window.location.hash.slice(1));
+  const accessToken = params.get("access_token");
+  if (!accessToken) return;
+
+  const expiresAt = Number(params.get("expires_at"));
+  const expiresIn = Number(params.get("expires_in"));
+  saveSupabaseSession({
+    access_token: accessToken,
+    refresh_token: params.get("refresh_token") || undefined,
+    expires_at: Number.isFinite(expiresAt) && expiresAt > 0
+      ? expiresAt
+      : Number.isFinite(expiresIn) && expiresIn > 0
+        ? Math.floor(Date.now() / 1000) + expiresIn
+        : undefined,
+  });
+
+  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+  window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
+}
+
+if (typeof window !== "undefined") consumeEmailVerificationRedirect();
+
 export async function supabaseFetch(path: string, init: RequestInit = {}, authenticated = true) {
   const config = getSupabaseConfig();
   if (!config) throw new Error("Supabase is not configured yet.");
@@ -44,7 +68,13 @@ export async function supabaseFetch(path: string, init: RequestInit = {}, authen
   headers.set("Content-Type", "application/json");
   if (authenticated && session?.access_token) headers.set("Authorization", `Bearer ${session.access_token}`);
 
-  const response = await fetch(`${config.url}${path}`, { ...init, headers });
+  let requestPath = path;
+  if (typeof window !== "undefined" && path === "/auth/v1/signup") {
+    const redirectTo = `${window.location.origin}/cloud`;
+    requestPath = `${path}?redirect_to=${encodeURIComponent(redirectTo)}`;
+  }
+
+  const response = await fetch(`${config.url}${requestPath}`, { ...init, headers });
   const body = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
     const message = body?.msg || body?.message || body?.error_description || body?.error || "Cloud request failed.";
