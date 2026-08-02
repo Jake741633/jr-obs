@@ -98,3 +98,32 @@ test("cable-sizing history can be cleared from state and local storage", async (
   assert.match(page, /window\.localStorage\.removeItem\(STORAGE_KEY\)/);
   assert.match(page, /Clear history/);
 });
+
+test("cable-sizing form can reset every current input without clearing history", async () => {
+  const page = await read(cableSizingPagePath);
+
+  assert.match(page, /function resetDefaults\(\)/);
+
+  for (const reset of [
+    'setPhase("Single phase")',
+    'setDesignCurrentAmps("20")',
+    'setInstallationMethod("Reference method C")',
+    'setCableMaterial("Copper")',
+    'setInsulationType("PVC 70°C")',
+    'setLoadedConductors("2")',
+    'setAmbientTemperature("30")',
+    'setAmbientFactor("1")',
+    'setGroupingFactor("1")',
+    'setCableLength("20")',
+    'setVoltage("230")',
+    'setMillivoltsPerAmpMetre("18")',
+    'setCableSizeMm2("2.5")',
+    'setTabulatedCurrentAmps("27")',
+    'setProtectiveDeviceAmps("20")',
+  ]) {
+    assert.match(page, new RegExp(reset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+
+  assert.match(page, /Reset defaults/);
+  assert.doesNotMatch(page.match(/function resetDefaults\(\)[\s\S]*?\n  }/)?.[0] ?? "", /setRecent|localStorage/);
+});
