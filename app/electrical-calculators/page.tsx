@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Calculator, Cable, CircleAlert, Gauge, Route, Zap } from "lucide-react";
+import { ArrowRight, Calculator, Cable, CircleAlert, Gauge, Route, Zap } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { InputField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -76,6 +77,17 @@ export default function ElectricalCalculatorsPage() {
         title="Load, current, voltage drop and cable sizing"
         description="Calculate design current, assess voltage drop and check a verified cable option against correction factors."
       />
+
+      <Link href="/electrical-calculators/cable-sizing" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-400/15">
+        <span className="flex items-center gap-3">
+          <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-300/15"><Cable className="size-5" /></span>
+          <span>
+            <span className="block font-bold">Open dedicated Cable Sizing</span>
+            <span className="block text-sm text-cyan-100/70">Full mobile workflow with verified inputs and locally saved recent calculations.</span>
+          </span>
+        </span>
+        <ArrowRight className="size-5 shrink-0" />
+      </Link>
 
       <Card className="border-amber-400/20 bg-amber-400/5">
         <div className="flex items-start gap-3">
