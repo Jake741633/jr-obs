@@ -11,11 +11,11 @@ const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf
 const portal = readFileSync(new URL("../app/customer-portal/page.tsx", import.meta.url), "utf8");
 const guard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
 
-test("record enumeration cannot remove the encoded organisation filter", () => {
-  assert.match(adapter, /organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}/);
-  assert.match(adapter, /source_id=eq\.\$\{encodeURIComponent\(sourceId\)\}/);
-  assert.match(adapter, /organisation_id: organisationId/);
-  assert.match(adapter, /organisationId,/);
+test("record enumeration cannot remove the organisation filter", () => {
+  assert.match(adapter, /cloudSelect<CloudEnvelope<T>>\(table, `select=\*&organisation_id=eq\.\$\{organisationId\}\$\{collectionFilter\}&deleted_at=is\.null`\)/);
+  assert.match(adapter, /collection_key=eq\.\$\{encodeURIComponent\(collectionKey\)\}/);
+  assert.match(adapter, /queueChange\(\{ table, storageKey: scopedStorageKey, operation: "upsert", organisationId, sourceId: record\.id/);
+  assert.match(adapter, /queueChange\(\{ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId/);
 });
 
 test("browser cache tampering cannot alias two organisations or customer accounts", () => {
