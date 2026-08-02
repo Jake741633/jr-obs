@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   changeStaffRole,
   reactivateStaffMember,
+  removeStaffMember,
   revokePendingStaffInvite,
   suspendStaffMember,
 } from "../lib/cloud/staffManagement.mjs";
@@ -113,6 +114,42 @@ test("suspending an already suspended profile returns a separate unchanged copy"
 
   assert.notEqual(result, suspended);
   assert.deepEqual(result, suspended);
+});
+
+test("staff removal closes membership and cannot be replayed into reactivation", () => {
+  const source = structuredClone(electrician);
+  const removed = removeStaffMember(owner, electrician, now);
+
+  assert.equal(removed.active, false);
+  assert.equal(removed.status, "removed");
+  assert.equal(removed.removedAt, now);
+  assert.equal(removed.updatedAt, now);
+  assert.deepEqual(electrician, source);
+  assert.throws(() => reactivateStaffMember(owner, removed, now), /cannot be reactivated/);
+  assert.throws(
+    () => reactivateStaffMember(owner, { ...electrician, removed_at: now }, now),
+    /cannot be reactivated/,
+  );
+});
+
+test("staff removal rejects owners, cross-organisation targets and inactive managers", () => {
+  assert.throws(() => removeStaffMember(owner, owner, now), /cannot be removed/);
+  assert.throws(
+    () => removeStaffMember(owner, { ...office, organisationId: "org-2" }, now),
+    /cannot be removed/,
+  );
+  assert.throws(
+    () => removeStaffMember({ ...owner, status: "suspended" }, office, now),
+    /active owner or admin/,
+  );
+});
+
+test("removing an already removed profile returns a separate unchanged copy", () => {
+  const removed = { ...office, active: false, status: "removed", removedAt: "earlier" };
+  const result = removeStaffMember(owner, removed, now);
+
+  assert.notEqual(result, removed);
+  assert.deepEqual(result, removed);
 });
 
 test("pending invitations can only be revoked inside the manager organisation", () => {
