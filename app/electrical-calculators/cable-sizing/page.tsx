@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Cable, CircleAlert, Save } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
@@ -27,6 +27,19 @@ type CableOption = {
 
 const STORAGE_KEY = "jr-os:electrical-calculators:cable-sizing:recent:v1";
 const number = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
+
+function readRecentCalculations(): RecentCalculation[] {
+  if (typeof window === "undefined") return [];
+
+  try {
+    const saved = window.localStorage.getItem(STORAGE_KEY);
+    if (!saved) return [];
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
   return (
@@ -55,16 +68,7 @@ export default function CableSizingPage() {
   const [cableSizeMm2, setCableSizeMm2] = useState("2.5");
   const [tabulatedCurrentAmps, setTabulatedCurrentAmps] = useState("27");
   const [protectiveDeviceAmps, setProtectiveDeviceAmps] = useState("20");
-  const [recent, setRecent] = useState<RecentCalculation[]>([]);
-
-  useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) setRecent(JSON.parse(saved));
-    } catch {
-      setRecent([]);
-    }
-  }, []);
+  const [recent, setRecent] = useState<RecentCalculation[]>(readRecentCalculations);
 
   const cableOptions = useMemo<CableOption[]>(() => [{
     sizeMm2: Number(cableSizeMm2),
