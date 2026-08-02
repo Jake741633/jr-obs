@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { ArrowRight, Calculator, Cable, CircleAlert, Gauge, Route, Scale, Zap } from "lucide-react";
+import { ArrowRight, Calculator, Cable, CircleAlert, Gauge, Route, Scale, ShieldCheck, Zap } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { InputField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
@@ -78,7 +78,7 @@ export default function ElectricalCalculatorsPage() {
         description="Calculate design current, assess voltage drop and check a verified cable option against correction factors."
       />
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="grid gap-3 lg:grid-cols-3">
         <Link href="/electrical-calculators/cable-sizing" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-400/15">
           <span className="flex items-center gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-300/15"><Cable className="size-5" /></span>
@@ -96,6 +96,17 @@ export default function ElectricalCalculatorsPage() {
             <span>
               <span className="block font-bold">Open Maximum Demand</span>
               <span className="block text-sm text-violet-100/70">Build a diversified load schedule and review L1, L2, L3 and highest-phase demand.</span>
+            </span>
+          </span>
+          <ArrowRight className="size-5 shrink-0" />
+        </Link>
+
+        <Link href="/electrical-calculators/earth-fault-loop" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-emerald-100 transition hover:border-emerald-300 hover:bg-emerald-400/15">
+          <span className="flex items-center gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-emerald-300/15"><ShieldCheck className="size-5" /></span>
+            <span>
+              <span className="block font-bold">Open Earth Fault Loop</span>
+              <span className="block text-sm text-emerald-100/70">Assess Ze + R1 + R2 against a verified maximum Zs and review fault-current evidence.</span>
             </span>
           </span>
           <ArrowRight className="size-5 shrink-0" />
@@ -220,7 +231,7 @@ export default function ElectricalCalculatorsPage() {
       <Card>
         <h2 className="font-semibold">Assumptions used</h2>
         <div className="mt-3 grid gap-2 lg:grid-cols-2">
-          {[...result.assumptions, ...voltageDrop.assumptions, ...cableSizing.assumptions].map((assumption: string, index: number) => <p key={`${index}-${assumption}`} className="text-sm text-slate-400">• {assumption}</p>)}
+          {[...result.assumptions, ...voltageDrop.assumptions, ...cableSizing.assumptions].map((assumption: string, index: number) => <p key={`${index}-${assumption}`} className="rounded-xl bg-slate-950/70 px-3 py-2 text-sm text-slate-400">{assumption}</p>)}
         </div>
       </Card>
     </main>
