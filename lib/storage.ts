@@ -110,7 +110,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     previousRef.current = items;
   }, [activeStorageKey, cacheUserId, isReady, items, key, mode, organisationId, target, userId]);
 
-  const displayItems = usePrivateFileCollectionBridge({ storageKey: key, items, setItems, isReady, identity, mode });
+  const { items: displayItems } = usePrivateFileCollectionBridge({ storageKey: key, items, setItems, isReady, identity, mode });
 
   const remove = useCallback((predicate: (item: T) => boolean) => {
     setItems((current) => current.filter((item) => !predicate(item)));
