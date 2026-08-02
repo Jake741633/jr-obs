@@ -89,3 +89,12 @@ test("dedicated cable-sizing route keeps deterministic calculations and local hi
   assert.match(page, /BS 7671/);
   assert.match(page, /manufacturer data/i);
 });
+
+test("cable-sizing history can be cleared from state and local storage", async () => {
+  const page = await read(cableSizingPagePath);
+
+  assert.match(page, /function clearHistory\(\)/);
+  assert.match(page, /setRecent\(\[\]\)/);
+  assert.match(page, /window\.localStorage\.removeItem\(STORAGE_KEY\)/);
+  assert.match(page, /Clear history/);
+});
