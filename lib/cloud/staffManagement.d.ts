@@ -5,12 +5,14 @@ export type TimestampedStaffProfile<T extends StaffProfile = StaffProfile> = T &
 };
 
 export type SuspendedStaffProfile<T extends StaffProfile = StaffProfile> = T & {
+  active: false;
   status: "suspended";
   suspendedAt: string;
   updatedAt: string;
 };
 
-export type ActiveStaffProfile<T extends StaffProfile = StaffProfile> = Omit<T, "suspendedAt"> & {
+export type ActiveStaffProfile<T extends StaffProfile = StaffProfile> = Omit<T, "suspendedAt" | "suspended_at"> & {
+  active: true;
   status: "active";
   updatedAt: string;
 };
