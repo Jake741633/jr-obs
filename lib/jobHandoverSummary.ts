@@ -13,7 +13,7 @@ export interface JobHandoverEvidence {
 }
 
 export function buildJobHandoverSummary(evidence: JobHandoverEvidence): HandoverReadinessSummary {
-  return jobHandoverReadiness({
+  const readiness = jobHandoverReadiness({
     progress: {
       testing: evidence.testingComplete ? 100 : 0,
       certificates: evidence.certificateIssued ? 100 : 0,
@@ -25,4 +25,9 @@ export function buildJobHandoverSummary(evidence: JobHandoverEvidence): Handover
     pendingQa: evidence.pendingQa,
     requiredDocumentsMissing: evidence.requiredDocumentsMissing,
   });
+
+  return {
+    ...readiness,
+    status: readiness.ready ? "Ready for handover" : "Handover blocked",
+  };
 }
