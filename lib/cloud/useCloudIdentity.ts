@@ -97,9 +97,7 @@ function handleStorageChange(event: StorageEvent) {
 }
 
 function handleVisibilityChange() {
-  if (document.visibilityState === "visible" && hasPersistedSession() && !snapshot.identity) {
-    void refreshCloudIdentity();
-  }
+  if (document.visibilityState === "visible") void refreshCloudIdentity();
 }
 
 export function useCloudIdentity() {
