@@ -176,12 +176,12 @@ export default function ElectricalCalculatorsPage() {
         </Card>
 
         <div className="space-y-4">
-          <Card className={cableSizing.hasSuitableCable ? "border-emerald-400/30" : "border-rose-400/30"}>
+          <Card className={cableSizing.selectedCable ? "border-emerald-400/30" : "border-rose-400/30"}>
             <div className="flex items-center justify-between"><Cable className="size-6 text-emerald-300" /><span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">Cable rating check</span></div>
-            <p className="mt-5 text-4xl font-black">{cableSizing.hasSuitableCable ? `${number.format(cableSizing.selectedCable.sizeMm2)} mm²` : "Not suitable"}</p>
+            <p className="mt-5 text-4xl font-black">{cableSizing.selectedCable ? `${number.format(cableSizing.selectedCable.sizeMm2)} mm²` : "Not suitable"}</p>
             <p className="mt-2 text-sm text-slate-400">Required tabulated capacity: {number.format(cableSizing.requiredTabulatedCurrentAmps)} A.</p>
-            <p className={`mt-4 text-sm font-semibold ${cableSizing.hasSuitableCable ? "text-emerald-300" : "text-rose-300"}`}>
-              {cableSizing.hasSuitableCable ? "Verified option meets current-capacity check" : "Verified option does not meet current-capacity check"}
+            <p className={`mt-4 text-sm font-semibold ${cableSizing.selectedCable ? "text-emerald-300" : "text-rose-300"}`}>
+              {cableSizing.selectedCable ? "Verified option meets current-capacity check" : "Verified option does not meet current-capacity check"}
             </p>
           </Card>
 
