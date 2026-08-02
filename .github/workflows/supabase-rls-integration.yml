@@ -17,28 +17,58 @@ concurrency:
 
 jobs:
   rls-integration:
-    if: ${{ inputs.confirmation == 'JR_OS_RLS_TEST' }}
     runs-on: ubuntu-latest
     environment: supabase-test
     timeout-minutes: 20
+    env:
+      SUPABASE_TEST_URL: ${{ secrets.SUPABASE_TEST_URL }}
+      SUPABASE_TEST_ANON_KEY: ${{ secrets.SUPABASE_TEST_ANON_KEY }}
+      SUPABASE_TEST_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_TEST_SERVICE_ROLE_KEY }}
+      SUPABASE_TEST_CONFIRM: ${{ inputs.confirmation }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Validate protected test configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_TEST_CONFIRM" = "JR_OS_RLS_TEST" || {
+            echo "The confirmation input must exactly equal JR_OS_RLS_TEST."
+            exit 1
+          }
+          test -n "$SUPABASE_TEST_URL" || {
+            echo "Missing SUPABASE_TEST_URL in the supabase-test environment."
+            exit 1
+          }
+          test -n "$SUPABASE_TEST_ANON_KEY" || {
+            echo "Missing SUPABASE_TEST_ANON_KEY in the supabase-test environment."
+            exit 1
+          }
+          test -n "$SUPABASE_TEST_SERVICE_ROLE_KEY" || {
+            echo "Missing SUPABASE_TEST_SERVICE_ROLE_KEY in the supabase-test environment."
+            exit 1
+          }
+          case "$SUPABASE_TEST_URL" in
+            https://*) ;;
+            *)
+              echo "SUPABASE_TEST_URL must use HTTPS."
+              exit 1
+              ;;
+          esac
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Run multi-tenant RLS and private Storage integration tests
         run: npm run test:rls
-        env:
-          SUPABASE_TEST_URL: ${{ secrets.SUPABASE_TEST_URL }}
-          SUPABASE_TEST_ANON_KEY: ${{ secrets.SUPABASE_TEST_ANON_KEY }}
-          SUPABASE_TEST_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_TEST_SERVICE_ROLE_KEY }}
-          SUPABASE_TEST_CONFIRM: ${{ inputs.confirmation }}
+
       - name: Clean disposable Supabase test data
         if: ${{ always() }}
-        run: node --test-force-exit tests/supabase-rls.cleanup.mjs
-        env:
-          SUPABASE_TEST_URL: ${{ secrets.SUPABASE_TEST_URL }}
-          SUPABASE_TEST_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_TEST_SERVICE_ROLE_KEY }}
-          SUPABASE_TEST_CONFIRM: ${{ inputs.confirmation }}
+        run: node tests/supabase-rls.cleanup.mjs
