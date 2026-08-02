@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const repositorySource = await readFile(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 
-test("sync status is derived from the current queue instead of stale stored state", () => {
+test("sync status is derived from the active organisation queue instead of stale stored state", () => {
   assert.match(repositorySource, /function statusForQueue\(queue: SyncQueueItem\[\]\): SyncState/);
   assert.match(repositorySource, /if \(!queue\.length\) return "Synced";/);
   assert.match(repositorySource, /get\(\): SyncState \{\s*const derived = navigator\.onLine \? statusForQueue\(getSyncQueue\(\)\) : "Offline";/s);
@@ -22,8 +22,8 @@ test("genuine unresolved conflicts still take priority over other queued states"
   assert.ok(offlineIndex > failedIndex, "Failed must take priority over offline state");
 });
 
-test("queue mutations continue recalculating and publishing sync state", () => {
-  assert.match(repositorySource, /syncStatus\.set\(statusForQueue\(next\)\);/);
+test("queue mutations continue recalculating and publishing active-organisation sync state", () => {
+  assert.match(repositorySource, /syncStatus\.set\(statusForQueue\(activeRemaining\)\);/);
   assert.match(repositorySource, /syncStatus\.set\(statusForQueue\(remaining\)\);/);
   assert.match(repositorySource, /window\.dispatchEvent\(new CustomEvent\("jr-os-sync-status", \{ detail: value \}\)\);/);
 });
