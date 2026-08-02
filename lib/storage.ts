@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createCollectionRepository, type RepositoryRecord } from "./cloud/adapter";
+import { createCollectionRepository, organisationStorageKey, type RepositoryRecord } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
 import { cloudSafeFileRecord, usePrivateFileCollectionBridge } from "./cloud/privateFiles";
 import { useCloudIdentity } from "./cloud/useCloudIdentity";
@@ -35,15 +35,16 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   const target = useMemo(() => collectionCloudTarget(key), [key]);
   const organisationId = identity?.organisationId;
   const userId = identity?.userId;
+  const activeStorageKey = organisationId ? organisationStorageKey(key, organisationId) : key;
 
   useEffect(() => {
     if (!identityReady) return;
     let active = true;
     suppressSyncRef.current = true;
+    setIsReady(false);
 
     async function loadCollection() {
-      const local = readLocal(key, initialValueRef.current);
-      let loaded = local;
+      let loaded = readLocal(activeStorageKey, initialValueRef.current);
 
       if (target && organisationId && userId) {
         const repository = createCollectionRepository<RepositoryRecord>({
@@ -69,11 +70,11 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     return () => {
       active = false;
     };
-  }, [identityReady, key, mode, organisationId, target, userId]);
+  }, [activeStorageKey, identityReady, key, mode, organisationId, target, userId]);
 
   useEffect(() => {
     if (!isReady) return;
-    window.localStorage.setItem(key, JSON.stringify(items));
+    window.localStorage.setItem(activeStorageKey, JSON.stringify(items));
 
     if (suppressSyncRef.current || !target || !organisationId || !userId || mode === "local") {
       previousRef.current = items;
@@ -101,9 +102,9 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       if (!nextById.has(id)) repository.remove(id);
     }
     previousRef.current = items;
-  }, [isReady, items, key, mode, organisationId, target, userId]);
+  }, [activeStorageKey, isReady, items, key, mode, organisationId, target, userId]);
 
-  const displayItems = usePrivateFileCollectionBridge({ storageKey: key, items, setItems, isReady, identity, mode });
+  const displayItems = usePrivateFileCollectionBridge({ storageKey: activeStorageKey, items, setItems, isReady, identity, mode });
 
   const remove = useCallback((predicate: (item: T) => boolean) => {
     setItems((current) => current.filter((item) => !predicate(item)));

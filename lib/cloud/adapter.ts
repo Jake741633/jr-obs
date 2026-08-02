@@ -6,6 +6,10 @@ import { queueChange, type CloudEnvelope } from "./repository";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
 
+export function organisationStorageKey(storageKey: string, organisationId: string) {
+  return `${storageKey}:organisation:${organisationId}`;
+}
+
 function readLocal<T>(storageKey: string): T[] {
   if (typeof window === "undefined") return [];
   try { return JSON.parse(window.localStorage.getItem(storageKey) || "[]") as T[]; } catch { return []; }
@@ -29,44 +33,45 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
   collectionKey?: string;
 }) {
   const { storageKey, table, organisationId, userId, collectionKey } = options;
+  const scopedStorageKey = organisationStorageKey(storageKey, organisationId);
   const collectionFilter = collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : "";
 
   return {
     mode: effectiveCloudMode(),
+    storageKey: scopedStorageKey,
     async list(): Promise<T[]> {
-      const local = readLocal<T>(storageKey);
+      const local = readLocal<T>(scopedStorageKey);
       const mode = effectiveCloudMode();
 
       if (mode === "local" || !navigator.onLine) return local;
 
-      // Migration mode keeps an existing browser's local records authoritative,
-      // but a fresh/private browser has no cache to display. In that case it may
-      // safely hydrate from the already-migrated tenant records without changing
-      // the operating mode or uploading anything.
+      // Authenticated caches are always tenant scoped. The legacy unscoped key is
+      // deliberately left untouched as a migration backup and is never trusted by
+      // a signed-in organisation.
       if (mode === "migration" && local.length > 0) return local;
 
       try {
         const rows = await cloudSelect<CloudEnvelope<T>>(table, `select=*&organisation_id=eq.${organisationId}${collectionFilter}&deleted_at=is.null`);
         const cloudRecords = rows.map((row) => row.payload);
-        writeLocal(storageKey, cloudRecords);
-        writeVersions(storageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));
+        writeLocal(scopedStorageKey, cloudRecords);
+        writeVersions(scopedStorageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));
         return cloudRecords;
       } catch { return local; }
     },
     save(record: T, expectedVersion?: number) {
-      const local = readLocal<T>(storageKey);
+      const local = readLocal<T>(scopedStorageKey);
       const index = local.findIndex((item) => item.id === record.id);
       if (index >= 0) local[index] = record; else local.push(record);
-      writeLocal(storageKey, local);
+      writeLocal(scopedStorageKey, local);
       if (effectiveCloudMode() === "local") return;
-      const version = expectedVersion ?? readVersions(storageKey)[record.id];
-      queueChange({ table, storageKey, operation: "upsert", organisationId, sourceId: record.id, payload: record, expectedVersion: version, collectionKey, userId });
+      const version = expectedVersion ?? readVersions(scopedStorageKey)[record.id];
+      queueChange({ table, storageKey: scopedStorageKey, operation: "upsert", organisationId, sourceId: record.id, payload: record, expectedVersion: version, collectionKey, userId });
     },
     remove(sourceId: string, expectedVersion?: number) {
-      writeLocal(storageKey, readLocal<T>(storageKey).filter((record) => record.id !== sourceId));
+      writeLocal(scopedStorageKey, readLocal<T>(scopedStorageKey).filter((record) => record.id !== sourceId));
       if (effectiveCloudMode() === "local") return;
-      const version = expectedVersion ?? readVersions(storageKey)[sourceId];
-      queueChange({ table, storageKey, operation: "delete", organisationId, sourceId, expectedVersion: version, collectionKey, userId });
+      const version = expectedVersion ?? readVersions(scopedStorageKey)[sourceId];
+      queueChange({ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId, expectedVersion: version, collectionKey, userId });
     },
   };
 }
