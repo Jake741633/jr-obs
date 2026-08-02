@@ -58,7 +58,7 @@ test("voltage-drop summary identifies an exceeded limit", () => {
 });
 
 test("maximum voltage drop is derived from nominal voltage and selected percentage", () => {
-  assert.equal(maximumVoltageDropVolts({ nominalVoltage: 230, maximumPercent: 3 }), 6.9);
+  assert.ok(Math.abs(maximumVoltageDropVolts({ nominalVoltage: 230, maximumPercent: 3 }) - 6.9) < 1e-12);
   assert.equal(maximumVoltageDropVolts({ nominalVoltage: 400, maximumPercent: 5 }), 20);
 });
 
