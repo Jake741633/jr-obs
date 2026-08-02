@@ -7,9 +7,12 @@ import {
   dailyProgressWarnings,
   normaliseDailyProgress,
 } from "../lib/siteDiaryDailyProgress-core.mjs";
+import { siteDiaryAttentionItems, siteDiaryAttentionSummary } from "../lib/siteDiaryAttention-core.mjs";
 
 const page = readFileSync(new URL("../app/field/site-diary/page.tsx", import.meta.url), "utf8");
 const navigation = readFileSync(new URL("../components/navigation.ts", import.meta.url), "utf8");
+const aiPage = readFileSync(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
+const attentionPanel = readFileSync(new URL("../components/ai/SiteDiaryAttentionPanel.tsx", import.meta.url), "utf8");
 
 test("daily progress normalises legacy diary records without losing existing fields", () => {
   const legacy = { id: "diary-1", workCompleted: "First fix complete", materialsUsed: "Cable" };
@@ -53,4 +56,50 @@ test("mobile site diary reuses cloud-aware collections and existing job timeline
   assert.match(page, /type="button"/);
   assert.match(page, /Save daily progress/);
   assert.match(navigation, /\["Mobile Site Diary", "\/field\/site-diary"\]/);
+});
+
+test("site diary attention items retain source links and prioritise safety and delays", () => {
+  const entries = [{
+    id: "diary-1",
+    jobId: "job-1",
+    workDate: "2026-08-02",
+    updatedAt: "2026-08-02T16:00:00Z",
+    materialsRequired: "25 mm conduit",
+    followUpActions: "Call builder",
+    delays: "No access to riser",
+    issuesAndRisks: "Open floor void",
+    customerInstructions: "Move socket",
+    builderInstructions: "Return Monday",
+  }];
+  const items = siteDiaryAttentionItems(entries);
+  assert.equal(items.length, 6);
+  assert.equal(items[0].priority, "Urgent");
+  assert.equal(items[0].jobId, "job-1");
+  assert.equal(items[0].sourceId, "diary-1");
+  assert.equal(items[0].sourceType, "SiteDiaryEntry");
+  assert.ok(items.some((item) => item.kind === "Materials" && item.href === "/purchases"));
+  assert.ok(items.some((item) => item.kind === "Safety" && item.href === "/rams"));
+});
+
+test("site diary attention summary reports actionable categories", () => {
+  const summary = siteDiaryAttentionSummary([
+    { id: "one", jobId: "job-1", workDate: "2026-08-02", delays: "Delay", materialsRequired: "Cable" },
+    { id: "two", jobId: "job-2", workDate: "2026-08-02", customerRequests: "Call customer", builderInstructions: "Confirm access" },
+  ]);
+  assert.deepEqual({ total: summary.total, urgent: summary.urgent, high: summary.high, materials: summary.materials, customerActions: summary.customerActions, builderActions: summary.builderActions }, {
+    total: 4,
+    urgent: 1,
+    high: 1,
+    materials: 1,
+    customerActions: 1,
+    builderActions: 1,
+  });
+});
+
+test("AI Command Centre renders cloud-aware site diary intelligence", () => {
+  assert.match(attentionPanel, /useSiteDiariesCollection\(\)/);
+  assert.match(attentionPanel, /siteDiaryAttentionSummary/);
+  assert.match(attentionPanel, /No duplicate tasks are created/);
+  assert.match(aiPage, /import \{ SiteDiaryAttentionPanel \}/);
+  assert.match(aiPage, /<SiteDiaryAttentionPanel \/>/);
 });
