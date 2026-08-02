@@ -8,8 +8,27 @@ const rolePages: Record<JrRole, string[]> = {
   customer: ["/customer-portal", "/cloud"],
 };
 
-export function canAccessPath(role: JrRole | undefined, path: string) {
+const operatorOnlyPaths = ["/release-readiness", "/cloud/cutover", "/cloud/queue"] as const;
+
+function operatorEmails() {
+  return (process.env.NEXT_PUBLIC_JR_OS_OPERATOR_EMAILS || "")
+    .split(",")
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+export function isOperatorOnlyPath(path: string) {
+  return operatorOnlyPaths.some((entry) => path === entry || path.startsWith(`${entry}/`));
+}
+
+export function isJrOsOperator(role: JrRole | undefined, email?: string) {
+  if (role !== "owner" || !email) return false;
+  return operatorEmails().includes(email.trim().toLowerCase());
+}
+
+export function canAccessPath(role: JrRole | undefined, path: string, email?: string) {
   if (!role) return false;
+  if (isOperatorOnlyPath(path) && email !== undefined && !isJrOsOperator(role, email)) return false;
   const allowed = rolePages[role];
   return allowed.includes("*") || allowed.some((entry) => path === entry || path.startsWith(`${entry}/`));
 }
