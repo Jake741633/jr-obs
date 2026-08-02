@@ -93,7 +93,7 @@ export async function importJrOsBackup(file: File, organisationId?: string) {
   if (parsed.app !== "JR OS" || parsed.version !== 1 || !parsed.data || typeof parsed.data !== "object") {
     throw new Error("This is not a valid JR OS backup file.");
   }
-  if (organisationId && parsed.organisationId && parsed.organisationId !== organisationId) {
+  if (organisationId && parsed.organisationId !== organisationId) {
     throw new Error("This backup belongs to a different JR OS organisation.");
   }
   let restored = 0;
