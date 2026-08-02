@@ -30,6 +30,17 @@ function identityChanged() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
 }
 
+function clearAuthParamsFromUrl() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete("code");
+  url.searchParams.delete("error");
+  url.searchParams.delete("error_code");
+  url.searchParams.delete("error_description");
+  url.hash = "";
+  window.history.replaceState({}, document.title, `${url.pathname}${url.search}`);
+}
+
 /**
  * Removes all JR OS browser-resident business data before an account boundary
  * changes. Cloud records remain untouched and reload after the next authorised
@@ -64,6 +75,48 @@ export async function getCurrentCloudUser() {
   catch { clearLocalJrOsAccountData(); saveSupabaseSession(null); identityChanged(); return null; }
 }
 
+export async function completeEmailVerificationFromUrl() {
+  if (typeof window === "undefined") return null;
+  const url = new URL(window.location.href);
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+  const accessToken = hash.get("access_token");
+  const refreshToken = hash.get("refresh_token");
+  const expiresIn = Number(hash.get("expires_in") || 0);
+  const tokenType = hash.get("token_type") || "bearer";
+  const code = url.searchParams.get("code");
+  const errorDescription = url.searchParams.get("error_description") || url.searchParams.get("error");
+
+  if (errorDescription) {
+    clearAuthParamsFromUrl();
+    throw new Error(errorDescription);
+  }
+
+  if (!accessToken && !code) return null;
+
+  let session: SupabaseSession;
+  if (accessToken && refreshToken) {
+    const expiresAt = expiresIn ? Math.floor(Date.now() / 1000) + expiresIn : undefined;
+    session = {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: tokenType,
+      expires_in: expiresIn || undefined,
+      expires_at: expiresAt,
+    } as SupabaseSession;
+  } else {
+    session = await supabaseFetch("/auth/v1/token?grant_type=pkce", {
+      method: "POST",
+      body: JSON.stringify({ auth_code: code }),
+    }, false) as SupabaseSession;
+  }
+
+  clearLocalJrOsAccountData();
+  saveSupabaseSession(session);
+  identityChanged();
+  clearAuthParamsFromUrl();
+  return session.user ?? await getCurrentCloudUser();
+}
+
 export async function signInWithEmail(email: string, password: string) {
   const session = await supabaseFetch("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email, password }) }, false) as SupabaseSession;
   clearLocalJrOsAccountData();
@@ -73,7 +126,8 @@ export async function signInWithEmail(email: string, password: string) {
 }
 
 export async function signUpWithEmail(email: string, password: string) {
-  const result = await supabaseFetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password, data: { full_name: "Jake Rinaldi", business_name: "JR Electrical Services" } }) }, false) as SupabaseSession;
+  const redirectTo = typeof window === "undefined" ? undefined : `${window.location.origin}/cloud`;
+  const result = await supabaseFetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password, options: redirectTo ? { emailRedirectTo: redirectTo } : undefined, data: { full_name: "Jake Rinaldi", business_name: "JR Electrical Services" } }) }, false) as SupabaseSession;
   if (result.access_token) {
     clearLocalJrOsAccountData();
     saveSupabaseSession(result);
