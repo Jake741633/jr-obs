@@ -72,16 +72,39 @@ test("staff can be suspended and reactivated without mutating source records", (
   const source = structuredClone(electrician);
   const suspended = suspendStaffMember(owner, electrician, now);
 
+  assert.equal(suspended.active, false);
   assert.equal(suspended.status, "suspended");
   assert.equal(suspended.suspendedAt, now);
   assert.equal(suspended.updatedAt, now);
   assert.deepEqual(electrician, source);
 
-  const reactivated = reactivateStaffMember(owner, suspended, "2026-08-02T08:00:00.000Z");
+  const reactivated = reactivateStaffMember(
+    owner,
+    { ...suspended, suspended_at: "2026-08-01T23:30:00.000Z" },
+    "2026-08-02T08:00:00.000Z",
+  );
+  assert.equal(reactivated.active, true);
   assert.equal(reactivated.status, "active");
   assert.equal(reactivated.suspendedAt, undefined);
+  assert.equal(reactivated.suspended_at, undefined);
   assert.equal(reactivated.updatedAt, "2026-08-02T08:00:00.000Z");
   assert.equal(suspended.status, "suspended");
+});
+
+test("suspension closes conflicting live membership state", () => {
+  const conflicted = {
+    ...office,
+    active: true,
+    status: "suspended",
+    suspendedAt: "earlier",
+  };
+  const result = suspendStaffMember(owner, conflicted, now);
+
+  assert.equal(result.active, false);
+  assert.equal(result.status, "suspended");
+  assert.equal(result.suspendedAt, now);
+  assert.equal(result.updatedAt, now);
+  assert.equal(conflicted.active, true);
 });
 
 test("suspending an already suspended profile returns a separate unchanged copy", () => {
