@@ -28,9 +28,14 @@ test("private object paths must belong to the active organisation", () => {
 
 test("signed download URLs are tenant keyed and short lived", () => {
   assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /encodeURIComponent\(organisationId\)/);
+  assert.match(privateFiles, /return `\$\{encodeURIComponent\(organisationId\)\}:\$\{encodeURIComponent\(sourceId\)\}`/);
   assert.match(privateFiles, /const boundedExpiry = Math\.min\(300, Math\.max\(60, Math\.floor\(expiresIn\)\)\)/);
   assert.match(privateFiles, /createSignedDownload\(objectPath, boundedExpiry\)/);
+});
+
+test("signed download cache identities cannot collide across organisations", () => {
+  assert.match(privateFiles, /encodeURIComponent\(organisationId\)\}:\$\{encodeURIComponent\(sourceId\)/);
+  assert.doesNotMatch(privateFiles, /encodeURIComponent\(organisationId\)\}\$\{encodeURIComponent\(sourceId\)/);
 });
 
 test("cloud payloads cannot leak embedded private bytes or stale signed links", () => {
