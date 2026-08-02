@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { CalendarDays, CheckCircle2, ChevronRight, CircleAlert, MapPin, Navigation, Phone, ShieldCheck } from "lucide-react";
-import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
@@ -110,6 +109,6 @@ export default function MobileJobControlPage() {
       <div className="mt-4 grid gap-2 sm:grid-cols-2"><Link href={`/jobs/${job.id}`} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link><Link href="/field" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold"><ShieldCheck className="mr-2 size-4" />Site workspace</Link></div>
     </Card>)}</section>}
 
-    <div className="fixed inset-x-4 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 sm:hidden"><Button asChild={undefined} className="w-full shadow-2xl" type="button" onClick={() => window.location.assign("/field")}><ShieldCheck className="mr-2 size-4" />Open today&apos;s site workspace</Button></div>
+    <div className="fixed inset-x-4 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 sm:hidden"><Link href="/field" className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-2xl"><ShieldCheck className="mr-2 size-4" />Open today&apos;s site workspace</Link></div>
   </div>;
 }
