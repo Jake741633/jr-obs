@@ -31,10 +31,12 @@ test("new signups do not inherit Jake or JR Electrical Services metadata", () =>
   assert.doesNotMatch(signupMigration, /'JR Electrical Services'/);
 });
 
-test("authenticated collection caches remain organisation scoped", () => {
+test("authenticated collection caches remain organisation scoped and restricted-account scoped", () => {
   assert.match(adapter, /organisationStorageKey/);
   assert.match(adapter, /:organisation:/);
-  assert.match(storage, /activeStorageKey = organisationId \? organisationStorageKey/);
+  assert.match(adapter, /export function accountStorageKey/);
+  assert.match(storage, /const cacheUserId = identity\?\.role === "customer" \? userId : undefined/);
+  assert.match(storage, /activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
   assert.match(storage, /window\.localStorage\.setItem\(activeStorageKey/);
 });
 

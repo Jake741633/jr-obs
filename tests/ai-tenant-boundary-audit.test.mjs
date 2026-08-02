@@ -9,15 +9,16 @@ const cloudCollections = readFileSync(new URL("../lib/cloud/collections.ts", imp
 const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf8");
 const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 
-test("AI source data is loaded through the organisation-scoped collection layer", () => {
+test("AI source data is loaded through the organisation and account-scoped collection layer", () => {
   assert.match(aiPage, /useCloudIdentity\(\)/);
   assert.match(aiPage, /useLocalStorageCollection<Job>\("jr-os-jobs"\)/);
   assert.match(aiPage, /useLocalStorageCollection<Customer>\("jr-os-customers"\)/);
   assert.match(aiPage, /useLocalStorageCollection<Builder>\("jr-os-builders"\)/);
   assert.match(aiPage, /useLocalStorageCollection<PricingDocument>\("jr-os-pricing-documents"\)/);
   assert.match(aiPage, /useLocalStorageCollection<Invoice>\("jr-os-invoices"\)/);
-  assert.match(storage, /const activeStorageKey = organisationId \? organisationStorageKey\(key, organisationId\) : key/);
-  assert.match(storage, /organisationId,\s*userId,/s);
+  assert.match(storage, /const cacheUserId = identity\?\.role === "customer" \? userId : undefined/);
+  assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
+  assert.match(storage, /organisationId,\s*userId,\s*cacheUserId,/s);
 });
 
 test("AI learning memory and recommendation evidence use tenant-scoped cloud collections", () => {
