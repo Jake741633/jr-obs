@@ -58,9 +58,9 @@ async function loadIdentity(force = false) {
   identityRequest = (async () => {
     const user = await getCurrentCloudUser();
     if (!user) return null;
-    const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&select=organisation_id,role,customer_source_id`);
+    const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&active=eq.true&select=organisation_id,role,customer_source_id,active`);
     const profile = Array.isArray(rows) ? rows[0] : null;
-    if (!profile?.organisation_id || !profile?.role) return null;
+    if (!profile?.active || !profile?.organisation_id || !profile?.role) return null;
     return {
       userId: user.id,
       email: user.email,
