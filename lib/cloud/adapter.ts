@@ -10,6 +10,11 @@ export function organisationStorageKey(storageKey: string, organisationId: strin
   return `${storageKey}:organisation:${organisationId}`;
 }
 
+export function accountStorageKey(storageKey: string, organisationId: string, userId?: string) {
+  const organisationKey = organisationStorageKey(storageKey, organisationId);
+  return userId ? `${organisationKey}:account:${encodeURIComponent(userId)}` : organisationKey;
+}
+
 function readLocal<T>(storageKey: string): T[] {
   if (typeof window === "undefined") return [];
   try { return JSON.parse(window.localStorage.getItem(storageKey) || "[]") as T[]; } catch { return []; }
@@ -30,10 +35,11 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
   table: string;
   organisationId: string;
   userId?: string;
+  cacheUserId?: string;
   collectionKey?: string;
 }) {
-  const { storageKey, table, organisationId, userId, collectionKey } = options;
-  const scopedStorageKey = organisationStorageKey(storageKey, organisationId);
+  const { storageKey, table, organisationId, userId, cacheUserId, collectionKey } = options;
+  const scopedStorageKey = accountStorageKey(storageKey, organisationId, cacheUserId);
   const collectionFilter = collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : "";
 
   return {
