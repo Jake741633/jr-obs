@@ -22,6 +22,7 @@ interface IdentitySnapshot {
 
 let snapshot: IdentitySnapshot = { identity: null, isReady: effectiveCloudMode() === "local" };
 let identityRequest: Promise<CloudIdentity | null> | null = null;
+let identityRequestVersion = 0;
 const listeners = new Set<() => void>();
 
 function emit(next: IdentitySnapshot) {
@@ -49,13 +50,15 @@ function hasPersistedSession() {
 
 async function loadIdentity(force = false) {
   if (effectiveCloudMode() === "local") {
+    identityRequestVersion += 1;
     emit({ identity: null, isReady: true });
     return null;
   }
   if (!force && snapshot.isReady && (snapshot.identity || !hasPersistedSession())) return snapshot.identity;
   if (!force && identityRequest) return identityRequest;
 
-  identityRequest = (async () => {
+  const requestVersion = ++identityRequestVersion;
+  const request = (async () => {
     const user = await getCurrentCloudUser();
     if (!user) return null;
     const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&active=eq.true&select=organisation_id,role,customer_source_id,active`);
@@ -69,13 +72,14 @@ async function loadIdentity(force = false) {
       customerSourceId: profile.customer_source_id || undefined,
     } satisfies CloudIdentity;
   })();
+  identityRequest = request;
 
   try {
-    const identity = await identityRequest;
-    emit({ identity, isReady: true });
+    const identity = await request;
+    if (requestVersion === identityRequestVersion) emit({ identity, isReady: true });
     return identity;
   } finally {
-    identityRequest = null;
+    if (identityRequest === request) identityRequest = null;
   }
 }
 
