@@ -21,13 +21,13 @@ export const businessStorageKeys = {
 
 export const defaultBusinessProfile: BusinessProfile = {
   id: "business-profile",
-  companyName: "JR Electrical Services",
+  companyName: "",
   logoDataUrl: "",
   logoFileName: "",
-  address: "Epsom, Surrey",
-  phone: "07508 306825",
+  address: "",
+  phone: "",
   email: "",
-  website: "https://jrelectricalservices.org",
+  website: "",
   updatedAt: initialTimestamp,
 };
 
@@ -103,13 +103,13 @@ export const defaultDocumentBranding: DocumentBrandingSettings = {
   showVatNumber: true,
   quoteHeading: "Quotation",
   invoiceHeading: "Invoice",
-  footerText: "Thank you for choosing JR Electrical Services.",
+  footerText: "Thank you for your business.",
   updatedAt: initialTimestamp,
 };
 
 export const defaultCertificateDefaults: CertificateDefaults = {
   id: "certificate-defaults",
-  inspectorName: "Jake Rinaldi",
+  inspectorName: "",
   schemeProvider: "",
   registrationNumber: "",
   defaultType: "Electrical Installation Condition Report",
