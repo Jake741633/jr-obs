@@ -79,14 +79,14 @@ export async function supabaseFetch(path: string, init: RequestInit = {}, authen
   const config = getSupabaseConfig();
   if (!config) throw new Error("Supabase is not configured yet.");
   const session = readSupabaseSession();
-  if (authenticated && !session?.access_token) {
-    throw new Error("Your cloud session has expired. Sign in again to continue.");
-  }
 
   const headers = new Headers(init.headers);
   headers.set("apikey", config.anonKey);
   headers.set("Content-Type", "application/json");
-  if (authenticated) headers.set("Authorization", `Bearer ${session.access_token}`);
+  if (authenticated) {
+    if (!session) throw new Error("Your cloud session has expired. Sign in again to continue.");
+    headers.set("Authorization", `Bearer ${session.access_token}`);
+  }
 
   let requestPath = path;
   if (typeof window !== "undefined" && path === "/auth/v1/signup") {
