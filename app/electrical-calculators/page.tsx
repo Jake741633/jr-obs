@@ -1,10 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Calculator, CircleAlert, Gauge, Route, Zap } from "lucide-react";
+import { Calculator, Cable, CircleAlert, Gauge, Route, Zap } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { InputField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { cableSizingSummary } from "../../lib/cableSizingCalculator-core.mjs";
 import { electricalLoadSummary } from "../../lib/electricalCalculators-core.mjs";
 import { voltageDropSummary } from "../../lib/voltageDropCalculator-core.mjs";
 
@@ -21,6 +22,12 @@ export default function ElectricalCalculatorsPage() {
   const [routeLength, setRouteLength] = useState("20");
   const [millivoltsPerAmpMetre, setMillivoltsPerAmpMetre] = useState("18");
   const [maximumPercent, setMaximumPercent] = useState("3");
+  const [ambientTemperatureFactor, setAmbientTemperatureFactor] = useState("1");
+  const [groupingFactor, setGroupingFactor] = useState("1");
+  const [insulationFactor, setInsulationFactor] = useState("1");
+  const [otherFactor, setOtherFactor] = useState("1");
+  const [cableSizeMm2, setCableSizeMm2] = useState("2.5");
+  const [tabulatedCurrentAmps, setTabulatedCurrentAmps] = useState("27");
 
   const result = useMemo(() => electricalLoadSummary({
     phase,
@@ -39,6 +46,18 @@ export default function ElectricalCalculatorsPage() {
     maximumPercent: Number(maximumPercent),
   }), [maximumPercent, millivoltsPerAmpMetre, phase, result.currentAmps, routeLength, voltage]);
 
+  const cableSizing = useMemo(() => cableSizingSummary({
+    designCurrentAmps: result.currentAmps,
+    ambientTemperatureFactor: Number(ambientTemperatureFactor),
+    groupingFactor: Number(groupingFactor),
+    insulationFactor: Number(insulationFactor),
+    otherFactor: Number(otherFactor),
+    cableOptions: [{
+      sizeMm2: Number(cableSizeMm2),
+      tabulatedCurrentAmps: Number(tabulatedCurrentAmps),
+    }],
+  }), [ambientTemperatureFactor, cableSizeMm2, groupingFactor, insulationFactor, otherFactor, result.currentAmps, tabulatedCurrentAmps]);
+
   function selectPhase(nextPhase: Phase) {
     setPhase(nextPhase);
     setVoltage(nextPhase === "Three phase" ? "400" : "230");
@@ -48,8 +67,8 @@ export default function ElectricalCalculatorsPage() {
     <main className="space-y-6">
       <PageHeader
         eyebrow="Electrical Calculators"
-        title="Load, current and voltage drop"
-        description="Calculate design current and assess voltage drop for single-phase and three-phase loads with visible assumptions."
+        title="Load, current, voltage drop and cable sizing"
+        description="Calculate design current, assess voltage drop and check a verified cable option against correction factors."
       />
 
       <Card className="border-amber-400/20 bg-amber-400/5">
@@ -57,7 +76,7 @@ export default function ElectricalCalculatorsPage() {
           <CircleAlert className="mt-0.5 size-5 shrink-0 text-amber-300" />
           <div>
             <h2 className="font-semibold text-amber-100">Design aid only</h2>
-            <p className="mt-1 text-sm text-amber-100/70">These calculators do not select a cable, protective device or confirm compliance. Verify all results against the current BS 7671 tables, manufacturer data and actual installation conditions.</p>
+            <p className="mt-1 text-sm text-amber-100/70">These calculators do not confirm compliance. Cable ratings and correction factors must come from current BS 7671 tables or manufacturer data for the actual installation method.</p>
           </div>
         </div>
       </Card>
@@ -133,10 +152,44 @@ export default function ElectricalCalculatorsPage() {
         </div>
       </div>
 
+      <div className="grid gap-6 xl:grid-cols-[1fr_0.9fr]">
+        <Card>
+          <div className="flex items-center gap-3">
+            <span className="grid size-10 place-items-center rounded-xl bg-emerald-400/10 text-emerald-300"><Cable className="size-5" /></span>
+            <div><h2 className="font-semibold">Cable sizing check</h2><p className="text-sm text-slate-500">Enter verified correction factors and one verified cable rating.</p></div>
+          </div>
+
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <InputField label="Ambient temperature factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={ambientTemperatureFactor} onChange={(event) => setAmbientTemperatureFactor(event.target.value)} />
+            <InputField label="Grouping factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={groupingFactor} onChange={(event) => setGroupingFactor(event.target.value)} />
+            <InputField label="Thermal insulation factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={insulationFactor} onChange={(event) => setInsulationFactor(event.target.value)} />
+            <InputField label="Other correction factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={otherFactor} onChange={(event) => setOtherFactor(event.target.value)} />
+            <InputField label="Verified cable size (mm²)" type="number" inputMode="decimal" min="0" step="0.5" value={cableSizeMm2} onChange={(event) => setCableSizeMm2(event.target.value)} />
+            <InputField label="Verified tabulated rating (A)" type="number" inputMode="decimal" min="0" step="0.1" value={tabulatedCurrentAmps} onChange={(event) => setTabulatedCurrentAmps(event.target.value)} />
+          </div>
+        </Card>
+
+        <div className="space-y-4">
+          <Card className={cableSizing.hasSuitableCable ? "border-emerald-400/30" : "border-rose-400/30"}>
+            <div className="flex items-center justify-between"><Cable className="size-6 text-emerald-300" /><span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">Cable rating check</span></div>
+            <p className="mt-5 text-4xl font-black">{cableSizing.hasSuitableCable ? `${number.format(cableSizing.selectedCable.sizeMm2)} mm²` : "Not suitable"}</p>
+            <p className="mt-2 text-sm text-slate-400">Required tabulated capacity: {number.format(cableSizing.requiredTabulatedCurrentAmps)} A.</p>
+            <p className={`mt-4 text-sm font-semibold ${cableSizing.hasSuitableCable ? "text-emerald-300" : "text-rose-300"}`}>
+              {cableSizing.hasSuitableCable ? "Verified option meets current-capacity check" : "Verified option does not meet current-capacity check"}
+            </p>
+          </Card>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Card><p className="text-sm text-slate-400">Combined correction factor</p><p className="mt-1 text-2xl font-bold">{number.format(cableSizing.combinedCorrectionFactor)}</p></Card>
+            <Card><p className="text-sm text-slate-400">Entered tabulated rating</p><p className="mt-1 text-2xl font-bold">{number.format(Number(tabulatedCurrentAmps))} A</p></Card>
+          </div>
+        </div>
+      </div>
+
       <Card>
         <h2 className="font-semibold">Assumptions used</h2>
         <div className="mt-3 grid gap-2 lg:grid-cols-2">
-          {[...result.assumptions, ...voltageDrop.assumptions].map((assumption: string, index: number) => <p key={`${index}-${assumption}`} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-400">{assumption}</p>)}
+          {[...result.assumptions, ...voltageDrop.assumptions, ...cableSizing.assumptions].map((assumption: string, index: number) => <p key={`${index}-${assumption}`} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-400">{assumption}</p>)}
         </div>
       </Card>
     </main>
