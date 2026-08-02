@@ -5,6 +5,7 @@ import type { ComplianceCertificate } from "../complianceCertificates";
 import type { PortalApprovalRecord, PortalRequest } from "../customerPortal";
 import type { ElectricalTestingRecord } from "../electricalTesting";
 import type { AiLearningEvidence, AiLearningMemory, AiReminder, Builder, BusinessExpense, CrmFollowUpSettings, Customer, CustomerInteraction, CustomerProfile, Invoice, Job, JobCompletionRecord, JobDocument, JobMaterialUsage, JobPack, JobPaymentStage, JobProgressRecord, JobTask, JobTimelineEntry, JobVariation, LeadActivity, Material, PricingDocument, PurchaseList, RamsDocument, SalesLead, SiteDiaryEntry, SiteSurvey, StockItem, StockLocation, StockMovement, TeamMember, TimesheetEntry } from "../models";
+import type { JobQaInspection } from "../jobQaTypes";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
@@ -49,6 +50,7 @@ export const coreBusinessStorageKeys = {
   jobPaymentStages: "jr-os-job-payment-stages",
   jobMaterialUsage: "jr-os-job-material-usage",
   jobCompletion: "jr-os-job-completion",
+  jobQaInspections: "jr-os-job-qa-inspections",
   aiReminders: "jr-os-ai-reminders",
   crmFollowUpSettings: "jr-os-crm-follow-up-settings",
 } as const;
@@ -126,5 +128,6 @@ export function useJobProgressCollection() { return useCloudLocalCollection<JobP
 export function useJobPaymentStagesCollection() { return useCloudLocalCollection<JobPaymentStage>(coreBusinessStorageKeys.jobPaymentStages); }
 export function useJobMaterialUsageCollection() { return useCloudLocalCollection<JobMaterialUsage>(coreBusinessStorageKeys.jobMaterialUsage); }
 export function useJobCompletionCollection() { return useCloudLocalCollection<JobCompletionRecord>(coreBusinessStorageKeys.jobCompletion); }
+export function useJobQaInspectionsCollection() { return useCloudLocalCollection<JobQaInspection>(coreBusinessStorageKeys.jobQaInspections); }
 export function useAiRemindersCollection() { return useCloudLocalCollection<AiReminder>(coreBusinessStorageKeys.aiReminders); }
 export function useCrmFollowUpSettingsCollection() { return useCloudLocalCollection<CrmFollowUpSettings>(coreBusinessStorageKeys.crmFollowUpSettings); }
