@@ -9,6 +9,7 @@ const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf
 const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
 const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
+const cloudAccessGuard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
 const aiPage = readFileSync(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
 const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf8");
 const settingsPage = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
@@ -64,6 +65,12 @@ test("suspended profiles cannot resolve an application identity or expose cached
   assert.match(identity, /active=eq\.true/);
   assert.match(identity, /select=organisation_id,role,customer_source_id,active/);
   assert.match(identity, /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) return null;/);
+});
+
+test("secured workspace transient state resets when organisations change", () => {
+  assert.match(cloudAccessGuard, /Fragment, type ReactNode/);
+  assert.match(cloudAccessGuard, /<Fragment key=\{identity\.organisationId\}>\{children\}<\/Fragment>/);
+  assert.doesNotMatch(cloudAccessGuard, /return children;\s*$/m);
 });
 
 test("AI-created CRM interactions attribute the signed-in user instead of Jake", () => {
