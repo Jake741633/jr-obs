@@ -34,7 +34,8 @@ test("organisation switches remount transient workspace state", () => {
 test("browser collections and private-file caches change identity across tenants", () => {
   assert.match(storage, /const cacheUserId = identity\?\.role === "customer" \? userId : undefined/);
   assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId\)/);
-  assert.match(storage, /\[key, organisationId, userId, cacheUserId\]/);
+  assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
+  assert.match(storage, /\[activeStorageKey, cacheUserId, isReady, items, key, mode, organisationId, target, userId\]/);
   assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
   assert.match(privateFiles, /encodeURIComponent\(organisationId\)/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
