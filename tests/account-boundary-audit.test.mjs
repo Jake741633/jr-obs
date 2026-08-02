@@ -110,3 +110,14 @@ test("private uploads and signed downloads reject cross-organisation object path
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(metadata\.organisation_id, metadata\.object_path\)/);
   assert.match(privateFiles, /signedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId\)/);
 });
+
+test("signed attachment URLs cannot be reused after an organisation switch", () => {
+  assert.match(privateFiles, /export function privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
+  assert.match(privateFiles, /encodeURIComponent\(organisationId\).*encodeURIComponent\(sourceId\)/s);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, queued\.sourceId\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, photo\.id\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, record\.id\)/);
+  assert.doesNotMatch(privateFiles, /signedUrls\[queued\.sourceId\]/);
+  assert.doesNotMatch(privateFiles, /signedUrls\[photo\.id\]/);
+  assert.doesNotMatch(privateFiles, /signedUrls\[record\.id\]/);
+});
