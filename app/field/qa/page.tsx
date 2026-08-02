@@ -63,7 +63,22 @@ export default function MobileQaPage() {
       timeline.setItems((current) => [timelineEntry, ...current]);
       const task = failedQaTask({ inspection: updated, taskId: makeId("snag"), now });
       if (task) {
-        const typedTask: JobTask = { ...task, category: qaTaskCategory(updated.type) };
+        const typedTask: JobTask = {
+          id: task.id,
+          jobId: task.jobId,
+          type: "Snag",
+          title: task.title,
+          description: task.description,
+          category: qaTaskCategory(updated.type),
+          priority: "High",
+          assignedTo: task.assignedTo,
+          dueDate: task.dueDate,
+          status: "Open",
+          photos: task.photos,
+          notes: task.notes,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+        };
         tasks.setItems((current) => [typedTask, ...current]);
       }
       setMessage(result === "Pass" ? `${inspection.type} QA passed.` : `${inspection.type} QA failed and a linked snag was created.`);
