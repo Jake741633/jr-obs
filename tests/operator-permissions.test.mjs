@@ -54,3 +54,24 @@ test("ordinary role routes retain their existing access without email context", 
   assert.equal(canAccessPath("electrician", "/jobs/job-1"), true);
   assert.equal(canAccessPath("customer", "/customer-portal"), true);
 });
+
+test("malformed and unknown roles fail closed across every permission helper", () => {
+  const {
+    canAccessPath,
+    canDeleteRecords,
+    canEditFieldRecords,
+    canEditFinance,
+    canManageUsers,
+    isJrOsOperator,
+  } = loadPermissions();
+  const invalidRoles = [undefined, null, "", "superadmin", "OWNER", 1, {}, []];
+
+  for (const role of invalidRoles) {
+    assert.equal(canAccessPath(role, "/customers", "operator@example.com"), false);
+    assert.equal(canManageUsers(role), false);
+    assert.equal(canDeleteRecords(role), false);
+    assert.equal(canEditFinance(role), false);
+    assert.equal(canEditFieldRecords(role), false);
+    assert.equal(isJrOsOperator(role, "operator@example.com"), false);
+  }
+});
