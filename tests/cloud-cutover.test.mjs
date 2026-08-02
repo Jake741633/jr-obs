@@ -91,6 +91,27 @@ test("shared identity reloads a persisted session and observes account changes",
   assert.match(identityHook, /jr-os-supabase-session/);
 });
 
+test("visible tabs always revalidate and clear stale in-memory identity first", () => {
+  assert.match(
+    identityHook,
+    /function handleVisibilityChange\(\) \{\s*if \(document\.visibilityState === "visible"\) void refreshCloudIdentity\(\);\s*\}/,
+  );
+  assert.match(
+    identityHook,
+    /export function refreshCloudIdentity\(\) \{\s*emit\(\{ identity: null, isReady: false \}\);\s*return loadIdentity\(true\);\s*\}/,
+  );
+  assert.match(identityHook, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
+});
+
+test("cross-tab session changes still trigger the same identity revalidation path", () => {
+  assert.match(
+    identityHook,
+    /function handleStorageChange\(event: StorageEvent\) \{\s*if \(event\.key === "jr-os-supabase-session"\) void refreshCloudIdentity\(\);\s*\}/,
+  );
+  assert.match(identityHook, /window\.addEventListener\("storage", handleStorageChange\)/);
+  assert.match(identityHook, /window\.removeEventListener\("storage", handleStorageChange\)/);
+});
+
 test("typed import records the common successful upload timestamp", () => {
   assert.match(cloudSync, /recordSuccessfulCloudUpload/);
   assert.match(cloudSync, /jr-os-last-cloud-sync/);
