@@ -7,9 +7,9 @@ const repositorySource = await readFile(new URL("../lib/cloud/repository.ts", im
 test("sync status is derived from the current queue instead of stale stored state", () => {
   assert.match(repositorySource, /function statusForQueue\(queue: SyncQueueItem\[\]\): SyncState/);
   assert.match(repositorySource, /if \(!queue\.length\) return "Synced";/);
-  assert.match(repositorySource, /get\(\): SyncState \{\s*const queue = getSyncQueue\(\);\s*const next = navigator\.onLine \? statusForQueue\(queue\) : "Offline";/s);
-  assert.match(repositorySource, /if \(stored !== next\) write\(STATUS_KEY, next\);/);
-  assert.match(repositorySource, /return next;/);
+  assert.match(repositorySource, /get\(\): SyncState \{\s*const derived = navigator\.onLine \? statusForQueue\(getSyncQueue\(\)\) : "Offline";/s);
+  assert.match(repositorySource, /if \(stored !== derived\) write\(STATUS_KEY, derived\);/);
+  assert.match(repositorySource, /return derived;/);
 });
 
 test("genuine unresolved conflicts still take priority over other queued states", () => {
