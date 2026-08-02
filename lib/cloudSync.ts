@@ -1,6 +1,7 @@
 "use client";
 
 import { exportJrOsData, JR_OS_STORAGE_PREFIX } from "./appData";
+import { organisationStorageKey } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
 import { importLocalCollection } from "./cloud/repository";
 import { readSupabaseSession, saveSupabaseSession, supabaseFetch, type SupabaseSession } from "./supabase/client";
@@ -42,17 +43,13 @@ function clearAuthParamsFromUrl() {
 }
 
 /**
- * Removes all JR OS browser-resident business data before an account boundary
- * changes. Cloud records remain untouched and reload after the next authorised
- * identity is resolved. This prevents one account seeing another account's
- * cached records or replaying another account's pending sync queue.
+ * Account changes must never delete browser-resident business records. Authenticated
+ * collections are isolated by organisation-scoped keys and reload after identity
+ * changes. This helper is retained for compatibility and intentionally preserves
+ * legacy, scoped, queued and versioned data.
  */
 export function clearLocalJrOsAccountData() {
-  if (typeof window === "undefined") return 0;
-  const keys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
-    .filter((key): key is string => Boolean(key?.startsWith(JR_OS_STORAGE_PREFIX)));
-  for (const key of keys) window.localStorage.removeItem(key);
-  return keys.length;
+  return 0;
 }
 
 function recordSuccessfulCloudUpload() {
@@ -72,7 +69,7 @@ export async function getCurrentCloudUser() {
   const session = readSupabaseSession();
   if (!session?.access_token) return null;
   try { return await supabaseFetch("/auth/v1/user", { method: "GET" }) as { id: string; email?: string }; }
-  catch { clearLocalJrOsAccountData(); saveSupabaseSession(null); identityChanged(); return null; }
+  catch { saveSupabaseSession(null); identityChanged(); return null; }
 }
 
 export async function completeEmailVerificationFromUrl() {
@@ -110,7 +107,6 @@ export async function completeEmailVerificationFromUrl() {
     }, false) as SupabaseSession;
   }
 
-  clearLocalJrOsAccountData();
   saveSupabaseSession(session);
   identityChanged();
   clearAuthParamsFromUrl();
@@ -119,7 +115,6 @@ export async function completeEmailVerificationFromUrl() {
 
 export async function signInWithEmail(email: string, password: string) {
   const session = await supabaseFetch("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email, password }) }, false) as SupabaseSession;
-  clearLocalJrOsAccountData();
   saveSupabaseSession(session);
   identityChanged();
   return session.user ?? null;
@@ -127,9 +122,17 @@ export async function signInWithEmail(email: string, password: string) {
 
 export async function signUpWithEmail(email: string, password: string) {
   const redirectTo = typeof window === "undefined" ? undefined : `${window.location.origin}/cloud`;
-  const result = await supabaseFetch("/auth/v1/signup", { method: "POST", body: JSON.stringify({ email, password, options: redirectTo ? { emailRedirectTo: redirectTo } : undefined, data: { full_name: "Jake Rinaldi", business_name: "JR Electrical Services" } }) }, false) as SupabaseSession;
+  const emailName = email.split("@")[0]?.trim() || "JR OS Owner";
+  const result = await supabaseFetch("/auth/v1/signup", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      password,
+      options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
+      data: { full_name: emailName, business_name: "New JR OS Business" },
+    }),
+  }, false) as SupabaseSession;
   if (result.access_token) {
-    clearLocalJrOsAccountData();
     saveSupabaseSession(result);
     identityChanged();
   }
@@ -139,7 +142,6 @@ export async function signUpWithEmail(email: string, password: string) {
 export async function signOutCloudUser() {
   try { await supabaseFetch("/auth/v1/logout", { method: "POST" }); }
   finally {
-    clearLocalJrOsAccountData();
     saveSupabaseSession(null);
     identityChanged();
   }
@@ -175,7 +177,7 @@ export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationPr
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
   const storageKeys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
     .filter((key): key is string => Boolean(key?.startsWith(JR_OS_STORAGE_PREFIX)))
-    .filter((key) => !cloudInternalKeys.includes(key) && !key.startsWith("jr-os-cloud-versions:"));
+    .filter((key) => !cloudInternalKeys.includes(key) && !key.startsWith("jr-os-cloud-versions:") && !key.includes(":organisation:"));
 
   const report = (currentCollection: string, completedCollections: number, latestError?: string) => onProgress?.({
     currentCollection,
@@ -224,7 +226,9 @@ export async function restoreCloudDataToLocal() {
   for (const record of Array.isArray(rows) ? rows : []) {
     const payload = record.payload as { storageKey?: string; value?: unknown };
     if (!payload.storageKey?.startsWith(JR_OS_STORAGE_PREFIX)) continue;
-    window.localStorage.setItem(payload.storageKey, JSON.stringify(payload.value)); restored += 1;
+    const scopedKey = organisationStorageKey(payload.storageKey, organisationId);
+    window.localStorage.setItem(scopedKey, JSON.stringify(payload.value));
+    restored += 1;
   }
   return restored;
 }
