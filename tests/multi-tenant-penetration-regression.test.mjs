@@ -20,8 +20,8 @@ test("record enumeration cannot remove the organisation filter", () => {
 });
 
 test("browser cache tampering cannot alias two organisations or customer accounts", () => {
-  assert.match(adapter, /return `\$\{storageKey\}:organisation:\$\{organisationId\}`/);
-  assert.match(adapter, /:account:\$\{encodeURIComponent\(userId\)\}/);
+  assert.match(adapter, /return `\$\{storageKey\}:organisation:\$\{JSON\.stringify\(\[organisationId\]\)\}`/);
+  assert.match(adapter, /:account:\$\{JSON\.stringify\(\[userId\]\)\}/);
   assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId\)/);
   assert.match(storage, /identity\?\.role === "customer" \? userId : undefined/);
   assert.doesNotMatch(storage, /localStorage\.setItem\(key, JSON\.stringify\(items\)\)/);

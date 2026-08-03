@@ -7,9 +7,9 @@ const storage = fs.readFileSync(new URL("../lib/storage.ts", import.meta.url), "
 
 test("authenticated collection caches are scoped by organisation and restricted account", () => {
   assert.match(adapter, /organisationStorageKey\(storageKey, organisationId\)/);
-  assert.match(adapter, /return `\$\{storageKey\}:organisation:\$\{organisationId\}`/);
+  assert.match(adapter, /return `\$\{storageKey\}:organisation:\$\{JSON\.stringify\(\[organisationId\]\)\}`/);
   assert.match(adapter, /export function accountStorageKey\(storageKey: string, organisationId: string, userId\?: string\)/);
-  assert.match(adapter, /return userId \? `\$\{organisationKey\}:account:\$\{encodeURIComponent\(userId\)\}` : organisationKey/);
+  assert.match(adapter, /return userId \? `\$\{organisationKey\}:account:\$\{JSON\.stringify\(\[userId\]\)\}` : organisationKey/);
   assert.match(storage, /const cacheUserId = identity\?\.role === "customer" \? userId : undefined/);
   assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
 });
@@ -22,10 +22,10 @@ test("migration mode never trusts a legacy unscoped cache for an authenticated o
 });
 
 test("switching organisations or restricted accounts changes the active browser cache key", () => {
-  const orgA = "jr-os-customers:organisation:org-a";
-  const orgB = "jr-os-customers:organisation:org-b";
-  const customerA = `${orgA}:account:user-a`;
-  const customerB = `${orgA}:account:user-b`;
+  const orgA = "jr-os-customers:organisation:[\"org-a\"]";
+  const orgB = "jr-os-customers:organisation:[\"org-b\"]";
+  const customerA = `${orgA}:account:[\"user-a\"]`;
+  const customerB = `${orgA}:account:[\"user-b\"]`;
   assert.notEqual(orgA, orgB);
   assert.notEqual(customerA, customerB);
   assert.match(storage, /setIsReady\(false\)/);
