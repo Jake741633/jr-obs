@@ -7,8 +7,14 @@ const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import
 
 test("offline queue items are tagged with their organisation", () => {
   assert.match(repository, /export interface SyncQueueItem<[^>]*> \{[^}]*organisationId: string;/s);
-  assert.match(repository, /const next: SyncQueueItem<T> = \{ \.\.\.item, id: `\$\{item\.organisationId\}:/);
+  assert.match(repository, /syncQueueItemId\(item\.organisationId, item\.table, item\.collectionKey, item\.sourceId, queuedAt\)/);
   assert.match(repository, /coalesceQueue\(queue, next\)/);
+});
+
+test("offline queue identities cannot collide when values contain separators", () => {
+  assert.match(repository, /export function syncQueueItemId\(organisationId: string, table: string, collectionKey: string \| undefined, sourceId: string, queuedAt: number\)/);
+  assert.match(repository, /return JSON\.stringify\(\[organisationId, table, collectionKey \|\| "typed", sourceId, queuedAt\]\)/);
+  assert.doesNotMatch(repository, /id: `\$\{item\.organisationId\}:\$\{item\.table\}:/);
 });
 
 test("queue reads and replay are restricted to the active organisation", () => {

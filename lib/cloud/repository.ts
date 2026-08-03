@@ -29,6 +29,10 @@ function updateCachedVersion(storageKey: string | undefined, sourceId: string, v
   write(key, versions);
 }
 
+export function syncQueueItemId(organisationId: string, table: string, collectionKey: string | undefined, sourceId: string, queuedAt: number) {
+  return JSON.stringify([organisationId, table, collectionKey || "typed", sourceId, queuedAt]);
+}
+
 function statusForQueue(queue: SyncQueueItem[]): SyncState {
   if (!queue.length) return "Synced";
   if (queue.some((item) => item.state === "Conflict")) return "Conflict";
@@ -78,7 +82,8 @@ export function discardSyncQueueItem(itemId: string) {
 
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "queuedAt" | "attempts" | "state">) {
   const queue = readAllSyncQueue();
-  const next: SyncQueueItem<T> = { ...item, id: `${item.organisationId}:${item.table}:${item.collectionKey || "typed"}:${item.sourceId}:${Date.now()}`, queuedAt: new Date().toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
+  const queuedAt = Date.now();
+  const next: SyncQueueItem<T> = { ...item, id: syncQueueItemId(item.organisationId, item.table, item.collectionKey, item.sourceId, queuedAt), queuedAt: new Date(queuedAt).toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
   write(QUEUE_KEY, coalesceQueue(queue, next));
   if (activeOrganisationId() === item.organisationId) syncStatus.set(navigator.onLine ? "Pending" : "Offline");
 }
