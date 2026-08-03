@@ -25,6 +25,8 @@ const requiredSuites = [
   "tombstone-transition-guard.test.mjs",
   "migration-marker-delete-guard.test.mjs",
   "private-file-identity-guard.test.mjs",
+  "server-side-replay-penetration.test.mjs",
+  "legacy-app-record-identity-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
