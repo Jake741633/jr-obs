@@ -57,7 +57,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       if (mode === "migration" && local.length > 0) return local;
 
       try {
-        const rows = await cloudSelect<CloudEnvelope<T>>(table, `select=*&organisation_id=eq.${organisationId}${collectionFilter}&deleted_at=is.null`);
+        const rows = await cloudSelect<CloudEnvelope<T>>(table, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`);
         const cloudRecords = rows.map((row) => row.payload);
         writeLocal(scopedStorageKey, cloudRecords);
         writeVersions(scopedStorageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));
