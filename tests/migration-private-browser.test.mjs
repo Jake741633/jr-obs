@@ -33,7 +33,7 @@ test("switching organisations or restricted accounts changes the active browser 
 });
 
 test("fresh browsers hydrate only tenant-filtered cloud records", () => {
-  assert.match(adapter, /organisation_id=eq\.\$\{organisationId\}/);
+  assert.match(adapter, /organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}/);
   assert.match(adapter, /const cloudRecords = rows\.map\(\(row\) => row\.payload\)/);
   assert.match(adapter, /writeLocal\(scopedStorageKey, cloudRecords\)/);
 });
