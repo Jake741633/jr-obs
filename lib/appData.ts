@@ -52,7 +52,7 @@ function isInternalBackupKey(key: string) {
 
 function backupStorageKey(key: string, organisationId?: string) {
   if (!organisationId) return key;
-  const suffix = `${ORGANISATION_MARKER}${organisationId}`;
+  const suffix = organisationStorageKey("", organisationId);
   return key.endsWith(suffix) ? key.slice(0, -suffix.length) : null;
 }
 
@@ -63,7 +63,7 @@ export function exportJrOsData(organisationId?: string): JrOsBackup {
     if (!key || !key.startsWith(JR_OS_STORAGE_PREFIX) || isInternalBackupKey(key)) continue;
     const exportedKey = backupStorageKey(key, organisationId);
     if (exportedKey === null) continue;
-    if (organisationId && key.includes(ORGANISATION_MARKER) && !key.endsWith(`${ORGANISATION_MARKER}${organisationId}`)) continue;
+    if (organisationId && key.includes(ORGANISATION_MARKER) && !key.endsWith(organisationStorageKey("", organisationId))) continue;
     if (organisationId && !key.includes(ORGANISATION_MARKER)) continue;
     const raw = window.localStorage.getItem(key);
     if (raw === null) continue;
