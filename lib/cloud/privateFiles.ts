@@ -94,6 +94,10 @@ export function privateSignedUrlCacheKey(organisationId: string, sourceId: strin
   return `${encodeURIComponent(organisationId)}:${encodeURIComponent(sourceId)}`;
 }
 
+export function privateUploadQueueItemId(organisationId: string, storageKey: string, sourceId: string) {
+  return JSON.stringify([organisationId, storageKey, sourceId]);
+}
+
 export function privateObjectPath(organisationId: string, jobId: string | undefined, sourceId: string, fileName: string) {
   const scope = jobId ? `jobs/${sanitizeSegment(jobId)}` : "unassigned";
   return `${sanitizeSegment(organisationId)}/${scope}/${sanitizeSegment(sourceId)}/${sanitizeSegment(fileName)}`;
@@ -173,7 +177,7 @@ export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "i
   const now = new Date().toISOString();
   const queued: PrivateFileUploadQueueItem = {
     ...item,
-    id: `${item.organisationId}:${item.storageKey}:${item.sourceId}`,
+    id: privateUploadQueueItemId(item.organisationId, item.storageKey, item.sourceId),
     state: typeof navigator !== "undefined" && !navigator.onLine ? "Offline" : "Pending",
     createdAt: now,
     updatedAt: now,
