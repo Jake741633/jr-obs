@@ -22,7 +22,8 @@ test("metadata actors are bound to the authenticated user", () => {
 });
 
 test("private file metadata deletion requires owner or admin authority", () => {
-  assert.match(migration, /create policy private_files_admin_delete[\s\S]*for delete/i);
-  assert.match(migration, /public\.can_manage_business\(\)/i);
-  assert.doesNotMatch(migration, /private_files_admin_delete[\s\S]*can_manage_field_data\(\)/i);
+  const deletePolicy = migration.match(/create policy private_files_admin_delete[\s\S]*?;\s*$/i)?.[0] ?? "";
+  assert.match(deletePolicy, /for delete to authenticated/i);
+  assert.match(deletePolicy, /public\.can_manage_business\(\)/i);
+  assert.doesNotMatch(deletePolicy, /can_manage_field_data\(\)/i);
 });
