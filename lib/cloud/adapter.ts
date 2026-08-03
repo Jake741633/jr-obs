@@ -7,12 +7,12 @@ import { queueChange, type CloudEnvelope } from "./repository";
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
 
 export function organisationStorageKey(storageKey: string, organisationId: string) {
-  return `${storageKey}:organisation:${organisationId}`;
+  return `${storageKey}:organisation:${JSON.stringify([organisationId])}`;
 }
 
 export function accountStorageKey(storageKey: string, organisationId: string, userId?: string) {
   const organisationKey = organisationStorageKey(storageKey, organisationId);
-  return userId ? `${organisationKey}:account:${encodeURIComponent(userId)}` : organisationKey;
+  return userId ? `${organisationKey}:account:${JSON.stringify([userId])}` : organisationKey;
 }
 
 function readLocal<T>(storageKey: string): T[] {
