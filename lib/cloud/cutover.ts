@@ -3,6 +3,7 @@
 import { cloudSelect } from "./client";
 import { collectionCloudTarget, typedCollectionTables } from "./collections";
 import type { SyncQueueItem } from "./repository";
+import type { PrivateFileUploadQueueItem } from "./privateFiles";
 
 const INFRASTRUCTURE_KEYS = new Set([
   "jr-os-cloud-sync-queue",
@@ -100,8 +101,9 @@ function collectionKeys() {
   return [...new Set([...CORE_COLLECTIONS, ...discovered])].sort();
 }
 
-function queueSummary() {
-  const queue = readJson<SyncQueueItem[]>("jr-os-cloud-sync-queue", []);
+function queueSummary(organisationId: string) {
+  const queue = readJson<SyncQueueItem[]>("jr-os-cloud-sync-queue", [])
+    .filter((item) => item.organisationId === organisationId);
   return {
     pending: queue.filter((item) => item.state === "Pending" || item.state === "Offline").length,
     conflicts: queue.filter((item) => item.state === "Conflict").length,
@@ -161,8 +163,9 @@ export async function runCloudCutoverCheck(organisationId: string): Promise<Clou
     }
   }
 
-  const queue = queueSummary();
-  const privateUploadQueueCount = readJson<unknown[]>("jr-os-private-file-upload-queue", []).length;
+  const queue = queueSummary(organisationId);
+  const privateUploadQueueCount = readJson<PrivateFileUploadQueueItem[]>("jr-os-private-file-upload-queue", [])
+    .filter((item) => item.organisationId === organisationId).length;
   const localOnlyTotal = collections.reduce((sum, item) => sum + item.localOnlyIds.length, 0);
   const cloudOnlyTotal = collections.reduce((sum, item) => sum + item.cloudOnlyIds.length, 0);
   const errorCount = collections.filter((item) => item.status === "Error").length;

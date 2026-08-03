@@ -32,6 +32,14 @@ test("cutover report detects local-only records and unsafe queue states", () => 
   assert.match(helper, /readyForCloudMode: blockers\.length === 0/);
 });
 
+test("cutover readiness counts only the active organisation queues", () => {
+  assert.match(helper, /function queueSummary\(organisationId: string\)/);
+  assert.match(helper, /filter\(\(item\) => item\.organisationId === organisationId\)/);
+  assert.match(helper, /const queue = queueSummary\(organisationId\)/);
+  assert.match(helper, /readJson<PrivateFileUploadQueueItem\[]>\("jr-os-private-file-upload-queue", \[\]\)[\s\S]*filter\(\(item\) => item\.organisationId === organisationId\)\.length/);
+  assert.doesNotMatch(helper, /readJson<unknown\[]>\("jr-os-private-file-upload-queue", \[\]\)\.length/);
+});
+
 test("cutover page refreshes and exposes the authenticated organisation", () => {
   assert.match(page, /identity\.organisationId/);
   assert.match(page, /refreshIdentity/);
