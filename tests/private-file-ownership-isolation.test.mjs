@@ -18,6 +18,13 @@ test("private upload queues do not cross tenant boundaries", () => {
   assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 
+test("private upload queue identities cannot collide across tuple boundaries", () => {
+  assert.match(privateFiles, /privateUploadQueueItemId\(organisationId: string, storageKey: string, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, storageKey, sourceId\]\)/);
+  assert.match(privateFiles, /id: privateUploadQueueItemId\(item\.organisationId, item\.storageKey, item\.sourceId\)/);
+  assert.doesNotMatch(privateFiles, /id: `\$\{item\.organisationId\}:\$\{item\.storageKey\}:\$\{item\.sourceId\}`/);
+});
+
 test("private object paths must belong to the active organisation", () => {
   assert.match(privateFiles, /return objectPath\.startsWith\(organisationObjectPrefix\(organisationId\)\)/);
   assert.match(privateFiles, /!objectPath\.includes\("\.\.\/"\)/);
