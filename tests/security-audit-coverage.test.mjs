@@ -14,6 +14,17 @@ const requiredSuites = [
   "multi-tenant-penetration-regression.test.mjs",
   "forged-browser-session-rejection.test.mjs",
   "jobProgressCore.test.mjs",
+  "generic-collection-role-guard.test.mjs",
+  "private-storage-customer-scope.test.mjs",
+  "customer-profile-visibility.test.mjs",
+  "legacy-storage-staff-reads.test.mjs",
+  "private-file-metadata-delete-guard.test.mjs",
+  "customer-generic-collection-reads.test.mjs",
+  "customer-typed-table-reads.test.mjs",
+  "customer-portal-insert-guard.test.mjs",
+  "tombstone-transition-guard.test.mjs",
+  "migration-marker-delete-guard.test.mjs",
+  "private-file-identity-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
