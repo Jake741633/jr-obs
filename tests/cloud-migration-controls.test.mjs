@@ -65,3 +65,8 @@ test("typed import preserves table and PostgREST errors", () => {
   assert.match(page, /result\.errors\.join\("\\n"\)/);
   assert.match(page, /throw new Error\(`\$\{summary\}\\n\$\{result\.errors\.join/);
 });
+
+test("legacy restore encodes the authenticated organisation filter", () => {
+  assert.match(cloudSync, /app_records\?organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}&select=payload/);
+  assert.doesNotMatch(cloudSync, /app_records\?organisation_id=eq\.\$\{organisationId\}&select=payload/);
+});

@@ -225,7 +225,7 @@ export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationPr
 
 export async function restoreCloudDataToLocal() {
   const { organisationId } = await getCloudContext();
-  const rows = await supabaseFetch(`/rest/v1/app_records?organisation_id=eq.${organisationId}&select=payload`);
+  const rows = await supabaseFetch(`/rest/v1/app_records?organisation_id=eq.${encodeURIComponent(organisationId)}&select=payload`);
   let restored = 0;
   for (const record of Array.isArray(rows) ? rows : []) {
     const payload = record.payload as { storageKey?: string; value?: unknown };
