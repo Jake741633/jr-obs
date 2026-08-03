@@ -8,7 +8,7 @@ const settingsPage = readFileSync(new URL("../app/settings/page.tsx", import.met
 test("authenticated exports include only the active organisation", () => {
   assert.match(appData, /export function exportJrOsData\(organisationId\?: string\)/);
   assert.match(appData, /const exportedKey = backupStorageKey\(key, organisationId\)/);
-  assert.match(appData, /if \(organisationId && key\.includes\(ORGANISATION_MARKER\) && !key\.endsWith\(`\$\{ORGANISATION_MARKER\}\$\{organisationId\}`\)\) continue;/);
+  assert.match(appData, /if \(organisationId && key\.includes\(ORGANISATION_MARKER\) && !key\.endsWith\(organisationStorageKey\("", organisationId\)\)\) continue;/);
   assert.match(appData, /if \(organisationId && !key\.includes\(ORGANISATION_MARKER\)\) continue;/);
   assert.match(appData, /return \{ version: 1, exportedAt: new Date\(\)\.toISOString\(\), app: "JR OS", organisationId, data \}/);
 });
