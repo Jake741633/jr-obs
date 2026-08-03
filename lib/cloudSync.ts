@@ -154,6 +154,10 @@ export async function getCloudContext() {
   return { user, organisationId: profile.organisation_id, role: profile.role, customerSourceId: profile.customer_source_id };
 }
 
+export function legacyMigrationRecordId(organisationId: string, storageKey: string) {
+  return JSON.stringify([organisationId, storageKey]);
+}
+
 export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
   const { user, organisationId } = await getCloudContext();
   const backup = exportJrOsData();
@@ -161,7 +165,7 @@ export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
   for (const [storageKey, value] of Object.entries(backup.data)) {
     if (!storageKey.startsWith(JR_OS_STORAGE_PREFIX)) { result.skipped += 1; continue; }
     const collection = storageKey.slice(JR_OS_STORAGE_PREFIX.length) || "general";
-    const record = { id: `${organisationId}:${storageKey}`, organisation_id: organisationId, collection, payload: { storageKey, value }, created_by: user.id, updated_by: user.id, updated_at: new Date().toISOString() };
+    const record = { id: legacyMigrationRecordId(organisationId, storageKey), organisation_id: organisationId, collection, payload: { storageKey, value }, created_by: user.id, updated_by: user.id, updated_at: new Date().toISOString() };
     try {
       await supabaseFetch("/rest/v1/app_records?on_conflict=id", { method: "POST", headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify(record) });
       result.uploaded += 1;
