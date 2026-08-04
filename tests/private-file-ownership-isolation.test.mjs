@@ -41,16 +41,16 @@ test("private object paths must belong to the active organisation", () => {
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\);\s*const boundedExpiry/s);
 });
 
-test("signed download URLs are tenant keyed and short lived", () => {
+test("signed download URLs are tenant and user keyed and short lived", () => {
   assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /return `\$\{encodeURIComponent\(organisationId\)\}:\$\{encodeURIComponent\(sourceId\)\}`/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
   assert.match(privateFiles, /const boundedExpiry = Math\.min\(300, Math\.max\(60, Math\.floor\(expiresIn\)\)\)/);
   assert.match(privateFiles, /createSignedDownload\(objectPath, boundedExpiry\)/);
 });
 
-test("signed download cache identities cannot collide across organisations", () => {
-  assert.match(privateFiles, /encodeURIComponent\(organisationId\)\}:\$\{encodeURIComponent\(sourceId\)/);
-  assert.doesNotMatch(privateFiles, /encodeURIComponent\(organisationId\)\}\$\{encodeURIComponent\(sourceId\)/);
+test("signed download cache identities cannot collide across organisation, user or source boundaries", () => {
+  assert.match(privateFiles, /JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
+  assert.doesNotMatch(privateFiles, /return `\$\{encodeURIComponent\(organisationId\)\}:\$\{encodeURIComponent\(sourceId\)\}`/);
 });
 
 test("cloud payloads cannot leak embedded private bytes or stale signed links", () => {
