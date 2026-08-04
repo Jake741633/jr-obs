@@ -155,6 +155,7 @@ export async function signUpWithEmail(email: string, password: string) {
 }
 
 export async function signOutCloudUser() {
+  if (typeof window !== "undefined") window.localStorage.removeItem("jr-os-active-organisation");
   try { await supabaseFetch("/auth/v1/logout", { method: "POST" }); }
   finally {
     saveSupabaseSession(null);
