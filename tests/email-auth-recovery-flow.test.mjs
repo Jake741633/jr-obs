@@ -22,6 +22,6 @@ test("email sign-in and sign-up normalise account addresses consistently", () =>
 test("recovery links cannot complete as ordinary verification sessions", () => {
   assert.match(cloudSync, /const authType = hash\.get\("type"\) \|\| url\.searchParams\.get\("type"\)/);
   assert.match(cloudSync, /if \(authType === "recovery"\) \{[\s\S]*window\.location\.replace\("\/auth\/update-password"\);[\s\S]*return null;/);
-  assert.match(supabaseClient, /params\.get\("type"\) === "recovery"/);
+  assert.match(supabaseClient, /if \(params\.get\("type"\) !== "recovery"\) return;/);
   assert.match(supabaseClient, /window\.location\.replace\("\/auth\/update-password"\)/);
 });
