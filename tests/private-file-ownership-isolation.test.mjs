@@ -12,7 +12,7 @@ test("private uploads and metadata remain organisation scoped", () => {
 });
 
 test("private upload queues do not cross tenant or user boundaries", () => {
-  assert.match(privateFiles, /readPrivateUploadQueue\(identity\.organisationId\)/);
+  assert.match(privateFiles, /readPrivateUploadQueue\(identity\.organisationId, identity\.userId\)/);
   assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| item\.userId !== userId\)/);
   assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => item\.organisationId === organisationId && item\.userId === userId\)/);
   assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity\.organisationId, identity\.userId,/);
