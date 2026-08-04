@@ -232,11 +232,12 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
 
 export async function flushPrivateFileUploadQueue(
   organisationId: string,
+  userId: string,
   onSynced?: (item: PrivateFileUploadQueueItem, result: Awaited<ReturnType<typeof uploadQueuedPrivateFile>>) => void,
 ) {
   const allQueue = readAllPrivateUploadQueue();
-  const preserved = allQueue.filter((item) => item.organisationId !== organisationId);
-  const activeQueue = allQueue.filter((item) => item.organisationId === organisationId);
+  const preserved = allQueue.filter((item) => item.organisationId !== organisationId || item.userId !== userId);
+  const activeQueue = allQueue.filter((item) => item.organisationId === organisationId && item.userId === userId);
   const remaining: PrivateFileUploadQueueItem[] = [];
   for (const [index, item] of activeQueue.entries()) {
     if (activeOrganisationId() !== organisationId) {
@@ -349,7 +350,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
       });
     }
 
-    const flush = () => void flushPrivateFileUploadQueue(identity.organisationId, (queued, result) => {
+    const flush = () => void flushPrivateFileUploadQueue(identity.organisationId, identity.userId, (queued, result) => {
       if (queued.storageKey !== storageKey || result.state !== "Synced") return;
       setItems((current) => current.map((item) => {
         const record = item as PrivateFileBackedRecord;
