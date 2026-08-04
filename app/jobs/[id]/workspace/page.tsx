@@ -11,6 +11,7 @@ import {
   CheckSquare2,
   ClipboardList,
   FileText,
+  Gauge,
   MapPin,
   Phone,
   ReceiptText,
@@ -24,6 +25,7 @@ import {
   useBuildersCollection,
   useCustomersCollection,
   useJobDocumentsCollection,
+  useJobProgressCollection,
   useJobsCollection,
   useJobTasksCollection,
   useJobTimelineCollection,
@@ -32,6 +34,7 @@ import {
   useTeamCollection,
 } from "../../../../lib/cloud/coreBusinessCollections";
 import { canonicalJobStatuses, transitionJobStatus } from "../../../../lib/jobManagement-core.mjs";
+import { normaliseJobProgress } from "../../../../lib/jobProgress-core.mjs";
 import { jobTaskCounts } from "../../../../lib/jobTasks-core.mjs";
 import { makeId } from "../../../../lib/storage";
 import type { CanonicalJobStatus, JobTimelineEntry } from "../../../../lib/models";
@@ -46,6 +49,10 @@ function quickLink(href: string, label: string, detail: string, icon: typeof Fil
   </Link>;
 }
 
+function progressBar(label: string, value: number) {
+  return <div><div className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-300">{label}</span><span className="font-semibold text-cyan-200">{value}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-400" style={{ width: `${value}%` }} /></div></div>;
+}
+
 export default function JobWorkspacePage() {
   const params = useParams<{ id: string }>();
   const jobId = params.id;
@@ -57,11 +64,12 @@ export default function JobWorkspacePage() {
   const diaries = useSiteDiariesCollection();
   const variations = useJobVariationsCollection();
   const documents = useJobDocumentsCollection();
+  const progress = useJobProgressCollection();
   const timeline = useJobTimelineCollection();
   const [selectedStatus, setSelectedStatus] = useState<CanonicalJobStatus>("Enquiry");
   const [statusMessage, setStatusMessage] = useState("");
 
-  const ready = [jobs, customers, builders, team, tasks, diaries, variations, documents, timeline].every((store) => store.isReady);
+  const ready = [jobs, customers, builders, team, tasks, diaries, variations, documents, progress, timeline].every((store) => store.isReady);
   if (!ready) return <Card>Loading job workspace…</Card>;
 
   const job = jobs.items.find((item) => item.id === jobId);
@@ -75,6 +83,8 @@ export default function JobWorkspacePage() {
   const jobVariations = variations.items.filter((item) => item.jobId === jobId);
   const acceptedVariationValue = jobVariations.filter((item) => ["Accepted", "Approved", "Invoiced"].includes(item.status)).reduce((sum, item) => sum + (item.fixedPrice ?? item.labourHours * item.labourRate + item.materialCharge + item.otherCharge), 0);
   const jobDocuments = documents.items.filter((item) => item.jobId === jobId);
+  const progressRecord = progress.items.find((item) => item.jobId === jobId);
+  const progressValue = normaliseJobProgress(progressRecord?.manual ?? {});
   const recentActivity = timeline.items.filter((item) => item.jobId === jobId).toSorted((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, 5);
   const currentStatus = canonicalJobStatuses.includes(job.status) ? job.status as CanonicalJobStatus : "Enquiry";
 
@@ -102,8 +112,22 @@ export default function JobWorkspacePage() {
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Contract value</p><p className="mt-1 font-bold">{money.format(job.value || 0)}</p></div>
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Variations</p><p className="mt-1 font-bold text-emerald-300">{money.format(acceptedVariationValue)}</p></div>
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Outstanding</p><p className="mt-1 font-bold text-amber-300">{counts.outstanding}</p></div>
-        <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Documents</p><p className="mt-1 font-bold">{jobDocuments.length}</p></div>
+        <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Progress</p><p className="mt-1 font-bold text-cyan-200">{progressValue.overall}%</p></div>
       </div>
+    </Card>
+
+    <Card>
+      <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-300"><Gauge className="size-5" /></span><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Live progress</p><h2 className="mt-1 text-xl font-bold">Operational completion</h2><p className="mt-2 text-sm text-slate-400">Read-only snapshot from the existing job progress record.</p></div></div>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+        {progressBar("Overall", progressValue.overall)}
+        {progressBar("First fix", progressValue.firstFix)}
+        {progressBar("Second fix", progressValue.secondFix)}
+        {progressBar("Testing", progressValue.testing)}
+        {progressBar("Certificates", progressValue.certificates)}
+        {progressBar("Materials", progressValue.materials)}
+        {progressBar("Payments", progressValue.payments)}
+      </div>
+      {!progressRecord ? <p className="mt-4 text-sm text-amber-300">No saved progress record yet. Add one from the full job management controls.</p> : <p className="mt-4 text-xs text-slate-500">Last updated {new Date(progressRecord.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} by {progressRecord.updatedBy || "JR OS"}.</p>}
     </Card>
 
     <Card>
