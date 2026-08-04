@@ -166,9 +166,10 @@ function readAllPrivateUploadQueue() {
   catch { return []; }
 }
 
-export function readPrivateUploadQueue(organisationId?: string) {
+export function readPrivateUploadQueue(organisationId?: string, userId?: string) {
   const queue = readAllPrivateUploadQueue();
-  return organisationId ? queue.filter((item) => item.organisationId === organisationId) : queue;
+  if (!organisationId) return queue;
+  return queue.filter((item) => item.organisationId === organisationId && (!userId || item.userId === userId));
 }
 
 function writeQueue(items: PrivateFileUploadQueueItem[]) {
@@ -301,7 +302,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
   useEffect(() => {
     if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
     const queuedIds = new Set(
-      readPrivateUploadQueue(identity.organisationId)
+      readPrivateUploadQueue(identity.organisationId, identity.userId)
         .filter((item) => item.storageKey === storageKey)
         .map((item) => item.sourceId),
     );
