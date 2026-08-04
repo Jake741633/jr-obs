@@ -25,3 +25,9 @@ test("recovery links cannot complete as ordinary verification sessions", () => {
   assert.match(supabaseClient, /if \(params\.get\("type"\) !== "recovery"\) return;/);
   assert.match(supabaseClient, /window\.location\.replace\("\/auth\/update-password"\)/);
 });
+
+test("verification callbacks persist the authenticated user before tenant resolution", () => {
+  assert.match(cloudSync, /const user = session\.user \?\? await getCurrentCloudUser\(\)/);
+  assert.match(cloudSync, /if \(user && !session\.user\) \{[\s\S]*saveSupabaseSession\(\{ \.\.\.session, user \}\);[\s\S]*identityChanged\(\);[\s\S]*\}/);
+  assert.match(cloudSync, /return user;/);
+});
