@@ -19,9 +19,10 @@ test("private upload queues do not cross tenant or user boundaries", () => {
   assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 
-test("private upload replay stops when the active organisation changes", () => {
-  assert.match(privateFiles, /for \(const \[index, item\] of activeQueue\.entries\(\)\) \{\s*if \(activeOrganisationId\(\) !== organisationId\) \{\s*remaining\.push\(\.\.\.activeQueue\.slice\(index\)\);\s*break;/s);
-  assert.match(privateFiles, /const result = await uploadQueuedPrivateFile[\s\S]*if \(activeOrganisationId\(\) !== organisationId\) \{[\s\S]*remaining\.push\(\.\.\.activeQueue\.slice\(index \+ 1\)\);[\s\S]*break;/);
+test("private upload replay stops when the active organisation or user changes", () => {
+  assert.match(privateFiles, /function activeReplayOwnerMatches\(organisationId: string, userId: string\) \{\s*return activeOrganisationId\(\) === organisationId && readSupabaseSession\(\)\?\.user\?\.id === userId;\s*\}/s);
+  assert.match(privateFiles, /for \(const \[index, item\] of activeQueue\.entries\(\)\) \{\s*if \(!activeReplayOwnerMatches\(organisationId, userId\)\) \{\s*remaining\.push\(\.\.\.activeQueue\.slice\(index\)\);\s*break;/s);
+  assert.match(privateFiles, /const result = await uploadQueuedPrivateFile[\s\S]*if \(!activeReplayOwnerMatches\(organisationId, userId\)\) \{[\s\S]*remaining\.push\(\.\.\.activeQueue\.slice\(index \+ 1\)\);[\s\S]*break;/);
   assert.match(privateFiles, /if \(result\.state === "Synced"\) onSynced\?\.\(item, result\)/);
 });
 
