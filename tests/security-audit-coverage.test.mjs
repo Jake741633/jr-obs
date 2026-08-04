@@ -24,6 +24,7 @@ const requiredSuites = [
   "customer-portal-insert-guard.test.mjs",
   "tombstone-transition-guard.test.mjs",
   "migration-marker-delete-guard.test.mjs",
+  "migration-marker-identity-guard.test.mjs",
   "private-file-identity-guard.test.mjs",
   "server-side-replay-penetration.test.mjs",
   "legacy-app-record-identity-guard.test.mjs",
