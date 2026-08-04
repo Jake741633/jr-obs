@@ -13,6 +13,7 @@ const requiredSuites = [
   "audit-policy-integrity.test.mjs",
   "multi-tenant-penetration-regression.test.mjs",
   "forged-browser-session-rejection.test.mjs",
+  "email-auth-recovery-flow.test.mjs",
   "jobProgressCore.test.mjs",
   "generic-collection-role-guard.test.mjs",
   "private-storage-customer-scope.test.mjs",
