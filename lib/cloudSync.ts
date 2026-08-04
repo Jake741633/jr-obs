@@ -120,7 +120,13 @@ export async function completeEmailVerificationFromUrl() {
     window.location.replace("/auth/update-password");
     return null;
   }
-  return session.user ?? await getCurrentCloudUser();
+
+  const user = session.user ?? await getCurrentCloudUser();
+  if (user && !session.user) {
+    saveSupabaseSession({ ...session, user });
+    identityChanged();
+  }
+  return user;
 }
 
 export async function signInWithEmail(email: string, password: string) {
