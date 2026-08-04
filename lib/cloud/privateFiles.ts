@@ -101,7 +101,7 @@ function activeReplayOwnerMatches(organisationId: string, userId: string) {
 }
 
 export function privateSignedUrlCacheKey(organisationId: string, sourceId: string) {
-  return `${encodeURIComponent(organisationId)}:${encodeURIComponent(sourceId)}`;
+  return JSON.stringify([organisationId, readSupabaseSession()?.user?.id ?? "", sourceId]);
 }
 
 export function privateUploadQueueItemId(organisationId: string, userId: string, storageKey: string, sourceId: string) {
