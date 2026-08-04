@@ -26,10 +26,10 @@ test("private upload replay stops when the active organisation changes", () => {
 });
 
 test("private upload queue identities cannot collide across tuple boundaries", () => {
-  assert.match(privateFiles, /privateUploadQueueItemId\(organisationId: string, storageKey: string, sourceId: string\)/);
-  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, storageKey, sourceId\]\)/);
-  assert.match(privateFiles, /id: privateUploadQueueItemId\(item\.organisationId, item\.storageKey, item\.sourceId\)/);
-  assert.doesNotMatch(privateFiles, /id: `\$\{item\.organisationId\}:\$\{item\.storageKey\}:\$\{item\.sourceId\}`/);
+  assert.match(privateFiles, /privateUploadQueueItemId\(organisationId: string, userId: string, storageKey: string, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, userId, storageKey, sourceId\]\)/);
+  assert.match(privateFiles, /id: privateUploadQueueItemId\(item\.organisationId, item\.userId, item\.storageKey, item\.sourceId\)/);
+  assert.doesNotMatch(privateFiles, /id: `\$\{item\.organisationId\}:\$\{item\.userId\}:\$\{item\.storageKey\}:\$\{item\.sourceId\}`/);
 });
 
 test("private object paths must belong to the active organisation", () => {
