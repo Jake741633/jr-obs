@@ -7,6 +7,7 @@ import type { CloudIdentity } from "./useCloudIdentity";
 
 export const PRIVATE_FILE_UPLOAD_QUEUE_KEY = "jr-os-private-file-upload-queue";
 export const MAX_PRIVATE_FILE_BYTES = 10 * 1024 * 1024;
+const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation";
 
 const allowedMimeTypes = new Set([
   "application/pdf",
@@ -88,6 +89,10 @@ function mimeFromDataUrl(dataUrl: string) {
 
 function organisationObjectPrefix(organisationId: string) {
   return `${sanitizeSegment(organisationId)}/`;
+}
+
+function activeOrganisationId() {
+  return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ORGANISATION_KEY);
 }
 
 export function privateSignedUrlCacheKey(organisationId: string, sourceId: string) {
@@ -233,9 +238,18 @@ export async function flushPrivateFileUploadQueue(
   const preserved = allQueue.filter((item) => item.organisationId !== organisationId);
   const activeQueue = allQueue.filter((item) => item.organisationId === organisationId);
   const remaining: PrivateFileUploadQueueItem[] = [];
-  for (const item of activeQueue) {
+  for (const [index, item] of activeQueue.entries()) {
+    if (activeOrganisationId() !== organisationId) {
+      remaining.push(...activeQueue.slice(index));
+      break;
+    }
     try {
       const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() });
+      if (activeOrganisationId() !== organisationId) {
+        if (result.state !== "Synced") remaining.push({ ...item, state: result.state, updatedAt: new Date().toISOString() });
+        remaining.push(...activeQueue.slice(index + 1));
+        break;
+      }
       if (result.state === "Synced") onSynced?.(item, result);
       else remaining.push({ ...item, state: result.state, updatedAt: new Date().toISOString() });
     } catch (error) {
