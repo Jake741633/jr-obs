@@ -31,3 +31,14 @@ test("verification callbacks persist the authenticated user before tenant resolu
   assert.match(cloudSync, /if \(user && !session\.user\) \{[\s\S]*saveSupabaseSession\(\{ \.\.\.session, user \}\);[\s\S]*identityChanged\(\);[\s\S]*\}/);
   assert.match(cloudSync, /return user;/);
 });
+
+test("sign-out clears tenant replay ownership before remote logout", () => {
+  assert.match(
+    cloudSync,
+    /export async function signOutCloudUser\(\) \{\s*if \(typeof window !== "undefined"\) window\.localStorage\.removeItem\("jr-os-active-organisation"\);\s*try \{ await supabaseFetch\("\/auth\/v1\/logout", \{ method: "POST" \}\); \}/s,
+  );
+  assert.match(
+    cloudSync,
+    /finally \{\s*saveSupabaseSession\(null\);\s*identityChanged\(\);\s*\}/s,
+  );
+});
