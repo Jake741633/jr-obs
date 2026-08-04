@@ -18,6 +18,12 @@ test("private upload queues do not cross tenant boundaries", () => {
   assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 
+test("private upload replay stops when the active organisation changes", () => {
+  assert.match(privateFiles, /for \(const \[index, item\] of activeQueue\.entries\(\)\) \{\s*if \(activeOrganisationId\(\) !== organisationId\) \{\s*remaining\.push\(\.\.\.activeQueue\.slice\(index\)\);\s*break;/s);
+  assert.match(privateFiles, /const result = await uploadQueuedPrivateFile[\s\S]*if \(activeOrganisationId\(\) !== organisationId\) \{[\s\S]*remaining\.push\(\.\.\.activeQueue\.slice\(index \+ 1\)\);[\s\S]*break;/);
+  assert.match(privateFiles, /if \(result\.state === "Synced"\) onSynced\?\.\(item, result\)/);
+});
+
 test("private upload queue identities cannot collide across tuple boundaries", () => {
   assert.match(privateFiles, /privateUploadQueueItemId\(organisationId: string, storageKey: string, sourceId: string\)/);
   assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, storageKey, sourceId\]\)/);
