@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { readSupabaseSession } from "../supabase/client";
 import { cloudInsert, cloudUpsert, createSignedDownload, createSignedUpload } from "./client";
 import { cloudConfig, cloudStorageBucket, effectiveCloudMode, type CloudMode } from "./config";
 import type { CloudIdentity } from "./useCloudIdentity";
@@ -93,6 +94,10 @@ function organisationObjectPrefix(organisationId: string) {
 
 function activeOrganisationId() {
   return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ORGANISATION_KEY);
+}
+
+function activeReplayOwnerMatches(organisationId: string, userId: string) {
+  return activeOrganisationId() === organisationId && readSupabaseSession()?.user?.id === userId;
 }
 
 export function privateSignedUrlCacheKey(organisationId: string, sourceId: string) {
@@ -241,13 +246,13 @@ export async function flushPrivateFileUploadQueue(
   const activeQueue = allQueue.filter((item) => item.organisationId === organisationId && item.userId === userId);
   const remaining: PrivateFileUploadQueueItem[] = [];
   for (const [index, item] of activeQueue.entries()) {
-    if (activeOrganisationId() !== organisationId) {
+    if (!activeReplayOwnerMatches(organisationId, userId)) {
       remaining.push(...activeQueue.slice(index));
       break;
     }
     try {
       const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() });
-      if (activeOrganisationId() !== organisationId) {
+      if (!activeReplayOwnerMatches(organisationId, userId)) {
         if (result.state !== "Synced") remaining.push({ ...item, state: result.state, updatedAt: new Date().toISOString() });
         remaining.push(...activeQueue.slice(index + 1));
         break;
