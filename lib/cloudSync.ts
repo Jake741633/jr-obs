@@ -38,8 +38,13 @@ function clearAuthParamsFromUrl() {
   url.searchParams.delete("error");
   url.searchParams.delete("error_code");
   url.searchParams.delete("error_description");
+  url.searchParams.delete("type");
   url.hash = "";
   window.history.replaceState({}, document.title, `${url.pathname}${url.search}`);
+}
+
+function normaliseAuthEmail(email: string) {
+  return email.trim().toLowerCase();
 }
 
 /**
@@ -80,6 +85,7 @@ export async function completeEmailVerificationFromUrl() {
   const refreshToken = hash.get("refresh_token");
   const expiresIn = Number(hash.get("expires_in") || 0);
   const tokenType = hash.get("token_type") || "bearer";
+  const authType = hash.get("type") || url.searchParams.get("type");
   const code = url.searchParams.get("code");
   const errorDescription = url.searchParams.get("error_description") || url.searchParams.get("error");
 
@@ -110,25 +116,28 @@ export async function completeEmailVerificationFromUrl() {
   saveSupabaseSession(session);
   identityChanged();
   clearAuthParamsFromUrl();
+  if (authType === "recovery") {
+    window.location.replace("/auth/update-password");
+    return null;
+  }
   return session.user ?? await getCurrentCloudUser();
 }
 
 export async function signInWithEmail(email: string, password: string) {
-  const session = await supabaseFetch("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email, password }) }, false) as SupabaseSession;
+  const session = await supabaseFetch("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email: normaliseAuthEmail(email), password }) }, false) as SupabaseSession;
   saveSupabaseSession(session);
   identityChanged();
   return session.user ?? null;
 }
 
 export async function signUpWithEmail(email: string, password: string) {
-  const redirectTo = typeof window === "undefined" ? undefined : `${window.location.origin}/cloud`;
-  const emailName = email.split("@")[0]?.trim() || "JR OS Owner";
+  const normalisedEmail = normaliseAuthEmail(email);
+  const emailName = normalisedEmail.split("@")[0]?.trim() || "JR OS Owner";
   const result = await supabaseFetch("/auth/v1/signup", {
     method: "POST",
     body: JSON.stringify({
-      email,
+      email: normalisedEmail,
       password,
-      options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
       data: { full_name: emailName, business_name: "New JR OS Business" },
     }),
   }, false) as SupabaseSession;
