@@ -37,7 +37,17 @@ import { canonicalJobStatuses, transitionJobStatus } from "../../../../lib/jobMa
 import { normaliseJobProgress } from "../../../../lib/jobProgress-core.mjs";
 import { jobTaskCounts } from "../../../../lib/jobTasks-core.mjs";
 import { makeId } from "../../../../lib/storage";
-import type { CanonicalJobStatus, JobProgressMetrics, JobTimelineEntry } from "../../../../lib/models";
+import type { CanonicalJobStatus, JobTimelineEntry } from "../../../../lib/models";
+
+type NormalisedJobProgress = {
+  overall: number;
+  firstFix: number;
+  secondFix: number;
+  testing: number;
+  certificates: number;
+  materials: number;
+  payments: number;
+};
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 
@@ -84,7 +94,7 @@ export default function JobWorkspacePage() {
   const acceptedVariationValue = jobVariations.filter((item) => ["Accepted", "Approved", "Invoiced"].includes(item.status)).reduce((sum, item) => sum + (item.fixedPrice ?? item.labourHours * item.labourRate + item.materialCharge + item.otherCharge), 0);
   const jobDocuments = documents.items.filter((item) => item.jobId === jobId);
   const progressRecord = progress.items.find((item) => item.jobId === jobId);
-  const progressValue = normaliseJobProgress(progressRecord?.manual ?? {}) as JobProgressMetrics;
+  const progressValue = normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress;
   const recentActivity = timeline.items.filter((item) => item.jobId === jobId).toSorted((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, 5);
   const currentStatus = canonicalJobStatuses.includes(job.status) ? job.status as CanonicalJobStatus : "Enquiry";
 
