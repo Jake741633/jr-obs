@@ -110,8 +110,8 @@ test("JR AI settings and backup actions use the resolved organisation identity",
 });
 
 test("private upload queue retries preserve every other organisation and user", () => {
-  assert.match(privateFiles, /export function readPrivateUploadQueue\(organisationId\?: string\)/);
-  assert.match(privateFiles, /queue\.filter\(\(item\) => item\.organisationId === organisationId\)/);
+  assert.match(privateFiles, /export function readPrivateUploadQueue\(organisationId\?: string, userId\?: string\)/);
+  assert.match(privateFiles, /queue\.filter\(\(item\) => item\.organisationId === organisationId && \(!userId \|\| item\.userId === userId\)\)/);
   assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| item\.userId !== userId\)/);
   assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => item\.organisationId === organisationId && item\.userId === userId\)/);
   assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
