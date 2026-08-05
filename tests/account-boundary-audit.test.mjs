@@ -128,9 +128,9 @@ test("private uploads and signed downloads reject cross-organisation object path
   assert.match(privateFiles, /signedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId\)/);
 });
 
-test("signed attachment URLs cannot be reused after an organisation switch", () => {
+test("signed attachment URLs cannot be reused after an organisation or user switch", () => {
   assert.match(privateFiles, /export function privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /encodeURIComponent\(organisationId\).*encodeURIComponent\(sourceId\)/s);
+  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
   assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, queued\.sourceId\)/);
   assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, photo\.id\)/);
   assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, record\.id\)/);
