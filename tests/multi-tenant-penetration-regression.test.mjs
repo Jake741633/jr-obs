@@ -52,12 +52,12 @@ test("backup payloads cannot inject another tenant or internal sync state", () =
   assert.match(appData, /organisationStorageKey\(key, organisationId\)/);
 });
 
-test("private file path and signed URL tampering fail organisation checks", () => {
+test("private file path and signed URL tampering fail organisation and user checks", () => {
   assert.match(privateFiles, /isOrganisationPrivateObjectPath/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
   assert.match(privateFiles, /The private file does not belong to the active organisation/);
   assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /encodeURIComponent\(organisationId\).*encodeURIComponent\(sourceId\)/s);
+  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
 });
 
 test("customer sessions cannot select or mutate another customer record", () => {
