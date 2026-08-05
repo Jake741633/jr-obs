@@ -49,7 +49,7 @@ test("signed download URLs are tenant and user keyed and short lived", () => {
 });
 
 test("signed download cache identities cannot collide across organisation, user or source boundaries", () => {
-  assert.match(privateFiles, /JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
   assert.doesNotMatch(privateFiles, /return `\$\{encodeURIComponent\(organisationId\)\}:\$\{encodeURIComponent\(sourceId\)\}`/);
 });
 
