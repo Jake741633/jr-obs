@@ -49,19 +49,21 @@ test("typed migration ignores already scoped tenant caches", () => {
   assert.match(cloudSync, /!key\.includes\(":organisation:"\)/);
 });
 
-test("sync queue visibility and retries are restricted to the active organisation", () => {
+test("sync queue visibility and retries are restricted to the active organisation and user", () => {
   assert.match(repository, /const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation"/);
-  assert.match(repository, /export function setActiveSyncOrganisation/);
-  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId\)/);
+  assert.match(repository, /const ACTIVE_USER_KEY = "jr-os-active-user"/);
+  assert.match(repository, /export function setActiveSyncIdentity/);
+  assert.match(repository, /item\.organisationId === organisationId && \(!userId \|\| item\.userId === userId\)/);
   assert.match(repository, /const liveQueue = readAllSyncQueue\(\)/);
-  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| !originalIds\.has\(item\.id\)\)/);
+  assert.match(repository, /item\.organisationId !== organisationId \|\| item\.userId !== userId \|\| !originalIds\.has\(item\.id\)/);
   assert.match(repository, /const retained = remaining\.filter\(\(item\) => liveIds\.has\(item\.id\)\)/);
   assert.match(repository, /write\(QUEUE_KEY, nextQueue\)/);
-  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId/);
+  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId && \(!userId \|\| entry\.userId === userId\)/);
+  assert.match(repository, /activeOrganisationId\(\) !== organisationId \|\| activeUserId\(\) !== userId/);
 });
 
-test("resolved identity controls the active sync organisation and clears it during account changes", () => {
-  assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
+test("resolved identity controls active sync ownership and clears it during account changes", () => {
+  assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
   assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
 });
 
@@ -69,7 +71,7 @@ test("cross-tab session replacement invalidates the previous tenant before loadi
   assert.match(identity, /function handleStorageChange\(event: StorageEvent\)/);
   assert.match(identity, /if \(event\.key === "jr-os-supabase-session"\) void refreshCloudIdentity\(\);/);
   assert.match(identity, /export function refreshCloudIdentity\(\) \{\s*emit\(\{ identity: null, isReady: false \}\);\s*return loadIdentity\(true\);\s*\}/);
-  assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
+  assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
 });
 
 test("suspended profiles cannot resolve an application identity or expose cached tenant data", () => {
@@ -80,7 +82,7 @@ test("suspended profiles cannot resolve an application identity or expose cached
 
 test("secured workspace transient state resets when organisations change", () => {
   assert.match(cloudAccessGuard, /Fragment, type ReactNode/);
-  assert.match(cloudAccessGuard, /<Fragment key=\{identity\.organisationId\}>\{children\}<\/Fragment>/);
+  assert.match(cloudAccessGuard, /<Fragment key=\{`\$\{identity\.organisationId\}:\$\{identity\.userId\}`\}>\{children\}<\/Fragment>/);
 });
 
 test("AI-created CRM interactions attribute the signed-in user instead of Jake", () => {
