@@ -206,6 +206,11 @@ const integrationTest = enabled ? test : test.skip;
 integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role boundaries", { timeout: 180_000 }, async () => {
   const context = { users: [], organisations: [], objectPaths: [] };
   try {
+    await expectDenied(
+      await request("/rest/v1/jobs?select=id"),
+      "Anonymous Data API access must fail at the grant boundary",
+    );
+
     const organisationA = await createOrganisation(`JR OS Security A ${runId}`);
     const organisationB = await createOrganisation(`JR OS Security B ${runId}`);
     context.organisations.push(organisationA, organisationB);

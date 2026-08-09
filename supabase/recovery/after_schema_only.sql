@@ -98,4 +98,7 @@
 \echo 'Moving JR OS authorization helpers behind the Data API boundary'
 \ir ../migrations/20260809_030_private_authorization_helpers.sql
 
+\echo 'Applying least-privilege public database grants'
+\ir ../migrations/20260809_031_public_grant_least_privilege.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

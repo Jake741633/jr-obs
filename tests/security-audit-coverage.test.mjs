@@ -32,6 +32,7 @@ const requiredSuites = [
   "legacy-app-record-identity-guard.test.mjs",
   "legacy-backup-role-guard.test.mjs",
   "private-authorization-helper-boundary.test.mjs",
+  "public-database-grants.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -73,6 +74,7 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Staff must not register private-file metadata for another tenant path",
     "Staff must not bypass the private-file metadata MIME allowlist",
     "Authorization helper RPC must not be exposed",
+    "Anonymous Data API access must fail at the grant boundary",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }
