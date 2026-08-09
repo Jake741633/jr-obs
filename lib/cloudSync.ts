@@ -7,6 +7,10 @@ import { importLocalCollection } from "./cloud/repository";
 import { readSupabaseSession, saveSupabaseSession, supabaseFetch, type SupabaseSession } from "./supabase/client";
 
 export interface CloudSyncResult { uploaded: number; skipped: number; errors: string[]; }
+export interface EmailVerificationResult {
+  user: { id: string; email?: string } | null;
+  requiresPasswordSignIn: boolean;
+}
 export interface TypedMigrationProgress {
   currentCollection: string;
   completedCollections: number;
@@ -40,6 +44,14 @@ function assertCloudMigrationRole(role: string | undefined) {
 
 function identityChanged() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
+}
+
+async function signOutTemporaryCloudSession() {
+  try { await supabaseFetch("/auth/v1/logout?scope=local", { method: "POST" }); }
+  finally {
+    saveSupabaseSession(null);
+    identityChanged();
+  }
 }
 
 function clearAuthParamsFromUrl() {
@@ -130,14 +142,24 @@ export async function completeEmailVerificationFromUrl() {
   saveSupabaseSession(storedSession);
   identityChanged();
   clearAuthParamsFromUrl();
-  if (authType === "recovery") return null;
+  if (authType === "recovery") {
+    return { user: null, requiresPasswordSignIn: false } satisfies EmailVerificationResult;
+  }
+
+  // Email verification and one-time-link sessions prove control of a link, but
+  // JR OS business access requires a normal password or other business-capable
+  // authentication method. Revoke the temporary session and ask for sign-in.
+  if (authType) {
+    try { await signOutTemporaryCloudSession(); } catch { /* local session is cleared in finally */ }
+    return { user: null, requiresPasswordSignIn: true } satisfies EmailVerificationResult;
+  }
 
   const user = storedSession.user ?? await getCurrentCloudUser();
   if (user && !storedSession.user) {
     saveSupabaseSession({ ...storedSession, user });
     identityChanged();
   }
-  return user;
+  return { user, requiresPasswordSignIn: false } satisfies EmailVerificationResult;
 }
 
 export async function signInWithEmail(email: string, password: string) {

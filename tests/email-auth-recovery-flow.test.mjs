@@ -22,15 +22,22 @@ test("email sign-in and sign-up normalise account addresses consistently", () =>
 test("recovery links cannot complete as ordinary verification sessions", () => {
   assert.match(cloudSync, /const authType = hash\.get\("type"\) \|\| url\.searchParams\.get\("type"\)/);
   assert.match(cloudSync, /authType === "recovery"\s*\? \{ \.\.\.session, is_password_recovery: true \}/);
-  assert.match(cloudSync, /if \(authType === "recovery"\) return null;/);
+  assert.match(cloudSync, /if \(authType === "recovery"\) \{[\s\S]*requiresPasswordSignIn: false/);
   assert.doesNotMatch(cloudSync, /window\.location\.replace\("\/auth\/update-password"\)/);
   assert.doesNotMatch(supabaseClient, /consumePasswordRecoveryRedirect/);
 });
 
-test("verification callbacks persist the authenticated user before tenant resolution", () => {
+test("non-verification callbacks persist the authenticated user before tenant resolution", () => {
   assert.match(cloudSync, /const user = storedSession\.user \?\? await getCurrentCloudUser\(\)/);
   assert.match(cloudSync, /if \(user && !storedSession\.user\) \{[\s\S]*saveSupabaseSession\(\{ \.\.\.storedSession, user \}\);[\s\S]*identityChanged\(\);[\s\S]*\}/);
-  assert.match(cloudSync, /return user;/);
+  assert.match(cloudSync, /return \{ user, requiresPasswordSignIn: false \} satisfies EmailVerificationResult;/);
+});
+
+test("email verification sessions require a normal sign-in before tenant resolution", () => {
+  assert.match(
+    cloudSync,
+    /if \(authType\) \{[\s\S]*await signOutTemporaryCloudSession\(\)[\s\S]*requiresPasswordSignIn: true/,
+  );
 });
 
 test("sign-out clears tenant replay ownership before remote logout", () => {

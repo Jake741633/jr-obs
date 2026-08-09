@@ -425,6 +425,31 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectDenied(await insertRecord(accounts.A.electrician, "materials", typedRecord(organisationA, source("deactivated-write"), customerA, jobA)), "Deactivated user must not write");
     await expectAllowed(await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.electrician.id}`, { active: true }), "Owner should reactivate user for remaining tests");
 
+    // Recovery/OTP sessions may update credentials through Auth, but they must
+    // not become an alternate route into JR OS business data.
+    const recoveryLink = await service("/auth/v1/admin/generate_link", {
+      method: "POST",
+      body: { type: "recovery", email: accounts.B.electrician.email },
+    });
+    await expectAllowed(recoveryLink, "Service role should generate a recovery test link");
+    const recoverySession = await request("/auth/v1/verify", {
+      method: "POST",
+      body: { type: "recovery", token_hash: recoveryLink.payload.hashed_token },
+    });
+    await expectAllowed(recoverySession, "Recovery token should create an Auth-only session");
+    const recoveryAccount = { ...accounts.B.electrician, accessToken: recoverySession.payload.access_token };
+    const recoveryRead = await listRecords(recoveryAccount, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    await expectAllowed(recoveryRead, "Recovery-only tenant query should fail closed");
+    assert.deepEqual(recoveryRead.payload, [], "Recovery-only sessions must not read tenant data");
+    await expectDenied(
+      await insertRecord(recoveryAccount, "jobs", typedRecord(organisationB, source("recovery-session-write"), customerB, jobB)),
+      "Recovery-only sessions must not write tenant data",
+    );
+    await expectAllowed(
+      await request("/auth/v1/logout?scope=local", { method: "POST", accessToken: recoverySession.payload.access_token }),
+      "Recovery-only test session should be revoked locally",
+    );
+
     // Session revocation: active access works, then stale access and refresh
     // tokens both lose tenant authorization immediately after admin logout.
     const activeSessionRead = await listRecords(accounts.B.electrician, "jobs", `select=source_id&source_id=eq.${jobB}`);

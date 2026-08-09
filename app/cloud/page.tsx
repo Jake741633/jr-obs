@@ -43,11 +43,17 @@ export default function CloudPage() {
     let active = true;
     void (async () => {
       try {
-        const verifiedUser = await completeEmailVerificationFromUrl();
-        const user = verifiedUser ?? await getCurrentCloudUser();
+        const verification = await completeEmailVerificationFromUrl();
+        const user = verification?.requiresPasswordSignIn
+          ? null
+          : verification?.user ?? await getCurrentCloudUser();
         if (!active) return;
         setUserEmail(user?.email ?? null);
-        if (verifiedUser) setAccountMessage("Email verified. You are now signed in securely.");
+        if (verification?.requiresPasswordSignIn) {
+          setAccountMessage("Email verified. Sign in with your password to open JR OS.");
+        } else if (verification?.user) {
+          setAccountMessage("Email verified. You are now signed in securely.");
+        }
       } catch (error) {
         if (!active) return;
         setAccountMessage(error instanceof Error ? error.message : "Email verification could not be completed.");

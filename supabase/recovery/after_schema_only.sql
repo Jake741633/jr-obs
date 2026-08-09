@@ -119,4 +119,7 @@
 \echo 'Rejecting revoked Supabase sessions in tenant authorization'
 \ir ../migrations/20260809_037_enforce_active_auth_sessions.sql
 
+\echo 'Rejecting recovery and verification-only sessions from business data'
+\ir ../migrations/20260809_038_restrict_verification_only_sessions.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -25,3 +25,18 @@ test("verification completion restores the saved session and clears auth details
   assert.match(helperSource, /clearAuthParamsFromUrl\s*\(\s*\)/);
   assert.match(cloudSync, /function\s+clearAuthParamsFromUrl\s*\([\s\S]*window\.history\.replaceState/);
 });
+
+test("email verification sessions are revoked before normal business sign-in", () => {
+  assert.match(
+    cloudSync,
+    /if \(authType\) \{[\s\S]*await signOutTemporaryCloudSession\(\)[\s\S]*requiresPasswordSignIn: true/,
+  );
+  assert.match(
+    cloudSync,
+    /async function signOutTemporaryCloudSession\(\) \{[\s\S]*\/auth\/v1\/logout\?scope=local[\s\S]*saveSupabaseSession\(null\)/,
+  );
+  assert.match(
+    cloudPage,
+    /verification\?\.requiresPasswordSignIn[\s\S]*Email verified\. Sign in with your password to open JR OS\./,
+  );
+});
