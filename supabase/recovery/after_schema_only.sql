@@ -164,4 +164,7 @@
 \echo 'Projecting a field-safe builder directory'
 \ir ../migrations/20260809_052_field_builder_projection.sql
 
+\echo 'Scoping field timesheet reads and updates to their creator'
+\ir ../migrations/20260809_053_timesheet_actor_scope.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
