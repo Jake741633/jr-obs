@@ -68,6 +68,7 @@ const requiredSuites = [
   "customer-invoice-projection.test.mjs",
   "customer-invoice-live-rls.test.mjs",
   "customer-payment-projection.test.mjs",
+  "customer-payment-live-rls.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
