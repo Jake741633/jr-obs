@@ -46,9 +46,9 @@ const roleCoverage = lines(
   '      await downloadStorageObject(accounts.A.electrician, ownPath),',
   '      "Electrician should download a field job document",',
   '    );',
-  '    await expectAllowed(',
+  '    await expectDenied(',
   '      await downloadStorageObject(accounts.A.customer, ownPath),',
-  '      "Customer should download their own job document",',
+  '      "Customer must not download an unshared job document",',
   '    );',
   '',
   '    const surveyPhotoFile = source("survey-photo-role");',
@@ -175,7 +175,7 @@ const patchedIntegration = integrationSource
 
 for (const phrase of [
   "Electrician should download a field job document",
-  "Customer should download their own job document",
+  "Customer must not download an unshared job document",
   "Electrician should download a field survey photo",
   "Customer must not download an internal survey photo",
   "Electrician must not read expense receipt metadata",
