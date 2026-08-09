@@ -179,4 +179,7 @@
 \echo 'Projecting issued-only certificate records for customer sessions'
 \ir ../migrations/20260809_057_customer_issued_certificate_projection.sql
 
+\echo 'Failing closed raw customer photo and job-document access'
+\ir ../migrations/20260809_058_fail_closed_customer_photo_sharing.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
