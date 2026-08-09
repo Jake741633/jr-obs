@@ -152,4 +152,7 @@
 \echo 'Projecting sanitised generic field collections for electricians'
 \ir ../migrations/20260809_048_field_cloud_collection_projection.sql
 
+\echo 'Projecting price-safe typed inventory records for electricians'
+\ir ../migrations/20260809_049_field_inventory_projections.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

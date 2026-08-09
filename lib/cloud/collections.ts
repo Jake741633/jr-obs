@@ -29,6 +29,9 @@ const roleReadTables: Record<string, Record<string, string>> = {
   electrician: {
     cloud_collections: "field_cloud_collections",
     jobs: "field_jobs",
+    materials: "field_materials",
+    purchase_lists: "field_purchase_lists",
+    stock_items: "field_stock_items",
     team_members: "field_team_members",
   },
 };

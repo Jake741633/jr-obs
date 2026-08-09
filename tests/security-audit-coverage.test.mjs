@@ -50,6 +50,7 @@ const requiredSuites = [
   "field-team-projection.test.mjs",
   "job-role-projections.test.mjs",
   "field-cloud-collection-projection.test.mjs",
+  "field-inventory-projections.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);

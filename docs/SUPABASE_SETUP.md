@@ -70,6 +70,7 @@ Use separate test users for owner, office, electrician and customer. Verify:
 - electrician field updates preserve hidden office-only job pricing while changing only allowlisted operational job fields
 - electrician generic field reads use a sanitised projection; survey rates, job-pack prices, variation pricing and material unit costs stay office-only
 - sensitive generic field updates preserve existing office pricing instead of overwriting it with redacted browser payloads
+- electrician typed inventory reads remove material trade and sell prices, stock unit costs and purchase-list item costs; inventory edits preserve hidden office pricing
 - only owner/admin accounts can enumerate organisation authentication profiles
 - electricians cannot delete tenant records
 - office users cannot manage owner/admin permissions
