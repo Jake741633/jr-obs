@@ -104,4 +104,7 @@
 \echo 'Constraining legacy private-storage uploads'
 \ir ../migrations/20260809_032_constrain_legacy_storage_uploads.sql
 
+\echo 'Auditing sensitive metadata deletions'
+\ir ../migrations/20260809_033_audit_sensitive_metadata_deletions.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

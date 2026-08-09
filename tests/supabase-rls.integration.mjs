@@ -20,7 +20,7 @@ const typedTables = [
   "certificates", "electrical_testing_records", "job_documents", "portal_approvals", "portal_requests",
   "ai_recommendation_evidence",
 ];
-const cleanupTables = ["private_files", "audit_log", "app_records", "cloud_collections", ...typedTables];
+const cleanupTables = ["private_files", "app_records", "cloud_collections", ...typedTables, "audit_log"];
 
 function authHeaders(key, accessToken, extra = {}) {
   return {
@@ -502,6 +502,40 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectDenied(await deleteStorageObject(accounts.A.office, ownPath), "Office must not delete private objects");
     await expectAllowed(await deleteStorageObject(accounts.A.admin, ownPath), "Admin should delete private objects");
     context.objectPaths = context.objectPaths.filter((path) => path !== ownPath);
+
+    const crossTenantMetadataDelete = await deleteRecords(
+      accounts.B.owner,
+      "private_files",
+      `source_id=eq.${source("file-own")}`,
+    );
+    await expectAllowed(crossTenantMetadataDelete, "Cross-tenant metadata deletion should fail closed");
+    assert.deepEqual(crossTenantMetadataDelete.payload, [], "Another tenant must not delete private file metadata");
+
+    await expectAllowed(
+      await deleteRecords(accounts.A.owner, "private_files", `source_id=eq.${source("file-own")}`),
+      "Owner should delete private file metadata",
+    );
+    const privateFileDeleteAudit = await listRecords(
+      accounts.A.owner,
+      "audit_log",
+      `select=action,entity_table,source_id,actor_user_id&entity_table=eq.private_files&source_id=eq.${source("file-own")}`,
+    );
+    await expectAllowed(privateFileDeleteAudit, "Private file deletion audit query should execute");
+    assert.equal(
+      privateFileDeleteAudit.payload.some((row) => (
+        row.action === "record_deleted"
+        && row.actor_user_id === accounts.A.owner.id
+      )),
+      true,
+      "Private file metadata deletion must create an immutable tenant audit row",
+    );
+    const crossTenantDeleteAudit = await listRecords(
+      accounts.B.owner,
+      "audit_log",
+      `select=source_id&entity_table=eq.private_files&source_id=eq.${source("file-own")}`,
+    );
+    await expectAllowed(crossTenantDeleteAudit, "Cross-tenant deletion audit query should fail closed");
+    assert.deepEqual(crossTenantDeleteAudit.payload, [], "Another tenant must not read deletion audit evidence");
   } finally {
     await cleanup(context);
   }
