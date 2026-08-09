@@ -66,6 +66,7 @@ const requiredSuites = [
   "customer-certificate-live-rls.test.mjs",
   "customer-photo-sharing-fail-closed.test.mjs",
   "customer-invoice-projection.test.mjs",
+  "customer-invoice-live-rls.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
