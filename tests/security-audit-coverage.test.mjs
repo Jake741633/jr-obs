@@ -64,6 +64,7 @@ const requiredSuites = [
   "private-file-role-scope.test.mjs",
   "customer-certificate-projection.test.mjs",
   "customer-certificate-live-rls.test.mjs",
+  "customer-photo-sharing-fail-closed.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
