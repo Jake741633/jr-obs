@@ -87,7 +87,7 @@ test("background sync merges results into the live queue without crossing tenant
   const originalIds = repository.indexOf("const originalIds = new Set(queue.map((item) => item.id))", liveQueueRead);
   const liveIds = repository.indexOf("const liveIds = new Set(liveQueue.map((item) => item.id))", originalIds);
   const untouched = repository.indexOf("const untouched = liveQueue.filter", liveIds);
-  const tenantPreservation = repository.indexOf("item.organisationId !== organisationId || !originalIds.has(item.id)", untouched);
+  const tenantPreservation = repository.indexOf("item.organisationId !== organisationId || item.userId !== userId || !originalIds.has(item.id)", untouched);
   const retained = repository.indexOf("const retained = remaining.filter((item) => liveIds.has(item.id))", tenantPreservation);
   const mergedQueue = repository.indexOf("const nextQueue = [...untouched, ...retained]", retained);
   const writeMerged = repository.indexOf("write(QUEUE_KEY, nextQueue)", mergedQueue);
@@ -114,14 +114,14 @@ test("live queue merge preserves new work and respects concurrent discards", () 
   assert.doesNotMatch(repository, /write\(QUEUE_KEY, \[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 
-test("background sync stops processing when the active organisation changes", () => {
+test("background sync stops processing when the active organisation or user changes", () => {
   const loopStart = repository.indexOf("for (const item of queue)");
-  const loopGuard = repository.indexOf("if (activeOrganisationId() !== organisationId)", loopStart);
+  const loopGuard = repository.indexOf("if (activeOrganisationId() !== organisationId || activeUserId() !== userId)", loopStart);
   const loopRetain = repository.indexOf("remaining.push(...queue.slice(processed));", loopGuard);
   const cloudRead = repository.indexOf("const existing = await cloudSelect", loopRetain);
-  const postReadGuard = repository.indexOf("if (activeOrganisationId() !== organisationId)", cloudRead);
+  const postReadGuard = repository.indexOf("if (activeOrganisationId() !== organisationId || activeUserId() !== userId)", cloudRead);
   const postReadRetain = repository.indexOf("remaining.push(item, ...queue.slice(processed));", postReadGuard);
-  const guardedStatus = repository.indexOf("if (activeOrganisationId() === organisationId) syncStatus.set(statusForQueue(activeRemaining))", postReadRetain);
+  const guardedStatus = repository.indexOf("if (activeOrganisationId() === organisationId && activeUserId() === userId) syncStatus.set(statusForQueue(activeRemaining))", postReadRetain);
 
   assert.ok(loopStart >= 0);
   assert.ok(loopGuard > loopStart);

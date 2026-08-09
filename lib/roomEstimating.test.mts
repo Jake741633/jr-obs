@@ -65,7 +65,12 @@ test("room quote conversion returns typed customer-safe lines", () => {
 });
 
 test("whole-property declarations preserve typed totals and quote lines", () => {
-  const rooms: RoomEstimateInput[] = [room, { ...room, id: "bedroom-1", templateKey: "bedroom", points: [{ ...room.points?.[0], id: "bedroom-sockets", quantity: 2 }] }];
+  const rooms: RoomEstimateInput[] = [room, {
+    ...room,
+    id: "bedroom-1",
+    templateKey: "bedroom",
+    points: [{ id: "bedroom-sockets", priceBookItemId: "socket", quantity: 2, notes: "Above worktop" }],
+  }];
   const summary = wholePropertyEstimateFinancials(rooms, priceBook);
   const lines: PriceBookQuoteLine[] = wholePropertyEstimateToQuoteLines(rooms, priceBook, (value) => `quote-${value}`);
 

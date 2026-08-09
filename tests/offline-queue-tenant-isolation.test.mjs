@@ -17,24 +17,25 @@ test("offline queue identities cannot collide when values contain separators", (
   assert.doesNotMatch(repository, /id: `\$\{item\.organisationId\}:\$\{item\.table\}:/);
 });
 
-test("queue reads and replay are restricted to the active organisation", () => {
+test("queue reads and replay are restricted to the active organisation and user", () => {
   assert.match(repository, /function activeOrganisationId\(\)/);
-  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId\)/);
-  assert.match(repository, /const queue = allQueue\.filter\(\(item\) => item\.organisationId === organisationId\)/);
+  assert.match(repository, /function activeUserId\(\)/);
+  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId && \(!userId \|\| item\.userId === userId\)\)/);
+  assert.match(repository, /const queue = allQueue\.filter\(\(item\) => item\.organisationId === organisationId && \(!userId \|\| item\.userId === userId\)\)/);
   assert.match(repository, /tenantRecordQuery\(\{ organisationId: item\.organisationId, sourceId: item\.sourceId/);
 });
 
-test("organisation changes abort an in-flight replay before foreign writes", () => {
-  const guards = repository.match(/if \(activeOrganisationId\(\) !== organisationId\)/g) ?? [];
-  assert.ok(guards.length >= 2, "replay must check tenant ownership before and after remote reads");
+test("identity changes abort an in-flight replay before foreign writes", () => {
+  const guards = repository.match(/if \(activeOrganisationId\(\) !== organisationId \|\| activeUserId\(\) !== userId\)/g) ?? [];
+  assert.ok(guards.length >= 2, "replay must check organisation and user ownership before and after remote reads");
   assert.match(repository, /remaining\.push\(\.\.\.queue\.slice\(processed\)\);\s*break;/s);
   assert.match(repository, /remaining\.push\(item, \.\.\.queue\.slice\(processed\)\);\s*break;/s);
 });
 
-test("replay preserves queues owned by other organisations", () => {
-  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| !originalIds\.has\(item\.id\)\)/);
+test("replay preserves queues owned by other organisations and users", () => {
+  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| item\.userId !== userId \|\| !originalIds\.has\(item\.id\)\)/);
   assert.match(repository, /const nextQueue = \[\.\.\.untouched, \.\.\.retained\]/);
-  assert.match(repository, /if \(activeOrganisationId\(\) === organisationId\) syncStatus\.set\(statusForQueue\(activeRemaining\)\)/);
+  assert.match(repository, /if \(activeOrganisationId\(\) === organisationId && activeUserId\(\) === userId\) syncStatus\.set\(statusForQueue\(activeRemaining\)\)/);
 });
 
 test("failed retries stay bound to their original tenant", () => {
@@ -44,7 +45,8 @@ test("failed retries stay bound to their original tenant", () => {
 });
 
 test("sign-out clears active replay ownership", () => {
-  assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
+  assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
   assert.match(repository, /else window\.localStorage\.removeItem\(ACTIVE_ORGANISATION_KEY\)/);
+  assert.match(repository, /else window\.localStorage\.removeItem\(ACTIVE_USER_KEY\)/);
   assert.match(repository, /if \(!organisationId\) return \{ processed: 0, cleared: 0, remaining: 0, conflicts: 0, failed: 0 \}/);
 });

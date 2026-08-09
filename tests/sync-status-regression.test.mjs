@@ -22,8 +22,8 @@ test("genuine unresolved conflicts still take priority over other queued states"
   assert.ok(offlineIndex > failedIndex, "Failed must take priority over offline state");
 });
 
-test("queue mutations continue recalculating and publishing active-organisation sync state", () => {
+test("queue mutations continue recalculating and publishing active-identity sync state", () => {
   assert.match(repositorySource, /syncStatus\.set\(statusForQueue\(activeRemaining\)\);/);
-  assert.match(repositorySource, /if \(activeOrganisationId\(\) === organisationId\) syncStatus\.set\(statusForQueue\(activeRemaining\)\);/);
+  assert.match(repositorySource, /if \(activeOrganisationId\(\) === organisationId && activeUserId\(\) === userId\) syncStatus\.set\(statusForQueue\(activeRemaining\)\);/);
   assert.match(repositorySource, /window\.dispatchEvent\(new CustomEvent\("jr-os-sync-status", \{ detail: value \}\)\);/);
 });

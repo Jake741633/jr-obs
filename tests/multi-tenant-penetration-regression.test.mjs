@@ -27,11 +27,11 @@ test("browser cache tampering cannot alias two organisations or customer account
   assert.doesNotMatch(storage, /localStorage\.setItem\(key, JSON\.stringify\(items\)\)/);
 });
 
-test("offline queue replay cannot process another organisation after a switch", () => {
-  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId\)/);
-  assert.match(repository, /if \(activeOrganisationId\(\) !== organisationId\)/);
-  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| !originalIds\.has\(item\.id\)\)/);
-  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId/);
+test("offline queue replay cannot process another organisation or user after a switch", () => {
+  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId && \(!userId \|\| item\.userId === userId\)\)/);
+  assert.match(repository, /if \(activeOrganisationId\(\) !== organisationId \|\| activeUserId\(\) !== userId\)/);
+  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| item\.userId !== userId \|\| !originalIds\.has\(item\.id\)\)/);
+  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId && \(!userId \|\| entry\.userId === userId\)/);
   assert.doesNotMatch(repository, /readAllSyncQueue\(\)\.forEach/);
 });
 
@@ -71,7 +71,8 @@ test("customer sessions cannot select or mutate another customer record", () => 
 
 test("tenant-sensitive state is invalidated across identity and workspace changes", () => {
   assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
-  assert.match(identity, /setActiveSyncOrganisation\(next\.identity\?\.organisationId \?\? null\)/);
+  assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
+  assert.match(guard, /<Fragment key=\{identity\.userId\}>/);
   assert.match(guard, /<Fragment key=\{identity\.organisationId\}>/);
   assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
 });

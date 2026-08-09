@@ -27,7 +27,7 @@ test("identity changes move sync ownership to the latest resolved organisation a
 });
 
 test("account switches remount transient workspace state", () => {
-  assert.match(guard, /<Fragment key=\{`\$\{identity\.organisationId\}:\$\{identity\.userId\}`\}>\{children\}<\/Fragment>/);
+  assert.match(guard, /<Fragment key=\{identity\.userId\}><Fragment key=\{identity\.organisationId\}>\{children\}<\/Fragment><\/Fragment>/);
   assert.match(guard, /if \(!isReady\)/);
   assert.match(guard, /if \(!identity\)/);
 });

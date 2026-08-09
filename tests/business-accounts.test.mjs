@@ -96,7 +96,7 @@ test("accepts only pending invitations and links the user account", () => {
   assert.equal(invite.status, "pending");
 
   assert.throws(() => acceptStaffInvite(accepted, "user-2"), /Only pending invites/);
-  assert.throws(() => acceptStaffInvite(invite, "   "), /User account is required/);
+  assert.throws(() => acceptStaffInvite(invite, "   ", "2026-08-01T13:00:00.000Z"), /User account is required/);
 });
 
 test("rejects expired invitations and honours explicit expiry dates", () => {

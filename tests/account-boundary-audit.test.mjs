@@ -80,9 +80,9 @@ test("suspended profiles cannot resolve an application identity or expose cached
   assert.match(identity, /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) return null;/);
 });
 
-test("secured workspace transient state resets when organisations change", () => {
+test("secured workspace transient state resets when organisations or users change", () => {
   assert.match(cloudAccessGuard, /Fragment, type ReactNode/);
-  assert.match(cloudAccessGuard, /<Fragment key=\{`\$\{identity\.organisationId\}:\$\{identity\.userId\}`\}>\{children\}<\/Fragment>/);
+  assert.match(cloudAccessGuard, /<Fragment key=\{identity\.userId\}><Fragment key=\{identity\.organisationId\}>\{children\}<\/Fragment><\/Fragment>/);
 });
 
 test("AI-created CRM interactions attribute the signed-in user instead of Jake", () => {
