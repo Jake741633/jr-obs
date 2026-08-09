@@ -58,3 +58,16 @@ test("penetration suite retains every final attack class", () => {
     assert.match(penetration, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }
 });
+
+test("live RLS coverage preserves privileged AI and tombstone boundaries", () => {
+  const liveRls = readFileSync(new URL("supabase-rls.integration.mjs", testsDirectory), "utf8");
+
+  for (const requiredPhrase of [
+    "Electrician must not write office-only AI learning memory",
+    "Electrician must not create a soft-delete tombstone",
+    "Owner should create a soft-delete tombstone",
+  ]) {
+    assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
+  }
+  assert.doesNotMatch(liveRls, /Field staff should create a soft-delete tombstone/i);
+});

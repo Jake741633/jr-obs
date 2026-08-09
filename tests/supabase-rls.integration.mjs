@@ -305,22 +305,31 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectDenied(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-other"), otherCustomerA, jobA)), "Customer must not create another customer request");
     assert.deepEqual((await listRecords(accounts.B.owner, "portal_requests", `select=source_id&source_id=eq.${requestA}`)).payload, []);
 
-    // Generic cloud_collections: Surveys, RAMS, Job Packs and AI learning memory.
+    // Generic cloud_collections: electricians retain field-operational writes,
+    // while office-only AI learning state remains protected.
     const genericCases = [
       ["jr-os-surveys", source("survey-a"), { circuits: [{ id: "c1" }] }],
       ["jr-os-rams", source("rams-a"), { risks: [{ id: "r1" }] }],
       ["jr-os-job-packs", source("pack-a"), { materials: [{ id: "m1" }] }],
-      ["jr-os-ai-learning-memory", source("memory-a"), { confidence: { overall: 75 } }],
     ];
     for (const [collectionKey, sourceId, payload] of genericCases) {
       await expectAllowed(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.electrician, customerA, jobA, payload)), `Field staff should write ${collectionKey}`);
       await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationB, collectionKey, `${sourceId}-cross`, accounts.A.electrician, customerB, jobB, payload)), `Cross-tenant generic write must fail for ${collectionKey}`);
       assert.deepEqual((await listRecords(accounts.B.owner, "cloud_collections", `select=source_id&collection_key=eq.${encodeURIComponent(collectionKey)}&source_id=eq.${sourceId}`)).payload, []);
     }
+    await expectDenied(await insertRecord(
+      accounts.A.electrician,
+      "cloud_collections",
+      genericRecord(organisationA, "jr-os-ai-learning-memory", source("memory-a"), accounts.A.electrician, customerA, jobA, { confidence: { overall: 75 } }),
+    ), "Electrician must not write office-only AI learning memory");
 
     // Soft delete/tombstone and conflict-safe versioning assumptions.
-    const tombstone = await patchRecords(accounts.A.electrician, "jobs", `source_id=eq.${jobA}`, { deleted_at: new Date().toISOString() });
-    await expectAllowed(tombstone, "Field staff should create a soft-delete tombstone");
+    await expectDenied(
+      await patchRecords(accounts.A.electrician, "jobs", `source_id=eq.${jobA}`, { deleted_at: new Date().toISOString() }),
+      "Electrician must not create a soft-delete tombstone",
+    );
+    const tombstone = await patchRecords(accounts.A.owner, "jobs", `source_id=eq.${jobA}`, { deleted_at: new Date().toISOString() });
+    await expectAllowed(tombstone, "Owner should create a soft-delete tombstone");
     assert.equal(tombstone.payload[0].version >= 2, true);
     const activeJobs = await listRecords(accounts.A.owner, "jobs", `select=source_id&source_id=eq.${jobA}&deleted_at=is.null`);
     assert.deepEqual(activeJobs.payload, [], "Tombstoned rows must be excluded by active-record queries");
