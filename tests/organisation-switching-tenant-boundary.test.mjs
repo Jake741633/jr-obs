@@ -16,14 +16,16 @@ test("stale identity requests cannot reactivate a previous organisation", () => 
   assert.match(identity, /identityRequestVersion \+= 1;\s*emit\(\{ identity: null, isReady: true \}\);/s);
 });
 
-test("identity changes move sync ownership to the latest resolved organisation and user", () => {
-  assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
+test("identity changes move sync ownership to the latest resolved authorisation context", () => {
+  assert.match(identity, /setActiveSyncIdentity\([\s\S]*next\.identity\?\.organisationId[\s\S]*next\.identity\?\.userId[\s\S]*next\.identity\?\.role[\s\S]*next\.identity\?\.customerSourceId/);
   assert.match(identity, /emit\(\{ identity: null, isReady: false \}\);\s*return loadIdentity\(true\);/s);
   assert.match(identity, /event\.key === "jr-os-supabase-session"/);
   assert.match(repository, /const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation";/);
   assert.match(repository, /const ACTIVE_USER_KEY = "jr-os-active-user";/);
-  assert.match(repository, /activeOrganisationId\(\) !== organisationId \|\| activeUserId\(\) !== userId/);
-  assert.match(repository, /if \(activeOrganisationId\(\) === organisationId && activeUserId\(\) === userId\) syncStatus\.set\(statusForQueue\(activeRemaining\)\)/);
+  assert.match(repository, /const ACTIVE_ROLE_KEY = "jr-os-active-role";/);
+  assert.match(repository, /const ACTIVE_CUSTOMER_SOURCE_KEY = "jr-os-active-customer-source";/);
+  assert.match(repository, /!activeSyncAuthorizationMatches\(authorization\)/);
+  assert.match(repository, /if \(activeSyncAuthorizationMatches\(authorization\)\) syncStatus\.set\(statusForQueue\(activeRemaining\)\)/);
 });
 
 test("account and permission switches remount transient workspace state", () => {

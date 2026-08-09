@@ -28,11 +28,12 @@ test("browser cache tampering cannot alias two organisations or authorisation id
   assert.doesNotMatch(storage, /localStorage\.setItem\(key, JSON\.stringify\(items\)\)/);
 });
 
-test("offline queue replay cannot process another organisation or user after a switch", () => {
-  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => item\.organisationId === organisationId && \(!userId \|\| item\.userId === userId\)\)/);
-  assert.match(repository, /if \(activeOrganisationId\(\) !== organisationId \|\| activeUserId\(\) !== userId\)/);
-  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| item\.userId !== userId \|\| !originalIds\.has\(item\.id\)\)/);
-  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId && \(!userId \|\| entry\.userId === userId\)/);
+test("offline queue replay cannot process another authorisation context after a switch", () => {
+  assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)/);
+  assert.match(repository, /if \(!activeSyncAuthorizationMatches\(authorization\)\)/);
+  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => !queueItemMatchesAuthorization\(item, authorization\) \|\| !originalIds\.has\(item\.id\)\)/);
+  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
+  assert.match(repository, /await revalidateSyncAuthorization\(authorization\)/);
   assert.doesNotMatch(repository, /readAllSyncQueue\(\)\.forEach/);
 });
 
@@ -73,7 +74,7 @@ test("customer sessions cannot select or mutate another customer record", () => 
 
 test("tenant-sensitive state is invalidated across identity and workspace changes", () => {
   assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
-  assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
+  assert.match(identity, /setActiveSyncIdentity\([\s\S]*next\.identity\?\.organisationId[\s\S]*next\.identity\?\.userId[\s\S]*next\.identity\?\.role[\s\S]*next\.identity\?\.customerSourceId/);
   assert.match(guard, /identity\.organisationId,[\s\S]*identity\.userId,[\s\S]*identity\.role,[\s\S]*identity\.customerSourceId/);
   assert.match(guard, /<Fragment key=\{workspaceIdentityKey\}>/);
   assert.match(storage, /\[activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);

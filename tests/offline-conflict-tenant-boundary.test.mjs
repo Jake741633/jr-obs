@@ -18,6 +18,8 @@ function change(organisationId, overrides = {}) {
     table: "customers",
     operation: "upsert",
     organisationId,
+    userId: "user-a",
+    role: "admin",
     sourceId: "shared-id",
     payload: { id: "shared-id", name: organisationId },
     expectedVersion: 1,
@@ -36,6 +38,17 @@ test("offline queue coalescing never merges identical record ids across organisa
   assert.equal(updatedA.length, 2);
   assert.equal(updatedA.find((item) => item.organisationId === "org-a")?.payload.name, "updated-a");
   assert.equal(updatedA.find((item) => item.organisationId === "org-b")?.payload.name, "org-b");
+});
+
+test("offline queue coalescing never merges users, roles or customer assignments", () => {
+  const admin = change("org-a");
+  const otherUser = change("org-a", { userId: "user-b" });
+  const demoted = change("org-a", { role: "electrician" });
+  const customerA = change("org-a", { role: "customer", customerSourceId: "customer-a" });
+  const customerB = change("org-a", { role: "customer", customerSourceId: "customer-b" });
+
+  const queue = [otherUser, demoted, customerA, customerB].reduce((items, item) => coalesceQueue(items, item), [admin]);
+  assert.equal(queue.length, 5);
 });
 
 test("version conflicts remain attached only to the originating tenant change", () => {
@@ -81,13 +94,13 @@ test("offline import cannot resurrect a tenant tombstone", () => {
 });
 
 test("background sync merges results into the live queue without crossing tenants", () => {
-  const activeOrganisation = repository.indexOf("const organisationId = activeOrganisationId()");
+  const activeOrganisation = repository.indexOf("const authorization = currentSyncAuthorization()");
   const tenantSnapshot = repository.indexOf("const queue = allQueue.filter", activeOrganisation);
   const liveQueueRead = repository.indexOf("const liveQueue = readAllSyncQueue()", tenantSnapshot);
   const originalIds = repository.indexOf("const originalIds = new Set(queue.map((item) => item.id))", liveQueueRead);
   const liveIds = repository.indexOf("const liveIds = new Set(liveQueue.map((item) => item.id))", originalIds);
   const untouched = repository.indexOf("const untouched = liveQueue.filter", liveIds);
-  const tenantPreservation = repository.indexOf("item.organisationId !== organisationId || item.userId !== userId || !originalIds.has(item.id)", untouched);
+  const tenantPreservation = repository.indexOf("!queueItemMatchesAuthorization(item, authorization) || !originalIds.has(item.id)", untouched);
   const retained = repository.indexOf("const retained = remaining.filter((item) => liveIds.has(item.id))", tenantPreservation);
   const mergedQueue = repository.indexOf("const nextQueue = [...untouched, ...retained]", retained);
   const writeMerged = repository.indexOf("write(QUEUE_KEY, nextQueue)", mergedQueue);
@@ -105,7 +118,7 @@ test("background sync merges results into the live queue without crossing tenant
   assert.ok(writeMerged > mergedQueue);
   assert.ok(activeRemaining > writeMerged);
   assert.match(repository, /tenantRecordQuery\(\{ organisationId: item\.organisationId/);
-  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId/);
+  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
 });
 
 test("live queue merge preserves new work and respects concurrent discards", () => {
@@ -114,14 +127,14 @@ test("live queue merge preserves new work and respects concurrent discards", () 
   assert.doesNotMatch(repository, /write\(QUEUE_KEY, \[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 
-test("background sync stops processing when the active organisation or user changes", () => {
+test("background sync stops processing when active authorisation changes", () => {
   const loopStart = repository.indexOf("for (const item of queue)");
-  const loopGuard = repository.indexOf("if (activeOrganisationId() !== organisationId || activeUserId() !== userId)", loopStart);
+  const loopGuard = repository.indexOf("if (!activeSyncAuthorizationMatches(authorization))", loopStart);
   const loopRetain = repository.indexOf("remaining.push(...queue.slice(processed));", loopGuard);
   const cloudRead = repository.indexOf("const existing = await cloudSelect", loopRetain);
-  const postReadGuard = repository.indexOf("if (activeOrganisationId() !== organisationId || activeUserId() !== userId)", cloudRead);
+  const postReadGuard = repository.indexOf("if (!activeSyncAuthorizationMatches(authorization))", cloudRead);
   const postReadRetain = repository.indexOf("remaining.push(item, ...queue.slice(processed));", postReadGuard);
-  const guardedStatus = repository.indexOf("if (activeOrganisationId() === organisationId && activeUserId() === userId) syncStatus.set(statusForQueue(activeRemaining))", postReadRetain);
+  const guardedStatus = repository.indexOf("if (activeSyncAuthorizationMatches(authorization)) syncStatus.set(statusForQueue(activeRemaining))", postReadRetain);
 
   assert.ok(loopStart >= 0);
   assert.ok(loopGuard > loopStart);
@@ -136,4 +149,5 @@ test("online retries resolve the active organisation at execution time", () => {
   assert.match(repository, /window\.addEventListener\("online", \(\) => void flushSyncQueue\(\)\)/);
   assert.match(repository, /setActiveSyncOrganisation\(organisationId: string \| null\)/);
   assert.match(repository, /syncStatus\.set\(navigator\.onLine \? statusForQueue\(getSyncQueue\(\)\) : "Offline"\)/);
+  assert.match(repository, /revalidateSyncAuthorization\(authorization\)/);
 });

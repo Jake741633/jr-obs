@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from
 import { readSupabaseSession } from "../supabase/client";
 import { cloudInsert, cloudUpsert, createSignedDownload, createSignedUpload } from "./client";
 import { cloudConfig, cloudStorageBucket, effectiveCloudMode, type CloudMode } from "./config";
+import { activeSyncAuthorizationMatches, revalidateSyncAuthorization, type SyncAuthorizationContext } from "./repository";
 import type { CloudIdentity } from "./useCloudIdentity";
 
 export const PRIVATE_FILE_UPLOAD_QUEUE_KEY = "jr-os-private-file-upload-queue";
@@ -31,6 +32,8 @@ export interface PrivateFileUploadQueueItem {
   id: string;
   organisationId: string;
   userId: string;
+  authorizationRole: string;
+  authorizationCustomerSourceId?: string;
   sourceId: string;
   parentSourceId?: string;
   storageKey: string;
@@ -96,16 +99,18 @@ function activeOrganisationId() {
   return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ORGANISATION_KEY);
 }
 
-function activeReplayOwnerMatches(organisationId: string, userId: string) {
-  return activeOrganisationId() === organisationId && readSupabaseSession()?.user?.id === userId;
+function activeReplayOwnerMatches(authorization: SyncAuthorizationContext) {
+  return activeOrganisationId() === authorization.organisationId
+    && readSupabaseSession()?.user?.id === authorization.userId
+    && activeSyncAuthorizationMatches(authorization);
 }
 
 export function privateSignedUrlCacheKey(identity: CloudIdentity, sourceId: string) {
   return JSON.stringify([identity.organisationId, identity.userId, identity.role, identity.customerSourceId ?? null, sourceId]);
 }
 
-export function privateUploadQueueItemId(organisationId: string, userId: string, storageKey: string, sourceId: string) {
-  return JSON.stringify([organisationId, userId, storageKey, sourceId]);
+export function privateUploadQueueItemId(organisationId: string, userId: string, role: string, customerSourceId: string | undefined, storageKey: string, sourceId: string) {
+  return JSON.stringify([organisationId, userId, role, customerSourceId ?? null, storageKey, sourceId]);
 }
 
 export function privateObjectPath(organisationId: string, jobId: string | undefined, sourceId: string, fileName: string) {
@@ -171,10 +176,20 @@ function readAllPrivateUploadQueue() {
   catch { return []; }
 }
 
-export function readPrivateUploadQueue(organisationId?: string, userId?: string) {
+function privateUploadAuthorization(item: PrivateFileUploadQueueItem): SyncAuthorizationContext {
+  return { organisationId: item.organisationId, userId: item.userId, role: item.authorizationRole, customerSourceId: item.authorizationCustomerSourceId };
+}
+
+function privateUploadMatchesAuthorization(item: PrivateFileUploadQueueItem, authorization: SyncAuthorizationContext) {
+  return item.organisationId === authorization.organisationId
+    && item.userId === authorization.userId
+    && item.authorizationRole === authorization.role
+    && (item.authorizationCustomerSourceId ?? null) === (authorization.customerSourceId ?? null);
+}
+
+export function readPrivateUploadQueue(authorization: SyncAuthorizationContext) {
   const queue = readAllPrivateUploadQueue();
-  if (!organisationId) return queue;
-  return queue.filter((item) => item.organisationId === organisationId && (!userId || item.userId === userId));
+  return queue.filter((item) => privateUploadMatchesAuthorization(item, authorization));
 }
 
 function writeQueue(items: PrivateFileUploadQueueItem[]) {
@@ -188,7 +203,7 @@ export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "i
   const now = new Date().toISOString();
   const queued: PrivateFileUploadQueueItem = {
     ...item,
-    id: privateUploadQueueItemId(item.organisationId, item.userId, item.storageKey, item.sourceId),
+    id: privateUploadQueueItemId(item.organisationId, item.userId, item.authorizationRole, item.authorizationCustomerSourceId, item.storageKey, item.sourceId),
     state: typeof navigator !== "undefined" && !navigator.onLine ? "Offline" : "Pending",
     createdAt: now,
     updatedAt: now,
@@ -208,6 +223,10 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
   assertOrganisationPrivateObjectPath(item.organisationId, item.objectPath);
   if (effectiveCloudMode() === "local") return { state: "Pending" as const };
   if (typeof navigator !== "undefined" && !navigator.onLine) return { state: "Offline" as const };
+  const authorization = privateUploadAuthorization(item);
+  if (!activeReplayOwnerMatches(authorization) || !(await revalidateSyncAuthorization(authorization))) {
+    throw new Error("Private upload authorisation changed before replay.");
+  }
   const blob = dataUrlToBlob(item.dataUrl, item.mimeType);
   if (blob.size !== item.size && Math.abs(blob.size - item.size) > 4) throw new Error("The cached file size does not match the queued upload.");
 
@@ -237,22 +256,21 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
 }
 
 export async function flushPrivateFileUploadQueue(
-  organisationId: string,
-  userId: string,
+  authorization: SyncAuthorizationContext,
   onSynced?: (item: PrivateFileUploadQueueItem, result: Awaited<ReturnType<typeof uploadQueuedPrivateFile>>) => void,
 ) {
   const allQueue = readAllPrivateUploadQueue();
-  const preserved = allQueue.filter((item) => item.organisationId !== organisationId || item.userId !== userId);
-  const activeQueue = allQueue.filter((item) => item.organisationId === organisationId && item.userId === userId);
+  const preserved = allQueue.filter((item) => !privateUploadMatchesAuthorization(item, authorization));
+  const activeQueue = allQueue.filter((item) => privateUploadMatchesAuthorization(item, authorization));
   const remaining: PrivateFileUploadQueueItem[] = [];
   for (const [index, item] of activeQueue.entries()) {
-    if (!activeReplayOwnerMatches(organisationId, userId)) {
+    if (!activeReplayOwnerMatches(authorization)) {
       remaining.push(...activeQueue.slice(index));
       break;
     }
     try {
       const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() });
-      if (!activeReplayOwnerMatches(organisationId, userId)) {
+      if (!activeReplayOwnerMatches(authorization)) {
         if (result.state !== "Synced") remaining.push({ ...item, state: result.state, updatedAt: new Date().toISOString() });
         remaining.push(...activeQueue.slice(index + 1));
         break;
@@ -307,7 +325,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
   useEffect(() => {
     if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
     const queuedIds = new Set(
-      readPrivateUploadQueue(identity.organisationId, identity.userId)
+      readPrivateUploadQueue(identity)
         .filter((item) => item.storageKey === storageKey)
         .map((item) => item.sourceId),
     );
@@ -323,6 +341,8 @@ export function usePrivateFileCollectionBridge<T>(input: {
           queuePrivateFileUpload({
             organisationId: identity.organisationId,
             userId: identity.userId,
+            authorizationRole: identity.role,
+            authorizationCustomerSourceId: identity.customerSourceId,
             sourceId: photo.id,
             parentSourceId: record.id,
             storageKey,
@@ -344,6 +364,8 @@ export function usePrivateFileCollectionBridge<T>(input: {
       queuePrivateFileUpload({
         organisationId: identity.organisationId,
         userId: identity.userId,
+        authorizationRole: identity.role,
+        authorizationCustomerSourceId: identity.customerSourceId,
         sourceId: record.id,
         storageKey,
         jobSourceId: record.jobId,
@@ -356,7 +378,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
       });
     }
 
-    const flush = () => void flushPrivateFileUploadQueue(identity.organisationId, identity.userId, (queued, result) => {
+    const flush = () => void flushPrivateFileUploadQueue(identity, (queued, result) => {
       if (queued.storageKey !== storageKey || result.state !== "Synced") return;
       setItems((current) => current.map((item) => {
         const record = item as PrivateFileBackedRecord;

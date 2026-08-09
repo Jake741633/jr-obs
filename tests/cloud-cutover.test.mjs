@@ -76,7 +76,7 @@ test("failed queue items show their exact record and error before any marker is 
 test("stale marker removal updates only the active identity queue and recalculates sync status", () => {
   const discardBody = functionBody(repository, "discardSyncQueueItem");
   assert.match(discardBody, /queue\.filter\(\(entry\) => entry\.id !== itemId\)/);
-  assert.match(discardBody, /activeRemaining = next\.filter\(\(entry\) => entry\.organisationId === organisationId && \(!userId \|\| entry\.userId === userId\)\)/);
+  assert.match(discardBody, /activeRemaining = next\.filter\(\(entry\) => queueItemMatchesAuthorization\(entry, authorization\)\)/);
   assert.match(discardBody, /statusForQueue\(activeRemaining\)/);
   assert.doesNotMatch(discardBody, /cloudPatch/);
   assert.doesNotMatch(discardBody, /cloudUpsert/);
@@ -108,7 +108,7 @@ test("visible tabs always revalidate and clear stale in-memory identity first", 
     identityHook,
     /export function refreshCloudIdentity\(\) \{\s*emit\(\{ identity: null, isReady: false \}\);\s*return loadIdentity\(true\);\s*\}/,
   );
-  assert.match(identityHook, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
+  assert.match(identityHook, /setActiveSyncIdentity\([\s\S]*next\.identity\?\.organisationId[\s\S]*next\.identity\?\.userId[\s\S]*next\.identity\?\.role[\s\S]*next\.identity\?\.customerSourceId/);
 });
 
 test("cross-tab session changes still trigger the same identity revalidation path", () => {

@@ -11,25 +11,30 @@ test("private uploads and metadata remain organisation scoped", () => {
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(item\.organisationId, item\.objectPath\)/);
 });
 
-test("private upload queues do not cross tenant or user boundaries", () => {
-  assert.match(privateFiles, /readPrivateUploadQueue\(identity\.organisationId, identity\.userId\)/);
-  assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| item\.userId !== userId\)/);
-  assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => item\.organisationId === organisationId && item\.userId === userId\)/);
-  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity\.organisationId, identity\.userId,/);
+test("private upload queues do not cross authorisation boundaries", () => {
+  assert.match(privateFiles, /readPrivateUploadQueue\(identity\)/);
+  assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => !privateUploadMatchesAuthorization\(item, authorization\)\)/);
+  assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => privateUploadMatchesAuthorization\(item, authorization\)\)/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity,/);
   assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 
-test("private upload replay stops when the active organisation or user changes", () => {
-  assert.match(privateFiles, /function activeReplayOwnerMatches\(organisationId: string, userId: string\) \{\s*return activeOrganisationId\(\) === organisationId && readSupabaseSession\(\)\?\.user\?\.id === userId;\s*\}/s);
-  assert.match(privateFiles, /for \(const \[index, item\] of activeQueue\.entries\(\)\) \{\s*if \(!activeReplayOwnerMatches\(organisationId, userId\)\) \{\s*remaining\.push\(\.\.\.activeQueue\.slice\(index\)\);\s*break;/s);
-  assert.match(privateFiles, /const result = await uploadQueuedPrivateFile[\s\S]*if \(!activeReplayOwnerMatches\(organisationId, userId\)\) \{[\s\S]*remaining\.push\(\.\.\.activeQueue\.slice\(index \+ 1\)\);[\s\S]*break;/);
+test("private upload replay stops when active or live authorisation changes", () => {
+  assert.match(privateFiles, /function activeReplayOwnerMatches\(authorization: SyncAuthorizationContext\)/);
+  assert.match(privateFiles, /readSupabaseSession\(\)\?\.user\?\.id === authorization\.userId/);
+  assert.match(privateFiles, /activeSyncAuthorizationMatches\(authorization\)/);
+  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
+  assert.match(privateFiles, /for \(const \[index, item\] of activeQueue\.entries\(\)\) \{\s*if \(!activeReplayOwnerMatches\(authorization\)\) \{\s*remaining\.push\(\.\.\.activeQueue\.slice\(index\)\);\s*break;/s);
+  assert.match(privateFiles, /const result = await uploadQueuedPrivateFile[\s\S]*if \(!activeReplayOwnerMatches\(authorization\)\) \{[\s\S]*remaining\.push\(\.\.\.activeQueue\.slice\(index \+ 1\)\);[\s\S]*break;/);
   assert.match(privateFiles, /if \(result\.state === "Synced"\) onSynced\?\.\(item, result\)/);
 });
 
 test("private upload queue identities cannot collide across tuple boundaries", () => {
-  assert.match(privateFiles, /privateUploadQueueItemId\(organisationId: string, userId: string, storageKey: string, sourceId: string\)/);
-  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, userId, storageKey, sourceId\]\)/);
-  assert.match(privateFiles, /id: privateUploadQueueItemId\(item\.organisationId, item\.userId, item\.storageKey, item\.sourceId\)/);
+  assert.match(privateFiles, /privateUploadQueueItemId\(organisationId: string, userId: string, role: string, customerSourceId: string \| undefined, storageKey: string, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, userId, role, customerSourceId \?\? null, storageKey, sourceId\]\)/);
+  assert.match(privateFiles, /id: privateUploadQueueItemId\(item\.organisationId, item\.userId, item\.authorizationRole, item\.authorizationCustomerSourceId, item\.storageKey, item\.sourceId\)/);
+  assert.notEqual(JSON.stringify(["org", "user", "admin", null, "files", "file"]), JSON.stringify(["org", "user", "electrician", null, "files", "file"]));
+  assert.notEqual(JSON.stringify(["org", "user", "customer", "customer-a", "files", "file"]), JSON.stringify(["org", "user", "customer", "customer-b", "files", "file"]));
   assert.doesNotMatch(privateFiles, /id: `\$\{item\.organisationId\}:\$\{item\.userId\}:\$\{item\.storageKey\}:\$\{item\.sourceId\}`/);
 });
 

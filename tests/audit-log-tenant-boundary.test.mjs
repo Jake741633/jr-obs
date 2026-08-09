@@ -28,9 +28,9 @@ test("audit collections inherit organisation and account cache scope", () => {
   assert.match(repository, /item\.organisationId === organisationId/);
 });
 
-test("audit sync queue operations remain bound to the originating organisation and user", () => {
+test("audit sync queue operations remain bound to the originating authorisation context", () => {
   assert.match(repository, /organisationId: item\.organisationId/);
-  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId && \(!userId \|\| entry\.userId === userId\)/);
-  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| item\.userId !== userId \|\| !originalIds\.has\(item\.id\)\)/);
+  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
+  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => !queueItemMatchesAuthorization\(item, authorization\) \|\| !originalIds\.has\(item\.id\)\)/);
   assert.match(repository, /const retained = remaining\.filter\(\(item\) => liveIds\.has\(item\.id\)\)/);
 });

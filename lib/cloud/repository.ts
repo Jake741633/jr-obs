@@ -3,24 +3,53 @@
 import { cloudPatch, cloudSelect, cloudUpsert } from "./client";
 import { effectiveCloudMode } from "./config";
 import { buildCloudEnvelope, coalesceQueue, hasVersionConflict, makeTombstone, pendingImports, tenantRecordQuery } from "./repository-core.mjs";
+import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 
 export type SyncState = "Synced" | "Pending" | "Offline" | "Conflict" | "Failed";
 export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: string; customer_source_id?: string | null; job_source_id?: string | null; version: number; source_updated_at?: string; payload: T; updated_at?: string; deleted_at?: string | null; }
 export interface GenericCloudEnvelope<T> extends TypedCloudEnvelope<T> { collection_key: string; }
 export type CloudEnvelope<T> = TypedCloudEnvelope<T> | GenericCloudEnvelope<T>;
-export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; payload?: T; expectedVersion?: number; queuedAt: string; attempts: number; state: SyncState; error?: string; }
+export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; role?: string; customerSourceId?: string; payload?: T; expectedVersion?: number; queuedAt: string; attempts: number; state: SyncState; error?: string; }
 export interface SyncQueueFlushResult { processed: number; cleared: number; remaining: number; conflicts: number; failed: number; }
+export interface SyncAuthorizationContext { organisationId: string; userId: string; role: string; customerSourceId?: string; }
 
 const QUEUE_KEY = "jr-os-cloud-sync-queue";
 const STATUS_KEY = "jr-os-cloud-sync-status";
 const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation";
 const ACTIVE_USER_KEY = "jr-os-active-user";
+const ACTIVE_ROLE_KEY = "jr-os-active-role";
+const ACTIVE_CUSTOMER_SOURCE_KEY = "jr-os-active-customer-source";
 
 function read<T>(key: string, fallback: T): T { try { return JSON.parse(window.localStorage.getItem(key) || "") as T; } catch { return fallback; } }
 function write(key: string, value: unknown) { window.localStorage.setItem(key, JSON.stringify(value)); }
 function readAllSyncQueue() { return read<SyncQueueItem[]>(QUEUE_KEY, []); }
 function activeOrganisationId() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ORGANISATION_KEY); }
 function activeUserId() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_USER_KEY); }
+function activeRole() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ROLE_KEY); }
+function activeCustomerSourceId() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_CUSTOMER_SOURCE_KEY); }
+function currentSyncAuthorization(): SyncAuthorizationContext | null {
+  const organisationId = activeOrganisationId();
+  const userId = activeUserId();
+  const role = activeRole();
+  if (!organisationId || !userId || !role) return null;
+  return { organisationId, userId, role, customerSourceId: activeCustomerSourceId() ?? undefined };
+}
+function sameSyncAuthorization(left: SyncAuthorizationContext, right: SyncAuthorizationContext) {
+  return left.organisationId === right.organisationId
+    && left.userId === right.userId
+    && left.role === right.role
+    && (left.customerSourceId ?? null) === (right.customerSourceId ?? null);
+}
+function queueItemMatchesAuthorization(item: SyncQueueItem, authorization: SyncAuthorizationContext) {
+  return item.organisationId === authorization.organisationId
+    && item.userId === authorization.userId
+    && item.role === authorization.role
+    && (item.customerSourceId ?? null) === (authorization.customerSourceId ?? null);
+}
+export function activeSyncAuthorizationMatches(authorization: SyncAuthorizationContext) {
+  const active = currentSyncAuthorization();
+  return Boolean(active && sameSyncAuthorization(active, authorization));
+}
 function collectionFilter(collectionKey?: string) { return collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : ""; }
 function samePayload(left: unknown, right: unknown) { return JSON.stringify(left ?? null) === JSON.stringify(right ?? null); }
 function updateCachedVersion(storageKey: string | undefined, sourceId: string, version?: number) {
@@ -31,8 +60,8 @@ function updateCachedVersion(storageKey: string | undefined, sourceId: string, v
   write(key, versions);
 }
 
-export function syncQueueItemId(organisationId: string, table: string, collectionKey: string | undefined, sourceId: string, queuedAt: number) {
-  return JSON.stringify([organisationId, table, collectionKey || "typed", sourceId, queuedAt]);
+export function syncQueueItemId(organisationId: string, userId: string | undefined, role: string | undefined, customerSourceId: string | undefined, table: string, collectionKey: string | undefined, sourceId: string, queuedAt: number) {
+  return JSON.stringify([organisationId, userId ?? null, role ?? null, customerSourceId ?? null, table, collectionKey || "typed", sourceId, queuedAt]);
 }
 
 function statusForQueue(queue: SyncQueueItem[]): SyncState {
@@ -43,17 +72,21 @@ function statusForQueue(queue: SyncQueueItem[]): SyncState {
   return "Pending";
 }
 
-export function setActiveSyncIdentity(organisationId: string | null, userId: string | null) {
+export function setActiveSyncIdentity(organisationId: string | null, userId: string | null, role: string | null = null, customerSourceId: string | null = null) {
   if (typeof window === "undefined") return;
   if (organisationId) window.localStorage.setItem(ACTIVE_ORGANISATION_KEY, organisationId);
   else window.localStorage.removeItem(ACTIVE_ORGANISATION_KEY);
   if (userId) window.localStorage.setItem(ACTIVE_USER_KEY, userId);
   else window.localStorage.removeItem(ACTIVE_USER_KEY);
+  if (role) window.localStorage.setItem(ACTIVE_ROLE_KEY, role);
+  else window.localStorage.removeItem(ACTIVE_ROLE_KEY);
+  if (customerSourceId) window.localStorage.setItem(ACTIVE_CUSTOMER_SOURCE_KEY, customerSourceId);
+  else window.localStorage.removeItem(ACTIVE_CUSTOMER_SOURCE_KEY);
   syncStatus.set(navigator.onLine ? statusForQueue(getSyncQueue()) : "Offline");
 }
 
 export function setActiveSyncOrganisation(organisationId: string | null) {
-  setActiveSyncIdentity(organisationId, activeUserId());
+  setActiveSyncIdentity(organisationId, activeUserId(), activeRole(), activeCustomerSourceId());
 }
 
 export const syncStatus = {
@@ -67,10 +100,9 @@ export const syncStatus = {
 };
 
 export function getSyncQueue() {
-  const organisationId = activeOrganisationId();
-  const userId = activeUserId();
-  if (!organisationId) return [];
-  return readAllSyncQueue().filter((item) => item.organisationId === organisationId && (!userId || item.userId === userId));
+  const authorization = currentSyncAuthorization();
+  if (!authorization) return [];
+  return readAllSyncQueue().filter((item) => queueItemMatchesAuthorization(item, authorization));
 }
 
 export function getOrganisationSyncQueue(organisationId: string) {
@@ -78,14 +110,14 @@ export function getOrganisationSyncQueue(organisationId: string) {
 }
 
 export function discardSyncQueueItem(itemId: string) {
-  const organisationId = activeOrganisationId();
-  const userId = activeUserId();
+  const authorization = currentSyncAuthorization();
+  if (!authorization) return { removed: false, remaining: 0 };
   const queue = readAllSyncQueue();
-  const item = queue.find((entry) => entry.id === itemId && entry.organisationId === organisationId && (!userId || entry.userId === userId));
+  const item = queue.find((entry) => entry.id === itemId && queueItemMatchesAuthorization(entry, authorization));
   if (!item) return { removed: false, remaining: getSyncQueue().length };
   const next = queue.filter((entry) => entry.id !== itemId);
   write(QUEUE_KEY, next);
-  const activeRemaining = next.filter((entry) => entry.organisationId === organisationId && (!userId || entry.userId === userId));
+  const activeRemaining = next.filter((entry) => queueItemMatchesAuthorization(entry, authorization));
   syncStatus.set(statusForQueue(activeRemaining));
   return { removed: true, remaining: activeRemaining.length, item };
 }
@@ -93,20 +125,48 @@ export function discardSyncQueueItem(itemId: string) {
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "queuedAt" | "attempts" | "state">) {
   const queue = readAllSyncQueue();
   const queuedAt = Date.now();
-  const next: SyncQueueItem<T> = { ...item, id: syncQueueItemId(item.organisationId, item.table, item.collectionKey, item.sourceId, queuedAt), queuedAt: new Date(queuedAt).toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
+  const next: SyncQueueItem<T> = { ...item, id: syncQueueItemId(item.organisationId, item.userId, item.role, item.customerSourceId, item.table, item.collectionKey, item.sourceId, queuedAt), queuedAt: new Date(queuedAt).toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
   write(QUEUE_KEY, coalesceQueue(queue, next));
-  if (activeOrganisationId() === item.organisationId && (!activeUserId() || activeUserId() === item.userId)) syncStatus.set(navigator.onLine ? "Pending" : "Offline");
+  const authorization = currentSyncAuthorization();
+  if (authorization && queueItemMatchesAuthorization(next, authorization)) syncStatus.set(navigator.onLine ? "Pending" : "Offline");
+}
+
+export async function revalidateSyncAuthorization(expected: SyncAuthorizationContext) {
+  if (!activeSyncAuthorizationMatches(expected)) return false;
+  const sessionUserId = readSupabaseSession()?.user?.id;
+  if (sessionUserId !== expected.userId) {
+    setActiveSyncIdentity(null, null, null, null);
+    window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
+    return false;
+  }
+  try {
+    const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(expected.userId)}&active=eq.true&select=organisation_id,role,customer_source_id,active`);
+    const profile = Array.isArray(rows) ? rows[0] : null;
+    const live: SyncAuthorizationContext | null = profile?.active && profile?.organisation_id && profile?.role
+      ? { organisationId: profile.organisation_id, userId: expected.userId, role: profile.role, customerSourceId: profile.customer_source_id || undefined }
+      : null;
+    if (!live || !sameSyncAuthorization(live, expected)) {
+      setActiveSyncIdentity(null, null, null, null);
+      window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
+      return false;
+    }
+    return activeSyncAuthorizationMatches(expected);
+  } catch {
+    return false;
+  }
 }
 
 export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
-  const organisationId = activeOrganisationId();
-  const userId = activeUserId();
+  const authorization = currentSyncAuthorization();
   const allQueue = readAllSyncQueue();
-  if (!organisationId) return { processed: 0, cleared: 0, remaining: 0, conflicts: 0, failed: 0 };
+  if (!authorization) return { processed: 0, cleared: 0, remaining: 0, conflicts: 0, failed: 0 };
 
-  const queue = allQueue.filter((item) => item.organisationId === organisationId && (!userId || item.userId === userId));
+  const queue = allQueue.filter((item) => queueItemMatchesAuthorization(item, authorization));
   if (!navigator.onLine) {
     syncStatus.set("Offline");
+    return { processed: 0, cleared: 0, remaining: queue.length, conflicts: queue.filter((item) => item.state === "Conflict").length, failed: queue.filter((item) => item.state === "Failed").length };
+  }
+  if (!(await revalidateSyncAuthorization(authorization))) {
     return { processed: 0, cleared: 0, remaining: queue.length, conflicts: queue.filter((item) => item.state === "Conflict").length, failed: queue.filter((item) => item.state === "Failed").length };
   }
 
@@ -114,14 +174,14 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
   let cleared = 0;
   let processed = 0;
   for (const item of queue) {
-    if (activeOrganisationId() !== organisationId || activeUserId() !== userId) {
+    if (!activeSyncAuthorizationMatches(authorization)) {
       remaining.push(...queue.slice(processed));
       break;
     }
     processed += 1;
     try {
       const existing = await cloudSelect<CloudEnvelope<unknown>>(item.table, tenantRecordQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, includeDeleted: true }));
-      if (activeOrganisationId() !== organisationId || activeUserId() !== userId) {
+      if (!activeSyncAuthorizationMatches(authorization)) {
         remaining.push(item, ...queue.slice(processed));
         break;
       }
@@ -172,15 +232,15 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
   const liveQueue = readAllSyncQueue();
   const originalIds = new Set(queue.map((item) => item.id));
   const liveIds = new Set(liveQueue.map((item) => item.id));
-  const untouched = liveQueue.filter((item) => item.organisationId !== organisationId || item.userId !== userId || !originalIds.has(item.id));
+  const untouched = liveQueue.filter((item) => !queueItemMatchesAuthorization(item, authorization) || !originalIds.has(item.id));
   const retained = remaining.filter((item) => liveIds.has(item.id));
   const nextQueue = [...untouched, ...retained];
   write(QUEUE_KEY, nextQueue);
 
-  const activeRemaining = nextQueue.filter((item) => item.organisationId === organisationId && (!userId || item.userId === userId));
+  const activeRemaining = nextQueue.filter((item) => queueItemMatchesAuthorization(item, authorization));
   const conflicts = activeRemaining.filter((item) => item.state === "Conflict").length;
   const failed = activeRemaining.filter((item) => item.state === "Failed").length;
-  if (activeOrganisationId() === organisationId && activeUserId() === userId) syncStatus.set(statusForQueue(activeRemaining));
+  if (activeSyncAuthorizationMatches(authorization)) syncStatus.set(statusForQueue(activeRemaining));
   return { processed, cleared, remaining: activeRemaining.length, conflicts, failed };
 }
 

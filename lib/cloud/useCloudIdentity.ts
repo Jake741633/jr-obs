@@ -27,7 +27,12 @@ const listeners = new Set<() => void>();
 
 function emit(next: IdentitySnapshot) {
   snapshot = next;
-  setActiveSyncIdentity(next.identity?.organisationId ?? null, next.identity?.userId ?? null);
+  setActiveSyncIdentity(
+    next.identity?.organisationId ?? null,
+    next.identity?.userId ?? null,
+    next.identity?.role ?? null,
+    next.identity?.customerSourceId ?? null,
+  );
   listeners.forEach((listener) => listener());
 }
 

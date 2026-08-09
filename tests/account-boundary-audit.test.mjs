@@ -52,21 +52,24 @@ test("typed migration ignores already scoped tenant caches", () => {
   assert.match(cloudSync, /!key\.includes\(":organisation:"\)/);
 });
 
-test("sync queue visibility and retries are restricted to the active organisation and user", () => {
+test("sync queue visibility and retries are restricted to live authorisation", () => {
   assert.match(repository, /const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation"/);
   assert.match(repository, /const ACTIVE_USER_KEY = "jr-os-active-user"/);
+  assert.match(repository, /const ACTIVE_ROLE_KEY = "jr-os-active-role"/);
+  assert.match(repository, /const ACTIVE_CUSTOMER_SOURCE_KEY = "jr-os-active-customer-source"/);
   assert.match(repository, /export function setActiveSyncIdentity/);
-  assert.match(repository, /item\.organisationId === organisationId && \(!userId \|\| item\.userId === userId\)/);
+  assert.match(repository, /queueItemMatchesAuthorization/);
+  assert.match(repository, /revalidateSyncAuthorization/);
   assert.match(repository, /const liveQueue = readAllSyncQueue\(\)/);
-  assert.match(repository, /item\.organisationId !== organisationId \|\| item\.userId !== userId \|\| !originalIds\.has\(item\.id\)/);
+  assert.match(repository, /!queueItemMatchesAuthorization\(item, authorization\) \|\| !originalIds\.has\(item\.id\)/);
   assert.match(repository, /const retained = remaining\.filter\(\(item\) => liveIds\.has\(item\.id\)\)/);
   assert.match(repository, /write\(QUEUE_KEY, nextQueue\)/);
-  assert.match(repository, /entry\.id === itemId && entry\.organisationId === organisationId && \(!userId \|\| entry\.userId === userId\)/);
-  assert.match(repository, /activeOrganisationId\(\) !== organisationId \|\| activeUserId\(\) !== userId/);
+  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
+  assert.match(repository, /!activeSyncAuthorizationMatches\(authorization\)/);
 });
 
 test("resolved identity controls active sync ownership and clears it during account changes", () => {
-  assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
+  assert.match(identity, /setActiveSyncIdentity\([\s\S]*next\.identity\?\.organisationId[\s\S]*next\.identity\?\.userId[\s\S]*next\.identity\?\.role[\s\S]*next\.identity\?\.customerSourceId/);
   assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
 });
 
@@ -74,7 +77,7 @@ test("cross-tab session replacement invalidates the previous tenant before loadi
   assert.match(identity, /function handleStorageChange\(event: StorageEvent\)/);
   assert.match(identity, /if \(event\.key === "jr-os-supabase-session"\) void refreshCloudIdentity\(\);/);
   assert.match(identity, /export function refreshCloudIdentity\(\) \{\s*emit\(\{ identity: null, isReady: false \}\);\s*return loadIdentity\(true\);\s*\}/);
-  assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
+  assert.match(identity, /setActiveSyncIdentity\([\s\S]*next\.identity\?\.organisationId[\s\S]*next\.identity\?\.userId[\s\S]*next\.identity\?\.role[\s\S]*next\.identity\?\.customerSourceId/);
 });
 
 test("suspended profiles cannot resolve an application identity or expose cached tenant data", () => {
@@ -115,13 +118,14 @@ test("JR AI settings and backup actions use the resolved organisation identity",
   assert.doesNotMatch(settingsPage, /window\.localStorage\.setItem\(profileKey/);
 });
 
-test("private upload queue retries preserve every other organisation and user", () => {
-  assert.match(privateFiles, /export function readPrivateUploadQueue\(organisationId\?: string, userId\?: string\)/);
-  assert.match(privateFiles, /queue\.filter\(\(item\) => item\.organisationId === organisationId && \(!userId \|\| item\.userId === userId\)\)/);
-  assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => item\.organisationId !== organisationId \|\| item\.userId !== userId\)/);
-  assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => item\.organisationId === organisationId && item\.userId === userId\)/);
+test("private upload queue retries preserve every other authorisation context", () => {
+  assert.match(privateFiles, /export function readPrivateUploadQueue\(authorization: SyncAuthorizationContext\)/);
+  assert.match(privateFiles, /queue\.filter\(\(item\) => privateUploadMatchesAuthorization\(item, authorization\)\)/);
+  assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => !privateUploadMatchesAuthorization\(item, authorization\)\)/);
+  assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => privateUploadMatchesAuthorization\(item, authorization\)\)/);
   assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
-  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity\.organisationId, identity\.userId/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity,/);
+  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
 });
 
 test("private uploads and signed downloads reject cross-organisation object paths", () => {

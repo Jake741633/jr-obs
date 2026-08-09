@@ -54,9 +54,21 @@ test("offline writes remain queued with Offline status", () => {
 });
 
 test("queue coalesces duplicate writes", () => {
-  const first = { organisationId: "org-a", table: "customers", sourceId: "cus-1", operation: "upsert" };
-  const second = { organisationId: "org-a", table: "customers", sourceId: "cus-1", operation: "upsert", payload: { name: "Updated" } };
+  const first = { organisationId: "org-a", userId: "user-a", role: "admin", table: "customers", sourceId: "cus-1", operation: "upsert" };
+  const second = { organisationId: "org-a", userId: "user-a", role: "admin", table: "customers", sourceId: "cus-1", operation: "upsert", payload: { name: "Updated" } };
   assert.deepEqual(coalesceQueue([first], second), [second]);
+});
+
+test("queue never coalesces another user or stale permission context", () => {
+  const original = { organisationId: "org-a", userId: "user-a", role: "admin", table: "customers", sourceId: "cus-1", operation: "upsert" };
+  const otherUser = { ...original, userId: "user-b" };
+  const demoted = { ...original, role: "electrician" };
+  const customerA = { ...original, role: "customer", customerSourceId: "customer-a" };
+  const customerB = { ...customerA, customerSourceId: "customer-b" };
+
+  assert.equal(coalesceQueue([original], otherUser).length, 2);
+  assert.equal(coalesceQueue([original], demoted).length, 2);
+  assert.equal(coalesceQueue([customerA], customerB).length, 2);
 });
 
 test("tenants and collections remain separate", () => {

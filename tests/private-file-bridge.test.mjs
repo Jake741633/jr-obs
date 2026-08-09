@@ -11,10 +11,10 @@ test("private file bridge receives the base allowlisted collection key", () => {
   assert.match(privateFiles, /\["jr-os-job-documents", "jr-os-expenses", "jr-os-surveys"\]\.includes\(storageKey\)/);
 });
 
-test("private file queues remain organisation scoped when using base collection keys", () => {
-  assert.match(privateFiles, /readPrivateUploadQueue\(identity\.organisationId, identity\.userId\)/);
+test("private file queues remain authorisation scoped when using base collection keys", () => {
+  assert.match(privateFiles, /readPrivateUploadQueue\(identity\)/);
   assert.match(privateFiles, /\.filter\(\(item\) => item\.storageKey === storageKey\)/);
-  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity\.organisationId, identity\.userId/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity,/);
   assert.match(privateFiles, /queued\.storageKey !== storageKey/);
 });
 
