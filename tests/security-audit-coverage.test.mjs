@@ -40,6 +40,7 @@ const requiredSuites = [
   "private-file-record-binding-guard.test.mjs",
   "active-auth-session-guard.test.mjs",
   "business-authentication-method-guard.test.mjs",
+  "cloud-record-binding-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -93,6 +94,10 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Revoked access tokens must not retain tenant writes",
     "Recovery-only sessions must not read tenant data",
     "Recovery-only sessions must not write tenant data",
+    "RLS metadata must match the stored business payload",
+    "Cloud records must not bind another organisation's customer or job",
+    "Cloud records must not bind a job to a different customer",
+    "Cloud payload ids must match stable source ids",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

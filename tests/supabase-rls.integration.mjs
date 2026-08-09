@@ -238,6 +238,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const otherCustomerA = source("customer-a-other");
     const jobA = source("job-a");
     const jobB = source("job-b");
+    const otherCustomerJobA = source("job-a-other-customer");
 
     // SECURITY DEFINER authorization helpers are policy internals, not public
     // PostgREST RPC endpoints. RLS keeps EXECUTE through the private schema.
@@ -283,9 +284,47 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectAllowed(crossTenantLegacyRead, "Cross-tenant legacy backup query should execute safely");
     assert.deepEqual(crossTenantLegacyRead.payload, [], "Another organisation must not read the legacy backup");
 
+    // Seed customer/job relationship roots before dependent records. The
+    // binding guard rejects aliases and orphaned references by design.
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "customers", typedRecord(organisationA, customerA, customerA, null, { name: "Tenant A customer" })),
+      "Office should create its tenant customer",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.electrician, "customers", typedRecord(organisationA, source("customer-field-blocked"), source("customer-field-blocked"), null)),
+      "Electrician must not create office-only customers",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.office, "customers", typedRecord(organisationB, customerB, customerB, null)),
+      "Office must not create a customer in another tenant",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "customers", typedRecord(organisationA, otherCustomerA, otherCustomerA, null, { name: "Other customer" })),
+      "Office should create a second same-tenant customer",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.B.office, "customers", typedRecord(organisationB, customerB, customerB, null, { name: "Tenant B customer" })),
+      "Tenant B office should create its customer",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.electrician, "jobs", typedRecord(organisationA, jobA, customerA, null, { title: "Tenant A job" })),
+      "Electrician should create a same-tenant job",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.electrician, "jobs", typedRecord(organisationB, source("job-cross"), customerB, null)),
+      "Electrician must not create a job in another tenant",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.electrician, "jobs", typedRecord(organisationA, otherCustomerJobA, otherCustomerA, null, { title: "Other customer job" })),
+      "Electrician should create a same-tenant job for the other customer",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.B.electrician, "jobs", typedRecord(organisationB, jobB, customerB, null, { title: "Tenant B job" })),
+      "Tenant B electrician should create its own job",
+    );
+
     // Office-only tables and typed entity tenant isolation.
     const officeCases = [
-      ["customers", customerA, { name: "Tenant A customer" }],
       ["pricing_documents", source("quote-a"), { type: "Quote", status: "Draft" }],
       ["invoices", source("invoice-a"), { status: "Draft", total: 1200 }],
       ["payments", source("payment-a"), { amount: 200, method: "Bank transfer" }],
@@ -301,11 +340,9 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectAllowed(tenantBRead, `Tenant B query should execute for ${table}`);
       assert.deepEqual(tenantBRead.payload, [], `Tenant B must not read Tenant A ${table}`);
     }
-    await expectAllowed(await insertRecord(accounts.A.office, "customers", typedRecord(organisationA, otherCustomerA, otherCustomerA, null, { name: "Other customer" })), "Office should create second customer");
 
     // Field-write tables.
     const fieldCases = [
-      ["jobs", jobA, { title: "Tenant A job" }],
       ["materials", source("material-a"), { name: "Cable" }],
       ["stock_items", source("stock-a"), { quantity: 4 }],
       ["stock_movements", source("movement-a"), { type: "Used", quantity: 1 }],
@@ -320,21 +357,12 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectAllowed(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), `Electrician should write ${table}`);
       await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, `${sourceId}-cross`, customerB, jobB, payload)), `Electrician must not write cross-tenant ${table}`);
     }
-    const otherCustomerJobA = source("job-a-other-customer");
-    await expectAllowed(
-      await insertRecord(accounts.A.electrician, "jobs", typedRecord(organisationA, otherCustomerJobA, otherCustomerA, otherCustomerJobA, { title: "Other customer job" })),
-      "Electrician should create a same-tenant job for the other customer",
-    );
-    await expectAllowed(
-      await insertRecord(accounts.B.electrician, "jobs", typedRecord(organisationB, jobB, customerB, jobB, { title: "Tenant B job" })),
-      "Tenant B electrician should create its own job",
-    );
 
     // Customer scoping for typed tables and portal writes.
     const customerJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
     await expectAllowed(customerJobs, "Customer jobs read should execute");
     assert.deepEqual(customerJobs.payload.map((row) => row.source_id), [jobA]);
-    await expectDenied(await insertRecord(accounts.A.customer, "jobs", typedRecord(organisationA, source("customer-job-write"), customerA, jobA)), "Customer must not create jobs");
+    await expectDenied(await insertRecord(accounts.A.customer, "jobs", typedRecord(organisationA, source("customer-job-write"), customerA, null)), "Customer must not create jobs");
 
     const approvalA = source("approval-a");
     const requestA = source("request-a");
@@ -391,6 +419,47 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationB, collectionKey, `${sourceId}-cross`, accounts.A.electrician, customerB, jobB, payload)), `Cross-tenant generic write must fail for ${collectionKey}`);
       assert.deepEqual((await listRecords(accounts.B.owner, "cloud_collections", `select=source_id&collection_key=eq.${encodeURIComponent(collectionKey)}&source_id=eq.${sourceId}`)).payload, []);
     }
+    await expectDenied(
+      await patchRecords(
+        accounts.A.electrician,
+        "cloud_collections",
+        `collection_key=eq.${encodeURIComponent("jr-os-surveys")}&source_id=eq.${source("survey-a")}`,
+        { customer_source_id: otherCustomerA, job_source_id: otherCustomerJobA },
+      ),
+      "RLS metadata must match the stored business payload",
+    );
+    await expectDenied(
+      await insertRecord(
+        accounts.A.office,
+        "pricing_documents",
+        typedRecord(organisationA, source("cross-organisation-binding"), customerB, jobB, { type: "Quote" }),
+      ),
+      "Cloud records must not bind another organisation's customer or job",
+    );
+    await expectDenied(
+      await insertRecord(
+        accounts.A.electrician,
+        "planner_entries",
+        typedRecord(organisationA, source("mismatched-job-customer"), customerA, otherCustomerJobA),
+      ),
+      "Cloud records must not bind a job to a different customer",
+    );
+    await expectDenied(
+      await insertRecord(
+        accounts.A.electrician,
+        "cloud_collections",
+        genericRecord(
+          organisationA,
+          "jr-os-rams",
+          source("stable-envelope-id"),
+          accounts.A.electrician,
+          customerA,
+          jobA,
+          { id: source("forged-payload-id") },
+        ),
+      ),
+      "Cloud payload ids must match stable source ids",
+    );
     await expectDenied(await insertRecord(
       accounts.A.electrician,
       "cloud_collections",

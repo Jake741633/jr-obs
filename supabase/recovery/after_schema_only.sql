@@ -122,4 +122,7 @@
 \echo 'Rejecting recovery and verification-only sessions from business data'
 \ir ../migrations/20260809_038_restrict_verification_only_sessions.sql
 
+\echo 'Validating cloud payload and customer/job record bindings'
+\ir ../migrations/20260809_039_guard_cloud_record_bindings.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

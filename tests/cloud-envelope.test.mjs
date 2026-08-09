@@ -58,6 +58,26 @@ test("canonical envelope selector keeps typed and generic rows separate", () => 
   assert.equal(Object.hasOwn(generic, "collection_key"), true);
 });
 
+test("customer and job roots use canonical relationship metadata", () => {
+  const customer = buildCloudEnvelope({
+    ...common,
+    sourceId: "customer-1",
+    recordTable: "customers",
+    payload: { id: "customer-1", name: "Customer One" },
+  });
+  assert.equal(customer.customer_source_id, "customer-1");
+  assert.equal(customer.job_source_id, null);
+
+  const job = buildCloudEnvelope({
+    ...common,
+    sourceId: "job-1",
+    recordTable: "jobs",
+    payload: { id: "job-1", customerId: "customer-1", title: "Job One" },
+  });
+  assert.equal(job.customer_source_id, "customer-1");
+  assert.equal(job.job_source_id, null);
+});
+
 test("certificate storage maps to the typed certificates table", async () => {
   const source = await readFile(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
   assert.match(source, /"jr-os-certificates"\s*:\s*"certificates"/);

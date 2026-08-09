@@ -215,6 +215,7 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
         const record = buildCloudEnvelope({
           organisationId: item.organisationId,
           sourceId: item.sourceId,
+          recordTable: item.table,
           collectionKey: item.collectionKey,
           payload: item.payload,
           version: (current?.version || 0) + 1,
@@ -255,6 +256,7 @@ export async function importLocalCollection<T extends { id: string; updatedAt?: 
     const rows = pending.map((record) => buildCloudEnvelope({
       organisationId,
       sourceId: record.id,
+      recordTable: table,
       collectionKey,
       payload: record,
       version: 1,

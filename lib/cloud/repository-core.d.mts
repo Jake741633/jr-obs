@@ -3,6 +3,7 @@ export interface QueueIdentity { organisationId: string; table: string; sourceId
 export interface CloudEnvelopeInput<T = unknown> {
   organisationId: string;
   sourceId: string;
+  recordTable?: string;
   collectionKey?: string;
   payload?: T;
   version: number;
