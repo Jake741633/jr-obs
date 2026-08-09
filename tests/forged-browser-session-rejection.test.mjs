@@ -20,7 +20,16 @@ test("rest and storage requests use the validated session loader", () => {
   assert.match(client, /createSignedDownload[\s\S]*cloudSession\.load\(\) \|\| undefined/);
 });
 
-test("rejected sessions cannot supply an authorization bearer token", () => {
-  assert.match(client, /result\.set\("Authorization", `Bearer \$\{session\?\.accessToken \|\| cloudConfig\.anonKey\}`\);/);
+test("rejected sessions cannot downgrade protected requests to anonymous access", () => {
+  assert.match(client, /if \(authenticated && !session\) throw new Error\("Your cloud session has expired\. Sign in again to continue\."\)/);
+  assert.match(client, /if \(session\) result\.set\("Authorization", `Bearer \$\{session\.accessToken\}`\);/);
+  assert.doesNotMatch(client, /Bearer \$\{session\?\.accessToken \|\| cloudConfig\.anonKey\}/);
   assert.doesNotMatch(client, /JSON\.parse\(window\.localStorage\.getItem\(SESSION_KEY\)[\s\S]*requestHeaders\(/);
+});
+
+test("recovery sessions cannot use the duplicate cloud client to reach business data", () => {
+  assert.match(client, /is_password_recovery\?: boolean/);
+  assert.match(client, /isPasswordRecovery: value\.is_password_recovery === true/);
+  assert.match(client, /authenticated && session\?\.isPasswordRecovery && !allowPasswordRecovery/);
+  assert.match(client, /if \(!session\?\.refreshToken \|\| session\.isPasswordRecovery\) return null/);
 });

@@ -21,24 +21,32 @@ test("email sign-in and sign-up normalise account addresses consistently", () =>
 
 test("recovery links cannot complete as ordinary verification sessions", () => {
   assert.match(cloudSync, /const authType = hash\.get\("type"\) \|\| url\.searchParams\.get\("type"\)/);
-  assert.match(cloudSync, /if \(authType === "recovery"\) \{[\s\S]*window\.location\.replace\("\/auth\/update-password"\);[\s\S]*return null;/);
-  assert.match(supabaseClient, /if \(params\.get\("type"\) !== "recovery"\) return;/);
-  assert.match(supabaseClient, /window\.location\.replace\("\/auth\/update-password"\)/);
+  assert.match(cloudSync, /authType === "recovery"\s*\? \{ \.\.\.session, is_password_recovery: true \}/);
+  assert.match(cloudSync, /if \(authType === "recovery"\) return null;/);
+  assert.doesNotMatch(cloudSync, /window\.location\.replace\("\/auth\/update-password"\)/);
+  assert.doesNotMatch(supabaseClient, /consumePasswordRecoveryRedirect/);
 });
 
 test("verification callbacks persist the authenticated user before tenant resolution", () => {
-  assert.match(cloudSync, /const user = session\.user \?\? await getCurrentCloudUser\(\)/);
-  assert.match(cloudSync, /if \(user && !session\.user\) \{[\s\S]*saveSupabaseSession\(\{ \.\.\.session, user \}\);[\s\S]*identityChanged\(\);[\s\S]*\}/);
+  assert.match(cloudSync, /const user = storedSession\.user \?\? await getCurrentCloudUser\(\)/);
+  assert.match(cloudSync, /if \(user && !storedSession\.user\) \{[\s\S]*saveSupabaseSession\(\{ \.\.\.storedSession, user \}\);[\s\S]*identityChanged\(\);[\s\S]*\}/);
   assert.match(cloudSync, /return user;/);
 });
 
 test("sign-out clears tenant replay ownership before remote logout", () => {
   assert.match(
     cloudSync,
-    /export async function signOutCloudUser\(\) \{\s*if \(typeof window !== "undefined"\) window\.localStorage\.removeItem\("jr-os-active-organisation"\);\s*try \{ await supabaseFetch\("\/auth\/v1\/logout", \{ method: "POST" \}\); \}/s,
+    /export async function signOutCloudUser\(\) \{[\s\S]*"jr-os-active-organisation"[\s\S]*"jr-os-active-user"[\s\S]*"jr-os-active-role"[\s\S]*"jr-os-active-customer-source"[\s\S]*supabaseFetch\("\/auth\/v1\/logout\?scope=global", \{ method: "POST" \}\)/,
   );
   assert.match(
     cloudSync,
     /finally \{\s*saveSupabaseSession\(null\);\s*identityChanged\(\);\s*\}/s,
   );
+});
+
+test("password recovery sessions cannot call business APIs", () => {
+  assert.match(supabaseClient, /const recoveryAction = path === "\/auth\/v1\/user" && method === "PUT"/);
+  assert.match(supabaseClient, /const recoverySignOut = path\.startsWith\("\/auth\/v1\/logout"\) && method === "POST"/);
+  assert.match(supabaseClient, /if \(session\.is_password_recovery && !recoveryAction && !recoverySignOut\) \{\s*throw new Error\("Complete password recovery before accessing JR OS data\."\)/);
+  assert.match(cloudSync, /if \(!session\?\.access_token \|\| session\.is_password_recovery\) return null/);
 });

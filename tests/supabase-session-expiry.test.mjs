@@ -48,7 +48,7 @@ test("authenticated cloud requests reject missing or expired sessions before fet
 test("valid authenticated sessions send the bearer token only inside the validated branch", () => {
   assert.match(
     source,
-    /if \(authenticated\) \{\s*if \(!session\) throw new Error\([\s\S]*?\);\s*headers\.set\("Authorization", `Bearer \$\{session\.access_token\}`\);\s*\}/,
+    /if \(authenticated\) \{\s*if \(!session\) throw new Error\([\s\S]*?\);[\s\S]*?if \(session\.is_password_recovery[\s\S]*?headers\.set\("Authorization", `Bearer \$\{session\.access_token\}`\);\s*\}/,
   );
 });
 

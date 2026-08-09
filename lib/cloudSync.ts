@@ -72,7 +72,7 @@ async function getProfile(userId: string) {
 
 export async function getCurrentCloudUser() {
   const session = readSupabaseSession();
-  if (!session?.access_token) return null;
+  if (!session?.access_token || session.is_password_recovery) return null;
   try { return await supabaseFetch("/auth/v1/user", { method: "GET" }) as { id: string; email?: string }; }
   catch { saveSupabaseSession(null); identityChanged(); return null; }
 }
@@ -113,17 +113,17 @@ export async function completeEmailVerificationFromUrl() {
     }, false) as SupabaseSession;
   }
 
-  saveSupabaseSession(session);
+  const storedSession: SupabaseSession = authType === "recovery"
+    ? { ...session, is_password_recovery: true }
+    : { ...session, is_password_recovery: undefined };
+  saveSupabaseSession(storedSession);
   identityChanged();
   clearAuthParamsFromUrl();
-  if (authType === "recovery") {
-    window.location.replace("/auth/update-password");
-    return null;
-  }
+  if (authType === "recovery") return null;
 
-  const user = session.user ?? await getCurrentCloudUser();
-  if (user && !session.user) {
-    saveSupabaseSession({ ...session, user });
+  const user = storedSession.user ?? await getCurrentCloudUser();
+  if (user && !storedSession.user) {
+    saveSupabaseSession({ ...storedSession, user });
     identityChanged();
   }
   return user;
@@ -155,8 +155,11 @@ export async function signUpWithEmail(email: string, password: string) {
 }
 
 export async function signOutCloudUser() {
-  if (typeof window !== "undefined") window.localStorage.removeItem("jr-os-active-organisation");
-  try { await supabaseFetch("/auth/v1/logout", { method: "POST" }); }
+  if (typeof window !== "undefined") {
+    ["jr-os-active-organisation", "jr-os-active-user", "jr-os-active-role", "jr-os-active-customer-source"]
+      .forEach((key) => window.localStorage.removeItem(key));
+  }
+  try { await supabaseFetch("/auth/v1/logout?scope=global", { method: "POST" }); }
   finally {
     saveSupabaseSession(null);
     identityChanged();

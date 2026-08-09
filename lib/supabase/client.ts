@@ -3,6 +3,7 @@ export interface SupabaseSession {
   refresh_token?: string;
   expires_at?: number;
   user?: { id: string; email?: string };
+  is_password_recovery?: boolean;
 }
 
 const sessionKey = "jr-os-supabase-session";
@@ -47,35 +48,6 @@ export function saveSupabaseSession(session: SupabaseSession | null) {
   else window.localStorage.setItem(sessionKey, JSON.stringify(session));
 }
 
-function consumePasswordRecoveryRedirect() {
-  if (typeof window === "undefined" || !window.location.hash) return;
-  const params = new URLSearchParams(window.location.hash.slice(1));
-  if (params.get("type") !== "recovery") return;
-
-  const accessToken = params.get("access_token");
-  if (!accessToken) return;
-
-  const expiresAt = Number(params.get("expires_at"));
-  const expiresIn = Number(params.get("expires_in"));
-  saveSupabaseSession({
-    access_token: accessToken,
-    refresh_token: params.get("refresh_token") || undefined,
-    expires_at: Number.isFinite(expiresAt) && expiresAt > 0
-      ? expiresAt
-      : Number.isFinite(expiresIn) && expiresIn > 0
-        ? Math.floor(Date.now() / 1000) + expiresIn
-        : undefined,
-  });
-
-  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
-  window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
-  if (window.location.pathname !== "/auth/update-password") {
-    window.location.replace("/auth/update-password");
-  }
-}
-
-if (typeof window !== "undefined") consumePasswordRecoveryRedirect();
-
 export async function supabaseFetch(path: string, init: RequestInit = {}, authenticated = true) {
   const config = getSupabaseConfig();
   if (!config) throw new Error("Supabase is not configured yet.");
@@ -86,6 +58,12 @@ export async function supabaseFetch(path: string, init: RequestInit = {}, authen
   headers.set("Content-Type", "application/json");
   if (authenticated) {
     if (!session) throw new Error("Your cloud session has expired. Sign in again to continue.");
+    const method = (init.method || "GET").toUpperCase();
+    const recoveryAction = path === "/auth/v1/user" && method === "PUT";
+    const recoverySignOut = path.startsWith("/auth/v1/logout") && method === "POST";
+    if (session.is_password_recovery && !recoveryAction && !recoverySignOut) {
+      throw new Error("Complete password recovery before accessing JR OS data.");
+    }
     headers.set("Authorization", `Bearer ${session.access_token}`);
   }
 

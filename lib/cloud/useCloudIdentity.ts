@@ -51,7 +51,8 @@ function getServerSnapshot(): IdentitySnapshot {
 }
 
 function hasPersistedSession() {
-  return Boolean(readSupabaseSession()?.access_token);
+  const session = readSupabaseSession();
+  return Boolean(session?.access_token && !session.is_password_recovery);
 }
 
 async function loadIdentity(force = false) {

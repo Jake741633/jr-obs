@@ -3,12 +3,22 @@
 import { FormEvent, useEffect, useState } from "react";
 import { KeyRound } from "lucide-react";
 import { completeEmailVerificationFromUrl, signOutCloudUser } from "../lib/cloudSync";
-import { supabaseFetch } from "../lib/supabase/client";
+import { readSupabaseSession, supabaseFetch } from "../lib/supabase/client";
 import { Button } from "./ui/Button";
 
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none focus:border-cyan-400";
 
 type RecoveryState = "checking" | "inactive" | "ready" | "saving" | "complete" | "error";
+
+function hasRecoveryCallback() {
+  const url = new URL(window.location.href);
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
+  return hash.get("type") === "recovery" || url.searchParams.get("type") === "recovery";
+}
+
+function hasRecoverySession() {
+  return readSupabaseSession()?.is_password_recovery === true;
+}
 
 export function PasswordRecoveryGate({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<RecoveryState>("checking");
@@ -19,17 +29,29 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
   useEffect(() => {
     let active = true;
 
+    function handleSessionChange(event?: Event) {
+      if (event instanceof StorageEvent && event.key !== "jr-os-supabase-session") return;
+      if (hasRecoverySession()) {
+        setState((current) => current === "saving" ? current : "ready");
+        return;
+      }
+      setState((current) => {
+        if (!active || !["ready", "saving"].includes(current)) return current;
+        setMessage("The password recovery session was closed. Return to sign in before opening JR OS.");
+        return "complete";
+      });
+    }
+
     async function prepareRecovery() {
-      const url = new URL(window.location.href);
-      const hash = new URLSearchParams(url.hash.replace(/^#/, ""));
-      const isRecovery = hash.get("type") === "recovery";
-      if (!isRecovery) {
+      const recoveryCallback = hasRecoveryCallback();
+      if (!recoveryCallback && !hasRecoverySession()) {
         if (active) setState("inactive");
         return;
       }
 
       try {
-        await completeEmailVerificationFromUrl();
+        if (recoveryCallback) await completeEmailVerificationFromUrl();
+        if (!hasRecoverySession()) throw new Error("This password recovery session is missing or has expired.");
         if (active) setState("ready");
       } catch (error) {
         if (!active) return;
@@ -38,8 +60,14 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
       }
     }
 
+    window.addEventListener("jr-os-cloud-identity-changed", handleSessionChange);
+    window.addEventListener("storage", handleSessionChange);
     void prepareRecovery();
-    return () => { active = false; };
+    return () => {
+      active = false;
+      window.removeEventListener("jr-os-cloud-identity-changed", handleSessionChange);
+      window.removeEventListener("storage", handleSessionChange);
+    };
   }, []);
 
   async function updatePassword(event: FormEvent<HTMLFormElement>) {
@@ -60,16 +88,23 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
         method: "PUT",
         body: JSON.stringify({ password }),
       });
+      let globalSignOutConfirmed = true;
+      try {
+        await signOutCloudUser();
+      } catch {
+        globalSignOutConfirmed = false;
+      }
       setState("complete");
-      setMessage("Password updated. You can now sign in normally with your new password.");
+      setMessage(globalSignOutConfirmed
+        ? "Password updated. You can now sign in normally with your new password."
+        : "Password updated and this browser session was cleared, but global sign-out could not be confirmed. Sign in again before continuing.");
     } catch (error) {
       setState("ready");
       setMessage(error instanceof Error ? error.message : "The password could not be updated.");
     }
   }
 
-  async function returnToSignIn() {
-    await signOutCloudUser();
+  function returnToSignIn() {
     window.location.assign("/cloud");
   }
 
@@ -84,7 +119,7 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
 
       {state === "error" ? <div className="mt-5 space-y-4"><p className="rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-200">{message}</p><Button type="button" onClick={() => window.location.assign("/cloud")}>Return to sign in</Button></div> : null}
 
-      {state === "complete" ? <div className="mt-5 space-y-4"><p className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-200">{message}</p><Button type="button" onClick={() => void returnToSignIn()}>Continue to sign in</Button></div> : null}
+      {state === "complete" ? <div className="mt-5 space-y-4"><p className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm text-emerald-200">{message}</p><Button type="button" onClick={returnToSignIn}>Continue to sign in</Button></div> : null}
 
       {state === "ready" || state === "saving" ? <form className="mt-5 space-y-4" onSubmit={updatePassword}>
         <label className="grid gap-2 text-sm"><span>New password</span><input className={fieldClass} type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} /></label>

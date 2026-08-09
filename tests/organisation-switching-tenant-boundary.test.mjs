@@ -66,3 +66,7 @@ test("visible sessions continuously revalidate revoked or changed membership", (
   assert.match(identity, /function handleWindowFocus\(\) \{\s*if \(document\.visibilityState === "visible"\) void refreshCloudIdentity\(\);\s*\}/);
   assert.match(identity, /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) return null;/);
 });
+
+test("password recovery sessions never resolve a business identity", () => {
+  assert.match(identity, /return Boolean\(session\?\.access_token && !session\.is_password_recovery\);/);
+});
