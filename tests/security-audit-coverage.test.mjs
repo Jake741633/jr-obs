@@ -20,6 +20,7 @@ const requiredSuites = [
   "private-storage-customer-scope.test.mjs",
   "customer-profile-visibility.test.mjs",
   "legacy-storage-staff-reads.test.mjs",
+  "legacy-storage-upload-boundary.test.mjs",
   "private-file-metadata-delete-guard.test.mjs",
   "customer-generic-collection-reads.test.mjs",
   "customer-typed-table-reads.test.mjs",
@@ -75,6 +76,7 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Staff must not bypass the private-file metadata MIME allowlist",
     "Authorization helper RPC must not be exposed",
     "Anonymous Data API access must fail at the grant boundary",
+    "Legacy storage must reject disallowed MIME types",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

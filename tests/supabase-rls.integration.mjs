@@ -12,6 +12,7 @@ const enabled = Boolean(config.url && config.anonKey && config.serviceRoleKey &&
 const runId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 const password = `JrOs-Test-${runId}!`;
 const bucket = "jr-os-private";
+const legacyBucket = "jr-os-files";
 
 const typedTables = [
   "customers", "jobs", "pricing_documents", "invoices", "payments", "expenses", "materials",
@@ -148,8 +149,8 @@ function absoluteSignedUrl(value) {
   return `${config.url}/storage/v1${value.startsWith("/") ? value : `/${value}`}`;
 }
 
-async function createSignedUpload(account, path) {
-  return authenticated(account, `/storage/v1/object/upload/sign/${bucket}/${encodedPath(path)}`, {
+async function createSignedUpload(account, path, storageBucket = bucket) {
+  return authenticated(account, `/storage/v1/object/upload/sign/${storageBucket}/${encodedPath(path)}`, {
     method: "POST",
     body: { expiresIn: 120 },
   });
@@ -181,6 +182,9 @@ async function cleanup(context) {
   for (const path of context.objectPaths) {
     await service(`/storage/v1/object/${bucket}/${encodedPath(path)}`, { method: "DELETE" }).catch(() => undefined);
   }
+  for (const path of context.legacyObjectPaths) {
+    await service(`/storage/v1/object/${legacyBucket}/${encodedPath(path)}`, { method: "DELETE" }).catch(() => undefined);
+  }
   for (const table of cleanupTables) {
     for (const organisationId of context.organisations) {
       await service(`/rest/v1/${table}?organisation_id=eq.${organisationId}`, { method: "DELETE" }).catch(() => undefined);
@@ -204,7 +208,7 @@ async function expectDenied(result, message) {
 const integrationTest = enabled ? test : test.skip;
 
 integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role boundaries", { timeout: 180_000 }, async () => {
-  const context = { users: [], organisations: [], objectPaths: [] };
+  const context = { users: [], organisations: [], objectPaths: [], legacyObjectPaths: [] };
   try {
     await expectDenied(
       await request("/rest/v1/jobs?select=id"),
@@ -458,6 +462,31 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       const oversized = new Uint8Array((10 * 1024 * 1024) + 1);
       assert.equal((await uploadSigned(oversizedSign.payload, oversized, "application/pdf")).ok, false, "File larger than 10 MB must fail");
     }
+
+    const legacyPath = `${organisationA}/legacy/${source("legacy-file")}/photo.png`;
+    context.legacyObjectPaths.push(legacyPath);
+    const legacyUpload = await createSignedUpload(accounts.A.electrician, legacyPath, legacyBucket);
+    await expectAllowed(legacyUpload, "Electrician should retain bounded legacy upload compatibility");
+    assert.equal((await uploadSigned(legacyUpload.payload, pngBytes, "image/png")).ok, true);
+
+    const legacyBadMimePath = `${organisationA}/legacy/${source("legacy-bad-mime")}/payload.exe`;
+    context.legacyObjectPaths.push(legacyBadMimePath);
+    const legacyBadMimeSign = await createSignedUpload(accounts.A.electrician, legacyBadMimePath, legacyBucket);
+    if (legacyBadMimeSign.response.ok) {
+      assert.equal(
+        (await uploadSigned(legacyBadMimeSign.payload, new Uint8Array([1, 2, 3]), "application/x-msdownload")).ok,
+        false,
+        "Legacy storage must reject disallowed MIME types",
+      );
+    }
+    await expectDenied(
+      await createSignedUpload(accounts.A.electrician, tenantBPath, legacyBucket),
+      "Legacy storage must reject another tenant path",
+    );
+    await expectDenied(
+      await createSignedUpload(accounts.A.customer, `${organisationA}/legacy/${source("legacy-customer")}/x.png`, legacyBucket),
+      "Customer must not upload to legacy storage",
+    );
 
     await expectAllowed(await createSignedDownload(accounts.A.owner, ownPath, 60), "Owner should create signed download URL");
     await expectAllowed(await createSignedDownload(accounts.A.customer, ownPath, 60), "Customer should sign own scoped file");

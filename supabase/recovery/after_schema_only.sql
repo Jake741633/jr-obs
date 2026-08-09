@@ -101,4 +101,7 @@
 \echo 'Applying least-privilege public database grants'
 \ir ../migrations/20260809_031_public_grant_least_privilege.sql
 
+\echo 'Constraining legacy private-storage uploads'
+\ir ../migrations/20260809_032_constrain_legacy_storage_uploads.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
