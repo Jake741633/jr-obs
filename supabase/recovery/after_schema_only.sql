@@ -167,4 +167,7 @@
 \echo 'Scoping field timesheet reads and updates to their creator'
 \ir ../migrations/20260809_053_timesheet_actor_scope.sql
 
+\echo 'Binding field timesheets to the authenticated team identity'
+\ir ../migrations/20260809_054_bind_timesheets_to_team_identity.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
