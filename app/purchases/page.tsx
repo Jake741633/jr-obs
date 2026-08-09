@@ -25,7 +25,7 @@ export default function PurchasesPage() {
   const [selectedJobId, setSelectedJobId] = useState("");
   const [message, setMessage] = useState("");
 
-  const sourceDocuments = useMemo(() => pricing.items.filter((document) => document.items.some((item) => item.kind === "Material")), [pricing.items]);
+  const sourceDocuments = useMemo(() => pricing.items.filter((document) => document.items.some((item) => item.category === "Materials")), [pricing.items]);
   const summary = useMemo(() => {
     const items = purchaseLists.items.flatMap((list) => list.items);
     return {
@@ -45,7 +45,7 @@ export default function PurchasesPage() {
   function createFromDocument() {
     const document = sourceDocuments.find((item) => item.id === selectedDocumentId);
     if (!document) return setMessage("Choose a quote or estimate with material lines.");
-    const materialLines = document.items.filter((item) => item.kind === "Material");
+    const materialLines = document.items.filter((item) => item.category === "Materials");
     const now = new Date().toISOString();
     const list: PurchaseList = {
       id: makeId("purchase"),
