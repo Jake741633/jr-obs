@@ -36,6 +36,7 @@ const requiredSuites = [
   "public-database-grants.test.mjs",
   "sensitive-metadata-delete-audit.test.mjs",
   "portal-record-binding-guard.test.mjs",
+  "private-file-object-path-uniqueness.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -82,6 +83,7 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Private file metadata deletion must create an immutable tenant audit row",
     "Staff must not bind a portal request to another tenant's job",
     "Staff must not rebind a customer portal submission",
+    "Staff must not alias an existing private object to another customer",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

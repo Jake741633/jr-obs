@@ -110,4 +110,7 @@
 \echo 'Guarding customer portal record bindings'
 \ir ../migrations/20260809_034_guard_portal_record_bindings.sql
 
+\echo 'Preventing private-file metadata path aliases'
+\ir ../migrations/20260809_035_private_file_object_path_uniqueness.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

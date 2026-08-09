@@ -472,6 +472,10 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       organisation_id: organisationA, source_id: source("file-other"), job_source_id: jobA, customer_source_id: otherCustomerA,
       bucket, object_path: otherCustomerPath, file_name: "other.png", mime_type: "image/png",
     }), "Office should write other-customer file metadata");
+    await expectDenied(await insertRecord(accounts.A.electrician, "private_files", {
+      organisation_id: organisationA, source_id: source("file-other-alias"), job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: otherCustomerPath, file_name: "other.png", mime_type: "image/png",
+    }), "Staff must not alias an existing private object to another customer");
 
     await expectDenied(await createSignedUpload(accounts.A.electrician, tenantBPath), "Staff must not create signed upload URLs for another tenant path");
     await expectDenied(await createSignedUpload(accounts.A.customer, `${organisationA}/jobs/${jobA}/${source("customer-upload")}/x.png`), "Customer must not upload files");
