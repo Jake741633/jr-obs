@@ -23,6 +23,7 @@ export const typedCollectionTables: Record<string, string> = {
 
 const roleReadTables: Record<string, Record<string, string>> = {
   customer: {
+    certificates: "customer_certificates",
     customers: "portal_customers",
     jobs: "customer_jobs",
     pricing_documents: "customer_pricing_documents",

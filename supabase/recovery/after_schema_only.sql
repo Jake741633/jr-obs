@@ -176,4 +176,7 @@
 \echo 'Scoping private files and Storage objects to their source collection'
 \ir ../migrations/20260809_056_private_file_role_scope.sql
 
+\echo 'Projecting issued-only certificate records for customer sessions'
+\ir ../migrations/20260809_057_customer_issued_certificate_projection.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
