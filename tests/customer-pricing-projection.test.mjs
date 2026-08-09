@@ -50,9 +50,9 @@ test("the projection is trigger-maintained and internal helpers are not RPCs", (
   assert.match(migration, /revoke execute on function private\.refresh_jr_customer_pricing_document\(\)[\s\S]*from public, anon, authenticated/i);
 });
 
-test("customer clients read the projection while staff clients retain the source table", () => {
-  assert.match(collections, /pricing_documents: "customer_pricing_documents"/);
-  assert.match(collections, /role === "customer" \? customerReadTables\[table\] \?\? table : table/);
+test("customer clients read the projection while other roles keep role-specific read routing", () => {
+  assert.match(collections, /customer:\s*\{[\s\S]*pricing_documents:\s*"customer_pricing_documents"/i);
+  assert.match(collections, /roleReadTables\[role\]\?\.\[table\] \?\? table/i);
   assert.match(adapter, /const readTable = collectionCloudReadTable\(table, cacheRole\)/);
   assert.match(adapter, /cloudSelect<CloudEnvelope<T>>\(readTable,/);
 });

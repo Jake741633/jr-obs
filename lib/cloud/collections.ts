@@ -21,8 +21,13 @@ export const typedCollectionTables: Record<string, string> = {
   "jr-os-ai-recommendation-evidence": "ai_recommendation_evidence",
 };
 
-const customerReadTables: Record<string, string> = {
-  pricing_documents: "customer_pricing_documents",
+const roleReadTables: Record<string, Record<string, string>> = {
+  customer: {
+    pricing_documents: "customer_pricing_documents",
+  },
+  electrician: {
+    team_members: "field_team_members",
+  },
 };
 
 export function collectionCloudTarget(storageKey: string) {
@@ -33,5 +38,5 @@ export function collectionCloudTarget(storageKey: string) {
 }
 
 export function collectionCloudReadTable(table: string, role?: string) {
-  return role === "customer" ? customerReadTables[table] ?? table : table;
+  return role ? roleReadTables[role]?.[table] ?? table : table;
 }

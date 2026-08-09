@@ -143,4 +143,7 @@
 \echo 'Restricting full pricing document reads to office roles'
 \ir ../migrations/20260809_045_restrict_electrician_pricing_reads.sql
 
+\echo 'Projecting a field-safe team directory for electricians'
+\ir ../migrations/20260809_046_field_team_member_projection.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

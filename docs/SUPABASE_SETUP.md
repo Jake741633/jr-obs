@@ -65,6 +65,7 @@ Use separate test users for owner, office, electrician and customer. Verify:
 - customers cannot read records with a different `customer_source_id`
 - electricians cannot query office-only finance, CRM history, settings or AI records directly
 - electricians cannot read full pricing documents, internal costs, markup or margin data through typed APIs
+- electricians receive only the field-safe team directory projection; payroll rates, emergency contacts and private team notes remain office-only
 - only owner/admin accounts can enumerate organisation authentication profiles
 - electricians cannot delete tenant records
 - office users cannot manage owner/admin permissions
