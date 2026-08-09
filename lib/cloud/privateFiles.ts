@@ -54,6 +54,7 @@ export interface PrivateFileMetadata {
   id?: string;
   organisation_id: string;
   source_id: string;
+  storage_key: string;
   job_source_id?: string;
   customer_source_id?: string;
   bucket: string;
@@ -229,6 +230,7 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
   const metadata: PrivateFileMetadata = {
     organisation_id: item.organisationId,
     source_id: item.sourceId,
+    storage_key: item.storageKey,
     job_source_id: item.jobSourceId,
     customer_source_id: item.customerSourceId,
     bucket: cloudStorageBucket,
