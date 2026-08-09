@@ -49,6 +49,7 @@ const requiredSuites = [
   "electrician-pricing-read-boundary.test.mjs",
   "field-team-projection.test.mjs",
   "job-role-projections.test.mjs",
+  "field-cloud-collection-projection.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);

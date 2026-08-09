@@ -27,6 +27,7 @@ const roleReadTables: Record<string, Record<string, string>> = {
     pricing_documents: "customer_pricing_documents",
   },
   electrician: {
+    cloud_collections: "field_cloud_collections",
     jobs: "field_jobs",
     team_members: "field_team_members",
   },

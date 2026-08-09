@@ -149,4 +149,7 @@
 \echo 'Projecting role-safe job records for field and customer sessions'
 \ir ../migrations/20260809_047_job_role_projections.sql
 
+\echo 'Projecting sanitised generic field collections for electricians'
+\ir ../migrations/20260809_048_field_cloud_collection_projection.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
