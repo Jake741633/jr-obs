@@ -41,15 +41,17 @@ test("private object paths must belong to the active organisation", () => {
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\);\s*const boundedExpiry/s);
 });
 
-test("signed download URLs are tenant and user keyed and short lived", () => {
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
+test("signed download URLs are authorisation-context keyed and short lived", () => {
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
   assert.match(privateFiles, /const boundedExpiry = Math\.min\(300, Math\.max\(60, Math\.floor\(expiresIn\)\)\)/);
   assert.match(privateFiles, /createSignedDownload\(objectPath, boundedExpiry\)/);
 });
 
-test("signed download cache identities cannot collide across organisation, user or source boundaries", () => {
-  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
+test("signed download cache identities cannot collide across authorisation or source boundaries", () => {
+  assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
+  assert.notEqual(JSON.stringify(["org", "user", "admin", null, "file"]), JSON.stringify(["org", "user", "electrician", null, "file"]));
+  assert.notEqual(JSON.stringify(["org", "user", "customer", "customer-a", "file"]), JSON.stringify(["org", "user", "customer", "customer-b", "file"]));
   assert.doesNotMatch(privateFiles, /return `\$\{encodeURIComponent\(organisationId\)\}:\$\{encodeURIComponent\(sourceId\)\}`/);
 });
 

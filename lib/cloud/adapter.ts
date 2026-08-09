@@ -10,9 +10,9 @@ export function organisationStorageKey(storageKey: string, organisationId: strin
   return `${storageKey}:organisation:${JSON.stringify([organisationId])}`;
 }
 
-export function accountStorageKey(storageKey: string, organisationId: string, userId?: string) {
+export function accountStorageKey(storageKey: string, organisationId: string, userId?: string, role?: string, customerSourceId?: string) {
   const organisationKey = organisationStorageKey(storageKey, organisationId);
-  return userId ? `${organisationKey}:account:${JSON.stringify([userId])}` : organisationKey;
+  return userId ? `${organisationKey}:account:${JSON.stringify([userId, role ?? null, customerSourceId ?? null])}` : organisationKey;
 }
 
 function readLocal<T>(storageKey: string): T[] {
@@ -36,10 +36,12 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
   organisationId: string;
   userId?: string;
   cacheUserId?: string;
+  cacheRole?: string;
+  cacheCustomerSourceId?: string;
   collectionKey?: string;
 }) {
-  const { storageKey, table, organisationId, userId, cacheUserId, collectionKey } = options;
-  const scopedStorageKey = accountStorageKey(storageKey, organisationId, cacheUserId);
+  const { storageKey, table, organisationId, userId, cacheUserId, cacheRole, cacheCustomerSourceId, collectionKey } = options;
+  const scopedStorageKey = accountStorageKey(storageKey, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId);
   const collectionFilter = collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : "";
 
   return {

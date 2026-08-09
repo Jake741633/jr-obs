@@ -100,8 +100,8 @@ function activeReplayOwnerMatches(organisationId: string, userId: string) {
   return activeOrganisationId() === organisationId && readSupabaseSession()?.user?.id === userId;
 }
 
-export function privateSignedUrlCacheKey(organisationId: string, sourceId: string) {
-  return JSON.stringify([organisationId, readSupabaseSession()?.user?.id ?? "", sourceId]);
+export function privateSignedUrlCacheKey(identity: CloudIdentity, sourceId: string) {
+  return JSON.stringify([identity.organisationId, identity.userId, identity.role, identity.customerSourceId ?? null, sourceId]);
 }
 
 export function privateUploadQueueItemId(organisationId: string, userId: string, storageKey: string, sourceId: string) {
@@ -382,7 +382,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
           privateUploadError: undefined,
         } as T;
       }));
-      const cacheKey = privateSignedUrlCacheKey(identity.organisationId, queued.sourceId);
+      const cacheKey = privateSignedUrlCacheKey(identity, queued.sourceId);
       setSignedUrls((current) => ({ ...current, [cacheKey]: result.signedDownloadUrl }));
     });
     flush();
@@ -396,14 +396,14 @@ export function usePrivateFileCollectionBridge<T>(input: {
     const missing = items.flatMap((item) => {
       const record = item as PrivateFileBackedRecord;
       if (storageKey === "jr-os-surveys") {
-        return (record.photos ?? []).filter((photo) => photo.privateStoragePath && !signedUrls[privateSignedUrlCacheKey(identity.organisationId, photo.id)]);
+        return (record.photos ?? []).filter((photo) => photo.privateStoragePath && !signedUrls[privateSignedUrlCacheKey(identity, photo.id)]);
       }
-      return record.privateStoragePath && !signedUrls[privateSignedUrlCacheKey(identity.organisationId, record.id)] ? [record] : [];
+      return record.privateStoragePath && !signedUrls[privateSignedUrlCacheKey(identity, record.id)] ? [record] : [];
     });
     if (missing.length === 0) return;
     Promise.all(missing.map(async (record) => {
       const url = await signedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId);
-      return [privateSignedUrlCacheKey(identity.organisationId, record.id), url] as const;
+      return [privateSignedUrlCacheKey(identity, record.id), url] as const;
     })).then((entries) => {
       if (!active) return;
       setSignedUrls((current) => ({ ...current, ...Object.fromEntries(entries) }));
@@ -416,11 +416,11 @@ export function usePrivateFileCollectionBridge<T>(input: {
     if (storageKey === "jr-os-surveys") {
       return {
         ...record,
-        photos: (record.photos ?? []).map((photo) => ({ ...photo, signedDownloadUrl: signedUrls[privateSignedUrlCacheKey(identity?.organisationId ?? "", photo.id)] })),
+        photos: (record.photos ?? []).map((photo) => ({ ...photo, signedDownloadUrl: identity ? signedUrls[privateSignedUrlCacheKey(identity, photo.id)] : undefined })),
       } as T;
     }
-    return { ...record, signedDownloadUrl: signedUrls[privateSignedUrlCacheKey(identity?.organisationId ?? "", record.id)] } as T;
-  }), [identity?.organisationId, items, signedUrls, storageKey]);
+    return { ...record, signedDownloadUrl: identity ? signedUrls[privateSignedUrlCacheKey(identity, record.id)] : undefined } as T;
+  }), [identity, items, signedUrls, storageKey]);
 
   return { items: hydratedItems };
 }

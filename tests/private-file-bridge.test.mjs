@@ -18,8 +18,8 @@ test("private file queues remain organisation scoped when using base collection 
   assert.match(privateFiles, /queued\.storageKey !== storageKey/);
 });
 
-test("signed URL cache remains organisation scoped independently of collection keys", () => {
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, queued\.sourceId\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, photo\.id\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, record\.id\)/);
+test("signed URL cache remains authorisation scoped independently of collection keys", () => {
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, queued\.sourceId\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, photo\.id\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, record\.id\)/);
 });

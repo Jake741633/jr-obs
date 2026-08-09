@@ -18,8 +18,8 @@ test("AI source data is loaded through the organisation and account-scoped colle
   assert.match(aiPage, /useLocalStorageCollection<Invoice>\("jr-os-invoices"\)/);
   assert.match(storage, /const cacheUserId = userId/);
   assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
-  assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
-  assert.match(storage, /organisationId,\s*userId,\s*cacheUserId,/s);
+  assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId\) : key/);
+  assert.match(storage, /organisationId,\s*userId,\s*cacheUserId,\s*cacheRole,\s*cacheCustomerSourceId,/s);
 });
 
 test("AI learning memory and recommendation evidence use tenant-scoped cloud collections", () => {

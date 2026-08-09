@@ -30,9 +30,9 @@ test("draft lists and searches derive only from the resolved scoped collection",
 });
 
 test("draft cache and unsaved editor state reset across account boundaries", () => {
-  assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
-  assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
-  assert.match(cloudAccessGuard, /<Fragment key=\{identity\.organisationId\}>\{children\}<\/Fragment>/);
+  assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId\) : key/);
+  assert.match(storage, /\[activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
+  assert.match(cloudAccessGuard, /<Fragment key=\{workspaceIdentityKey\}>\{children\}<\/Fragment>/);
   assert.match(quotesPage, /const \[form, setForm\] = useState\(blankForm\)/);
   assert.match(quotesPage, /const \[items, setItems\] = useState<PricingLineItem\[\]>\(\[\]\)/);
   assert.match(mobileQuotesPage, /const \[draft, setDraft\] = useState\(blankDraft\)/);

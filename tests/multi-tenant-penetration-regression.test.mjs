@@ -19,10 +19,10 @@ test("record enumeration cannot remove the organisation filter", () => {
   assert.match(adapter, /queueChange\(\{ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId/);
 });
 
-test("browser cache tampering cannot alias two organisations or authenticated users", () => {
+test("browser cache tampering cannot alias two organisations or authorisation identities", () => {
   assert.match(adapter, /return `\$\{storageKey\}:organisation:\$\{JSON\.stringify\(\[organisationId\]\)\}`/);
-  assert.match(adapter, /:account:\$\{JSON\.stringify\(\[userId\]\)\}/);
-  assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId\)/);
+  assert.match(adapter, /:account:\$\{JSON\.stringify\(\[userId, role \?\? null, customerSourceId \?\? null\]\)\}/);
+  assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId\)/);
   assert.match(storage, /const cacheUserId = userId/);
   assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
   assert.doesNotMatch(storage, /localStorage\.setItem\(key, JSON\.stringify\(items\)\)/);
@@ -41,7 +41,8 @@ test("stale identity responses cannot restore an earlier tenant", () => {
   assert.match(identity, /const requestVersion = \+\+identityRequestVersion/);
   assert.match(identity, /requestVersion === identityRequestVersion/);
   assert.match(identity, /identityRequestVersion \+= 1/);
-  assert.match(guard, /key=\{identity\.organisationId\}/);
+  assert.match(guard, /const workspaceIdentityKey = JSON\.stringify/);
+  assert.match(guard, /<Fragment key=\{workspaceIdentityKey\}>/);
 });
 
 test("backup payloads cannot inject another tenant or internal sync state", () => {
@@ -53,12 +54,12 @@ test("backup payloads cannot inject another tenant or internal sync state", () =
   assert.match(appData, /organisationStorageKey\(key, organisationId\)/);
 });
 
-test("private file path and signed URL tampering fail organisation and user checks", () => {
+test("private file path and signed URL tampering fail full authorisation checks", () => {
   assert.match(privateFiles, /isOrganisationPrivateObjectPath/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
   assert.match(privateFiles, /The private file does not belong to the active organisation/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
 });
 
 test("customer sessions cannot select or mutate another customer record", () => {
@@ -73,9 +74,9 @@ test("customer sessions cannot select or mutate another customer record", () => 
 test("tenant-sensitive state is invalidated across identity and workspace changes", () => {
   assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
   assert.match(identity, /setActiveSyncIdentity\(next\.identity\?\.organisationId \?\? null, next\.identity\?\.userId \?\? null\)/);
-  assert.match(guard, /<Fragment key=\{identity\.userId\}>/);
-  assert.match(guard, /<Fragment key=\{identity\.organisationId\}>/);
-  assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
+  assert.match(guard, /identity\.organisationId,[\s\S]*identity\.userId,[\s\S]*identity\.role,[\s\S]*identity\.customerSourceId/);
+  assert.match(guard, /<Fragment key=\{workspaceIdentityKey\}>/);
+  assert.match(storage, /\[activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
 });
 
 test("forged or expired browser sessions cannot reach cloud requests", () => {

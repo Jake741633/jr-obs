@@ -26,20 +26,21 @@ test("identity changes move sync ownership to the latest resolved organisation a
   assert.match(repository, /if \(activeOrganisationId\(\) === organisationId && activeUserId\(\) === userId\) syncStatus\.set\(statusForQueue\(activeRemaining\)\)/);
 });
 
-test("account switches remount transient workspace state", () => {
-  assert.match(guard, /<Fragment key=\{identity\.userId\}><Fragment key=\{identity\.organisationId\}>\{children\}<\/Fragment><\/Fragment>/);
+test("account and permission switches remount transient workspace state", () => {
+  assert.match(guard, /const workspaceIdentityKey = JSON\.stringify\(\[[\s\S]*identity\.organisationId,[\s\S]*identity\.userId,[\s\S]*identity\.role,[\s\S]*identity\.customerSourceId \?\? ""/);
+  assert.match(guard, /<Fragment key=\{workspaceIdentityKey\}>\{children\}<\/Fragment>/);
   assert.match(guard, /if \(!isReady\)/);
   assert.match(guard, /if \(!identity\)/);
 });
 
-test("every browser collection and private-file cache changes identity across tenants and users", () => {
+test("every browser collection and private-file cache changes across authorisation identities", () => {
   assert.match(storage, /const cacheUserId = userId/);
   assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
-  assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId\)/);
-  assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
-  assert.match(storage, /\[activeStorageKey, cacheUserId, isReady, items, key, mode, organisationId, target, userId\]/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
+  assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId\)/);
+  assert.match(storage, /\[activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
+  assert.match(storage, /\[activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, items, key, mode, organisationId, target, userId\]/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
 });
 

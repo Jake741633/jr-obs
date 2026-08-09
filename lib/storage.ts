@@ -36,7 +36,9 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   const organisationId = identity?.organisationId;
   const userId = identity?.userId;
   const cacheUserId = userId;
-  const activeStorageKey = organisationId ? accountStorageKey(key, organisationId, cacheUserId) : key;
+  const cacheRole = identity?.role;
+  const cacheCustomerSourceId = identity?.customerSourceId;
+  const activeStorageKey = organisationId ? accountStorageKey(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId) : key;
 
   useEffect(() => {
     if (identityReady) return;
@@ -66,6 +68,8 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
           organisationId,
           userId,
           cacheUserId,
+          cacheRole,
+          cacheCustomerSourceId,
         });
         loaded = await repository.list() as T[];
       }
@@ -83,7 +87,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     return () => {
       active = false;
     };
-  }, [activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId]);
+  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, identityReady, key, mode, organisationId, target, userId]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -104,6 +108,8 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       organisationId,
       userId,
       cacheUserId,
+      cacheRole,
+      cacheCustomerSourceId,
     });
 
     for (const [id, item] of nextById) {
@@ -116,7 +122,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       if (!nextById.has(id)) repository.remove(id);
     }
     previousRef.current = items;
-  }, [activeStorageKey, cacheUserId, isReady, items, key, mode, organisationId, target, userId]);
+  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, items, key, mode, organisationId, target, userId]);
 
   const { items: displayItems } = usePrivateFileCollectionBridge({ storageKey: key, items, setItems, isReady, identity, mode });
 

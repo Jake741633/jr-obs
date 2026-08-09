@@ -22,8 +22,8 @@ test("pricing workflow audit entries use the shared scoped timeline store", () =
 });
 
 test("audit collections inherit organisation and account cache scope", () => {
-  assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
-  assert.match(storage, /createCollectionRepository<RepositoryRecord>\(\{[\s\S]*organisationId,[\s\S]*userId,[\s\S]*cacheUserId,/);
+  assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId\) : key/);
+  assert.match(storage, /createCollectionRepository<RepositoryRecord>\(\{[\s\S]*organisationId,[\s\S]*userId,[\s\S]*cacheUserId,[\s\S]*cacheRole,[\s\S]*cacheCustomerSourceId,/);
   assert.match(repository, /organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}/);
   assert.match(repository, /item\.organisationId === organisationId/);
 });

@@ -31,13 +31,15 @@ test("new signups do not inherit Jake or JR Electrical Services metadata", () =>
   assert.doesNotMatch(signupMigration, /'JR Electrical Services'/);
 });
 
-test("authenticated collection caches remain organisation and user scoped", () => {
+test("authenticated collection caches remain scoped to the full authorisation context", () => {
   assert.match(adapter, /organisationStorageKey/);
   assert.match(adapter, /:organisation:/);
   assert.match(adapter, /export function accountStorageKey/);
   assert.match(storage, /const cacheUserId = userId/);
   assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
-  assert.match(storage, /activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
+  assert.match(storage, /const cacheRole = identity\?\.role/);
+  assert.match(storage, /const cacheCustomerSourceId = identity\?\.customerSourceId/);
+  assert.match(storage, /activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId\) : key/);
   assert.match(storage, /window\.localStorage\.setItem\(activeStorageKey/);
 });
 
@@ -81,9 +83,10 @@ test("suspended profiles cannot resolve an application identity or expose cached
   assert.match(identity, /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) return null;/);
 });
 
-test("secured workspace transient state resets when organisations or users change", () => {
+test("secured workspace transient state resets when any authorisation identity field changes", () => {
   assert.match(cloudAccessGuard, /Fragment, type ReactNode/);
-  assert.match(cloudAccessGuard, /<Fragment key=\{identity\.userId\}><Fragment key=\{identity\.organisationId\}>\{children\}<\/Fragment><\/Fragment>/);
+  assert.match(cloudAccessGuard, /const workspaceIdentityKey = JSON\.stringify\(\[[\s\S]*identity\.organisationId,[\s\S]*identity\.userId,[\s\S]*identity\.role,[\s\S]*identity\.customerSourceId \?\? "",[\s\S]*identity\.email\?\.trim\(\)\.toLowerCase\(\) \?\? "",[\s\S]*\]\)/);
+  assert.match(cloudAccessGuard, /<Fragment key=\{workspaceIdentityKey\}>\{children\}<\/Fragment>/);
 });
 
 test("AI-created CRM interactions attribute the signed-in user instead of Jake", () => {
@@ -131,12 +134,12 @@ test("private uploads and signed downloads reject cross-organisation object path
   assert.match(privateFiles, /signedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId\)/);
 });
 
-test("signed attachment URLs cannot be reused after an organisation or user switch", () => {
-  assert.match(privateFiles, /export function privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, queued\.sourceId\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, photo\.id\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity\.organisationId, record\.id\)/);
+test("signed attachment URLs cannot be reused after an authorisation context change", () => {
+  assert.match(privateFiles, /export function privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, queued\.sourceId\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, photo\.id\)/);
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, record\.id\)/);
   assert.doesNotMatch(privateFiles, /signedUrls\[queued\.sourceId\]/);
   assert.doesNotMatch(privateFiles, /signedUrls\[photo\.id\]/);
   assert.doesNotMatch(privateFiles, /signedUrls\[record\.id\]/);

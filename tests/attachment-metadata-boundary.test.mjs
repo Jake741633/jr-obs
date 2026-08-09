@@ -26,8 +26,8 @@ test("attachment uploads and downloads validate object ownership before cloud ac
   assert.match(privateFiles, /createSignedDownload\(objectPath, boundedExpiry\)/);
 });
 
-test("signed attachment cache identity includes organisation, user and source id", () => {
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(organisationId: string, sourceId: string\)/);
-  assert.match(privateFiles, /return JSON\.stringify\(\[organisationId, readSupabaseSession\(\)\?\.user\?\.id \?\? "", sourceId\]\)/);
+test("signed attachment cache identity includes organisation, user, role, customer and source id", () => {
+  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
   assert.doesNotMatch(privateFiles, /setSignedUrls\(\(current\) => \(\{ \.\.\.current, \[queued\.sourceId\]/);
 });
