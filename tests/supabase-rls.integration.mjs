@@ -264,6 +264,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       ["can_manage_office_data", {}],
       ["can_manage_field_data", {}],
       ["can_write_cloud_collection", { collection_key_value: "jr-os-job-tasks" }],
+      ["can_read_cloud_collection", { collection_key_value: "jr-os-job-tasks" }],
     ];
     for (const [helper, body] of helperRpcCases) {
       await expectDenied(
@@ -337,6 +338,11 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
 
     // Office-only tables and typed entity tenant isolation.
     const quoteA = source("quote-a");
+    const invoiceA = source("invoice-a");
+    const paymentA = source("payment-a");
+    const expenseA = source("expense-a");
+    const teamA = source("team-a");
+    const evidenceA = source("evidence-a");
     const officeCases = [
       ["pricing_documents", quoteA, {
         type: "Quote",
@@ -363,11 +369,11 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
         nextFollowUpDate: "2026-08-15",
         terms: "Customer-visible terms",
       }],
-      ["invoices", source("invoice-a"), { status: "Draft", total: 1200 }],
-      ["payments", source("payment-a"), { amount: 200, method: "Bank transfer" }],
-      ["expenses", source("expense-a"), { grossAmount: 50 }],
-      ["team_members", source("team-a"), { role: "Electrician" }],
-      ["ai_recommendation_evidence", source("evidence-a"), { confidence: 82 }],
+      ["invoices", invoiceA, { status: "Draft", total: 1200 }],
+      ["payments", paymentA, { amount: 200, method: "Bank transfer" }],
+      ["expenses", expenseA, { grossAmount: 50 }],
+      ["team_members", teamA, { role: "Electrician" }],
+      ["ai_recommendation_evidence", evidenceA, { confidence: 82 }],
     ];
     for (const [table, sourceId, payload] of officeCases) {
       await expectAllowed(await insertRecord(accounts.A.office, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), `Office should write ${table}`);
@@ -377,6 +383,27 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectAllowed(tenantBRead, `Tenant B query should execute for ${table}`);
       assert.deepEqual(tenantBRead.payload, [], `Tenant B must not read Tenant A ${table}`);
     }
+
+    for (const [table, sourceId] of [
+      ["invoices", invoiceA],
+      ["payments", paymentA],
+      ["expenses", expenseA],
+      ["ai_recommendation_evidence", evidenceA],
+    ]) {
+      const electricianRead = await listRecords(accounts.A.electrician, table, `select=source_id&source_id=eq.${sourceId}`);
+      await expectAllowed(electricianRead, `Electrician office-only ${table} query should fail closed`);
+      assert.deepEqual(electricianRead.payload, [], `Electrician must not read office-only typed data: ${table}`);
+    }
+    const electricianTeamRead = await listRecords(accounts.A.electrician, "team_members", `select=source_id&source_id=eq.${teamA}`);
+    await expectAllowed(electricianTeamRead, "Electrician field team query should execute");
+    assert.equal(electricianTeamRead.payload.length, 1, "Electrician should retain field team reads");
+
+    const customerInvoice = await listRecords(accounts.A.customer, "invoices", `select=source_id&source_id=eq.${invoiceA}`);
+    await expectAllowed(customerInvoice, "Customer invoice query should execute");
+    assert.equal(customerInvoice.payload.length, 1, "Customer must retain own invoice reads");
+    const customerPayment = await listRecords(accounts.A.customer, "payments", `select=source_id&source_id=eq.${paymentA}`);
+    await expectAllowed(customerPayment, "Customer payment query should execute");
+    assert.equal(customerPayment.payload.length, 1, "Customer must retain own payment reads");
 
     const staffPricing = await listRecords(accounts.A.office, "pricing_documents", `select=payload&source_id=eq.${quoteA}`);
     await expectAllowed(staffPricing, "Staff should retain the complete pricing record");
@@ -495,6 +522,14 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       }),
       "Staff must not rebind a customer portal submission approval",
     );
+    for (const [table, sourceId] of [["portal_approvals", approvalA], ["portal_requests", requestA]]) {
+      const electricianPortalRead = await listRecords(accounts.A.electrician, table, `select=source_id&source_id=eq.${sourceId}`);
+      await expectAllowed(electricianPortalRead, `Electrician ${table} query should fail closed`);
+      assert.deepEqual(electricianPortalRead.payload, [], `Electrician must not read customer portal workflow data: ${table}`);
+      const customerPortalRead = await listRecords(accounts.A.customer, table, `select=source_id&source_id=eq.${sourceId}`);
+      await expectAllowed(customerPortalRead, `Customer ${table} query should execute`);
+      assert.equal(customerPortalRead.payload.length, 1, `Customer must retain own ${table} reads`);
+    }
     assert.deepEqual((await listRecords(accounts.B.owner, "portal_requests", `select=source_id&source_id=eq.${requestA}`)).payload, []);
 
     // Generic cloud_collections: electricians retain field-operational writes,
@@ -508,6 +543,9 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectAllowed(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.electrician, customerA, jobA, payload)), `Field staff should write ${collectionKey}`);
       await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationB, collectionKey, `${sourceId}-cross`, accounts.A.electrician, customerB, jobB, payload)), `Cross-tenant generic write must fail for ${collectionKey}`);
       assert.deepEqual((await listRecords(accounts.B.owner, "cloud_collections", `select=source_id&collection_key=eq.${encodeURIComponent(collectionKey)}&source_id=eq.${sourceId}`)).payload, []);
+      const electricianFieldRead = await listRecords(accounts.A.electrician, "cloud_collections", `select=source_id&collection_key=eq.${encodeURIComponent(collectionKey)}&source_id=eq.${sourceId}`);
+      await expectAllowed(electricianFieldRead, `Electrician field ${collectionKey} query should execute`);
+      assert.equal(electricianFieldRead.payload.length, 1, `Electrician should retain field collection reads: ${collectionKey}`);
     }
     await expectDenied(
       await patchRecords(
@@ -550,11 +588,23 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       ),
       "Cloud payload ids must match stable source ids",
     );
+    const memoryA = source("memory-a");
     await expectDenied(await insertRecord(
       accounts.A.electrician,
       "cloud_collections",
-      genericRecord(organisationA, "jr-os-ai-learning-memory", source("memory-a"), accounts.A.electrician, customerA, jobA, { confidence: { overall: 75 } }),
+      genericRecord(organisationA, "jr-os-ai-learning-memory", memoryA, accounts.A.electrician, customerA, jobA, { confidence: { overall: 75 } }),
     ), "Electrician must not write office-only AI learning memory");
+    await expectAllowed(await insertRecord(
+      accounts.A.office,
+      "cloud_collections",
+      genericRecord(organisationA, "jr-os-ai-learning-memory", memoryA, accounts.A.office, customerA, jobA, { confidence: { overall: 75 } }),
+    ), "Office should write sensitive generic AI learning memory");
+    const electricianMemoryRead = await listRecords(accounts.A.electrician, "cloud_collections", `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-ai-learning-memory")}&source_id=eq.${memoryA}`);
+    await expectAllowed(electricianMemoryRead, "Electrician sensitive generic query should fail closed");
+    assert.deepEqual(electricianMemoryRead.payload, [], "Electrician must not read office-only generic data");
+    const officeMemoryRead = await listRecords(accounts.A.office, "cloud_collections", `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-ai-learning-memory")}&source_id=eq.${memoryA}`);
+    await expectAllowed(officeMemoryRead, "Office sensitive generic query should execute");
+    assert.equal(officeMemoryRead.payload.length, 1, "Office should retain sensitive generic reads");
 
     // Soft delete/tombstone and conflict-safe versioning assumptions.
     await expectDenied(

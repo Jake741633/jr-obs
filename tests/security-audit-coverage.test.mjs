@@ -44,6 +44,7 @@ const requiredSuites = [
   "profile-management-hierarchy-guard.test.mjs",
   "authenticated-storage-transfer-guard.test.mjs",
   "customer-pricing-projection.test.mjs",
+  "electrician-office-read-boundary.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -118,6 +119,12 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Another customer must not read the pricing projection",
     "Another organisation must not read the pricing projection",
     "Customer must not write the pricing projection",
+    "Electrician must not read office-only typed data",
+    "Electrician should retain field collection reads",
+    "Electrician must not read office-only generic data",
+    "Office should retain sensitive generic reads",
+    "Customer must retain own invoice reads",
+    "Electrician must not read customer portal workflow data",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

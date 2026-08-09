@@ -63,6 +63,7 @@ Use separate test users for owner, office, electrician and customer. Verify:
 
 - users cannot query another organisation by changing REST filters
 - customers cannot read records with a different `customer_source_id`
+- electricians cannot query office-only finance, CRM history, settings or AI records directly
 - electricians cannot delete tenant records
 - office users cannot manage owner/admin permissions
 - only owner/admin users can delete typed records

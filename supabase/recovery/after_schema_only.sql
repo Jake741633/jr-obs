@@ -134,4 +134,7 @@
 \echo 'Protecting staff-only pricing details from customer sessions'
 \ir ../migrations/20260809_042_protect_customer_pricing_details.sql
 
+\echo 'Restricting electrician reads to field-operational records'
+\ir ../migrations/20260809_043_restrict_electrician_office_reads.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
