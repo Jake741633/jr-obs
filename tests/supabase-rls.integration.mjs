@@ -425,9 +425,20 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectDenied(await insertRecord(accounts.A.electrician, "materials", typedRecord(organisationA, source("deactivated-write"), customerA, jobA)), "Deactivated user must not write");
     await expectAllowed(await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.electrician.id}`, { active: true }), "Owner should reactivate user for remaining tests");
 
-    // Session revocation: admin logout invalidates refresh-token reuse.
+    // Session revocation: active access works, then stale access and refresh
+    // tokens both lose tenant authorization immediately after admin logout.
+    const activeSessionRead = await listRecords(accounts.B.electrician, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    await expectAllowed(activeSessionRead, "Active same-tenant session should read its job");
+    assert.deepEqual(activeSessionRead.payload.map((row) => row.source_id), [jobB]);
     const revokeResult = await service(`/auth/v1/admin/users/${accounts.B.electrician.id}/logout`, { method: "POST", body: { scope: "global" } });
     await expectAllowed(revokeResult, "Admin should revoke a user session");
+    const revokedSessionRead = await listRecords(accounts.B.electrician, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    await expectAllowed(revokedSessionRead, "Revoked access token query should fail closed");
+    assert.deepEqual(revokedSessionRead.payload, [], "Revoked access tokens must not retain tenant reads");
+    await expectDenied(
+      await insertRecord(accounts.B.electrician, "jobs", typedRecord(organisationB, source("revoked-session-write"), customerB, jobB)),
+      "Revoked access tokens must not retain tenant writes",
+    );
     const refreshAfterRevoke = await request("/auth/v1/token?grant_type=refresh_token", { method: "POST", body: { refresh_token: accounts.B.electrician.refreshToken } });
     await expectDenied(refreshAfterRevoke, "Revoked refresh token must not create a new session");
 

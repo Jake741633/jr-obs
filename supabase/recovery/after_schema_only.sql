@@ -116,4 +116,7 @@
 \echo 'Guarding private-file customer and job bindings'
 \ir ../migrations/20260809_036_guard_private_file_record_bindings.sql
 
+\echo 'Rejecting revoked Supabase sessions in tenant authorization'
+\ir ../migrations/20260809_037_enforce_active_auth_sessions.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

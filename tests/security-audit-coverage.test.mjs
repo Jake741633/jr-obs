@@ -38,6 +38,7 @@ const requiredSuites = [
   "portal-record-binding-guard.test.mjs",
   "private-file-object-path-uniqueness.test.mjs",
   "private-file-record-binding-guard.test.mjs",
+  "active-auth-session-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -87,6 +88,8 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Staff must not bind private-file metadata to another customer's job",
     "Staff must not bind private-file metadata to another tenant's job",
     "Staff must not alias an existing private object to a second metadata row",
+    "Revoked access tokens must not retain tenant reads",
+    "Revoked access tokens must not retain tenant writes",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }
