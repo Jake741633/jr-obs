@@ -103,7 +103,8 @@ export default function MaterialsPage() {
       sellPrice,
       favourite: form.favourite,
       notes: form.notes.trim(),
-      ...(priceRestricted ? {} : { lastPriceCheckedAt: now, priceSource: "Manual" as MaterialPriceSource }),
+      lastPriceCheckedAt: now,
+      priceSource: "Manual" as MaterialPriceSource,
     };
 
     materials.setItems((current) => {
