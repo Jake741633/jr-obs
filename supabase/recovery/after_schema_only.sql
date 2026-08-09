@@ -155,4 +155,7 @@
 \echo 'Projecting price-safe typed inventory records for electricians'
 \ir ../migrations/20260809_049_field_inventory_projections.sql
 
+\echo 'Removing field-visible material price-check metadata'
+\ir ../migrations/20260809_050_restrict_field_material_price_metadata.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

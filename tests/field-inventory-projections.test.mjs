@@ -6,21 +6,25 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20260809_049_field_inventory_projections.sql", import.meta.url),
   "utf8",
 );
+const metadataHardening = readFileSync(
+  new URL("../supabase/migrations/20260809_050_restrict_field_material_price_metadata.sql", import.meta.url),
+  "utf8",
+);
 const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 const setup = readFileSync(new URL("../docs/SUPABASE_SETUP.md", import.meta.url), "utf8");
 
-function functionBody(name) {
-  const start = migration.indexOf(`create or replace function ${name}`);
-  const end = migration.indexOf("revoke execute on function", start);
-  return migration.slice(start, end);
+function functionBody(source, name) {
+  const start = source.indexOf(`create or replace function ${name}`);
+  const end = source.indexOf("revoke execute on function", start);
+  return source.slice(start, end);
 }
 
-const materialProjection = functionBody("private.jr_field_material_payload");
-const stockProjection = functionBody("private.jr_field_stock_item_payload");
-const purchaseProjection = functionBody("private.jr_field_purchase_list_payload");
-const purchaseMerge = functionBody("private.jr_merge_field_purchase_list_payload");
-const writeGuard = functionBody("private.guard_jr_electrician_inventory_payload");
+const materialProjection = functionBody(metadataHardening, "private.jr_field_material_payload");
+const stockProjection = functionBody(migration, "private.jr_field_stock_item_payload");
+const purchaseProjection = functionBody(migration, "private.jr_field_purchase_list_payload");
+const purchaseMerge = functionBody(migration, "private.jr_merge_field_purchase_list_payload");
+const writeGuard = functionBody(migration, "private.guard_jr_electrician_inventory_payload");
 
 test("typed inventory projections are RLS protected read-only application surfaces", () => {
   for (const table of ["field_materials", "field_stock_items", "field_purchase_lists"]) {
@@ -39,7 +43,7 @@ test("typed inventory projections are RLS protected read-only application surfac
   assert.match(migration, /deleted_at is null/i);
 });
 
-test("material projection keeps catalogue data but removes price intelligence", () => {
+test("material projection keeps catalogue data but removes all price intelligence and metadata", () => {
   for (const key of [
     "id",
     "name",
@@ -54,9 +58,10 @@ test("material projection keeps catalogue data but removes price intelligence", 
   ]) {
     assert.match(materialProjection, new RegExp(`'${key}'`));
   }
-  for (const privateKey of ["tradeCost", "sellPrice", "priceHistory"]) {
+  for (const privateKey of ["tradeCost", "sellPrice", "priceHistory", "lastPriceCheckedAt", "priceSource"]) {
     assert.doesNotMatch(materialProjection, new RegExp(`'${privateKey}'`));
   }
+  assert.match(metadataHardening, /update public\.field_materials projection[\s\S]*private\.jr_field_material_payload\(source\.payload\)/i);
 });
 
 test("stock projection removes unit cost while retaining stock-control fields", () => {
@@ -118,7 +123,9 @@ test("electrician repositories read price-safe typed inventory projections", () 
 test("recovery and deployment guidance retain typed inventory pricing privacy", () => {
   const genericIndex = recovery.indexOf("20260809_048_field_cloud_collection_projection.sql");
   const inventoryIndex = recovery.indexOf("20260809_049_field_inventory_projections.sql");
+  const metadataIndex = recovery.indexOf("20260809_050_restrict_field_material_price_metadata.sql");
   assert.ok(genericIndex >= 0 && inventoryIndex > genericIndex, "typed inventory projection must follow generic field projection hardening");
-  assert.match(setup, /typed inventory reads remove material trade and sell prices, stock unit costs and purchase-list item costs/i);
+  assert.ok(metadataIndex > inventoryIndex, "material price metadata hardening must follow typed inventory projection creation");
+  assert.match(setup, /typed inventory reads remove material trade and sell prices, price-check metadata, stock unit costs and purchase-list item costs/i);
   assert.match(setup, /inventory edits preserve hidden office pricing/i);
 });
