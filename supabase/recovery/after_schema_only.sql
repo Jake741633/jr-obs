@@ -89,4 +89,7 @@
 \echo 'Applying JR OS legacy backup office scope'
 \ir ../migrations/20260809_027_legacy_backup_office_scope.sql
 
+\echo 'Applying JR OS customer portal job binding'
+\ir ../migrations/20260809_028_customer_portal_job_binding.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -291,6 +291,15 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectAllowed(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), `Electrician should write ${table}`);
       await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, `${sourceId}-cross`, customerB, jobB, payload)), `Electrician must not write cross-tenant ${table}`);
     }
+    const otherCustomerJobA = source("job-a-other-customer");
+    await expectAllowed(
+      await insertRecord(accounts.A.electrician, "jobs", typedRecord(organisationA, otherCustomerJobA, otherCustomerA, otherCustomerJobA, { title: "Other customer job" })),
+      "Electrician should create a same-tenant job for the other customer",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.B.electrician, "jobs", typedRecord(organisationB, jobB, customerB, jobB, { title: "Tenant B job" })),
+      "Tenant B electrician should create its own job",
+    );
 
     // Customer scoping for typed tables and portal writes.
     const customerJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
@@ -303,6 +312,14 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, approvalA, customerA, jobA, { decision: "Accepted" })), "Customer should create own approval");
     await expectAllowed(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, requestA, customerA, jobA, { type: "Question" })), "Customer should create own request");
     await expectDenied(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-other"), otherCustomerA, jobA)), "Customer must not create another customer request");
+    await expectDenied(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-job"), customerA, jobB)),
+      "Customer must not attach an approval to another tenant's job while keeping their own customer ID",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-other-customer-job"), customerA, otherCustomerJobA)),
+      "Customer must not attach a request to another customer's job while keeping their own customer ID",
+    );
     assert.deepEqual((await listRecords(accounts.B.owner, "portal_requests", `select=source_id&source_id=eq.${requestA}`)).payload, []);
 
     // Generic cloud_collections: electricians retain field-operational writes,
