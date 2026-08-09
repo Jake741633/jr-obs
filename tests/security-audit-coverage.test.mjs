@@ -68,6 +68,9 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Owner should create a soft-delete tombstone",
     "Customer must not attach an approval to another tenant's job while keeping their own customer ID",
     "Customer must not attach a request to another customer's job while keeping their own customer ID",
+    "Electrician must not forge another user's private-file attribution",
+    "Staff must not register private-file metadata for another tenant path",
+    "Staff must not bypass the private-file metadata MIME allowlist",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

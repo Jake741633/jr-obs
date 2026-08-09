@@ -385,6 +385,21 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     context.objectPaths.push(ownPath, otherCustomerPath, tenantBPath);
     const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 
+    await expectDenied(await insertRecord(accounts.A.electrician, "private_files", {
+      organisation_id: organisationA, source_id: source("file-forged-actor"), job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: `${organisationA}/jobs/${jobA}/${source("file-forged-actor-path")}/evidence.pdf`,
+      file_name: "evidence.pdf", mime_type: "application/pdf", created_by: accounts.A.office.id, updated_by: accounts.A.office.id,
+    }), "Electrician must not forge another user's private-file attribution");
+    await expectDenied(await insertRecord(accounts.A.electrician, "private_files", {
+      organisation_id: organisationA, source_id: source("file-cross-path-metadata"), job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: tenantBPath, file_name: "cross.png", mime_type: "image/png",
+    }), "Staff must not register private-file metadata for another tenant path");
+    await expectDenied(await insertRecord(accounts.A.electrician, "private_files", {
+      organisation_id: organisationA, source_id: source("file-bad-mime-metadata"), job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: `${organisationA}/jobs/${jobA}/${source("file-bad-mime-path")}/payload.exe`,
+      file_name: "payload.exe", mime_type: "application/x-msdownload",
+    }), "Staff must not bypass the private-file metadata MIME allowlist");
+
     const signedUpload = await createSignedUpload(accounts.A.electrician, ownPath);
     await expectAllowed(signedUpload, "Electrician should create signed upload URL");
     assert.equal((await uploadSigned(signedUpload.payload, pngBytes, "image/png")).ok, true, "Signed upload should succeed");

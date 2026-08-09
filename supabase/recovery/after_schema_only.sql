@@ -92,4 +92,7 @@
 \echo 'Applying JR OS customer portal job binding'
 \ir ../migrations/20260809_028_customer_portal_job_binding.sql
 
+\echo 'Applying JR OS consolidated private file metadata policies'
+\ir ../migrations/20260809_029_consolidate_private_file_policies.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
