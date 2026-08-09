@@ -8,6 +8,7 @@ const migration = readFileSync(
 );
 const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
+const runner = readFileSync(new URL("./run-supabase-rls.integration.mjs", import.meta.url), "utf8");
 
 function functionBody(name) {
   const start = migration.indexOf(`create or replace function ${name}`);
@@ -55,4 +56,19 @@ test("customer projections are trigger-maintained and recovery-safe", () => {
   assert.match(migration, /revoke execute on function private\.jr_customer_contact_payload\(jsonb\)[\s\S]*from public, anon, authenticated, service_role/i);
   assert.match(migration, /revoke execute on function private\.refresh_jr_customer_role_projections\(\)[\s\S]*from public, anon, authenticated/i);
   assert.match(recovery, /20260809_051_customer_role_projections\.sql/i);
+});
+
+test("live RLS runner covers customer source denial, redaction and projection isolation", () => {
+  for (const phrase of [
+    "Electrician complete customer query should fail closed",
+    "Field customer projection must omit internal CRM notes",
+    "Customer complete customer query should fail closed",
+    "Portal customer projection must omit internal CRM notes",
+    "Another customer must not read the customer contact projection",
+    "Another organisation must not read the customer contact projection",
+    "Electrician must not write the field customer projection",
+    "Customer must not write the portal customer projection",
+  ]) {
+    assert.match(runner, new RegExp(phrase.replaceAll(" ", "\\s+"), "i"));
+  }
 });
