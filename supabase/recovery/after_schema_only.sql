@@ -140,4 +140,7 @@
 \echo 'Restricting authentication profile directory reads to account managers'
 \ir ../migrations/20260809_044_restrict_profile_directory_reads.sql
 
+\echo 'Restricting full pricing document reads to office roles'
+\ir ../migrations/20260809_045_restrict_electrician_pricing_reads.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
