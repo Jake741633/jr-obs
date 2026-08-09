@@ -1,6 +1,7 @@
 "use client";
 
 import { cloudSelect } from "./client";
+import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
 import { queueChange, type CloudEnvelope } from "./repository";
 
@@ -42,6 +43,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
 }) {
   const { storageKey, table, organisationId, userId, cacheUserId, cacheRole, cacheCustomerSourceId, collectionKey } = options;
   const scopedStorageKey = accountStorageKey(storageKey, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId);
+  const readTable = collectionCloudReadTable(table, cacheRole);
   const collectionFilter = collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : "";
 
   return {
@@ -59,7 +61,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       if (mode === "migration" && local.length > 0) return local;
 
       try {
-        const rows = await cloudSelect<CloudEnvelope<T>>(table, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`);
+        const rows = await cloudSelect<CloudEnvelope<T>>(readTable, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`);
         const cloudRecords = rows.map((row) => row.payload);
         writeLocal(scopedStorageKey, cloudRecords);
         writeVersions(scopedStorageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));

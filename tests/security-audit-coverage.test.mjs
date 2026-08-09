@@ -43,6 +43,7 @@ const requiredSuites = [
   "cloud-record-binding-guard.test.mjs",
   "profile-management-hierarchy-guard.test.mjs",
   "authenticated-storage-transfer-guard.test.mjs",
+  "customer-pricing-projection.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -112,6 +113,11 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Authenticated staff upload must succeed",
     "Revoked sessions must not upload private objects",
     "Revoked sessions must not download private objects",
+    "Customer base pricing query should fail closed",
+    "Customer pricing projection must omit staff-only profitability",
+    "Another customer must not read the pricing projection",
+    "Another organisation must not read the pricing projection",
+    "Customer must not write the pricing projection",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

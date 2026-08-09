@@ -131,4 +131,7 @@
 \echo 'Requiring live authenticated transfers for private Storage'
 \ir ../migrations/20260809_041_require_authenticated_storage_transfers.sql
 
+\echo 'Protecting staff-only pricing details from customer sessions'
+\ir ../migrations/20260809_042_protect_customer_pricing_details.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

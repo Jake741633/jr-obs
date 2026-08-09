@@ -13,7 +13,8 @@ const guard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.
 const client = readFileSync(new URL("../lib/cloud/client.ts", import.meta.url), "utf8");
 
 test("record enumeration cannot remove the organisation filter", () => {
-  assert.match(adapter, /cloudSelect<CloudEnvelope<T>>\(table, `select=\*&organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}\$\{collectionFilter\}&deleted_at=is\.null`\)/);
+  assert.match(adapter, /const readTable = collectionCloudReadTable\(table, cacheRole\)/);
+  assert.match(adapter, /cloudSelect<CloudEnvelope<T>>\(readTable, `select=\*&organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}\$\{collectionFilter\}&deleted_at=is\.null`\)/);
   assert.match(adapter, /collection_key=eq\.\$\{encodeURIComponent\(collectionKey\)\}/);
   assert.match(adapter, /queueChange\(\{ table, storageKey: scopedStorageKey, operation: "upsert", organisationId, sourceId: record\.id/);
   assert.match(adapter, /queueChange\(\{ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId/);

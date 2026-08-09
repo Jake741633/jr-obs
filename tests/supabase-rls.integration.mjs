@@ -336,8 +336,33 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
 
     // Office-only tables and typed entity tenant isolation.
+    const quoteA = source("quote-a");
     const officeCases = [
-      ["pricing_documents", source("quote-a"), { type: "Quote", status: "Draft" }],
+      ["pricing_documents", quoteA, {
+        type: "Quote",
+        status: "Sent",
+        number: "Q-SEC-0001",
+        title: "Customer-safe security quote",
+        validUntil: "2026-09-01",
+        vatEnabled: true,
+        vatRate: 20,
+        items: [{
+          id: source("quote-line-a"),
+          description: "Customer-visible installation",
+          category: "Materials",
+          quantity: 2,
+          unitPrice: 60,
+          unitCost: 10,
+          supplier: "Staff-only supplier",
+        }],
+        pricingSettings: { materialMarkupPercent: 500 },
+        profitability: { costPrice: 20, expectedProfit: 100, grossMargin: 83.3 },
+        internalNotes: "Staff-only pricing note",
+        revisions: [{ id: source("quote-revision-a"), internalNotes: "Historic staff-only note" }],
+        lastFollowUpAt: "2026-08-01T10:00:00.000Z",
+        nextFollowUpDate: "2026-08-15",
+        terms: "Customer-visible terms",
+      }],
       ["invoices", source("invoice-a"), { status: "Draft", total: 1200 }],
       ["payments", source("payment-a"), { amount: 200, method: "Bank transfer" }],
       ["expenses", source("expense-a"), { grossAmount: 50 }],
@@ -352,6 +377,59 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectAllowed(tenantBRead, `Tenant B query should execute for ${table}`);
       assert.deepEqual(tenantBRead.payload, [], `Tenant B must not read Tenant A ${table}`);
     }
+
+    const staffPricing = await listRecords(accounts.A.office, "pricing_documents", `select=payload&source_id=eq.${quoteA}`);
+    await expectAllowed(staffPricing, "Staff should retain the complete pricing record");
+    assert.equal(staffPricing.payload[0].payload.profitability.expectedProfit, 100);
+    assert.equal(staffPricing.payload[0].payload.items[0].unitCost, 10);
+
+    const customerBasePricing = await listRecords(accounts.A.customer, "pricing_documents", `select=payload&source_id=eq.${quoteA}`);
+    await expectAllowed(customerBasePricing, "Customer base pricing query should fail closed");
+    assert.deepEqual(customerBasePricing.payload, [], "Customer sessions must not read complete staff pricing payloads");
+
+    const customerPricing = await listRecords(accounts.A.customer, "customer_pricing_documents", `select=source_id,payload&source_id=eq.${quoteA}`);
+    await expectAllowed(customerPricing, "Customer should read their allowlisted pricing projection");
+    assert.equal(customerPricing.payload.length, 1);
+    assert.equal(customerPricing.payload[0].payload.number, "Q-SEC-0001");
+    assert.equal(customerPricing.payload[0].payload.items[0].unitPrice, 60);
+    assert.equal(customerPricing.payload[0].payload.profitability, undefined, "Customer pricing projection must omit staff-only profitability");
+    assert.equal(customerPricing.payload[0].payload.pricingSettings, undefined);
+    assert.equal(customerPricing.payload[0].payload.internalNotes, undefined);
+    assert.equal(customerPricing.payload[0].payload.revisions, undefined);
+    assert.equal(customerPricing.payload[0].payload.items[0].unitCost, undefined);
+    assert.equal(customerPricing.payload[0].payload.items[0].supplier, undefined);
+
+    const otherCustomerQuote = source("quote-a-other-customer");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, otherCustomerQuote, otherCustomerA, otherCustomerJobA, {
+        type: "Quote",
+        status: "Sent",
+        number: "Q-SEC-OTHER",
+        title: "Other customer quote",
+        items: [{ id: source("quote-line-other"), description: "Other customer work", quantity: 1, unitPrice: 100, unitCost: 1 }],
+      })),
+      "Office should create another customer's quote",
+    );
+    const crossCustomerPricing = await listRecords(accounts.A.customer, "customer_pricing_documents", `select=source_id&source_id=eq.${otherCustomerQuote}`);
+    await expectAllowed(crossCustomerPricing, "Cross-customer pricing projection query should execute safely");
+    assert.deepEqual(crossCustomerPricing.payload, [], "Another customer must not read the pricing projection");
+
+    const crossOrganisationPricing = await listRecords(accounts.B.customer, "customer_pricing_documents", `select=source_id&source_id=eq.${quoteA}`);
+    await expectAllowed(crossOrganisationPricing, "Cross-organisation pricing projection query should execute safely");
+    assert.deepEqual(crossOrganisationPricing.payload, [], "Another organisation must not read the pricing projection");
+
+    await expectDenied(
+      await insertRecord(accounts.A.customer, "customer_pricing_documents", {
+        organisation_id: organisationA,
+        source_id: source("forged-customer-pricing"),
+        customer_source_id: customerA,
+        version: 1,
+        payload: { id: source("forged-customer-pricing"), number: "FORGED" },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }),
+      "Customer must not write the pricing projection",
+    );
 
     // Field-write tables.
     const fieldCases = [
