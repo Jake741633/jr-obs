@@ -31,6 +31,7 @@ const requiredSuites = [
   "server-side-replay-penetration.test.mjs",
   "legacy-app-record-identity-guard.test.mjs",
   "legacy-backup-role-guard.test.mjs",
+  "private-authorization-helper-boundary.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -71,6 +72,7 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Electrician must not forge another user's private-file attribution",
     "Staff must not register private-file metadata for another tenant path",
     "Staff must not bypass the private-file metadata MIME allowlist",
+    "Authorization helper RPC must not be exposed",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

@@ -230,6 +230,26 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const jobA = source("job-a");
     const jobB = source("job-b");
 
+    // SECURITY DEFINER authorization helpers are policy internals, not public
+    // PostgREST RPC endpoints. RLS keeps EXECUTE through the private schema.
+    const helperRpcCases = [
+      ["current_jr_role", {}],
+      ["current_customer_source_id", {}],
+      ["is_organisation_member", { target_organisation_id: organisationA }],
+      ["current_organisation_id", {}],
+      ["current_role", {}],
+      ["can_manage_business", {}],
+      ["can_manage_office_data", {}],
+      ["can_manage_field_data", {}],
+      ["can_write_cloud_collection", { collection_key_value: "jr-os-job-tasks" }],
+    ];
+    for (const [helper, body] of helperRpcCases) {
+      await expectDenied(
+        await authenticated(accounts.A.owner, `/rest/v1/rpc/${helper}`, { method: "POST", body }),
+        `Authorization helper RPC must not be exposed: ${helper}`,
+      );
+    }
+
     // Legacy aggregate backups contain the complete organisation and remain office-only.
     const legacyBackupId = JSON.stringify([organisationA, source("legacy-backup")]);
     await expectAllowed(await insertRecord(accounts.A.owner, "app_records", {

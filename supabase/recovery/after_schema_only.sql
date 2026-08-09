@@ -95,4 +95,7 @@
 \echo 'Applying JR OS consolidated private file metadata policies'
 \ir ../migrations/20260809_029_consolidate_private_file_policies.sql
 
+\echo 'Moving JR OS authorization helpers behind the Data API boundary'
+\ir ../migrations/20260809_030_private_authorization_helpers.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
