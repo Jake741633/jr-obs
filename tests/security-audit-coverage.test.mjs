@@ -30,6 +30,7 @@ const requiredSuites = [
   "private-file-identity-guard.test.mjs",
   "server-side-replay-penetration.test.mjs",
   "legacy-app-record-identity-guard.test.mjs",
+  "legacy-backup-role-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);

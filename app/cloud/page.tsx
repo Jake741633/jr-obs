@@ -6,6 +6,7 @@ import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import {
   completeEmailVerificationFromUrl,
+  canManageCloudMigration,
   getCurrentCloudUser,
   migrateLocalDataToCloud,
   migrateTypedLocalDataToCloud,
@@ -17,6 +18,7 @@ import {
 } from "../../lib/cloudSync";
 import { effectiveCloudMode } from "../../lib/cloud/config";
 import { flushSyncQueue, syncStatus, type SyncState } from "../../lib/cloud/repository";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { isSupabaseConfigured } from "../../lib/supabase/client";
 
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none focus:border-cyan-400";
@@ -25,6 +27,7 @@ const emptyResults: Record<MigrationAction, string> = { "typed-import": "", "leg
 
 export default function CloudPage() {
   const configured = isSupabaseConfigured();
+  const { identity } = useCloudIdentity();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -141,6 +144,7 @@ export default function CloudPage() {
   }
 
   const unavailable = !configured || !userEmail;
+  const migrationUnavailable = unavailable || !canManageCloudMigration(identity?.role);
 
   return <div className="space-y-6">
     <div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Cloud foundation</p><h1 className="mt-1 text-3xl font-bold">Cloud & account</h1><p className="mt-2 text-sm text-slate-400">Connect JR OS to account-based storage without deleting or disabling existing browser records.</p></div>
@@ -157,16 +161,16 @@ export default function CloudPage() {
       <p className="mt-2 text-sm text-slate-400">The legacy backup copy remains available. The typed migration copies individual records using their existing local IDs and skips unchanged records.</p>
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-slate-800 p-4">
-          <Button type="button" disabled={unavailable || activeAction === "typed-import"} onClick={importTypedRecords}><CloudUpload className="mr-2 size-4" />{activeAction === "typed-import" ? "Importing typed records…" : "Import records to typed tables"}</Button>
+          <Button type="button" disabled={migrationUnavailable || activeAction === "typed-import"} onClick={importTypedRecords}><CloudUpload className="mr-2 size-4" />{activeAction === "typed-import" ? "Importing typed records…" : "Import records to typed tables"}</Button>
           {importProgress ? <div className="mt-3 space-y-1 text-sm text-slate-400"><p>Current collection: <span className="text-slate-200">{importProgress.currentCollection}</span></p><p>Collections: {importProgress.completedCollections}/{importProgress.totalCollections || "…"}</p><p>{importProgress.imported} imported · {importProgress.skipped} skipped · {importProgress.failed} failed</p>{importProgress.latestError ? <p className="whitespace-pre-wrap text-red-300">{importProgress.latestError}</p> : null}</div> : null}
           {actionResults["typed-import"] ? <p className="mt-3 whitespace-pre-wrap rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{actionResults["typed-import"]}</p> : null}
         </div>
         <div className="rounded-xl border border-slate-800 p-4">
-          <Button type="button" disabled={unavailable || activeAction === "legacy-copy"} onClick={copyLegacyBackup}><CloudUpload className="mr-2 size-4" />{activeAction === "legacy-copy" ? "Copying legacy backup…" : "Copy legacy backup"}</Button>
+          <Button type="button" disabled={migrationUnavailable || activeAction === "legacy-copy"} onClick={copyLegacyBackup}><CloudUpload className="mr-2 size-4" />{activeAction === "legacy-copy" ? "Copying legacy backup…" : "Copy legacy backup"}</Button>
           {actionResults["legacy-copy"] ? <p className="mt-3 whitespace-pre-wrap rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{actionResults["legacy-copy"]}</p> : null}
         </div>
         <div className="rounded-xl border border-slate-800 p-4">
-          <Button type="button" disabled={unavailable || activeAction === "legacy-restore"} onClick={restoreLegacyBackup}><CloudDownload className="mr-2 size-4" />{activeAction === "legacy-restore" ? "Restoring legacy backup…" : "Restore legacy backup"}</Button>
+          <Button type="button" disabled={migrationUnavailable || activeAction === "legacy-restore"} onClick={restoreLegacyBackup}><CloudDownload className="mr-2 size-4" />{activeAction === "legacy-restore" ? "Restoring legacy backup…" : "Restore legacy backup"}</Button>
           {actionResults["legacy-restore"] ? <p className="mt-3 whitespace-pre-wrap rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{actionResults["legacy-restore"]}</p> : null}
         </div>
         <div className="rounded-xl border border-slate-800 p-4">

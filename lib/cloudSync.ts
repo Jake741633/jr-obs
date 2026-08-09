@@ -26,6 +26,17 @@ const cloudInternalKeys = [
   "jr-os-last-cloud-sync",
   "jr-os-last-typed-cloud-sync",
 ];
+const cloudMigrationRoles = ["owner", "admin", "office"] as const;
+
+export function canManageCloudMigration(role: string | undefined) {
+  return Boolean(role && cloudMigrationRoles.some((allowedRole) => allowedRole === role));
+}
+
+function assertCloudMigrationRole(role: string | undefined) {
+  if (!canManageCloudMigration(role)) {
+    throw new Error("Only owner, admin or office users can access organisation migration backups.");
+  }
+}
 
 function identityChanged() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
@@ -178,7 +189,8 @@ export function legacyMigrationRecordId(organisationId: string, storageKey: stri
 }
 
 export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
-  const { user, organisationId } = await getCloudContext();
+  const { user, organisationId, role } = await getCloudContext();
+  assertCloudMigrationRole(role);
   const backup = exportJrOsData();
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
   for (const [storageKey, value] of Object.entries(backup.data)) {
@@ -196,7 +208,7 @@ export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
 
 export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationProgressHandler): Promise<CloudSyncResult> {
   const { user, organisationId, role } = await getCloudContext();
-  if (!["owner", "admin", "office"].includes(role)) throw new Error("Only owner, admin or office users can run the collection migration.");
+  assertCloudMigrationRole(role);
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
   const storageKeys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
     .filter((key): key is string => Boolean(key?.startsWith(JR_OS_STORAGE_PREFIX)))
@@ -243,7 +255,8 @@ export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationPr
 }
 
 export async function restoreCloudDataToLocal() {
-  const { organisationId } = await getCloudContext();
+  const { organisationId, role } = await getCloudContext();
+  assertCloudMigrationRole(role);
   const rows = await supabaseFetch(`/rest/v1/app_records?organisation_id=eq.${encodeURIComponent(organisationId)}&select=payload`);
   let restored = 0;
   for (const record of Array.isArray(rows) ? rows : []) {

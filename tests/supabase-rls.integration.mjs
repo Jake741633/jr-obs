@@ -19,7 +19,7 @@ const typedTables = [
   "certificates", "electrical_testing_records", "job_documents", "portal_approvals", "portal_requests",
   "ai_recommendation_evidence",
 ];
-const cleanupTables = ["private_files", "audit_log", "cloud_collections", ...typedTables];
+const cleanupTables = ["private_files", "audit_log", "app_records", "cloud_collections", ...typedTables];
 
 function authHeaders(key, accessToken, extra = {}) {
   return {
@@ -229,6 +229,30 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const otherCustomerA = source("customer-a-other");
     const jobA = source("job-a");
     const jobB = source("job-b");
+
+    // Legacy aggregate backups contain the complete organisation and remain office-only.
+    const legacyBackupId = JSON.stringify([organisationA, source("legacy-backup")]);
+    await expectAllowed(await insertRecord(accounts.A.owner, "app_records", {
+      id: legacyBackupId,
+      organisation_id: organisationA,
+      collection: "legacy-backup",
+      payload: { storageKey: "jr-os-customers", value: [{ id: customerA, name: "Private legacy customer" }] },
+      created_by: accounts.A.owner.id,
+      updated_by: accounts.A.owner.id,
+    }), "Owner should create a tenant-bound legacy backup");
+    for (const role of ["owner", "admin", "office"]) {
+      const result = await listRecords(accounts.A[role], "app_records", `select=id&id=eq.${encodeURIComponent(legacyBackupId)}`);
+      await expectAllowed(result, `${role} legacy backup query should execute`);
+      assert.equal(result.payload.length, 1, `${role} should read its organisation legacy backup`);
+    }
+    for (const role of ["electrician", "customer"]) {
+      const result = await listRecords(accounts.A[role], "app_records", `select=id&id=eq.${encodeURIComponent(legacyBackupId)}`);
+      await expectAllowed(result, `${role} legacy backup query should fail closed`);
+      assert.deepEqual(result.payload, [], `${role} must not read full organisation backups`);
+    }
+    const crossTenantLegacyRead = await listRecords(accounts.B.owner, "app_records", `select=id&id=eq.${encodeURIComponent(legacyBackupId)}`);
+    await expectAllowed(crossTenantLegacyRead, "Cross-tenant legacy backup query should execute safely");
+    assert.deepEqual(crossTenantLegacyRead.payload, [], "Another organisation must not read the legacy backup");
 
     // Office-only tables and typed entity tenant isolation.
     const officeCases = [

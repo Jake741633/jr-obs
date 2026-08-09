@@ -20,7 +20,7 @@ test("cloud context excludes suspended profiles", () => {
 });
 
 test("migration and restore operations resolve their tenant through guarded cloud context", () => {
-  assert.match(cloudSync, /export async function migrateLocalDataToCloud\(\): Promise<CloudSyncResult> \{\s*const \{ user, organisationId \} = await getCloudContext\(\)/s);
+  assert.match(cloudSync, /export async function migrateLocalDataToCloud\(\): Promise<CloudSyncResult> \{\s*const \{ user, organisationId, role \} = await getCloudContext\(\)/s);
   assert.match(cloudSync, /export async function migrateTypedLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(\)/);
-  assert.match(cloudSync, /export async function restoreCloudDataToLocal\(\) \{\s*const \{ organisationId \} = await getCloudContext\(\)/s);
+  assert.match(cloudSync, /export async function restoreCloudDataToLocal\(\) \{\s*const \{ organisationId, role \} = await getCloudContext\(\)/s);
 });
