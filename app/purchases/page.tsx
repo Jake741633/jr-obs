@@ -63,7 +63,7 @@ export default function PurchasesPage() {
           stockCode: material?.stockCode || "",
           supplierUrl: material?.supplierUrl || undefined,
           quantity: line.quantity,
-          unitCost: line.unitCost,
+          unitCost: line.unitCost ?? 0,
           status: "Needed" as const,
         };
       }),
