@@ -126,7 +126,9 @@ The migration creates the private `jr-os-private` bucket and tenant-path RLS pol
 <organisation-id>/jobs/<job-source-id>/<generated-file-name>
 ```
 
-Use signed upload/download URLs from the data-access layer. Do not save service credentials in the browser and do not change the bucket to public.
+Use authenticated upload/download requests from the data-access layer. Migration `041` deliberately denies client-created signed upload and download URLs because those bearer URLs outlive Auth session revocation. Do not save service credentials in the browser and do not change either JR OS bucket to public.
+
+After deploying migration `041`, ask Supabase Support to rotate the project's dedicated Storage signed-URL key. Supabase documents that signed download URLs issued before the migration remain valid until their chosen expiry and cannot be revoked by rotating Auth keys. Do not mark the signed-token hardening complete until that rotation is confirmed: <https://supabase.com/docs/guides/storage/serving/downloads#signing-urls>.
 
 ## Production readiness limits
 

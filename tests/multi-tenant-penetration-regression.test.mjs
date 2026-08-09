@@ -55,11 +55,11 @@ test("backup payloads cannot inject another tenant or internal sync state", () =
   assert.match(appData, /organisationStorageKey\(key, organisationId\)/);
 });
 
-test("private file path and signed URL tampering fail full authorisation checks", () => {
+test("private file path and authenticated download tampering fail full authorisation checks", () => {
   assert.match(privateFiles, /isOrganisationPrivateObjectPath/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
   assert.match(privateFiles, /The private file does not belong to the active organisation/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity: CloudIdentity, sourceId: string\)/);
   assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
 });
 
@@ -85,6 +85,7 @@ test("forged or expired browser sessions cannot reach cloud requests", () => {
   assert.match(client, /window\.localStorage\.removeItem\(SESSION_KEY\);\s*return null;/s);
   assert.match(client, /catch \{\s*window\.localStorage\.removeItem\(SESSION_KEY\);\s*return null;\s*\}/s);
   assert.match(client, /cloudSelect[\s\S]*cloudSession\.load\(\) \|\| undefined/);
-  assert.match(client, /createSignedUpload[\s\S]*cloudSession\.load\(\) \|\| undefined/);
-  assert.match(client, /createSignedDownload[\s\S]*cloudSession\.load\(\) \|\| undefined/);
+  assert.match(client, /uploadPrivateObject[\s\S]*cloudSession\.load\(\) \|\| undefined/);
+  assert.match(client, /downloadPrivateObject[\s\S]*const session = cloudSession\.load\(\)/);
+  assert.doesNotMatch(client, /\/storage\/v1\/object\/(?:upload\/)?sign\//);
 });

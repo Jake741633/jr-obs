@@ -128,4 +128,7 @@
 \echo 'Enforcing the owner and admin profile-management hierarchy'
 \ir ../migrations/20260809_040_enforce_profile_management_hierarchy.sql
 
+\echo 'Requiring live authenticated transfers for private Storage'
+\ir ../migrations/20260809_041_require_authenticated_storage_transfers.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

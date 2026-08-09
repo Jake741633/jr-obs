@@ -42,6 +42,7 @@ const requiredSuites = [
   "business-authentication-method-guard.test.mjs",
   "cloud-record-binding-guard.test.mjs",
   "profile-management-hierarchy-guard.test.mjs",
+  "authenticated-storage-transfer-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -61,7 +62,7 @@ test("penetration suite retains every final attack class", () => {
     "offline queue replay",
     "stale identity responses",
     "backup payloads",
-    "private file path and signed URL tampering",
+    "private file path and authenticated download tampering",
     "customer sessions",
     "tenant-sensitive state",
     "forged or expired browser sessions",
@@ -105,6 +106,12 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Demoted sessions must lose staff management authority",
     "Profile user identities must not be rebound",
     "Customers must not rebind their portal scope",
+    "Signed upload URL creation must be disabled",
+    "Pre-existing signed upload tokens must be rejected",
+    "Signed download URL creation must be disabled",
+    "Authenticated staff upload must succeed",
+    "Revoked sessions must not upload private objects",
+    "Revoked sessions must not download private objects",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

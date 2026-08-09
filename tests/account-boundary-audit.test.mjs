@@ -136,23 +136,22 @@ test("private upload queue retries preserve every other authorisation context", 
   assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
 });
 
-test("private uploads and signed downloads reject cross-organisation object paths", () => {
+test("private authenticated transfers reject cross-organisation object paths", () => {
   assert.match(privateFiles, /export function isOrganisationPrivateObjectPath/);
   assert.match(privateFiles, /The private file does not belong to the active organisation/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(item\.organisationId, item\.objectPath\)/);
-  assert.match(privateFiles, /signedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
+  assert.match(privateFiles, /authenticatedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(metadata\.organisation_id, metadata\.object_path\)/);
-  assert.match(privateFiles, /signedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId\)/);
+  assert.match(privateFiles, /authenticatedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId\)/);
 });
 
-test("signed attachment URLs cannot be reused after an authorisation context change", () => {
-  assert.match(privateFiles, /export function privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+test("authenticated attachment URLs cannot be reused after an authorisation context change", () => {
+  assert.match(privateFiles, /export function privateDownloadCacheKey\(identity: CloudIdentity, sourceId: string\)/);
   assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, queued\.sourceId\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, photo\.id\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, record\.id\)/);
-  assert.doesNotMatch(privateFiles, /signedUrls\[queued\.sourceId\]/);
-  assert.doesNotMatch(privateFiles, /signedUrls\[photo\.id\]/);
-  assert.doesNotMatch(privateFiles, /signedUrls\[record\.id\]/);
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity, photo\.id\)/);
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity, record\.id\)/);
+  assert.match(privateFiles, /URL\.revokeObjectURL\(url\)/);
+  assert.doesNotMatch(privateFiles, /downloadUrls\[photo\.id\]/);
+  assert.doesNotMatch(privateFiles, /downloadUrls\[record\.id\]/);
 });

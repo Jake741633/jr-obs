@@ -156,6 +156,14 @@ async function createSignedUpload(account, path, storageBucket = bucket) {
   });
 }
 
+async function uploadStorageObject(account, path, bytes, mimeType, storageBucket = bucket) {
+  return authenticated(account, `/storage/v1/object/${storageBucket}/${encodedPath(path)}`, {
+    method: "POST",
+    rawBody: bytes,
+    extraHeaders: { "Content-Type": mimeType, "x-upsert": "false" },
+  });
+}
+
 async function uploadSigned(signedPayload, bytes, mimeType) {
   const value = signedPayload.signedURL || signedPayload.signedUrl || signedPayload.url;
   assert.ok(value, "Signed upload response did not contain a URL");
@@ -171,6 +179,10 @@ async function createSignedDownload(account, path, expiresIn = 60) {
     method: "POST",
     body: { expiresIn },
   });
+}
+
+async function downloadStorageObject(account, path, storageBucket = bucket) {
+  return authenticated(account, `/storage/v1/object/authenticated/${storageBucket}/${encodedPath(path)}`);
 }
 
 async function deleteStorageObject(account, path) {
@@ -632,17 +644,35 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       file_name: "other.png", mime_type: "image/png",
     }), "Staff must not bind private-file metadata to another tenant's job");
 
-    const signedUpload = await createSignedUpload(accounts.A.electrician, ownPath);
-    await expectAllowed(signedUpload, "Electrician should create signed upload URL");
-    assert.equal((await uploadSigned(signedUpload.payload, pngBytes, "image/png")).ok, true, "Signed upload should succeed");
+    await expectDenied(
+      await createSignedUpload(accounts.A.electrician, ownPath),
+      "Signed upload URL creation must be disabled",
+    );
+    const signedTokenPath = `${organisationA}/jobs/${jobA}/${source("preexisting-signed-upload")}/photo.png`;
+    context.objectPaths.push(signedTokenPath);
+    const trustedSignedUpload = await service(
+      `/storage/v1/object/upload/sign/${bucket}/${encodedPath(signedTokenPath)}`,
+      { method: "POST" },
+    );
+    await expectAllowed(trustedSignedUpload, "Service role should create a token for the signed-upload revocation test");
+    assert.equal(
+      (await uploadSigned(trustedSignedUpload.payload, pngBytes, "image/png")).ok,
+      false,
+      "Pre-existing signed upload tokens must be rejected",
+    );
+    await expectAllowed(
+      await uploadStorageObject(accounts.A.electrician, ownPath, pngBytes, "image/png"),
+      "Authenticated staff upload must succeed",
+    );
     await expectAllowed(await insertRecord(accounts.A.electrician, "private_files", {
       organisation_id: organisationA, source_id: source("file-own"), job_source_id: jobA, customer_source_id: customerA,
       bucket, object_path: ownPath, file_name: "photo.png", mime_type: "image/png",
     }), "Staff should write private file metadata");
 
-    const otherUpload = await createSignedUpload(accounts.A.office, otherCustomerPath);
-    await expectAllowed(otherUpload, "Office should create signed upload URL");
-    assert.equal((await uploadSigned(otherUpload.payload, pngBytes, "image/png")).ok, true);
+    await expectAllowed(
+      await uploadStorageObject(accounts.A.office, otherCustomerPath, pngBytes, "image/png"),
+      "Authenticated office upload should succeed",
+    );
     await expectAllowed(await insertRecord(accounts.A.office, "private_files", {
       organisation_id: organisationA, source_id: source("file-other"), job_source_id: otherCustomerJobA, customer_source_id: otherCustomerA,
       bucket, object_path: otherCustomerPath, file_name: "other.png", mime_type: "image/png",
@@ -652,59 +682,111 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       bucket, object_path: otherCustomerPath, file_name: "other.png", mime_type: "image/png",
     }), "Staff must not alias an existing private object to a second metadata row");
 
-    await expectDenied(await createSignedUpload(accounts.A.electrician, tenantBPath), "Staff must not create signed upload URLs for another tenant path");
-    await expectDenied(await createSignedUpload(accounts.A.customer, `${organisationA}/jobs/${jobA}/${source("customer-upload")}/x.png`), "Customer must not upload files");
+    await expectDenied(
+      await uploadStorageObject(accounts.A.electrician, tenantBPath, pngBytes, "image/png"),
+      "Staff must not upload to another tenant path",
+    );
+    await expectDenied(
+      await uploadStorageObject(
+        accounts.A.customer,
+        `${organisationA}/jobs/${jobA}/${source("customer-upload")}/x.png`,
+        pngBytes,
+        "image/png",
+      ),
+      "Customer must not upload files",
+    );
 
     const badMimePath = `${organisationA}/jobs/${jobA}/${source("bad-mime")}/payload.exe`;
     context.objectPaths.push(badMimePath);
-    const badMimeSign = await createSignedUpload(accounts.A.electrician, badMimePath);
-    if (badMimeSign.response.ok) {
-      assert.equal((await uploadSigned(badMimeSign.payload, new Uint8Array([1, 2, 3]), "application/x-msdownload")).ok, false, "Disallowed MIME upload must fail");
-    }
+    await expectDenied(
+      await uploadStorageObject(accounts.A.electrician, badMimePath, new Uint8Array([1, 2, 3]), "application/x-msdownload"),
+      "Disallowed MIME upload must fail",
+    );
 
     const oversizedPath = `${organisationA}/jobs/${jobA}/${source("oversized")}/large.bin`;
     context.objectPaths.push(oversizedPath);
-    const oversizedSign = await createSignedUpload(accounts.A.electrician, oversizedPath);
-    if (oversizedSign.response.ok) {
-      const oversized = new Uint8Array((10 * 1024 * 1024) + 1);
-      assert.equal((await uploadSigned(oversizedSign.payload, oversized, "application/pdf")).ok, false, "File larger than 10 MB must fail");
-    }
+    const oversized = new Uint8Array((10 * 1024 * 1024) + 1);
+    await expectDenied(
+      await uploadStorageObject(accounts.A.electrician, oversizedPath, oversized, "application/pdf"),
+      "File larger than 10 MB must fail",
+    );
 
     const legacyPath = `${organisationA}/legacy/${source("legacy-file")}/photo.png`;
     context.legacyObjectPaths.push(legacyPath);
-    const legacyUpload = await createSignedUpload(accounts.A.electrician, legacyPath, legacyBucket);
-    await expectAllowed(legacyUpload, "Electrician should retain bounded legacy upload compatibility");
-    assert.equal((await uploadSigned(legacyUpload.payload, pngBytes, "image/png")).ok, true);
+    await expectDenied(
+      await createSignedUpload(accounts.A.electrician, legacyPath, legacyBucket),
+      "Legacy signed upload URL creation must be disabled",
+    );
+    await expectAllowed(
+      await uploadStorageObject(accounts.A.electrician, legacyPath, pngBytes, "image/png", legacyBucket),
+      "Electrician should retain authenticated legacy upload compatibility",
+    );
 
     const legacyBadMimePath = `${organisationA}/legacy/${source("legacy-bad-mime")}/payload.exe`;
     context.legacyObjectPaths.push(legacyBadMimePath);
-    const legacyBadMimeSign = await createSignedUpload(accounts.A.electrician, legacyBadMimePath, legacyBucket);
-    if (legacyBadMimeSign.response.ok) {
-      assert.equal(
-        (await uploadSigned(legacyBadMimeSign.payload, new Uint8Array([1, 2, 3]), "application/x-msdownload")).ok,
-        false,
-        "Legacy storage must reject disallowed MIME types",
-      );
-    }
     await expectDenied(
-      await createSignedUpload(accounts.A.electrician, tenantBPath, legacyBucket),
+      await uploadStorageObject(
+        accounts.A.electrician,
+        legacyBadMimePath,
+        new Uint8Array([1, 2, 3]),
+        "application/x-msdownload",
+        legacyBucket,
+      ),
+      "Legacy storage must reject disallowed MIME types",
+    );
+    await expectDenied(
+      await uploadStorageObject(accounts.A.electrician, tenantBPath, pngBytes, "image/png", legacyBucket),
       "Legacy storage must reject another tenant path",
     );
     await expectDenied(
-      await createSignedUpload(accounts.A.customer, `${organisationA}/legacy/${source("legacy-customer")}/x.png`, legacyBucket),
+      await uploadStorageObject(
+        accounts.A.customer,
+        `${organisationA}/legacy/${source("legacy-customer")}/x.png`,
+        pngBytes,
+        "image/png",
+        legacyBucket,
+      ),
       "Customer must not upload to legacy storage",
     );
 
-    await expectAllowed(await createSignedDownload(accounts.A.owner, ownPath, 60), "Owner should create signed download URL");
-    await expectAllowed(await createSignedDownload(accounts.A.customer, ownPath, 60), "Customer should sign own scoped file");
-    await expectDenied(await createSignedDownload(accounts.A.customer, otherCustomerPath, 60), "Customer must not sign another customer's file");
-    await expectDenied(await createSignedDownload(accounts.B.owner, ownPath, 60), "Another tenant must not sign Tenant A file");
+    await expectDenied(
+      await createSignedDownload(accounts.A.owner, ownPath, 31_536_000),
+      "Signed download URL creation must be disabled",
+    );
+    await expectAllowed(
+      await downloadStorageObject(accounts.A.owner, ownPath),
+      "Owner should download through a live authenticated request",
+    );
+    await expectAllowed(
+      await downloadStorageObject(accounts.A.customer, ownPath),
+      "Customer should download their own scoped file through live authorization",
+    );
+    await expectDenied(
+      await downloadStorageObject(accounts.A.customer, otherCustomerPath),
+      "Customer must not download another customer's file",
+    );
+    await expectDenied(
+      await downloadStorageObject(accounts.B.owner, ownPath),
+      "Another tenant must not download Tenant A files",
+    );
 
-    const expiring = await createSignedDownload(accounts.A.owner, ownPath, 1);
-    await expectAllowed(expiring, "Owner should create expiring signed URL");
-    const expiringUrl = expiring.payload.signedURL || expiring.payload.signedUrl || expiring.payload.url;
-    await new Promise((resolve) => setTimeout(resolve, 2200));
-    assert.equal((await fetch(absoluteSignedUrl(expiringUrl))).ok, false, "Expired signed URL must stop working");
+    await expectAllowed(
+      await service(`/auth/v1/admin/users/${accounts.A.electrician.id}/logout`, { method: "POST", body: { scope: "global" } }),
+      "Admin should revoke the Storage test session",
+    );
+    await expectDenied(
+      await uploadStorageObject(
+        accounts.A.electrician,
+        `${organisationA}/jobs/${jobA}/${source("revoked-upload")}/revoked.png`,
+        pngBytes,
+        "image/png",
+      ),
+      "Revoked sessions must not upload private objects",
+    );
+    await expectDenied(
+      await downloadStorageObject(accounts.A.electrician, ownPath),
+      "Revoked sessions must not download private objects",
+    );
 
     await expectDenied(await deleteStorageObject(accounts.A.office, ownPath), "Office must not delete private objects");
     await expectAllowed(await deleteStorageObject(accounts.A.admin, ownPath), "Admin should delete private objects");

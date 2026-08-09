@@ -2,26 +2,26 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+const client = readFileSync(new URL("../lib/cloud/client.ts", import.meta.url), "utf8");
 const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
 
-test("private signed download links remain short lived", () => {
-  assert.match(
-    privateFiles,
-    /export async function signedPrivateDownloadUrl\(objectPath: string, organisationId: string, expiresIn = 300\)/,
-  );
-  assert.match(privateFiles, /const boundedExpiry = Math\.min\(300, Math\.max\(60, Math\.floor\(expiresIn\)\)\);/);
-  assert.match(privateFiles, /createSignedDownload\(objectPath, boundedExpiry\)/);
-  assert.doesNotMatch(privateFiles, /createSignedDownload\(objectPath, expiresIn\)/);
+test("private transfers do not mint independently valid Storage bearer URLs", () => {
+  assert.doesNotMatch(client, /\/storage\/v1\/object\/sign\//);
+  assert.doesNotMatch(client, /\/storage\/v1\/object\/upload\/sign\//);
+  assert.match(client, /\/storage\/v1\/object\/authenticated\/\$\{cloudStorageBucket\}/);
+  assert.match(client, /uploadPrivateObject[\s\S]*method: "POST"[\s\S]*cloudSession\.load\(\) \|\| undefined/);
 });
 
-test("private signed downloads still require active organisation ownership", () => {
-  const start = privateFiles.indexOf("export async function signedPrivateDownloadUrl");
+test("private downloads use live authorization and revocable browser object URLs", () => {
+  const start = privateFiles.indexOf("export async function authenticatedPrivateDownloadUrl");
   const end = privateFiles.indexOf("\nexport async function registerExistingPrivateFile", start);
-  const signedDownload = privateFiles.slice(start, end);
+  const authenticatedDownload = privateFiles.slice(start, end);
 
-  assert.match(signedDownload, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
+  assert.match(authenticatedDownload, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
   assert.ok(
-    signedDownload.indexOf("assertOrganisationPrivateObjectPath") < signedDownload.indexOf("createSignedDownload"),
-    "ownership must be validated before a signed link is requested",
+    authenticatedDownload.indexOf("assertOrganisationPrivateObjectPath") < authenticatedDownload.indexOf("downloadPrivateObject"),
+    "ownership must be validated before an authenticated download is requested",
   );
+  assert.match(authenticatedDownload, /URL\.createObjectURL\(file\)/);
+  assert.match(privateFiles, /URL\.revokeObjectURL\(url\)/);
 });

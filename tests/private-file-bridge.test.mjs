@@ -18,8 +18,8 @@ test("private file queues remain authorisation scoped when using base collection
   assert.match(privateFiles, /queued\.storageKey !== storageKey/);
 });
 
-test("signed URL cache remains authorisation scoped independently of collection keys", () => {
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, queued\.sourceId\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, photo\.id\)/);
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity, record\.id\)/);
+test("authenticated download cache remains authorisation scoped independently of collection keys", () => {
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity, photo\.id\)/);
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity, record\.id\)/);
+  assert.match(privateFiles, /URL\.revokeObjectURL\(url\)/);
 });

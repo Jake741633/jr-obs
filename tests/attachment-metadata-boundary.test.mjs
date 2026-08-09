@@ -18,16 +18,16 @@ test("existing attachment metadata cannot register a cross-organisation path", (
   assert.match(privateFiles, /cloudInsert<PrivateFileMetadata>\("private_files", \[metadata\]\)/);
 });
 
-test("attachment uploads and downloads validate object ownership before cloud access", () => {
+test("authenticated attachment transfers validate object ownership before cloud access", () => {
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(item\.organisationId, item\.objectPath\)/);
-  assert.match(privateFiles, /export async function signedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
+  assert.match(privateFiles, /uploadPrivateObject\(item\.objectPath, blob, item\.mimeType\)/);
+  assert.match(privateFiles, /export async function authenticatedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
-  assert.match(privateFiles, /const boundedExpiry = Math\.min\(300, Math\.max\(60, Math\.floor\(expiresIn\)\)\)/);
-  assert.match(privateFiles, /createSignedDownload\(objectPath, boundedExpiry\)/);
+  assert.match(privateFiles, /downloadPrivateObject\(objectPath\)/);
 });
 
-test("signed attachment cache identity includes organisation, user, role, customer and source id", () => {
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+test("authenticated attachment cache identity includes organisation, user, role, customer and source id", () => {
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity: CloudIdentity, sourceId: string\)/);
   assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
-  assert.doesNotMatch(privateFiles, /setSignedUrls\(\(current\) => \(\{ \.\.\.current, \[queued\.sourceId\]/);
+  assert.doesNotMatch(privateFiles, /setDownloadUrls\(\(current\) => \(\{ \.\.\.current, \[queued\.sourceId\]/);
 });

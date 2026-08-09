@@ -16,15 +16,15 @@ test("rest and storage requests use the validated session loader", () => {
   assert.match(client, /cloudUpsert[\s\S]*cloudSession\.load\(\) \|\| undefined/);
   assert.match(client, /cloudPatch[\s\S]*cloudSession\.load\(\) \|\| undefined/);
   assert.match(client, /cloudDelete[\s\S]*cloudSession\.load\(\) \|\| undefined/);
-  assert.match(client, /createSignedUpload[\s\S]*cloudSession\.load\(\) \|\| undefined/);
-  assert.match(client, /createSignedDownload[\s\S]*cloudSession\.load\(\) \|\| undefined/);
+  assert.match(client, /uploadPrivateObject[\s\S]*cloudSession\.load\(\) \|\| undefined/);
+  assert.match(client, /downloadPrivateObject[\s\S]*const session = cloudSession\.load\(\)/);
 });
 
 test("rejected sessions cannot downgrade protected requests to anonymous access", () => {
   assert.match(client, /if \(authenticated && !session\) throw new Error\("Your cloud session has expired\. Sign in again to continue\."\)/);
   assert.match(client, /if \(session\) result\.set\("Authorization", `Bearer \$\{session\.accessToken\}`\);/);
   assert.doesNotMatch(client, /Bearer \$\{session\?\.accessToken \|\| cloudConfig\.anonKey\}/);
-  assert.doesNotMatch(client, /JSON\.parse\(window\.localStorage\.getItem\(SESSION_KEY\)[\s\S]*requestHeaders\(/);
+  assert.doesNotMatch(client, /requestHeaders\(\s*normalizeSession\(JSON\.parse\(window\.localStorage\.getItem\(SESSION_KEY\)/);
 });
 
 test("recovery sessions cannot use the duplicate cloud client to reach business data", () => {

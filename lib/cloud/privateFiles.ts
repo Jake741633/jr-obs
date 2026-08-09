@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { readSupabaseSession } from "../supabase/client";
-import { cloudInsert, cloudUpsert, createSignedDownload, createSignedUpload } from "./client";
-import { cloudConfig, cloudStorageBucket, effectiveCloudMode, type CloudMode } from "./config";
+import { cloudInsert, cloudUpsert, downloadPrivateObject, uploadPrivateObject } from "./client";
+import { cloudStorageBucket, effectiveCloudMode, type CloudMode } from "./config";
 import { activeSyncAuthorizationMatches, revalidateSyncAuthorization, type SyncAuthorizationContext } from "./repository";
 import type { CloudIdentity } from "./useCloudIdentity";
 
@@ -105,7 +105,7 @@ function activeReplayOwnerMatches(authorization: SyncAuthorizationContext) {
     && activeSyncAuthorizationMatches(authorization);
 }
 
-export function privateSignedUrlCacheKey(identity: CloudIdentity, sourceId: string) {
+export function privateDownloadCacheKey(identity: CloudIdentity, sourceId: string) {
   return JSON.stringify([identity.organisationId, identity.userId, identity.role, identity.customerSourceId ?? null, sourceId]);
 }
 
@@ -213,12 +213,6 @@ export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "i
   return queued;
 }
 
-function signedObjectUrl(value: string) {
-  if (/^https?:\/\//i.test(value)) return value;
-  const normalized = value.startsWith("/") ? value : `/${value}`;
-  return `${cloudConfig.url}/storage/v1${normalized}`;
-}
-
 export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) {
   assertOrganisationPrivateObjectPath(item.organisationId, item.objectPath);
   if (effectiveCloudMode() === "local") return { state: "Pending" as const };
@@ -230,13 +224,7 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
   const blob = dataUrlToBlob(item.dataUrl, item.mimeType);
   if (blob.size !== item.size && Math.abs(blob.size - item.size) > 4) throw new Error("The cached file size does not match the queued upload.");
 
-  const signed = await createSignedUpload(item.objectPath);
-  const response = await fetch(signedObjectUrl(signed.signedURL), {
-    method: "PUT",
-    headers: { "Content-Type": item.mimeType, "x-upsert": "false" },
-    body: blob,
-  });
-  if (!response.ok) throw new Error((await response.text()) || `Private file upload failed (${response.status}).`);
+  await uploadPrivateObject(item.objectPath, blob, item.mimeType);
 
   const metadata: PrivateFileMetadata = {
     organisation_id: item.organisationId,
@@ -251,8 +239,7 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
     updated_by: item.userId,
   };
   const rows = await cloudUpsert<PrivateFileMetadata>("private_files", [metadata]);
-  const signedDownload = await createSignedDownload(item.objectPath);
-  return { state: "Synced" as const, metadata: rows[0] ?? metadata, signedDownloadUrl: signedObjectUrl(signedDownload.signedURL) };
+  return { state: "Synced" as const, metadata: rows[0] ?? metadata };
 }
 
 export async function flushPrivateFileUploadQueue(
@@ -285,11 +272,10 @@ export async function flushPrivateFileUploadQueue(
   return remaining;
 }
 
-export async function signedPrivateDownloadUrl(objectPath: string, organisationId: string, expiresIn = 300) {
+export async function authenticatedPrivateDownloadUrl(objectPath: string, organisationId: string) {
   assertOrganisationPrivateObjectPath(organisationId, objectPath);
-  const boundedExpiry = Math.min(300, Math.max(60, Math.floor(expiresIn)));
-  const result = await createSignedDownload(objectPath, boundedExpiry);
-  return signedObjectUrl(result.signedURL);
+  const file = await downloadPrivateObject(objectPath);
+  return URL.createObjectURL(file);
 }
 
 export async function registerExistingPrivateFile(metadata: PrivateFileMetadata) {
@@ -320,7 +306,17 @@ export function usePrivateFileCollectionBridge<T>(input: {
   mode: CloudMode;
 }) {
   const { storageKey, items, setItems, isReady, identity, mode } = input;
-  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [downloadUrls, setDownloadUrls] = useState<Record<string, string>>({});
+  const downloadUrlsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    downloadUrlsRef.current = downloadUrls;
+  }, [downloadUrls]);
+
+  useEffect(() => () => {
+    for (const url of Object.values(downloadUrlsRef.current)) URL.revokeObjectURL(url);
+    downloadUrlsRef.current = {};
+  }, []);
 
   useEffect(() => {
     if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
@@ -404,8 +400,6 @@ export function usePrivateFileCollectionBridge<T>(input: {
           privateUploadError: undefined,
         } as T;
       }));
-      const cacheKey = privateSignedUrlCacheKey(identity, queued.sourceId);
-      setSignedUrls((current) => ({ ...current, [cacheKey]: result.signedDownloadUrl }));
     });
     flush();
     window.addEventListener("online", flush);
@@ -418,31 +412,42 @@ export function usePrivateFileCollectionBridge<T>(input: {
     const missing = items.flatMap((item) => {
       const record = item as PrivateFileBackedRecord;
       if (storageKey === "jr-os-surveys") {
-        return (record.photos ?? []).filter((photo) => photo.privateStoragePath && !signedUrls[privateSignedUrlCacheKey(identity, photo.id)]);
+        return (record.photos ?? []).filter((photo) => photo.privateStoragePath && !downloadUrls[privateDownloadCacheKey(identity, photo.id)]);
       }
-      return record.privateStoragePath && !signedUrls[privateSignedUrlCacheKey(identity, record.id)] ? [record] : [];
+      return record.privateStoragePath && !downloadUrls[privateDownloadCacheKey(identity, record.id)] ? [record] : [];
     });
     if (missing.length === 0) return;
+    const createdUrls: string[] = [];
     Promise.all(missing.map(async (record) => {
-      const url = await signedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId);
-      return [privateSignedUrlCacheKey(identity, record.id), url] as const;
+      const url = await authenticatedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId);
+      createdUrls.push(url);
+      return [privateDownloadCacheKey(identity, record.id), url] as const;
     })).then((entries) => {
-      if (!active) return;
-      setSignedUrls((current) => ({ ...current, ...Object.fromEntries(entries) }));
-    }).catch(() => undefined);
+      if (!active) {
+        for (const url of createdUrls) URL.revokeObjectURL(url);
+        return;
+      }
+      setDownloadUrls((current) => {
+        const next = { ...current, ...Object.fromEntries(entries) };
+        downloadUrlsRef.current = next;
+        return next;
+      });
+    }).catch(() => {
+      for (const url of createdUrls) URL.revokeObjectURL(url);
+    });
     return () => { active = false; };
-  }, [identity, isReady, items, mode, signedUrls, storageKey]);
+  }, [downloadUrls, identity, isReady, items, mode, storageKey]);
 
   const hydratedItems = useMemo(() => items.map((item) => {
     const record = item as PrivateFileBackedRecord;
     if (storageKey === "jr-os-surveys") {
       return {
         ...record,
-        photos: (record.photos ?? []).map((photo) => ({ ...photo, signedDownloadUrl: identity ? signedUrls[privateSignedUrlCacheKey(identity, photo.id)] : undefined })),
+        photos: (record.photos ?? []).map((photo) => ({ ...photo, signedDownloadUrl: identity ? downloadUrls[privateDownloadCacheKey(identity, photo.id)] : undefined })),
       } as T;
     }
-    return { ...record, signedDownloadUrl: identity ? signedUrls[privateSignedUrlCacheKey(identity, record.id)] : undefined } as T;
-  }), [identity, items, signedUrls, storageKey]);
+    return { ...record, signedDownloadUrl: identity ? downloadUrls[privateDownloadCacheKey(identity, record.id)] : undefined } as T;
+  }), [downloadUrls, identity, items, storageKey]);
 
   return { items: hydratedItems };
 }

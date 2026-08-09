@@ -93,17 +93,18 @@ The suite verifies:
 
 The suite uses the private `jr-os-private` bucket and verifies:
 
-- Staff can request signed upload URLs for their own tenant path.
-- Signed uploads succeed for allowed content.
+- Authenticated staff can upload allowed content to their own tenant path.
+- Client-created signed upload and download URLs are denied.
+- Signed upload bearer tokens are rejected at the Storage table.
 - Customers cannot upload files.
-- Cross-tenant signed-upload requests are denied.
+- Cross-tenant authenticated uploads are denied.
 - Unsupported MIME uploads are denied.
 - Files larger than 10 MB are denied.
-- Owners can create signed download URLs.
-- Customers can sign only customer-scoped files.
-- Customers cannot sign another customer's file.
-- Another organisation cannot sign or read the file.
-- Short-lived signed download URLs expire.
+- Owners can download through live authenticated requests.
+- Customers can download only customer-scoped files.
+- Customers cannot download another customer's file.
+- Another organisation cannot read the file.
+- Revoked Auth sessions cannot upload or download private objects.
 - Office users cannot delete private objects.
 - Admin users can delete private objects.
 - `private_files` metadata follows the same tenant and customer scope.

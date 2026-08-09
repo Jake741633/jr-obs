@@ -43,17 +43,17 @@ test("private object paths must belong to the active organisation", () => {
   assert.match(privateFiles, /!objectPath\.includes\("\.\.\/"\)/);
   assert.match(privateFiles, /!objectPath\.startsWith\("\/"\)/);
   assert.match(privateFiles, /throw new Error\("The private file does not belong to the active organisation\."\)/);
-  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\);\s*const boundedExpiry/s);
+  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\);\s*const file = await downloadPrivateObject/s);
 });
 
-test("signed download URLs are authorisation-context keyed and short lived", () => {
-  assert.match(privateFiles, /privateSignedUrlCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+test("authenticated object URLs are authorisation-context keyed and revoked", () => {
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity: CloudIdentity, sourceId: string\)/);
   assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
-  assert.match(privateFiles, /const boundedExpiry = Math\.min\(300, Math\.max\(60, Math\.floor\(expiresIn\)\)\)/);
-  assert.match(privateFiles, /createSignedDownload\(objectPath, boundedExpiry\)/);
+  assert.match(privateFiles, /URL\.createObjectURL\(file\)/);
+  assert.match(privateFiles, /URL\.revokeObjectURL\(url\)/);
 });
 
-test("signed download cache identities cannot collide across authorisation or source boundaries", () => {
+test("download cache identities cannot collide across authorisation or source boundaries", () => {
   assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
   assert.notEqual(JSON.stringify(["org", "user", "admin", null, "file"]), JSON.stringify(["org", "user", "electrician", null, "file"]));
   assert.notEqual(JSON.stringify(["org", "user", "customer", "customer-a", "file"]), JSON.stringify(["org", "user", "customer", "customer-b", "file"]));
