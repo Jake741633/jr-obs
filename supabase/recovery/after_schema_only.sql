@@ -173,4 +173,7 @@
 \echo 'Scoping field planner entries to assigned team members'
 \ir ../migrations/20260809_055_planner_team_scope.sql
 
+\echo 'Scoping private files and Storage objects to their source collection'
+\ir ../migrations/20260809_056_private_file_role_scope.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
