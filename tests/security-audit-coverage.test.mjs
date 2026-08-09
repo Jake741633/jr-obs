@@ -63,6 +63,7 @@ const requiredSuites = [
   "planner-team-live-rls.test.mjs",
   "private-file-role-scope.test.mjs",
   "customer-certificate-projection.test.mjs",
+  "customer-certificate-live-rls.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
