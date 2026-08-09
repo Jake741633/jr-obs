@@ -35,7 +35,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   const target = useMemo(() => collectionCloudTarget(key), [key]);
   const organisationId = identity?.organisationId;
   const userId = identity?.userId;
-  const cacheUserId = identity?.role === "customer" ? userId : undefined;
+  const cacheUserId = userId;
   const activeStorageKey = organisationId ? accountStorageKey(key, organisationId, cacheUserId) : key;
 
   useEffect(() => {

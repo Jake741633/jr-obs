@@ -19,11 +19,12 @@ test("record enumeration cannot remove the organisation filter", () => {
   assert.match(adapter, /queueChange\(\{ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId/);
 });
 
-test("browser cache tampering cannot alias two organisations or customer accounts", () => {
+test("browser cache tampering cannot alias two organisations or authenticated users", () => {
   assert.match(adapter, /return `\$\{storageKey\}:organisation:\$\{JSON\.stringify\(\[organisationId\]\)\}`/);
   assert.match(adapter, /:account:\$\{JSON\.stringify\(\[userId\]\)\}/);
   assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId\)/);
-  assert.match(storage, /identity\?\.role === "customer" \? userId : undefined/);
+  assert.match(storage, /const cacheUserId = userId/);
+  assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
   assert.doesNotMatch(storage, /localStorage\.setItem\(key, JSON\.stringify\(items\)\)/);
 });
 

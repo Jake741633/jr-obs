@@ -20,8 +20,9 @@ test("pricing document search stays on the shared cloud-aware collection layer",
   assert.match(collections, /pricingDocuments: "jr-os-pricing-documents"/);
 });
 
-test("authenticated recent-item caches follow organisation and customer account identity", () => {
-  assert.match(storage, /const cacheUserId = identity\?\.role === "customer" \? userId : undefined/);
+test("authenticated recent-item caches follow organisation and user identity", () => {
+  assert.match(storage, /const cacheUserId = userId/);
+  assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
   assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
   assert.match(storage, /createCollectionRepository<RepositoryRecord>\(\{[\s\S]*organisationId,[\s\S]*userId,[\s\S]*cacheUserId,/);
   assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);

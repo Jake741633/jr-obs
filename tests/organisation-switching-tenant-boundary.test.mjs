@@ -32,8 +32,9 @@ test("account switches remount transient workspace state", () => {
   assert.match(guard, /if \(!identity\)/);
 });
 
-test("browser collections and private-file caches change identity across tenants and users", () => {
-  assert.match(storage, /const cacheUserId = identity\?\.role === "customer" \? userId : undefined/);
+test("every browser collection and private-file cache changes identity across tenants and users", () => {
+  assert.match(storage, /const cacheUserId = userId/);
+  assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
   assert.match(storage, /accountStorageKey\(key, organisationId, cacheUserId\)/);
   assert.match(storage, /\[activeStorageKey, cacheUserId, identityReady, key, mode, organisationId, target, userId\]/);
   assert.match(storage, /\[activeStorageKey, cacheUserId, isReady, items, key, mode, organisationId, target, userId\]/);

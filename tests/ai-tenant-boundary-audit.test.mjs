@@ -16,7 +16,8 @@ test("AI source data is loaded through the organisation and account-scoped colle
   assert.match(aiPage, /useLocalStorageCollection<Builder>\("jr-os-builders"\)/);
   assert.match(aiPage, /useLocalStorageCollection<PricingDocument>\("jr-os-pricing-documents"\)/);
   assert.match(aiPage, /useLocalStorageCollection<Invoice>\("jr-os-invoices"\)/);
-  assert.match(storage, /const cacheUserId = identity\?\.role === "customer" \? userId : undefined/);
+  assert.match(storage, /const cacheUserId = userId/);
+  assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
   assert.match(storage, /const activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId\) : key/);
   assert.match(storage, /organisationId,\s*userId,\s*cacheUserId,/s);
 });
