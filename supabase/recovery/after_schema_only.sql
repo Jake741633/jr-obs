@@ -182,4 +182,7 @@
 \echo 'Failing closed raw customer photo and job-document access'
 \ir ../migrations/20260809_058_fail_closed_customer_photo_sharing.sql
 
+\echo 'Projecting customer-safe invoice records'
+\ir ../migrations/20260809_059_customer_invoice_projection.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
