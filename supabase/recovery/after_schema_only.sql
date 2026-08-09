@@ -113,4 +113,7 @@
 \echo 'Preventing private-file metadata path aliases'
 \ir ../migrations/20260809_035_private_file_object_path_uniqueness.sql
 
+\echo 'Guarding private-file customer and job bindings'
+\ir ../migrations/20260809_036_guard_private_file_record_bindings.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -409,6 +409,10 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     assert.deepEqual(activeJobs.payload, [], "Tombstoned rows must be excluded by active-record queries");
     const tombstones = await listRecords(accounts.A.owner, "jobs", `select=source_id,deleted_at&source_id=eq.${jobA}&deleted_at=not.is.null`);
     assert.equal(tombstones.payload.length, 1, "Tombstone must remain available for sync conflict detection");
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "jobs", `source_id=eq.${jobA}`, { deleted_at: null }),
+      "Owner should restore the job before adding new private files",
+    );
 
     // Role-change protection and deactivation.
     await expectDenied(await patchRecords(accounts.A.office, "profiles", `id=eq.${accounts.A.office.id}`, { role: "owner" }), "Office user must not self-promote");
@@ -437,7 +441,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
 
     // Private Storage: signed upload/download, path enforcement, content controls and customer scope.
     const ownPath = `${organisationA}/jobs/${jobA}/${source("file-own")}/photo.png`;
-    const otherCustomerPath = `${organisationA}/jobs/${jobA}/${source("file-other")}/other.png`;
+    const otherCustomerPath = `${organisationA}/jobs/${otherCustomerJobA}/${source("file-other")}/other.png`;
     const tenantBPath = `${organisationB}/jobs/${jobB}/${source("file-cross")}/cross.png`;
     context.objectPaths.push(ownPath, otherCustomerPath, tenantBPath);
     const pngBytes = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
@@ -456,6 +460,16 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       bucket, object_path: `${organisationA}/jobs/${jobA}/${source("file-bad-mime-path")}/payload.exe`,
       file_name: "payload.exe", mime_type: "application/x-msdownload",
     }), "Staff must not bypass the private-file metadata MIME allowlist");
+    await expectDenied(await insertRecord(accounts.A.office, "private_files", {
+      organisation_id: organisationA, source_id: source("file-cross-customer-binding"), job_source_id: jobA, customer_source_id: otherCustomerA,
+      bucket, object_path: `${organisationA}/jobs/${jobA}/${source("file-cross-customer-path")}/other.png`,
+      file_name: "other.png", mime_type: "image/png",
+    }), "Staff must not bind private-file metadata to another customer's job");
+    await expectDenied(await insertRecord(accounts.A.office, "private_files", {
+      organisation_id: organisationA, source_id: source("file-cross-tenant-binding"), job_source_id: jobB, customer_source_id: customerA,
+      bucket, object_path: `${organisationA}/jobs/${jobB}/${source("file-cross-tenant-path")}/other.png`,
+      file_name: "other.png", mime_type: "image/png",
+    }), "Staff must not bind private-file metadata to another tenant's job");
 
     const signedUpload = await createSignedUpload(accounts.A.electrician, ownPath);
     await expectAllowed(signedUpload, "Electrician should create signed upload URL");
@@ -469,13 +483,13 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectAllowed(otherUpload, "Office should create signed upload URL");
     assert.equal((await uploadSigned(otherUpload.payload, pngBytes, "image/png")).ok, true);
     await expectAllowed(await insertRecord(accounts.A.office, "private_files", {
-      organisation_id: organisationA, source_id: source("file-other"), job_source_id: jobA, customer_source_id: otherCustomerA,
+      organisation_id: organisationA, source_id: source("file-other"), job_source_id: otherCustomerJobA, customer_source_id: otherCustomerA,
       bucket, object_path: otherCustomerPath, file_name: "other.png", mime_type: "image/png",
     }), "Office should write other-customer file metadata");
     await expectDenied(await insertRecord(accounts.A.electrician, "private_files", {
-      organisation_id: organisationA, source_id: source("file-other-alias"), job_source_id: jobA, customer_source_id: customerA,
+      organisation_id: organisationA, source_id: source("file-other-alias"), job_source_id: otherCustomerJobA, customer_source_id: otherCustomerA,
       bucket, object_path: otherCustomerPath, file_name: "other.png", mime_type: "image/png",
-    }), "Staff must not alias an existing private object to another customer");
+    }), "Staff must not alias an existing private object to a second metadata row");
 
     await expectDenied(await createSignedUpload(accounts.A.electrician, tenantBPath), "Staff must not create signed upload URLs for another tenant path");
     await expectDenied(await createSignedUpload(accounts.A.customer, `${organisationA}/jobs/${jobA}/${source("customer-upload")}/x.png`), "Customer must not upload files");
