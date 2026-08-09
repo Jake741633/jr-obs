@@ -125,4 +125,7 @@
 \echo 'Validating cloud payload and customer/job record bindings'
 \ir ../migrations/20260809_039_guard_cloud_record_bindings.sql
 
+\echo 'Enforcing the owner and admin profile-management hierarchy'
+\ir ../migrations/20260809_040_enforce_profile_management_hierarchy.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

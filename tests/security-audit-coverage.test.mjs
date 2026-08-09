@@ -41,6 +41,7 @@ const requiredSuites = [
   "active-auth-session-guard.test.mjs",
   "business-authentication-method-guard.test.mjs",
   "cloud-record-binding-guard.test.mjs",
+  "profile-management-hierarchy-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -98,6 +99,12 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Cloud records must not bind another organisation's customer or job",
     "Cloud records must not bind a job to a different customer",
     "Cloud payload ids must match stable source ids",
+    "Admins must not promote themselves to owner",
+    "Admins must not manage another admin",
+    "Staff must not change the owner membership",
+    "Demoted sessions must lose staff management authority",
+    "Profile user identities must not be rebound",
+    "Customers must not rebind their portal scope",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

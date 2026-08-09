@@ -485,8 +485,64 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
 
     // Role-change protection and deactivation.
     await expectDenied(await patchRecords(accounts.A.office, "profiles", `id=eq.${accounts.A.office.id}`, { role: "owner" }), "Office user must not self-promote");
+    await expectDenied(
+      await patchRecords(accounts.A.admin, "profiles", `id=eq.${accounts.A.admin.id}`, { role: "owner" }),
+      "Admins must not promote themselves to owner",
+    );
     await expectAllowed(await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.office.id}`, { role: "admin" }), "Owner should change staff role");
+    await expectDenied(
+      await patchRecords(accounts.A.admin, "profiles", `id=eq.${accounts.A.office.id}`, { role: "office" }),
+      "Admins must not manage another admin",
+    );
     await expectAllowed(await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.office.id}`, { role: "office" }), "Owner should restore staff role");
+    await expectDenied(
+      await patchRecords(accounts.A.admin, "profiles", `id=eq.${accounts.A.owner.id}`, { active: false }),
+      "Staff must not change the owner membership",
+    );
+    await expectDenied(
+      await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.office.id}`, { role: "owner" }),
+      "Staff management must not assign a second owner",
+    );
+    await expectDenied(
+      await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.owner.id}`, { active: false }),
+      "Owners must not deactivate their own protected membership",
+    );
+    await expectAllowed(
+      await service(`/rest/v1/profiles?id=eq.${accounts.B.customer.id}`, { method: "DELETE" }),
+      "Service role should temporarily remove the alias target profile",
+    );
+    await expectDenied(
+      await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.office.id}`, { id: accounts.B.customer.id }),
+      "Profile user identities must not be rebound",
+    );
+    await createProfile(accounts.B.customer, organisationB, "customer", customerB);
+    await expectDenied(
+      await patchRecords(accounts.A.customer, "profiles", `id=eq.${accounts.A.customer.id}`, { customer_source_id: otherCustomerA }),
+      "Customers must not rebind their portal scope",
+    );
+    await expectDenied(
+      await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.office.id}`, {
+        role: "customer",
+        customer_source_id: source("missing-customer-profile-scope"),
+      }),
+      "Active customer profiles must use a live same-tenant customer scope",
+    );
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.admin.id}`, { role: "office" }),
+      "Owner should demote an admin",
+    );
+    const staleAdminManagement = await patchRecords(
+      accounts.A.admin,
+      "profiles",
+      `id=eq.${accounts.A.electrician.id}`,
+      { role: "office" },
+    );
+    await expectAllowed(staleAdminManagement, "Demoted profile update should fail closed without leaking a row");
+    assert.deepEqual(staleAdminManagement.payload, [], "Demoted sessions must lose staff management authority");
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.admin.id}`, { role: "admin" }),
+      "Owner should restore the admin for remaining checks",
+    );
     await expectAllowed(await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.electrician.id}`, { active: false }), "Owner should deactivate user");
     const deactivatedRead = await listRecords(accounts.A.electrician, "materials", "select=source_id");
     await expectAllowed(deactivatedRead, "Deactivated token query should be safely scoped");
