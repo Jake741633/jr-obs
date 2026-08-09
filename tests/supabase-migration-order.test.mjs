@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 
 const files = [
@@ -12,6 +12,10 @@ const files = [
   "supabase/migrations/20260731_005_security_readiness_phase1.sql",
   "supabase/migrations/20260731_006_profiles_rls_recursion_fix.sql",
 ];
+const allMigrationFiles = readdirSync("supabase/migrations")
+  .filter((file) => file.endsWith(".sql"))
+  .sort()
+  .map((file) => `supabase/migrations/${file}`);
 
 const sql = Object.fromEntries(files.map((file) => [file, readFileSync(file, "utf8")]));
 
@@ -23,11 +27,12 @@ function referenceIndex(source, name) {
   return source.search(new RegExp(`public\\.${name}\\s*\\(`, "i"));
 }
 
-test("JR OS Supabase files exist in the required recovery order", () => {
+test("JR OS Supabase bootstrap files exist and recovery applies every migration in order", () => {
   assert.deepEqual(Object.keys(sql), files);
   const recovery = readFileSync("supabase/recovery/after_schema_only.sql", "utf8");
   const included = [...recovery.matchAll(/\\ir\s+\.\.\/migrations\/([^\s]+)/g)].map((match) => `supabase/migrations/${match[1]}`);
-  assert.deepEqual(included, files.slice(1));
+  assert.deepEqual(included, allMigrationFiles);
+  assert.equal(new Set(included).size, included.length, "recovery must not apply a migration twice");
   assert.match(recovery, /\\set ON_ERROR_STOP on/);
 });
 

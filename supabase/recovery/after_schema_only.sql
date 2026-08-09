@@ -26,4 +26,67 @@
 \echo 'Applying JR OS profile RLS recursion fix'
 \ir ../migrations/20260731_006_profiles_rls_recursion_fix.sql
 
+\echo 'Applying JR OS profile self-update guard'
+\ir ../migrations/20260801_007_profile_self_update_guard.sql
+
+\echo 'Applying JR OS private signed-upload controls'
+\ir ../migrations/20260801_008_private_storage_signed_uploads.sql
+
+\echo 'Applying JR OS neutral signup defaults'
+\ir ../migrations/20260802_009_neutral_signup_defaults.sql
+
+\echo 'Applying JR OS audit-log integrity controls'
+\ir ../migrations/20260802_010_audit_log_integrity.sql
+
+\echo 'Applying JR OS generic collection role guard'
+\ir ../migrations/20260803_011_generic_collection_role_guard.sql
+
+\echo 'Applying JR OS private storage customer scope'
+\ir ../migrations/20260803_012_private_storage_customer_scope.sql
+
+\echo 'Applying JR OS customer profile visibility'
+\ir ../migrations/20260803_013_customer_profile_visibility.sql
+
+\echo 'Applying JR OS legacy storage staff reads'
+\ir ../migrations/20260803_014_legacy_storage_staff_reads.sql
+
+\echo 'Applying JR OS private metadata delete guard'
+\ir ../migrations/20260803_015_private_file_metadata_delete_guard.sql
+
+\echo 'Applying JR OS customer generic collection reads'
+\ir ../migrations/20260803_016_customer_generic_collection_reads.sql
+
+\echo 'Applying JR OS customer typed-table reads'
+\ir ../migrations/20260803_017_customer_typed_table_reads.sql
+
+\echo 'Applying JR OS customer portal insert guard'
+\ir ../migrations/20260803_018_customer_portal_insert_guard.sql
+
+\echo 'Applying JR OS typed insert actor guard'
+\ir ../migrations/20260803_019_typed_insert_actor_guard.sql
+
+\echo 'Applying JR OS legacy aggregate read scope'
+\ir ../migrations/20260803_020_legacy_app_records_staff_reads.sql
+
+\echo 'Applying JR OS tombstone transition guard'
+\ir ../migrations/20260803_021_tombstone_transition_guard.sql
+
+\echo 'Applying JR OS migration marker delete guard'
+\ir ../migrations/20260803_022_migration_marker_delete_guard.sql
+
+\echo 'Applying JR OS private file identity guard'
+\ir ../migrations/20260803_023_private_file_identity_guard.sql
+
+\echo 'Applying JR OS cloud record identity guard'
+\ir ../migrations/20260803_024_cloud_record_identity_guard.sql
+
+\echo 'Applying JR OS legacy record identity guard'
+\ir ../migrations/20260803_025_legacy_app_record_identity_guard.sql
+
+\echo 'Applying JR OS migration marker identity guard'
+\ir ../migrations/20260803_026_migration_marker_identity_guard.sql
+
+\echo 'Applying JR OS legacy backup office scope'
+\ir ../migrations/20260809_027_legacy_backup_office_scope.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
