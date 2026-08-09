@@ -146,4 +146,7 @@
 \echo 'Projecting a field-safe team directory for electricians'
 \ir ../migrations/20260809_046_field_team_member_projection.sql
 
+\echo 'Projecting role-safe job records for field and customer sessions'
+\ir ../migrations/20260809_047_job_role_projections.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

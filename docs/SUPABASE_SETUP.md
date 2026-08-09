@@ -66,6 +66,8 @@ Use separate test users for owner, office, electrician and customer. Verify:
 - electricians cannot query office-only finance, CRM history, settings or AI records directly
 - electricians cannot read full pricing documents, internal costs, markup or margin data through typed APIs
 - electricians receive only the field-safe team directory projection; payroll rates, emergency contacts and private team notes remain office-only
+- electricians and customers never read complete job commercial payloads; role projections remove contract value, retention and accepted quote profitability before Data API delivery
+- electrician field updates preserve hidden office-only job pricing while changing only allowlisted operational job fields
 - only owner/admin accounts can enumerate organisation authentication profiles
 - electricians cannot delete tenant records
 - office users cannot manage owner/admin permissions

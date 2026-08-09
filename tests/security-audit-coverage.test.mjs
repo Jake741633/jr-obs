@@ -48,6 +48,7 @@ const requiredSuites = [
   "profile-directory-read-boundary.test.mjs",
   "electrician-pricing-read-boundary.test.mjs",
   "field-team-projection.test.mjs",
+  "job-role-projections.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
