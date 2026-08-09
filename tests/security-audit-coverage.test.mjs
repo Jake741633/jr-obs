@@ -52,6 +52,7 @@ const requiredSuites = [
   "field-cloud-collection-projection.test.mjs",
   "field-inventory-projections.test.mjs",
   "field-inventory-ui-privacy.test.mjs",
+  "customer-role-projections.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
