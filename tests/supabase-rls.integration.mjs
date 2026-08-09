@@ -273,6 +273,35 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       );
     }
 
+    for (const [role, message] of [
+      ["owner", "Owners should retain organisation profile administration"],
+      ["admin", "Admins should retain organisation profile administration"],
+    ]) {
+      const directory = await listRecords(accounts.A[role], "profiles", "select=id,role,organisation_id");
+      await expectAllowed(directory, `${role} profile directory query should execute`);
+      assert.deepEqual(
+        directory.payload.map((profile) => profile.id).sort(),
+        roles.map((profileRole) => accounts.A[profileRole].id).sort(),
+        message,
+      );
+    }
+    for (const [role, message] of [
+      ["office", "Office must not enumerate authentication profiles"],
+      ["electrician", "Electrician must not enumerate authentication profiles"],
+      ["customer", "Customer must not enumerate authentication profiles"],
+    ]) {
+      const ownProfileOnly = await listRecords(accounts.A[role], "profiles", "select=id,role,organisation_id");
+      await expectAllowed(ownProfileOnly, `${role} own-profile query should execute`);
+      assert.deepEqual(
+        ownProfileOnly.payload.map((profile) => profile.id),
+        [accounts.A[role].id],
+        message,
+      );
+    }
+    const crossTenantProfiles = await listRecords(accounts.A.owner, "profiles", `select=id&organisation_id=eq.${organisationB}`);
+    await expectAllowed(crossTenantProfiles, "Cross-tenant profile directory query should execute safely");
+    assert.deepEqual(crossTenantProfiles.payload, [], "Owners must not enumerate another organisation's authentication profiles");
+
     // Legacy aggregate backups contain the complete organisation and remain office-only.
     const legacyBackupId = JSON.stringify([organisationA, source("legacy-backup")]);
     await expectAllowed(await insertRecord(accounts.A.owner, "app_records", {
@@ -687,6 +716,9 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const deactivatedRead = await listRecords(accounts.A.electrician, "materials", "select=source_id");
     await expectAllowed(deactivatedRead, "Deactivated token query should be safely scoped");
     assert.deepEqual(deactivatedRead.payload, [], "Deactivated user must not see tenant data");
+    const deactivatedProfileRead = await listRecords(accounts.A.electrician, "profiles", `select=id&id=eq.${accounts.A.electrician.id}`);
+    await expectAllowed(deactivatedProfileRead, "Suspended own-profile query should fail closed");
+    assert.deepEqual(deactivatedProfileRead.payload, [], "Suspended sessions must not read their authentication profile");
     await expectDenied(await insertRecord(accounts.A.electrician, "materials", typedRecord(organisationA, source("deactivated-write"), customerA, jobA)), "Deactivated user must not write");
     await expectAllowed(await patchRecords(accounts.A.owner, "profiles", `id=eq.${accounts.A.electrician.id}`, { active: true }), "Owner should reactivate user for remaining tests");
 
@@ -706,6 +738,9 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const recoveryRead = await listRecords(recoveryAccount, "jobs", `select=source_id&source_id=eq.${jobB}`);
     await expectAllowed(recoveryRead, "Recovery-only tenant query should fail closed");
     assert.deepEqual(recoveryRead.payload, [], "Recovery-only sessions must not read tenant data");
+    const recoveryProfileRead = await listRecords(recoveryAccount, "profiles", `select=id&id=eq.${accounts.B.electrician.id}`);
+    await expectAllowed(recoveryProfileRead, "Recovery-only own-profile query should fail closed");
+    assert.deepEqual(recoveryProfileRead.payload, [], "Recovery-only sessions must not resolve an authentication profile");
     await expectDenied(
       await insertRecord(recoveryAccount, "jobs", typedRecord(organisationB, source("recovery-session-write"), customerB, jobB)),
       "Recovery-only sessions must not write tenant data",
@@ -725,6 +760,9 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const revokedSessionRead = await listRecords(accounts.B.electrician, "jobs", `select=source_id&source_id=eq.${jobB}`);
     await expectAllowed(revokedSessionRead, "Revoked access token query should fail closed");
     assert.deepEqual(revokedSessionRead.payload, [], "Revoked access tokens must not retain tenant reads");
+    const revokedProfileRead = await listRecords(accounts.B.electrician, "profiles", `select=id&id=eq.${accounts.B.electrician.id}`);
+    await expectAllowed(revokedProfileRead, "Revoked own-profile query should fail closed");
+    assert.deepEqual(revokedProfileRead.payload, [], "Revoked access tokens must not read their authentication profile");
     await expectDenied(
       await insertRecord(accounts.B.electrician, "jobs", typedRecord(organisationB, source("revoked-session-write"), customerB, jobB)),
       "Revoked access tokens must not retain tenant writes",

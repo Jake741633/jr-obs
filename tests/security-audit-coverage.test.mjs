@@ -45,6 +45,7 @@ const requiredSuites = [
   "authenticated-storage-transfer-guard.test.mjs",
   "customer-pricing-projection.test.mjs",
   "electrician-office-read-boundary.test.mjs",
+  "profile-directory-read-boundary.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -125,6 +126,14 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Office should retain sensitive generic reads",
     "Customer must retain own invoice reads",
     "Electrician must not read customer portal workflow data",
+    "Owners should retain organisation profile administration",
+    "Admins should retain organisation profile administration",
+    "Office must not enumerate authentication profiles",
+    "Electrician must not enumerate authentication profiles",
+    "Customer must not enumerate authentication profiles",
+    "Suspended sessions must not read their authentication profile",
+    "Recovery-only sessions must not resolve an authentication profile",
+    "Revoked access tokens must not read their authentication profile",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

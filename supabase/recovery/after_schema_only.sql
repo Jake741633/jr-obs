@@ -137,4 +137,7 @@
 \echo 'Restricting electrician reads to field-operational records'
 \ir ../migrations/20260809_043_restrict_electrician_office_reads.sql
 
+\echo 'Restricting authentication profile directory reads to account managers'
+\ir ../migrations/20260809_044_restrict_profile_directory_reads.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
