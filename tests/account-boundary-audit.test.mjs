@@ -80,6 +80,14 @@ test("cross-tab session replacement invalidates the previous tenant before loadi
   assert.match(identity, /setActiveSyncIdentity\([\s\S]*next\.identity\?\.organisationId[\s\S]*next\.identity\?\.userId[\s\S]*next\.identity\?\.role[\s\S]*next\.identity\?\.customerSourceId/);
 });
 
+test("active tabs revalidate membership and session authority without waiting for a reload", () => {
+  assert.match(identity, /IDENTITY_REVALIDATION_INTERVAL_MS = 30_000/);
+  assert.match(identity, /document\.visibilityState === "visible"[\s\S]*revalidateCloudIdentity\(\)/);
+  assert.match(identity, /window\.addEventListener\("focus", handleWindowFocus\)/);
+  assert.match(identity, /function revalidateCloudIdentity\(\) \{\s*return identityRequest \?\? loadIdentity\(true\);\s*\}/);
+  assert.match(identity, /catch \{\s*if \(requestVersion === identityRequestVersion\) emit\(\{ identity: null, isReady: true \}\)/);
+});
+
 test("suspended profiles cannot resolve an application identity or expose cached tenant data", () => {
   assert.match(identity, /active=eq\.true/);
   assert.match(identity, /select=organisation_id,role,customer_source_id,active/);

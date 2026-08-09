@@ -24,6 +24,7 @@ let snapshot: IdentitySnapshot = { identity: null, isReady: effectiveCloudMode()
 let identityRequest: Promise<CloudIdentity | null> | null = null;
 let identityRequestVersion = 0;
 const listeners = new Set<() => void>();
+const IDENTITY_REVALIDATION_INTERVAL_MS = 30_000;
 
 function emit(next: IdentitySnapshot) {
   snapshot = next;
@@ -96,6 +97,10 @@ export function refreshCloudIdentity() {
   return loadIdentity(true);
 }
 
+function revalidateCloudIdentity() {
+  return identityRequest ?? loadIdentity(true);
+}
+
 function handleIdentityChange() {
   void refreshCloudIdentity();
 }
@@ -108,6 +113,10 @@ function handleVisibilityChange() {
   if (document.visibilityState === "visible") void refreshCloudIdentity();
 }
 
+function handleWindowFocus() {
+  if (document.visibilityState === "visible") void refreshCloudIdentity();
+}
+
 export function useCloudIdentity() {
   const mode = effectiveCloudMode();
   const current = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
@@ -116,11 +125,17 @@ export function useCloudIdentity() {
     if (mode !== "local" && (!current.isReady || (!current.identity && hasPersistedSession()))) void loadIdentity();
     window.addEventListener("jr-os-cloud-identity-changed", handleIdentityChange);
     window.addEventListener("storage", handleStorageChange);
+    window.addEventListener("focus", handleWindowFocus);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    const intervalId = mode === "local" ? undefined : window.setInterval(() => {
+      if (document.visibilityState === "visible") void revalidateCloudIdentity();
+    }, IDENTITY_REVALIDATION_INTERVAL_MS);
     return () => {
       window.removeEventListener("jr-os-cloud-identity-changed", handleIdentityChange);
       window.removeEventListener("storage", handleStorageChange);
+      window.removeEventListener("focus", handleWindowFocus);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (intervalId !== undefined) window.clearInterval(intervalId);
     };
   }, [current.identity, current.isReady, mode]);
 

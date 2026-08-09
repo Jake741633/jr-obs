@@ -55,3 +55,14 @@ test("collections clear previous tenant data while identity is unresolved", () =
   const loadIndex = storage.indexOf("async function loadCollection()");
   assert.ok(clearIndex !== -1 && loadIndex !== -1 && clearIndex < loadIndex, "collection state must clear before tenant loading begins");
 });
+
+test("visible sessions continuously revalidate revoked or changed membership", () => {
+  assert.match(identity, /const IDENTITY_REVALIDATION_INTERVAL_MS = 30_000;/);
+  assert.match(identity, /function revalidateCloudIdentity\(\) \{\s*return identityRequest \?\? loadIdentity\(true\);\s*\}/);
+  assert.match(identity, /window\.setInterval\(\(\) => \{\s*if \(document\.visibilityState === "visible"\) void revalidateCloudIdentity\(\);\s*\}, IDENTITY_REVALIDATION_INTERVAL_MS\)/);
+  assert.match(identity, /window\.clearInterval\(intervalId\)/);
+  assert.match(identity, /window\.addEventListener\("focus", handleWindowFocus\)/);
+  assert.match(identity, /window\.removeEventListener\("focus", handleWindowFocus\)/);
+  assert.match(identity, /function handleWindowFocus\(\) \{\s*if \(document\.visibilityState === "visible"\) void refreshCloudIdentity\(\);\s*\}/);
+  assert.match(identity, /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) return null;/);
+});
