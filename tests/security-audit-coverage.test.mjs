@@ -35,6 +35,7 @@ const requiredSuites = [
   "private-authorization-helper-boundary.test.mjs",
   "public-database-grants.test.mjs",
   "sensitive-metadata-delete-audit.test.mjs",
+  "portal-record-binding-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
@@ -79,6 +80,8 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Anonymous Data API access must fail at the grant boundary",
     "Legacy storage must reject disallowed MIME types",
     "Private file metadata deletion must create an immutable tenant audit row",
+    "Staff must not bind a portal request to another tenant's job",
+    "Staff must not rebind a customer portal submission",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

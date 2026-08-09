@@ -107,4 +107,7 @@
 \echo 'Auditing sensitive metadata deletions'
 \ir ../migrations/20260809_033_audit_sensitive_metadata_deletions.sql
 
+\echo 'Guarding customer portal record bindings'
+\ir ../migrations/20260809_034_guard_portal_record_bindings.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

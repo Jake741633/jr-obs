@@ -340,6 +340,14 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const requestA = source("request-a");
     await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, approvalA, customerA, jobA, { decision: "Accepted" })), "Customer should create own approval");
     await expectAllowed(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, requestA, customerA, jobA, { type: "Question" })), "Customer should create own request");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "portal_requests", typedRecord(organisationA, source("request-staff-valid"), customerA, jobA, { type: "Question" })),
+      "Staff should create a portal request for a matching tenant job",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.office, "portal_requests", typedRecord(organisationA, source("request-staff-cross-job"), customerA, jobB, { type: "Question" })),
+      "Staff must not bind a portal request to another tenant's job",
+    );
     await expectDenied(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-other"), otherCustomerA, jobA)), "Customer must not create another customer request");
     await expectDenied(
       await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-job"), customerA, jobB)),
@@ -348,6 +356,26 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectDenied(
       await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-other-customer-job"), customerA, otherCustomerJobA)),
       "Customer must not attach a request to another customer's job while keeping their own customer ID",
+    );
+    await expectAllowed(
+      await patchRecords(accounts.A.office, "portal_requests", `source_id=eq.${requestA}`, {
+        payload: { id: requestA, customerId: customerA, jobId: jobA, status: "In review", testRun: runId },
+      }),
+      "Staff should update portal request workflow data without changing its binding",
+    );
+    await expectDenied(
+      await patchRecords(accounts.A.office, "portal_requests", `source_id=eq.${requestA}`, {
+        customer_source_id: otherCustomerA,
+        job_source_id: otherCustomerJobA,
+      }),
+      "Staff must not rebind a customer portal submission",
+    );
+    await expectDenied(
+      await patchRecords(accounts.A.office, "portal_approvals", `source_id=eq.${approvalA}`, {
+        customer_source_id: otherCustomerA,
+        job_source_id: otherCustomerJobA,
+      }),
+      "Staff must not rebind a customer portal submission approval",
     );
     assert.deepEqual((await listRecords(accounts.B.owner, "portal_requests", `select=source_id&source_id=eq.${requestA}`)).payload, []);
 
