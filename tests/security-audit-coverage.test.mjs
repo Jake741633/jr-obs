@@ -60,6 +60,7 @@ const requiredSuites = [
   "timesheet-team-binding.test.mjs",
   "timesheet-team-binding-live-rls.test.mjs",
   "planner-team-scope.test.mjs",
+  "planner-team-live-rls.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
