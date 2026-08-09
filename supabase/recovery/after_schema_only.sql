@@ -158,4 +158,7 @@
 \echo 'Removing field-visible material price-check metadata'
 \ir ../migrations/20260809_050_restrict_field_material_price_metadata.sql
 
+\echo 'Projecting role-safe customer contact records'
+\ir ../migrations/20260809_051_customer_role_projections.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
