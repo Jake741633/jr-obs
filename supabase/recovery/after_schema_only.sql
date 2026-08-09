@@ -161,4 +161,7 @@
 \echo 'Projecting role-safe customer contact records'
 \ir ../migrations/20260809_051_customer_role_projections.sql
 
+\echo 'Projecting a field-safe builder directory'
+\ir ../migrations/20260809_052_field_builder_projection.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
