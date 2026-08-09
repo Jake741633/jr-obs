@@ -170,4 +170,7 @@
 \echo 'Binding field timesheets to the authenticated team identity'
 \ir ../migrations/20260809_054_bind_timesheets_to_team_identity.sql
 
+\echo 'Scoping field planner entries to assigned team members'
+\ir ../migrations/20260809_055_planner_team_scope.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
