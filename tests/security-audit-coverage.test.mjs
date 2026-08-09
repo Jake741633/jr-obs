@@ -67,6 +67,7 @@ const requiredSuites = [
   "customer-photo-sharing-fail-closed.test.mjs",
   "customer-invoice-projection.test.mjs",
   "customer-invoice-live-rls.test.mjs",
+  "customer-payment-projection.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
