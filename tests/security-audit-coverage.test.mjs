@@ -58,6 +58,7 @@ const requiredSuites = [
   "timesheet-actor-scope.test.mjs",
   "timesheet-actor-live-rls.test.mjs",
   "timesheet-team-binding.test.mjs",
+  "timesheet-team-binding-live-rls.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
