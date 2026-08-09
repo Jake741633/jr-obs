@@ -56,6 +56,7 @@ const requiredSuites = [
   "field-builder-projection.test.mjs",
   "field-builder-live-rls.test.mjs",
   "timesheet-actor-scope.test.mjs",
+  "timesheet-actor-live-rls.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
