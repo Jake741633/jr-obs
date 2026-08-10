@@ -208,4 +208,7 @@
 \echo 'Binding customer portal payment links and publishing the current migration version'
 \ir ../migrations/20260810_066_bind_portal_payment_links.sql
 
+\echo 'Projecting customer-safe job timeline records'
+\ir ../migrations/20260810_067_customer_timeline_projection.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

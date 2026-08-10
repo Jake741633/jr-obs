@@ -43,7 +43,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
 }) {
   const { storageKey, table, organisationId, userId, cacheUserId, cacheRole, cacheCustomerSourceId, collectionKey } = options;
   const scopedStorageKey = accountStorageKey(storageKey, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId);
-  const readTable = collectionCloudReadTable(table, cacheRole);
+  const readTable = collectionCloudReadTable(table, cacheRole, collectionKey);
   const collectionFilter = collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : "";
 
   return {

@@ -79,6 +79,8 @@ const requiredSuites = [
   "portal-approval-evidence-guard.test.mjs",
   "portal-payment-link-binding-guard.test.mjs",
   "portal-target-binding-guard.test.mjs",
+  "customer-timeline-projection.test.mjs",
+  "customer-timeline-live-rls.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
