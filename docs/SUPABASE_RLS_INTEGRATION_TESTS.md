@@ -6,23 +6,22 @@ Never point this workflow at production and never use production credentials.
 
 ## Required schema
 
-Apply these files to the dedicated test project in order:
+The disposable project must be on the newest migration committed in `supabase/migrations` before live testing begins.
 
-1. `supabase/schema.sql`
-2. `supabase/migrations/20260730_001_cloud_foundation.sql`
-3. `supabase/migrations/20260730_002_audit_triggers.sql`
-4. `supabase/migrations/20260730_003_permission_hardening.sql`
-5. `supabase/migrations/20260731_004_generic_collection_sync.sql`
-6. `supabase/migrations/20260731_005_security_readiness_phase1.sql`
+For an existing test project:
 
-Migration `005`:
+1. Apply every unapplied migration in filename order.
+2. Never edit a migration that has already been applied.
+3. Apply the newest migration last so it republishes the exact deployed-migration marker.
 
-- Removes authenticated direct writes to `audit_log`.
-- Keeps audit history append-only through trusted database triggers.
-- Customer-scopes private-file metadata and Storage reads.
-- Restricts private uploads to staff roles and tenant-prefixed paths.
-- Enforces the JR OS MIME allowlist and 10 MB maximum in Storage RLS.
-- Restricts private-file deletion to owner and admin roles.
+For a fresh schema-only recovery:
+
+1. Apply `supabase/schema.sql`.
+2. Run `supabase/recovery/after_schema_only.sql` with `psql` and `ON_ERROR_STOP` enabled.
+
+The recovery script applies the current effective migration sequence. It deliberately skips superseded migration `063` and installs self-contained migration `064` instead.
+
+The newest migration must create or replace `public.jr_os_deployed_migration()` with its own filename, revoke execution from `public`, `anon` and `authenticated`, and grant execution only to `service_role`. The protected workflow derives the expected filename from the checked-out repository and stops before any test data is created when the remote marker is missing or stale.
 
 ## Temporary test identities
 
@@ -173,10 +172,11 @@ It runs:
 
 ```text
 npm ci
+npm run verify:supabase-schema
 npm run test:rls
 ```
 
-Without all secrets and the exact confirmation input, the integration test does not run.
+Migration verification runs before the live suite and fails closed if the service-role-only marker is missing or does not equal the repository's newest migration filename. Without all secrets and the exact confirmation input, the integration test does not run.
 
 ## Running locally
 
@@ -187,6 +187,7 @@ export SUPABASE_TEST_URL="https://your-test-project.supabase.co"
 export SUPABASE_TEST_ANON_KEY="..."
 export SUPABASE_TEST_SERVICE_ROLE_KEY="..."
 export SUPABASE_TEST_CONFIRM="JR_OS_RLS_TEST"
+npm run verify:supabase-schema
 npm run test:rls
 ```
 
