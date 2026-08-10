@@ -1,9 +1,10 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { KeyRound } from "lucide-react";
 import { completeEmailVerificationFromUrl, signOutCloudUser } from "../lib/cloudSync";
-import { readSupabaseSession, supabaseFetch } from "../lib/supabase/client";
+import { captureSupabaseSessionOwnership, readSupabaseSession, readSupabaseSessionOwnershipEpoch, supabaseFetch } from "../lib/supabase/client";
+import { sameSupabaseSessionOwnership } from "../lib/supabase/sessionOwnership-core.mjs";
 import { Button } from "./ui/Button";
 
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none focus:border-cyan-400";
@@ -25,6 +26,8 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [message, setMessage] = useState("");
+  const sessionBoundaryVersionRef = useRef(0);
+  const recoveryOperationVersionRef = useRef(0);
 
   function clearRecoverySecrets() {
     setPassword("");
@@ -36,9 +39,10 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
 
     function handleSessionChange(event?: Event) {
       if (event instanceof StorageEvent && event.key !== "jr-os-supabase-session") return;
+      sessionBoundaryVersionRef.current += 1;
       clearRecoverySecrets();
       if (hasRecoverySession()) {
-        setState((current) => current === "saving" ? current : "ready");
+        setState("ready");
         return;
       }
       setState((current) => {
@@ -50,17 +54,22 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
 
     async function prepareRecovery() {
       const recoveryCallback = hasRecoveryCallback();
+      const startingBoundaryVersion = sessionBoundaryVersionRef.current;
       if (!recoveryCallback && !hasRecoverySession()) {
         if (active) setState("inactive");
         return;
       }
 
       try {
-        if (recoveryCallback) await completeEmailVerificationFromUrl();
+        if (recoveryCallback) {
+          await completeEmailVerificationFromUrl(() => active && sessionBoundaryVersionRef.current === startingBoundaryVersion);
+        }
+        const expectedBoundaryVersion = startingBoundaryVersion + (recoveryCallback ? 1 : 0);
+        if (!active || sessionBoundaryVersionRef.current !== expectedBoundaryVersion) return;
         if (!hasRecoverySession()) throw new Error("This password recovery session is missing or has expired.");
         if (active) setState("ready");
       } catch (error) {
-        if (!active) return;
+        if (!active || sessionBoundaryVersionRef.current !== startingBoundaryVersion) return;
         setMessage(error instanceof Error ? error.message : "This recovery link could not be verified.");
         setState("error");
       }
@@ -71,6 +80,8 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
     void prepareRecovery();
     return () => {
       active = false;
+      sessionBoundaryVersionRef.current += 1;
+      recoveryOperationVersionRef.current += 1;
       window.removeEventListener("jr-os-cloud-identity-changed", handleSessionChange);
       window.removeEventListener("storage", handleSessionChange);
     };
@@ -88,24 +99,48 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
       return;
     }
 
+    const startingOwnership = captureSupabaseSessionOwnership();
+    const startingSession = startingOwnership.session;
+    if (!startingSession?.is_password_recovery) {
+      clearRecoverySecrets();
+      setMessage("The password recovery session was closed. Return to sign in before opening JR OS.");
+      setState("complete");
+      return;
+    }
+    const startingBoundaryVersion = sessionBoundaryVersionRef.current;
+    const operationVersion = ++recoveryOperationVersionRef.current;
+    const operationIsCurrent = () => recoveryOperationVersionRef.current === operationVersion
+      && sessionBoundaryVersionRef.current === startingBoundaryVersion
+      && sameSupabaseSessionOwnership(
+        readSupabaseSession(),
+        readSupabaseSessionOwnershipEpoch(),
+        startingOwnership.session,
+        startingOwnership.epoch,
+      );
+
     setState("saving");
     try {
       await supabaseFetch("/auth/v1/user", {
         method: "PUT",
         body: JSON.stringify({ password }),
       });
+      if (!operationIsCurrent()) return;
       clearRecoverySecrets();
       let globalSignOutConfirmed = true;
       try {
-        await signOutCloudUser();
+        await signOutCloudUser(startingOwnership, operationIsCurrent);
       } catch {
         globalSignOutConfirmed = false;
       }
+      if (recoveryOperationVersionRef.current !== operationVersion
+        || sessionBoundaryVersionRef.current !== startingBoundaryVersion + 1
+        || readSupabaseSession() !== null) return;
       setState("complete");
       setMessage(globalSignOutConfirmed
         ? "Password updated. You can now sign in normally with your new password."
         : "Password updated and this browser session was cleared, but global sign-out could not be confirmed. Sign in again before continuing.");
     } catch (error) {
+      if (!operationIsCurrent()) return;
       setState("ready");
       setMessage(error instanceof Error ? error.message : "The password could not be updated.");
     }

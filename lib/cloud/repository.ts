@@ -4,6 +4,7 @@ import { cloudPatch, cloudSelect, cloudUpsert } from "./client";
 import { effectiveCloudMode } from "./config";
 import { buildCloudEnvelope, coalesceQueue, hasVersionConflict, makeTombstone, pendingImports, tenantRecordQuery } from "./repository-core.mjs";
 import { readSupabaseSession, supabaseFetch } from "../supabase/client";
+import { assertCloudPageOperationCurrent } from "./cloudPageIdentity-core.mjs";
 
 export type SyncState = "Synced" | "Pending" | "Offline" | "Conflict" | "Failed";
 export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: string; customer_source_id?: string | null; job_source_id?: string | null; version: number; source_updated_at?: string; payload: T; updated_at?: string; deleted_at?: string | null; }
@@ -245,11 +246,14 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
   return { processed, cleared, remaining: activeRemaining.length, conflicts, failed };
 }
 
-export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; customerSourceId?: string; jobId?: string; jobSourceId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string) {
+export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; customerSourceId?: string; jobId?: string; jobSourceId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string, operationIsCurrent?: () => boolean) {
+  assertCloudPageOperationCurrent(operationIsCurrent);
   const records = read<T[]>(storageKey, []);
   if (!records.length) return { imported: 0, skipped: 0 };
   const filter = collectionFilter(collectionKey);
+  assertCloudPageOperationCurrent(operationIsCurrent);
   const existing = await cloudSelect<{ source_id: string; source_updated_at?: string; version?: number; deleted_at?: string | null }>(table, `select=source_id,source_updated_at,version,deleted_at&organisation_id=eq.${encodeURIComponent(organisationId)}${filter}`);
+  assertCloudPageOperationCurrent(operationIsCurrent);
   const pending = pendingImports(records, existing);
   if (pending.length) {
     const importedAt = new Date().toISOString();
@@ -264,7 +268,9 @@ export async function importLocalCollection<T extends { id: string; updatedAt?: 
       createdBy: userId,
       updatedBy: userId,
     }));
+    assertCloudPageOperationCurrent(operationIsCurrent);
     await cloudUpsert(table, rows, collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
+    assertCloudPageOperationCurrent(operationIsCurrent);
   }
   const versions = Object.fromEntries(existing.map((row) => [row.source_id, row.version || 1]));
   for (const record of pending) versions[record.id] = 1;

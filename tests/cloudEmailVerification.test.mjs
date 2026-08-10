@@ -29,11 +29,11 @@ test("verification completion restores the saved session and clears auth details
 test("email verification sessions are revoked before normal business sign-in", () => {
   assert.match(
     cloudSync,
-    /if \(authType\) \{[\s\S]*await signOutTemporaryCloudSession\(\)[\s\S]*requiresPasswordSignIn: true/,
+    /if \(authType\) \{[\s\S]*await signOutTemporaryCloudSession\(storedOwnership\)[\s\S]*requiresPasswordSignIn: true/,
   );
   assert.match(
     cloudSync,
-    /async function signOutTemporaryCloudSession\(\) \{[\s\S]*\/auth\/v1\/logout\?scope=local[\s\S]*saveSupabaseSession\(null\)/,
+    /async function signOutTemporaryCloudSession\(expectedOwnership: SupabaseSessionOwnership\) \{[\s\S]*\/auth\/v1\/logout\?scope=local[\s\S]*activeSessionMatches\(expectedOwnership\)[\s\S]*saveSupabaseSession\(null\)/,
   );
   assert.match(
     cloudPage,
