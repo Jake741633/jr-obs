@@ -16,6 +16,9 @@ const allMigrationFiles = readdirSync("supabase/migrations")
   .filter((file) => file.endsWith(".sql"))
   .sort()
   .map((file) => `supabase/migrations/${file}`);
+const supersededRecoveryMigrations = new Set([
+  "supabase/migrations/20260810_063_guard_planner_team_assignments.sql",
+]);
 
 const sql = Object.fromEntries(files.map((file) => [file, readFileSync(file, "utf8")]));
 
@@ -27,12 +30,14 @@ function referenceIndex(source, name) {
   return source.search(new RegExp(`public\\.${name}\\s*\\(`, "i"));
 }
 
-test("JR OS Supabase bootstrap files exist and recovery applies every migration in order", () => {
+test("JR OS Supabase bootstrap files exist and recovery applies every current migration in order", () => {
   assert.deepEqual(Object.keys(sql), files);
   const recovery = readFileSync("supabase/recovery/after_schema_only.sql", "utf8");
   const included = [...recovery.matchAll(/\\ir\s+\.\.\/migrations\/([^\s]+)/g)].map((match) => `supabase/migrations/${match[1]}`);
-  assert.deepEqual(included, allMigrationFiles);
+  const expected = allMigrationFiles.filter((file) => !supersededRecoveryMigrations.has(file));
+  assert.deepEqual(included, expected);
   assert.equal(new Set(included).size, included.length, "recovery must not apply a migration twice");
+  assert.match(recovery, /Migration 064 is a self-contained replacement for 063/i);
   assert.match(recovery, /\\set ON_ERROR_STOP on/);
 });
 

@@ -141,12 +141,6 @@ function normaliseAuthEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
-function typedMigrationPriority(storageKey: string) {
-  if (storageKey === "jr-os-customers") return 0;
-  if (storageKey === "jr-os-jobs") return 1;
-  return 2;
-}
-
 /**
  * Account changes must never delete browser-resident business records. Authenticated
  * collections are isolated by organisation-scoped keys and reload after identity
@@ -394,8 +388,7 @@ export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationPr
   assertCloudMigrationRole(role);
   assertCloudPageOperationCurrent(operationIsCurrent);
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
-  const storageKeys = typedLegacyMigrationStorageKeys(window.localStorage)
-    .sort((left, right) => typedMigrationPriority(left) - typedMigrationPriority(right));
+  const storageKeys = typedLegacyMigrationStorageKeys(window.localStorage);
   if (storageKeys.length) claimLegacyMigrationStorage(window.localStorage, organisationId);
 
   const report = (currentCollection: string, completedCollections: number, latestError?: string) => onProgress?.({

@@ -93,6 +93,27 @@ test("legacy collectors never mix organisation caches or private queued bytes", 
   assert.equal(JSON.stringify(collectLegacyAggregateData(storage)).includes("PRIVATE_BYTES"), false);
 });
 
+test("typed migration uploads team identities before relationship-bound planner records", () => {
+  const storage = new FakeStorage([
+    ["jr-os-timesheets", "[]"],
+    ["jr-os-planner", "[]"],
+    ["jr-os-team", "[]"],
+    ["jr-os-jobs", "[]"],
+    ["jr-os-customers", "[]"],
+    ["jr-os-invoices", "[]"],
+  ]);
+
+  assert.deepEqual(typedLegacyMigrationStorageKeys(storage), [
+    "jr-os-customers",
+    "jr-os-jobs",
+    "jr-os-team",
+    "jr-os-invoices",
+    "jr-os-planner",
+    "jr-os-timesheets",
+  ]);
+  assert.doesNotMatch(cloudSync, /typedLegacyMigrationStorageKeys\(window\.localStorage\)[\s\S]{0,120}\.sort\(/);
+});
+
 test("one organisation claims legacy data once and another organisation cannot replay it", () => {
   const storage = new FakeStorage([["jr-os-customers", JSON.stringify([{ id: "legacy" }])]]);
   assert.equal(claimLegacyMigrationStorage(storage, "org-b"), true);

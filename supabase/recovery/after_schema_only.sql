@@ -197,7 +197,9 @@
 \echo 'Guarding customer portal workflow targets'
 \ir ../migrations/20260810_062_guard_portal_target_bindings.sql
 
-\echo 'Guarding planner team assignment relationships'
-\ir ../migrations/20260810_063_guard_planner_team_assignments.sql
+\echo 'Installing current planner team assignment lifecycle guards'
+-- Migration 064 is a self-contained replacement for 063. Replaying 063 here
+-- would reject valid completed/cancelled history whose team member is archived.
+\ir ../migrations/20260810_064_preserve_planner_history_team_lifecycle.sql
 
 \echo 'JR OS schema-only recovery completed successfully'
