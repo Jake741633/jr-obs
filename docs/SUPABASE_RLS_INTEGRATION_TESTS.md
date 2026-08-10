@@ -49,6 +49,7 @@ The suite verifies:
 - Office-only table write policies.
 - Field-write table policies.
 - Customer Portal read and insert scope.
+- Customer Portal approvals and appointment requests resolve only eligible same-customer pricing and planner targets, and those targets cannot be retargeted later.
 - Generic `cloud_collections` tenant and customer scope.
 - Typed entity-table tenant scope.
 - Soft-delete tombstones remain available for synchronisation.

@@ -1,5 +1,6 @@
 import type { ElectricalCertificate, Invoice, Job, JobDocument, PlannerEntry, PricingDocument } from "./models";
 import { normaliseJobStatus } from "./jobManagement-core.mjs";
+export { portalRequestTargetMatchesJob } from "./customerPortal-core.mjs";
 
 export type PortalDecision = "Accepted" | "Declined";
 export type PortalRequestType = "Appointment change" | "Question" | "Additional work" | "General message";
@@ -33,7 +34,7 @@ export function jobProgress(job: Job, timelineCount: number) {
 export function portalAppointments(entries: PlannerEntry[], jobs: Job[], customerId: string) {
   const ids = new Set(jobs.filter((job) => job.customerId === customerId).map((job) => job.id));
   const today = new Date().toISOString().slice(0, 10);
-  return entries.filter((entry) => entry.jobId && ids.has(entry.jobId) && entry.status !== "Cancelled" && entry.date >= today).sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
+  return entries.filter((entry) => entry.jobId && ids.has(entry.jobId) && ["Planned", "Confirmed"].includes(entry.status) && entry.date >= today).sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime));
 }
 
 export function customerDocuments<T extends PricingDocument | Invoice | ElectricalCertificate>(items: T[], customerId: string, jobIds: Set<string>) {

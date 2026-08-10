@@ -77,6 +77,8 @@ Use separate test users for owner, office, electrician and customer. Verify:
 - electricians cannot delete tenant records
 - office users cannot manage owner/admin permissions
 - only owner/admin users can delete typed records
+- customer portal approvals cannot reference Draft, expired, missing or another customer's pricing document, and appointment requests cannot reference cancelled, missing or cross-customer planner entries
+- portal approval document targets and request planner targets remain immutable after submission
 - private storage objects cannot be opened using an unauthenticated permanent URL
 
 Do not use real customer records until these tests pass.
