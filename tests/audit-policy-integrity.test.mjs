@@ -5,10 +5,15 @@ import test from "node:test";
 const foundation = readFileSync(new URL("../supabase/migrations/20260730_001_cloud_foundation.sql", import.meta.url), "utf8");
 const triggers = readFileSync(new URL("../supabase/migrations/20260730_002_audit_triggers.sql", import.meta.url), "utf8");
 const integrity = readFileSync(new URL("../supabase/migrations/20260802_010_audit_log_integrity.sql", import.meta.url), "utf8");
+const readBoundary = readFileSync(new URL("../supabase/migrations/20260810_061_restrict_profile_audit_reads.sql", import.meta.url), "utf8");
 const helper = readFileSync(new URL("../lib/cloud/audit.ts", import.meta.url), "utf8");
 
-test("audit reads remain organisation scoped and unavailable to customer roles", () => {
-  assert.match(foundation, /create policy audit_read[\s\S]*organisation_id=public\.current_organisation_id\(\)[\s\S]*public\.can_manage_office_data\(\)/i);
+test("final audit reads remain organisation scoped and hide profile history from office roles", () => {
+  assert.match(foundation, /create policy audit_read[\s\S]*public\.can_manage_office_data\(\)/i);
+  assert.match(readBoundary, /drop policy if exists audit_read on public\.audit_log/i);
+  assert.match(readBoundary, /create policy audit_read[\s\S]*organisation_id = private\.current_organisation_id\(\)/i);
+  assert.match(readBoundary, /private\.can_manage_business\(\)/i);
+  assert.match(readBoundary, /private\.current_jr_role\(\) = 'office'[\s\S]*entity_table <> 'profiles'[\s\S]*action <> 'user_permission_changed'/i);
 });
 
 test("direct audit inserts cannot impersonate another actor or cross organisations", () => {

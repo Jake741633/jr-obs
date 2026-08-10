@@ -188,4 +188,7 @@
 \echo 'Projecting customer-safe payment records'
 \ir ../migrations/20260809_060_customer_payment_projection.sql
 
+\echo 'Restricting profile and permission audit history to account managers'
+\ir ../migrations/20260810_061_restrict_profile_audit_reads.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -46,6 +46,7 @@ const requiredSuites = [
   "customer-pricing-projection.test.mjs",
   "electrician-office-read-boundary.test.mjs",
   "profile-directory-read-boundary.test.mjs",
+  "profile-audit-read-boundary.test.mjs",
   "electrician-pricing-read-boundary.test.mjs",
   "field-team-projection.test.mjs",
   "job-role-projections.test.mjs",
@@ -160,6 +161,11 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Suspended sessions must not read their authentication profile",
     "Recovery-only sessions must not resolve an authentication profile",
     "Revoked access tokens must not read their authentication profile",
+    "Owner should retain profile audit history",
+    "Admin should retain profile audit history",
+    "Office profile audit query should fail closed",
+    "Office must not recover authentication profiles through audit history",
+    "Office should retain operational audit rows",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

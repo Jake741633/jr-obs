@@ -55,7 +55,9 @@ Create Auth users and profiles linked to the same organisation. Supported roles 
 
 For a customer portal user, set `profiles.customer_source_id` to the stable JR OS customer record ID. Customer RLS uses that value to restrict records.
 
-Profile and permission changes are audit logged by database trigger.
+Profile and permission changes are audit logged by database trigger. Complete
+profile and permission audit history is restricted to owner/admin accounts;
+office users retain access only to operational audit rows.
 
 ## 6. Verify RLS before storing real data
 
