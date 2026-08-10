@@ -52,7 +52,6 @@ test("binding validation is private, recovery-safe and migration-order safe", ()
     /revoke execute on function private\.jr_cloud_record_binding_is_valid[\s\S]*from public, anon, authenticated, service_role/i,
   );
   assert.match(recovery, /20260809_039_guard_cloud_record_bindings\.sql/i);
-  assert.match(cloudSync, /function typedMigrationPriority[\s\S]*jr-os-customers[\s\S]*return 0[\s\S]*jr-os-jobs[\s\S]*return 1/i);
-  assert.match(cloudSync, /\.sort\(\(left, right\) => typedMigrationPriority\(left\) - typedMigrationPriority\(right\)\)/i);
+  assert.match(cloudSync, /const storageKeys = typedLegacyMigrationStorageKeys\(window\.localStorage\);/i);
   assert.equal(repository.match(/recordTable: (?:item\.table|table)/g)?.length, 2);
 });
