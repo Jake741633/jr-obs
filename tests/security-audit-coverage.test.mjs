@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 
 const requiredSuites = [
@@ -83,16 +84,16 @@ const requiredSuites = [
   "customer-timeline-live-rls.test.mjs",
 ];
 
-const testsDirectory = new URL("./", import.meta.url);
+const testsDirectory = resolve(process.cwd(), "tests");
 
 for (const suite of requiredSuites) {
   test(`security audit retains ${suite}`, () => {
-    assert.equal(existsSync(new URL(suite, testsDirectory)), true);
+    assert.equal(existsSync(resolve(testsDirectory, suite)), true);
   });
 }
 
 test("penetration suite retains every final attack class", () => {
-  const penetration = readFileSync(new URL("multi-tenant-penetration-regression.test.mjs", testsDirectory), "utf8");
+  const penetration = readFileSync(resolve(testsDirectory, "multi-tenant-penetration-regression.test.mjs"), "utf8");
 
   for (const requiredPhrase of [
     "record enumeration",
@@ -110,7 +111,7 @@ test("penetration suite retains every final attack class", () => {
 });
 
 test("live RLS coverage preserves privileged AI and tombstone boundaries", () => {
-  const liveRls = readFileSync(new URL("supabase-rls.integration.mjs", testsDirectory), "utf8");
+  const liveRls = readFileSync(resolve(testsDirectory, "supabase-rls.integration.mjs"), "utf8");
 
   for (const requiredPhrase of [
     "Electrician must not write office-only AI learning memory",
