@@ -1,12 +1,15 @@
 "use client";
 
-import { organisationStorageKey } from "./cloud/adapter";
+import { accountStorageKey, organisationStorageKey } from "./cloud/adapter";
 import {
   aggregateLegacyMigrationStorageKeys,
+  backupStorageScope,
   claimLegacyMigrationStorage,
+  collectAccountBusinessData,
   collectLegacyAggregateData,
-  collectOrganisationBusinessData,
-  isLegacyAggregateStorageKey,
+  isCompleteAccountStorageContext,
+  sameAccountStorageContext,
+  type AccountStorageContext,
 } from "./cloud/migrationStoragePolicy-core.mjs";
 
 export const JR_OS_STORAGE_PREFIX = "jr-os-";
@@ -45,11 +48,15 @@ export interface JrOsBackup {
   data: Record<string, unknown>;
 }
 
-export function exportJrOsData(organisationId?: string): JrOsBackup {
-  const data = organisationId
-    ? collectOrganisationBusinessData(window.localStorage, organisationId)
-    : collectLegacyAggregateData(window.localStorage);
-  return { version: 1, exportedAt: new Date().toISOString(), app: "JR OS", organisationId, data };
+export function exportJrOsData(context: AccountStorageContext): JrOsBackup {
+  const data = collectAccountBusinessData(window.localStorage, context);
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    app: "JR OS",
+    organisationId: context.organisationId,
+    data,
+  };
 }
 
 export function exportLegacyJrOsData(organisationId: string): JrOsBackup {
@@ -65,8 +72,8 @@ export function exportLegacyJrOsData(organisationId: string): JrOsBackup {
   };
 }
 
-export function downloadJrOsBackup(organisationId?: string) {
-  const backup = exportJrOsData(organisationId);
+export function downloadJrOsBackup(context: AccountStorageContext) {
+  const backup = exportJrOsData(context);
   const date = backup.exportedAt.slice(0, 10);
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -77,18 +84,32 @@ export function downloadJrOsBackup(organisationId?: string) {
   URL.revokeObjectURL(url);
 }
 
-export async function importJrOsBackup(file: File, organisationId?: string) {
+export async function importJrOsBackup(
+  file: File,
+  context: AccountStorageContext,
+  resolveCurrentContext: () => Promise<AccountStorageContext | null>,
+) {
+  if (!isCompleteAccountStorageContext(context)) {
+    throw new Error("Authenticated backup restore requires a complete account context.");
+  }
   const parsed = JSON.parse(await file.text()) as Partial<JrOsBackup>;
   if (parsed.app !== "JR OS" || parsed.version !== 1 || !parsed.data || typeof parsed.data !== "object") {
     throw new Error("This is not a valid JR OS backup file.");
   }
-  if (organisationId && parsed.organisationId !== organisationId) {
+  if (parsed.organisationId !== context.organisationId) {
     throw new Error("This backup belongs to a different JR OS organisation.");
+  }
+  const currentContext = await resolveCurrentContext();
+  if (!sameAccountStorageContext(context, currentContext)) {
+    throw new Error("The active JR OS account changed before the backup could be restored.");
   }
   let restored = 0;
   Object.entries(parsed.data).forEach(([key, value]) => {
-    if (!isLegacyAggregateStorageKey(key)) return;
-    const destinationKey = organisationId ? organisationStorageKey(key, organisationId) : key;
+    const scope = backupStorageScope(key);
+    if (!scope) return;
+    const destinationKey = scope === "account"
+      ? accountStorageKey(key, context.organisationId, context.userId, context.role, context.customerSourceId)
+      : organisationStorageKey(key, context.organisationId);
     window.localStorage.setItem(destinationKey, typeof value === "string" ? value : JSON.stringify(value));
     restored += 1;
   });

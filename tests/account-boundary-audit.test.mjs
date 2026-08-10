@@ -43,8 +43,11 @@ test("authenticated collection caches remain scoped to the full authorisation co
   assert.match(storage, /window\.localStorage\.setItem\(activeStorageKey/);
 });
 
-test("legacy restore writes only to the authenticated organisation cache", () => {
-  assert.match(cloudSync, /const scopedKey = organisationStorageKey\(payload\.storageKey, organisationId\)/);
+test("legacy restore routes registered data to the current account and organisation scopes", () => {
+  assert.match(cloudSync, /if \(!payload\.storageKey \|\| !isLegacyAggregateStorageKey\(payload\.storageKey\)\) continue/);
+  assert.match(cloudSync, /const scope = backupStorageScope\(payload\.storageKey\)/);
+  assert.match(cloudSync, /accountStorageKey\(payload\.storageKey, organisationId, user\.id, role, customerSourceId\)/);
+  assert.match(cloudSync, /organisationStorageKey\(payload\.storageKey, organisationId\)/);
   assert.match(cloudSync, /window\.localStorage\.setItem\(scopedKey/);
 });
 
@@ -107,20 +110,21 @@ test("AI-created CRM interactions attribute the signed-in user instead of Jake",
   assert.doesNotMatch(aiPage, /completedBy: "Jake"/);
 });
 
-test("authenticated backups include only the active organisation and exclude account internals", () => {
-  assert.match(appData, /organisationStorageKey/);
-  assert.match(appData, /organisationId\?: string/);
-  assert.match(appData, /collectOrganisationBusinessData\(window\.localStorage, organisationId\)/);
-  assert.match(appData, /isLegacyAggregateStorageKey\(key\)/);
+test("authenticated backups include the exact active account and exclude account internals", () => {
+  assert.match(appData, /accountStorageKey/);
+  assert.match(appData, /collectAccountBusinessData\(window\.localStorage, context\)/);
+  assert.match(appData, /backupStorageScope\(key\)/);
+  assert.match(appData, /sameAccountStorageContext\(context, currentContext\)/);
   assert.match(appData, /This backup belongs to a different JR OS organisation/);
-  assert.match(appData, /const destinationKey = organisationId \? organisationStorageKey\(key, organisationId\) : key/);
+  assert.match(appData, /accountStorageKey\(key, context\.organisationId, context\.userId, context\.role, context\.customerSourceId\)/);
+  assert.match(appData, /organisationStorageKey\(key, context\.organisationId\)/);
 });
 
 test("JR AI settings and backup actions use the resolved organisation identity", () => {
   assert.match(settingsPage, /useCloudIdentity\(\)/);
   assert.match(settingsPage, /organisationStorageKey\(profileKey, identity\.organisationId\)/);
-  assert.match(settingsPage, /downloadJrOsBackup\(identity\?\.organisationId\)/);
-  assert.match(settingsPage, /importJrOsBackup\(file, identity\?\.organisationId\)/);
+  assert.match(settingsPage, /downloadJrOsBackup\(identity\)/);
+  assert.match(settingsPage, /importJrOsBackup\(file, identity, refreshIdentity\)/);
   assert.doesNotMatch(settingsPage, /window\.localStorage\.getItem\(profileKey\)/);
   assert.doesNotMatch(settingsPage, /window\.localStorage\.setItem\(profileKey/);
 });

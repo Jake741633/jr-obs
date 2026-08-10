@@ -73,6 +73,8 @@ const requiredSuites = [
   "legacy-migration-storage-boundary.test.mjs",
   "cable-sizing-history-tenant-boundary.test.mjs",
   "auth-credential-state-boundary.test.mjs",
+  "backup-storage-key-isolation.test.mjs",
+  "export-import-tenant-boundary.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import {
+  CABLE_SIZING_HISTORY_STORAGE_KEY,
+  accountBackupStorageKeys,
+  backupStorageScope,
+} from "../lib/cloud/migrationStoragePolicy-core.mjs";
 
 const page = readFileSync(new URL("../app/electrical-calculators/cable-sizing/page.tsx", import.meta.url), "utf8");
 const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url), "utf8");
@@ -45,4 +50,11 @@ test("every account tuple component changes the browser history key", () => {
   assert.notEqual(base, scoped("org-a", "user-a", "electrician"));
   assert.notEqual(scoped("org-a", "user-a", "customer", "customer-a"), scoped("org-a", "user-a", "customer", "customer-b"));
   assert.equal(base, scoped("org-a", "user-a", "owner"));
+});
+
+test("personal cable-sizing recents stay outside organisation-portable v1 backups", () => {
+  assert.match(page, /const STORAGE_KEY = "jr-os:electrical-calculators:cable-sizing:recent:v1"/);
+  assert.equal(CABLE_SIZING_HISTORY_STORAGE_KEY, "jr-os:electrical-calculators:cable-sizing:recent:v1");
+  assert.equal(accountBackupStorageKeys.includes(CABLE_SIZING_HISTORY_STORAGE_KEY), false);
+  assert.equal(backupStorageScope(CABLE_SIZING_HISTORY_STORAGE_KEY), null);
 });
