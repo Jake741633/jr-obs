@@ -191,4 +191,7 @@
 \echo 'Restricting profile and permission audit history to account managers'
 \ir ../migrations/20260810_061_restrict_profile_audit_reads.sql
 
+\echo 'Guarding customer portal workflow targets'
+\ir ../migrations/20260810_062_guard_portal_target_bindings.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

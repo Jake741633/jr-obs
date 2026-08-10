@@ -75,6 +75,7 @@ const requiredSuites = [
   "auth-credential-state-boundary.test.mjs",
   "backup-storage-key-isolation.test.mjs",
   "export-import-tenant-boundary.test.mjs",
+  "portal-target-binding-guard.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);

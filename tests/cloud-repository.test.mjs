@@ -122,9 +122,9 @@ test("operational and field payloads round-trip without changing IDs or shapes",
   assert.deepEqual(linkedSourceIds(payloads[7]), { customerSourceId: "cus-1", jobSourceId: "job-1" });
 });
 
-test("portal approval and request payloads retain audit and customer links", () => {
-  const approval = { id: "approval-1", customerId: "cus-1", documentId: "quote-1", decision: "Accepted", approvalName: "Customer", termsAccepted: true, termsSnapshot: "Terms", decidedAt: "2026-07-31T10:00:00Z" };
-  const request = { id: "request-1", customerId: "cus-1", jobId: "job-1", type: "Appointment change", message: "Please move the visit", status: "Open", createdAt: "2026-07-31T10:05:00Z", updatedAt: "2026-07-31T10:05:00Z" };
+test("portal approval and request payloads retain audit, customer and workflow target links", () => {
+  const approval = { id: "approval-1", customerId: "cus-1", documentId: "quote-1", documentType: "Quote", decision: "Accepted", approvalName: "Customer", termsAccepted: true, termsSnapshot: "Terms", decidedAt: "2026-07-31T10:00:00Z" };
+  const request = { id: "request-1", customerId: "cus-1", jobId: "job-1", plannerEntryId: "planner-1", type: "Appointment change", message: "Please move the visit", status: "Open", createdAt: "2026-07-31T10:05:00Z", updatedAt: "2026-07-31T10:05:00Z" };
   assert.deepEqual(cloudRowsToCache([{ source_id: approval.id, version: 1, payload: approval }, { source_id: request.id, version: 1, payload: request }]), [approval, request]);
   assert.deepEqual(linkedSourceIds(approval), { customerSourceId: "cus-1", jobSourceId: undefined });
   assert.deepEqual(linkedSourceIds(request), { customerSourceId: "cus-1", jobSourceId: "job-1" });

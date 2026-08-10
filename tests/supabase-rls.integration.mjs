@@ -216,6 +216,10 @@ async function expectAllowed(result, message) {
 async function expectDenied(result, message) {
   assert.equal(result.response.ok, false, `${message}: unexpectedly allowed`);
 }
+async function expectDeniedWithCode(result, code, message) {
+  await expectDenied(result, message);
+  assert.equal(result.payload?.code, code, `${message}: expected PostgreSQL ${code}, received ${JSON.stringify(result.payload)}`);
+}
 
 const integrationTest = enabled ? test : test.skip;
 
@@ -487,6 +491,53 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       "Customer must not write the pricing projection",
     );
 
+    const draftQuoteA = source("quote-a-draft");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, draftQuoteA, customerA, jobA, {
+        type: "Quote", status: "Draft", number: "Q-SEC-DRAFT", title: "Internal draft quote", items: [],
+      })),
+      "Office should create an internal Draft quote for portal target testing",
+    );
+    const secondQuoteA = source("quote-a-second-sent");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, secondQuoteA, customerA, jobA, {
+        type: "Quote", status: "Sent", number: "Q-SEC-SECOND", title: "Second eligible quote", items: [],
+      })),
+      "Office should create a second eligible quote for immutable target testing",
+    );
+    const acceptedQuoteA = source("quote-a-accepted");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, acceptedQuoteA, customerA, jobA, {
+        type: "Quote", status: "Accepted", number: "Q-SEC-ACCEPTED", title: "Already synchronised accepted quote", items: [],
+      })),
+      "Office should create a final-status quote for sync-order testing",
+    );
+    const expiredQuoteA = source("quote-a-expired");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, expiredQuoteA, customerA, jobA, {
+        type: "Quote", status: "Expired", number: "Q-SEC-EXPIRED", title: "Expired quote", items: [],
+      })),
+      "Office should create an Expired quote for portal target testing",
+    );
+    const deletedQuoteA = source("quote-a-deleted");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, deletedQuoteA, customerA, jobA, {
+        type: "Quote", status: "Sent", number: "Q-SEC-DELETED", title: "Deleted quote", items: [],
+      })),
+      "Office should create a quote before soft-delete target testing",
+    );
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "pricing_documents", `source_id=eq.${deletedQuoteA}`, { deleted_at: new Date().toISOString() }),
+      "Owner should soft-delete the pricing target fixture",
+    );
+    const quoteB = source("quote-b");
+    await expectAllowed(
+      await insertRecord(accounts.B.office, "pricing_documents", typedRecord(organisationB, quoteB, customerB, jobB, {
+        type: "Quote", status: "Sent", number: "Q-SEC-B", title: "Tenant B quote", items: [],
+      })),
+      "Tenant B office should create its portal target fixture",
+    );
+
     // Field-write tables.
     const fieldCases = [
       ["materials", source("material-a"), { name: "Cable" }],
@@ -504,6 +555,34 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, `${sourceId}-cross`, customerB, jobB, payload)), `Electrician must not write cross-tenant ${table}`);
     }
 
+    const portalPlannerA = source("portal-planner-a");
+    const secondPortalPlannerA = source("portal-planner-a-second");
+    const otherCustomerPlannerA = source("portal-planner-a-other-customer");
+    const portalPlannerB = source("portal-planner-b");
+    const cancelledPortalPlannerA = source("portal-planner-a-cancelled");
+    const deletedPortalPlannerA = source("portal-planner-a-deleted");
+    for (const [account, organisationId, plannerId, customerId, jobId, status] of [
+      [accounts.A.office, organisationA, portalPlannerA, customerA, jobA, "Confirmed"],
+      [accounts.A.office, organisationA, secondPortalPlannerA, customerA, jobA, "Planned"],
+      [accounts.A.office, organisationA, otherCustomerPlannerA, otherCustomerA, otherCustomerJobA, "Confirmed"],
+      [accounts.B.office, organisationB, portalPlannerB, customerB, jobB, "Confirmed"],
+      [accounts.A.office, organisationA, cancelledPortalPlannerA, customerA, jobA, "Cancelled"],
+      [accounts.A.office, organisationA, deletedPortalPlannerA, customerA, jobA, "Planned"],
+    ]) {
+      await expectAllowed(
+        await insertRecord(account, "planner_entries", typedRecord(organisationId, plannerId, customerId, jobId, {
+          title: "Portal appointment", type: "Job", date: "2026-08-20", startTime: "09:00", endTime: "10:00",
+          teamMemberIds: [], location: "Test address", notes: "", status,
+          createdAt: "2026-08-10T00:00:00.000Z", updatedAt: "2026-08-10T00:00:00.000Z",
+        })),
+        `Office should create portal planner target ${plannerId}`,
+      );
+    }
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "planner_entries", `source_id=eq.${deletedPortalPlannerA}`, { deleted_at: new Date().toISOString() }),
+      "Owner should soft-delete the planner target fixture",
+    );
+
     // Customer scoping for typed tables and portal writes.
     const customerJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
     await expectAllowed(customerJobs, "Customer jobs read should execute");
@@ -512,8 +591,80 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
 
     const approvalA = source("approval-a");
     const requestA = source("request-a");
-    await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, approvalA, customerA, jobA, { decision: "Accepted" })), "Customer should create own approval");
-    await expectAllowed(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, requestA, customerA, jobA, { type: "Question" })), "Customer should create own request");
+    await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, approvalA, customerA, null, {
+      documentId: quoteA, documentType: "Quote", decision: "Accepted", approvalName: "Portal customer",
+    })), "Customer should approve their own Sent pricing document");
+    await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-after-status-sync"), customerA, null, {
+      documentId: acceptedQuoteA, documentType: "Quote", decision: "Accepted", approvalName: "Portal customer",
+    })), "Customer approval should tolerate the matching final status arriving first");
+    await expectAllowed(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, requestA, customerA, jobA, {
+      plannerEntryId: portalPlannerA, type: "Appointment change", message: "Please move this visit", status: "Open",
+    })), "Customer should create a request for their own active planner entry");
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-other-customer-document"), customerA, null, { documentId: otherCustomerQuote, documentType: "Quote", decision: "Accepted" })),
+      "23503",
+      "Customer must not approve another customer's pricing document",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-document"), customerA, null, { documentId: quoteB, documentType: "Quote", decision: "Accepted" })),
+      "23503",
+      "Customer must not approve another tenant's pricing document",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-missing-document"), customerA, null, { documentId: source("missing-pricing-document"), documentType: "Quote", decision: "Accepted" })),
+      "23503",
+      "Customer must not approve a nonexistent pricing document",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-draft-document"), customerA, null, { documentId: draftQuoteA, documentType: "Quote", decision: "Accepted" })),
+      "23503",
+      "Customer must not approve a Draft pricing document",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-expired-document"), customerA, null, { documentId: expiredQuoteA, documentType: "Quote", decision: "Accepted" })),
+      "23503",
+      "Customer must not approve an Expired pricing document",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-deleted-document"), customerA, null, { documentId: deletedQuoteA, documentType: "Quote", decision: "Accepted" })),
+      "23503",
+      "Customer must not approve a soft-deleted pricing document",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-type-mismatch"), customerA, null, { documentId: quoteA, documentType: "Estimate", decision: "Accepted" })),
+      "23503",
+      "Customer must not approve a pricing document under the wrong type",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-final-status-mismatch"), customerA, null, { documentId: acceptedQuoteA, documentType: "Quote", decision: "Declined" })),
+      "23503",
+      "Customer must not record a decision that conflicts with the final pricing status",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-other-customer-planner"), customerA, jobA, { plannerEntryId: otherCustomerPlannerA, type: "Appointment change" })),
+      "23503",
+      "Customer must not target another customer's planner entry",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-cross-tenant-planner"), customerA, jobA, { plannerEntryId: portalPlannerB, type: "Appointment change" })),
+      "23503",
+      "Customer must not target another tenant's planner entry",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-missing-planner"), customerA, jobA, { plannerEntryId: source("missing-planner-entry"), type: "Appointment change" })),
+      "23503",
+      "Customer must not target a nonexistent planner entry",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-cancelled-planner"), customerA, jobA, { plannerEntryId: cancelledPortalPlannerA, type: "Appointment change" })),
+      "23503",
+      "Customer must not target a cancelled planner entry",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-deleted-planner"), customerA, jobA, { plannerEntryId: deletedPortalPlannerA, type: "Appointment change" })),
+      "23503",
+      "Customer must not target a soft-deleted planner entry",
+    );
     await expectAllowed(
       await insertRecord(accounts.A.office, "portal_requests", typedRecord(organisationA, source("request-staff-valid"), customerA, jobA, { type: "Question" })),
       "Staff should create a portal request for a matching tenant job",
@@ -524,7 +675,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
     await expectDenied(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-other"), otherCustomerA, jobA)), "Customer must not create another customer request");
     await expectDenied(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-job"), customerA, jobB)),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-job"), customerA, jobB, { documentId: quoteA, documentType: "Quote", decision: "Accepted" })),
       "Customer must not attach an approval to another tenant's job while keeping their own customer ID",
     );
     await expectDenied(
@@ -533,9 +684,23 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
     await expectAllowed(
       await patchRecords(accounts.A.office, "portal_requests", `source_id=eq.${requestA}`, {
-        payload: { id: requestA, customerId: customerA, jobId: jobA, status: "In review", testRun: runId },
+        payload: { id: requestA, customerId: customerA, jobId: jobA, plannerEntryId: portalPlannerA, status: "In review", testRun: runId },
       }),
       "Staff should update portal request workflow data without changing its binding",
+    );
+    await expectDeniedWithCode(
+      await patchRecords(accounts.A.office, "portal_approvals", `source_id=eq.${approvalA}`, {
+        payload: { id: approvalA, customerId: customerA, jobId: null, documentId: secondQuoteA, documentType: "Quote", decision: "Accepted", testRun: runId },
+      }),
+      "23514",
+      "Staff must not retarget an existing portal approval",
+    );
+    await expectDeniedWithCode(
+      await patchRecords(accounts.A.office, "portal_requests", `source_id=eq.${requestA}`, {
+        payload: { id: requestA, customerId: customerA, jobId: jobA, plannerEntryId: secondPortalPlannerA, status: "In review", testRun: runId },
+      }),
+      "23514",
+      "Staff must not retarget an existing portal request",
     );
     await expectDenied(
       await patchRecords(accounts.A.office, "portal_requests", `source_id=eq.${requestA}`, {

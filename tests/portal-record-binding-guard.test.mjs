@@ -6,30 +6,33 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20260809_034_guard_portal_record_bindings.sql", import.meta.url),
   "utf8",
 );
+const finalMigration = readFileSync(
+  new URL("../supabase/migrations/20260810_062_guard_portal_target_bindings.sql", import.meta.url),
+  "utf8",
+);
 
-test("portal binding guard is private, invoker-safe and not directly callable", () => {
+test("final portal binding guard is private, definer-safe and not directly callable", () => {
   assert.match(
-    migration,
-    /create or replace function private\.guard_jr_portal_record_binding\(\)[\s\S]*language plpgsql[\s\S]*set search_path = ''/i,
+    finalMigration,
+    /create or replace function private\.guard_jr_portal_record_binding\(\)[\s\S]*language plpgsql[\s\S]*security definer[\s\S]*set search_path = ''/i,
   );
-  assert.doesNotMatch(migration, /security definer/i);
   assert.match(
-    migration,
+    finalMigration,
     /revoke execute on function private\.guard_jr_portal_record_binding\(\)[\s\S]*from public, anon, authenticated/i,
   );
 });
 
 test("portal customer and job bindings cannot change after insert", () => {
   assert.match(
-    migration,
+    finalMigration,
     /if tg_op = 'UPDATE'[\s\S]*new\.customer_source_id is distinct from old\.customer_source_id[\s\S]*new\.job_source_id is distinct from old\.job_source_id[\s\S]*errcode = '42501'/i,
   );
 });
 
 test("non-null portal jobs must be active and match tenant and customer", () => {
   assert.match(
-    migration,
-    /new\.job_source_id is not null[\s\S]*from public\.jobs j[\s\S]*j\.organisation_id = new\.organisation_id[\s\S]*j\.source_id = new\.job_source_id[\s\S]*j\.customer_source_id is not distinct from new\.customer_source_id[\s\S]*j\.deleted_at is null[\s\S]*errcode = '42501'/i,
+    finalMigration,
+    /new\.job_source_id is not null[\s\S]*from public\.jobs job[\s\S]*job\.organisation_id = new\.organisation_id[\s\S]*job\.source_id = new\.job_source_id[\s\S]*job\.customer_source_id is not distinct from new\.customer_source_id[\s\S]*job\.deleted_at is null[\s\S]*errcode = '42501'/i,
   );
 });
 

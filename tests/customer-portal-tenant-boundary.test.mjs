@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { portalRequestTargetMatchesJob } from "../lib/customerPortal-core.mjs";
 
 const portal = readFileSync(new URL("../app/customer-portal/page.tsx", import.meta.url), "utf8");
+const portalCore = readFileSync(new URL("../lib/customerPortal.ts", import.meta.url), "utf8");
 const guard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
 const permissions = readFileSync(new URL("../lib/cloud/permissions.ts", import.meta.url), "utf8");
 
@@ -28,15 +30,33 @@ test("portal reads are filtered with the resolved active customer id", () => {
 test("portal approvals reject documents outside the active customer collection", () => {
   assert.match(portal, /!activeCustomerId \|\| !customerPricing\.some\(\(item\) => item\.id === document\.id\)/);
   assert.match(portal, /customerId: activeCustomerId, documentId: document\.id/);
+  assert.match(portal, /if \(document\.status !== "Sent"\) return setNotice\("That document is no longer awaiting a decision\."\)/);
   assert.match(portal, /customerId: activeCustomerId, jobId: document\.jobId/);
   assert.doesNotMatch(portal, /customerId: selectedCustomerId, documentId/);
 });
 
 test("portal requests reject foreign jobs and appointments", () => {
   assert.match(portal, /requestJobId && !jobIds\.has\(requestJobId\)/);
-  assert.match(portal, /requestPlannerId && !appointments\.some\(\(entry\) => entry\.id === requestPlannerId\)/);
+  assert.match(portal, /!portalRequestTargetMatchesJob\(appointments, requestPlannerId, requestJobId\)/);
   assert.match(portal, /customerId: activeCustomerId, jobId: requestJobId \|\| undefined/);
   assert.doesNotMatch(portal, /customerId: selectedCustomerId, jobId: requestJobId/);
+  assert.match(portalCore, /\["Planned", "Confirmed"\]\.includes\(entry\.status\)/);
+});
+
+test("portal appointment requests keep the appointment bound to its exact job", () => {
+  const appointments = [
+    { id: "appointment-a", jobId: "job-a" },
+    { id: "appointment-b", jobId: "job-b" },
+  ];
+  assert.equal(portalRequestTargetMatchesJob(appointments, "appointment-a", "job-a"), true);
+  assert.equal(portalRequestTargetMatchesJob(appointments, "appointment-a", ""), false);
+  assert.equal(portalRequestTargetMatchesJob(appointments, "appointment-a", "job-b"), false);
+  assert.equal(portalRequestTargetMatchesJob(appointments, "missing", "job-a"), false);
+  assert.equal(portalRequestTargetMatchesJob(appointments, "", "job-b"), true);
+  assert.match(
+    portal,
+    /if \(!portalRequestTargetMatchesJob\(appointments, requestPlannerId, nextJobId\)\) setRequestPlannerId\(""\)/,
+  );
 });
 
 test("customer selection and demo codes remain only in the locked preview flow", () => {
