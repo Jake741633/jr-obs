@@ -33,7 +33,7 @@ test("email verification sessions are revoked before normal business sign-in", (
   );
   assert.match(
     cloudSync,
-    /async function signOutTemporaryCloudSession\(expectedOwnership: SupabaseSessionOwnership\) \{[\s\S]*\/auth\/v1\/logout\?scope=local[\s\S]*activeSessionMatches\(expectedOwnership\)[\s\S]*saveSupabaseSession\(null\)/,
+    /async function revokeCapturedCloudSession\(expectedOwnership: SupabaseSessionOwnership, scope: "global" \| "local"\) \{[\s\S]*Authorization: `Bearer \$\{accessToken\}`[\s\S]*\}, false\)[\s\S]*async function signOutTemporaryCloudSession[\s\S]*revokeCapturedCloudSession\(expectedOwnership, "local"\)[\s\S]*activeSessionMatches\(expectedOwnership\)[\s\S]*saveSupabaseSession\(null\)/,
   );
   assert.match(
     cloudPage,

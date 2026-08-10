@@ -80,10 +80,19 @@ function assertActiveSession(expected: SupabaseSessionOwnership) {
   if (!activeSessionMatches(expected)) throw new Error(accountChangedMessage);
 }
 
+async function revokeCapturedCloudSession(expectedOwnership: SupabaseSessionOwnership, scope: "global" | "local") {
+  const accessToken = expectedOwnership.session?.access_token;
+  if (!accessToken) return false;
+  await supabaseFetch(`/auth/v1/logout?scope=${scope}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  }, false);
+  return true;
+}
+
 async function signOutTemporaryCloudSession(expectedOwnership: SupabaseSessionOwnership) {
-  assertActiveSession(expectedOwnership);
   let cleared = false;
-  try { await supabaseFetch("/auth/v1/logout?scope=local", { method: "POST" }); }
+  try { await revokeCapturedCloudSession(expectedOwnership, "local"); }
   catch { /* a local verification session must still be removed */ }
   finally {
     if (activeSessionMatches(expectedOwnership)) {
@@ -285,16 +294,14 @@ export async function signUpWithEmail(email: string, password: string, operation
 }
 
 export async function signOutCloudUser(expectedOwnership = captureSupabaseSessionOwnership(), operationIsCurrent?: CloudOperationOwnershipGuard) {
-  assertCloudPageOperationCurrent(operationIsCurrent);
-  assertActiveSession(expectedOwnership);
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && activeSessionMatches(expectedOwnership)) {
+    assertCloudPageOperationCurrent(operationIsCurrent);
     ["jr-os-active-organisation", "jr-os-active-user", "jr-os-active-role", "jr-os-active-customer-source"]
       .forEach((key) => window.localStorage.removeItem(key));
   }
-  try { await supabaseFetch("/auth/v1/logout?scope=global", { method: "POST" }); }
+  try { await revokeCapturedCloudSession(expectedOwnership, "global"); }
   finally {
     if (activeSessionMatches(expectedOwnership)) {
-      assertCloudPageOperationCurrent(operationIsCurrent);
       saveSupabaseSession(null);
       identityChanged();
     }
