@@ -42,6 +42,12 @@ const roleReadTables: Record<string, Record<string, string>> = {
   },
 };
 
+const roleCollectionReadTables: Record<string, Record<string, string>> = {
+  customer: {
+    "jr-os-job-timeline": "customer_job_timeline",
+  },
+};
+
 export function collectionCloudTarget(storageKey: string) {
   const typedTable = typedCollectionTables[storageKey];
   if (typedTable) return { table: typedTable };
@@ -49,6 +55,11 @@ export function collectionCloudTarget(storageKey: string) {
   return null;
 }
 
-export function collectionCloudReadTable(table: string, role?: string) {
-  return role ? roleReadTables[role]?.[table] ?? table : table;
+export function collectionCloudReadTable(table: string, role?: string, collectionKey?: string) {
+  if (!role) return table;
+  if (collectionKey) {
+    const collectionTable = roleCollectionReadTables[role]?.[collectionKey];
+    if (collectionTable) return collectionTable;
+  }
+  return roleReadTables[role]?.[table] ?? table;
 }
