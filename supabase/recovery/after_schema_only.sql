@@ -188,4 +188,7 @@
 \echo 'Projecting customer-safe payment records'
 \ir ../migrations/20260809_060_customer_payment_projection.sql
 
+\echo 'Projecting customer-safe job timeline records'
+\ir ../migrations/20260809_061_customer_job_timeline_projection.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
