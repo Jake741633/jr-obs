@@ -9,7 +9,7 @@
     "lint": "eslint",
     "test": "node --test tests/*.test.mjs",
     "verify:supabase-schema": "node scripts/verify-supabase-deployed-migration.mjs",
-    "test:rls": "node --test tests/planner-team-live-rls.test.mjs"
+    "test:rls": "node scripts/run-supabase-rls.mjs"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
