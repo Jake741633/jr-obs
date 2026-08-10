@@ -44,10 +44,10 @@ test("recovery-only sessions stay blocked across reloads and account changes in 
 
 test("successful recovery clears the privileged recovery session before unlocking sign-in", () => {
   const update = gate.indexOf('await supabaseFetch("/auth/v1/user"');
-  const signOut = gate.indexOf("await signOutCloudUser(startingOwnership)", update);
+  const signOut = gate.indexOf("await signOutCloudUser(startingOwnership, undefined, updatedUser?.id)", update);
   const complete = gate.indexOf('setState("complete")', signOut);
   assert.ok(update !== -1 && signOut > update && complete > signOut);
-  assert.match(gate, /const passwordUpdateStillOwned = operationIsCurrent\(\)[\s\S]*await signOutCloudUser\(startingOwnership\)[\s\S]*if \(!passwordUpdateStillOwned\) return/);
+  assert.match(gate, /const passwordUpdateStillOwned = operationIsCurrent\(\)[\s\S]*await signOutCloudUser\(startingOwnership, undefined, updatedUser\?\.id\)[\s\S]*if \(!passwordUpdateStillOwned\) return/);
   assert.doesNotMatch(gate, /async function returnToSignIn\(\) \{\s*await signOutCloudUser\(\)/);
 });
 

@@ -22,7 +22,11 @@ import {
   type SupabaseSession,
   type SupabaseSessionOwnership,
 } from "./supabase/client";
-import { sameSupabaseSessionOwnership } from "./supabase/sessionOwnership-core.mjs";
+import {
+  capturedSupabaseLogoutRequest,
+  globalSupabaseSignOutOwnsSession,
+  sameSupabaseSessionOwnership,
+} from "./supabase/sessionOwnership-core.mjs";
 
 export interface CloudSyncResult { uploaded: number; skipped: number; errors: string[]; }
 export interface EmailVerificationResult {
@@ -81,13 +85,30 @@ function assertActiveSession(expected: SupabaseSessionOwnership) {
 }
 
 async function revokeCapturedCloudSession(expectedOwnership: SupabaseSessionOwnership, scope: "global" | "local") {
-  const accessToken = expectedOwnership.session?.access_token;
-  if (!accessToken) return false;
-  await supabaseFetch(`/auth/v1/logout?scope=${scope}`, {
+  const request = capturedSupabaseLogoutRequest(expectedOwnership, scope);
+  if (!request) return false;
+  await supabaseFetch(request.path, {
     method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}` },
+    headers: request.headers,
   }, false);
   return true;
+}
+
+function activeSessionOwnedByGlobalSignOut(expectedOwnership: SupabaseSessionOwnership, expectedUserId?: string) {
+  const currentOwnership = captureSupabaseSessionOwnership();
+  return globalSupabaseSignOutOwnsSession(
+    currentOwnership.session,
+    currentOwnership.epoch,
+    expectedOwnership.session,
+    expectedOwnership.epoch,
+    expectedUserId,
+  );
+}
+
+function clearActiveCloudReplayOwnership() {
+  if (typeof window === "undefined") return;
+  ["jr-os-active-organisation", "jr-os-active-user", "jr-os-active-role", "jr-os-active-customer-source"]
+    .forEach((key) => window.localStorage.removeItem(key));
 }
 
 async function signOutTemporaryCloudSession(expectedOwnership: SupabaseSessionOwnership) {
@@ -293,15 +314,20 @@ export async function signUpWithEmail(email: string, password: string, operation
   return result.user ?? null;
 }
 
-export async function signOutCloudUser(expectedOwnership = captureSupabaseSessionOwnership(), operationIsCurrent?: CloudOperationOwnershipGuard) {
-  if (typeof window !== "undefined" && activeSessionMatches(expectedOwnership)) {
-    assertCloudPageOperationCurrent(operationIsCurrent);
-    ["jr-os-active-organisation", "jr-os-active-user", "jr-os-active-role", "jr-os-active-customer-source"]
-      .forEach((key) => window.localStorage.removeItem(key));
+export async function signOutCloudUser(
+  expectedOwnership = captureSupabaseSessionOwnership(),
+  operationIsCurrent?: CloudOperationOwnershipGuard,
+  expectedUserId?: string,
+) {
+  if (activeSessionOwnedByGlobalSignOut(expectedOwnership, expectedUserId)) {
+    const exactStartingOwnership = activeSessionMatches(expectedOwnership);
+    if (exactStartingOwnership) assertCloudPageOperationCurrent(operationIsCurrent);
+    clearActiveCloudReplayOwnership();
   }
   try { await revokeCapturedCloudSession(expectedOwnership, "global"); }
   finally {
-    if (activeSessionMatches(expectedOwnership)) {
+    if (activeSessionOwnedByGlobalSignOut(expectedOwnership, expectedUserId)) {
+      clearActiveCloudReplayOwnership();
       saveSupabaseSession(null);
       identityChanged();
     }

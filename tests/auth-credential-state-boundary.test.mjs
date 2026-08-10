@@ -50,13 +50,13 @@ test("recovery secrets clear when session ownership changes and after a successf
   const update = functionBody(recoveryGate, "updatePassword");
   const passwordUpdate = update.indexOf('await supabaseFetch("/auth/v1/user"');
   const secretClear = update.indexOf("clearRecoverySecrets()", passwordUpdate);
-  const signOut = update.indexOf("await signOutCloudUser(startingOwnership)", passwordUpdate);
+  const signOut = update.indexOf("await signOutCloudUser(startingOwnership, undefined, updatedUser?.id)", passwordUpdate);
 
   assert.match(clear, /setPassword\(""\)/);
   assert.match(clear, /setConfirmation\(""\)/);
   assert.match(sessionChange, /clearRecoverySecrets\(\);\s*if \(hasRecoverySession\(\)\)/);
   assert.ok(passwordUpdate >= 0 && secretClear > passwordUpdate && signOut > secretClear);
   assert.match(update, /sameSupabaseSessionOwnership\([\s\S]*startingOwnership\.epoch/);
-  assert.match(update, /const passwordUpdateStillOwned = operationIsCurrent\(\)[\s\S]*await signOutCloudUser\(startingOwnership\)[\s\S]*if \(!passwordUpdateStillOwned\) return/);
+  assert.match(update, /const passwordUpdateStillOwned = operationIsCurrent\(\)[\s\S]*await signOutCloudUser\(startingOwnership, undefined, updatedUser\?\.id\)[\s\S]*if \(!passwordUpdateStillOwned\) return/);
   assert.match(functionBody(recoveryGate, "returnToSignIn"), /clearRecoverySecrets\(\)/);
 });

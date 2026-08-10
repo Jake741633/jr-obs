@@ -12,7 +12,13 @@ import {
   normalCloudPageSessionUserId,
   ownedCloudPageValue,
 } from "../lib/cloud/cloudPageIdentity-core.mjs";
-import { sameSupabaseSession, sameSupabaseSessionOwnership, supabaseSessionFingerprint } from "../lib/supabase/sessionOwnership-core.mjs";
+import {
+  capturedSupabaseLogoutRequest,
+  globalSupabaseSignOutOwnsSession,
+  sameSupabaseSession,
+  sameSupabaseSessionOwnership,
+  supabaseSessionFingerprint,
+} from "../lib/supabase/sessionOwnership-core.mjs";
 
 const page = readFileSync(new URL("../app/cloud/page.tsx", import.meta.url), "utf8");
 const cloudSync = readFileSync(new URL("../lib/cloudSync.ts", import.meta.url), "utf8");
@@ -67,7 +73,7 @@ test("late authentication responses cannot overwrite a replacement session", () 
   assert.match(cloudSync, /signUpWithEmail[\s\S]*const startingOwnership = captureSupabaseSessionOwnership\(\)[\s\S]*assertCloudPageOperationCurrent\(operationIsCurrent\)[\s\S]*assertActiveSession\(startingOwnership\)[\s\S]*if \(result\.access_token\)/);
   assert.match(cloudSync, /getCurrentCloudUser[\s\S]*activeSessionMatches\(startingOwnership\)[\s\S]*return null/);
   assert.match(cloudSync, /if \(!startingSession\.user\?\.id && user\?\.id\) \{[\s\S]*saveSupabaseSession\(\{ \.\.\.activeSession, user: \{ id: user\.id, email: user\.email \} \}\)/);
-  assert.match(cloudSync, /signOutCloudUser\(expectedOwnership = captureSupabaseSessionOwnership\(\), operationIsCurrent\?: CloudOperationOwnershipGuard\)[\s\S]*if \(activeSessionMatches\(expectedOwnership\)\)/);
+  assert.match(cloudSync, /signOutCloudUser\([\s\S]*operationIsCurrent\?: CloudOperationOwnershipGuard,[\s\S]*expectedUserId\?: string,[\s\S]*activeSessionOwnedByGlobalSignOut\(expectedOwnership, expectedUserId\)/);
   assert.match(page, /signInWithEmail\(submittedEmail\.trim\(\), submittedPassword, operationIsCurrent\)/);
   assert.match(page, /signUpWithEmail\(submittedEmail\.trim\(\), submittedPassword, operationIsCurrent\)/);
   assert.match(page, /completeEmailVerificationFromUrl\(verificationIsCurrent\)/);
@@ -151,6 +157,51 @@ test("authentication epochs reject A-to-B-to-A and null-to-B-to-null session ABA
   assert.match(supabaseClient, /const sessionOwnershipEpochKey = "jr-os-supabase-session-epoch"/);
   assert.match(supabaseClient, /function rotateSessionOwnershipEpoch\(\)[\s\S]*localStorage\.setItem\(sessionOwnershipEpochKey, nextSessionOwnershipEpoch\(\)\)/);
   assert.match(supabaseClient, /saveSupabaseSession[\s\S]*previousFingerprint !== supabaseSessionFingerprint\(session\)\) rotateSessionOwnershipEpoch\(\)/);
+});
+
+test("captured global logout revokes A without clearing replacement B", () => {
+  const recoveryA = { access_token: "recovery-token-a", is_password_recovery: true, user: { id: "user-a" } };
+  const replacementB = { access_token: "normal-token-b", user: { id: "user-b" } };
+  const request = capturedSupabaseLogoutRequest({ session: recoveryA, epoch: "epoch-a" }, "global");
+
+  assert.deepEqual(request, {
+    path: "/auth/v1/logout?scope=global",
+    headers: { Authorization: "Bearer recovery-token-a" },
+  });
+  assert.equal(
+    globalSupabaseSignOutOwnsSession(replacementB, "epoch-b", recoveryA, "epoch-a", "user-a"),
+    false,
+  );
+  assert.throws(
+    () => capturedSupabaseLogoutRequest({ session: recoveryA, epoch: "epoch-a" }, "others"),
+    /Unsupported Supabase logout scope/,
+  );
+});
+
+test("global logout clears exact and same-user replacement sessions", () => {
+  const recoveryWithoutUser = { access_token: "recovery-token-a", is_password_recovery: true };
+  const sameUserReplacement = { access_token: "normal-token-a-2", user: { id: "user-a" } };
+  const differentUserReplacement = { access_token: "normal-token-b", user: { id: "user-b" } };
+
+  assert.equal(
+    globalSupabaseSignOutOwnsSession(recoveryWithoutUser, "epoch-a", recoveryWithoutUser, "epoch-a"),
+    true,
+  );
+  assert.equal(
+    globalSupabaseSignOutOwnsSession(sameUserReplacement, "epoch-a-2", recoveryWithoutUser, "epoch-a", "user-a"),
+    true,
+  );
+  assert.equal(
+    globalSupabaseSignOutOwnsSession(differentUserReplacement, "epoch-b", recoveryWithoutUser, "epoch-a", "user-a"),
+    false,
+  );
+  assert.equal(
+    globalSupabaseSignOutOwnsSession({ ...sameUserReplacement, access_token: "recovery-token-a" }, "epoch-returned", recoveryWithoutUser, "epoch-a", "user-a"),
+    true,
+  );
+  assert.equal(capturedSupabaseLogoutRequest({ session: null, epoch: "epoch-a" }, "global"), null);
+  assert.match(cloudSync, /signOutCloudUser[\s\S]*activeSessionOwnedByGlobalSignOut\(expectedOwnership, expectedUserId\)[\s\S]*clearActiveCloudReplayOwnership\(\)[\s\S]*revokeCapturedCloudSession\(expectedOwnership, "global"\)[\s\S]*activeSessionOwnedByGlobalSignOut\(expectedOwnership, expectedUserId\)[\s\S]*saveSupabaseSession\(null\)/);
+  assert.match(recoveryGate, /const updatedUser = await supabaseFetch\("\/auth\/v1\/user"[\s\S]*signOutCloudUser\(startingOwnership, undefined, updatedUser\?\.id\)/);
 });
 
 test("legacy cloud auth uses the same epoch-aware canonical session boundary", () => {
