@@ -28,6 +28,11 @@ export function collectionFilter(collectionKey?: string): string;
 export function tenantRecordQuery(input: Required<Pick<TenantQueryInput, "organisationId" | "sourceId">> & Pick<TenantQueryInput, "collectionKey" | "includeDeleted">): string;
 export function tenantListQuery(input: Pick<TenantQueryInput, "organisationId" | "collectionKey">): string;
 export function hasVersionConflict(currentVersion?: number, expectedVersion?: number): boolean;
+export function cloudRecordMatchesQueuedPayload(
+  table: string,
+  current: { payload?: unknown; created_at?: string | null } | null | undefined,
+  queuedPayload: unknown,
+): boolean;
 export function linkedSourceIds(payload: unknown): { customerSourceId?: string; jobSourceId?: string };
 export function buildTypedEnvelope<T>(input: CloudEnvelopeInput<T>): TypedCloudRow<T>;
 export function buildGenericEnvelope<T>(input: CloudEnvelopeInput<T> & { collectionKey: string }): GenericCloudRow<T>;

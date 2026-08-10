@@ -76,6 +76,7 @@ const requiredSuites = [
   "cloud-account-identity-boundary.test.mjs",
   "backup-storage-key-isolation.test.mjs",
   "export-import-tenant-boundary.test.mjs",
+  "portal-approval-evidence-guard.test.mjs",
   "portal-target-binding-guard.test.mjs",
 ];
 

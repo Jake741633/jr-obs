@@ -57,7 +57,7 @@ test("cutover page can retry the queue and immediately rerun readiness", () => {
 });
 
 test("queue repair clears already-synchronised operations without rewriting cloud records", () => {
-  assert.match(repository, /samePayload\(current\.payload, item\.payload\)/);
+  assert.match(repository, /cloudRecordMatchesQueuedPayload\(item\.table, current, item\.payload\)/);
   assert.match(repository, /current && !current\.deleted_at/);
   assert.match(repository, /item\.operation === "delete" && \(!current \|\| current\.deleted_at\)/);
   assert.match(repository, /SyncQueueFlushResult/);
