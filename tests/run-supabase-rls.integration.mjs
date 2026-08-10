@@ -1,7 +1,16 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+
+const scriptsDirectory = join(process.cwd(), "scripts");
+const { liveSupabaseTestConfiguration } = await import(
+  pathToFileURL(join(scriptsDirectory, "run-supabase-rls.mjs")).href
+);
+const { verifyDeployedMigration } = await import(
+  pathToFileURL(join(scriptsDirectory, "verify-supabase-deployed-migration.mjs")).href
+);
 
 const fieldCasesSnippet = `    // Field-write tables.\n    const fieldCases = [\n      ["materials", source("material-a"), { name: "Cable" }],\n      ["stock_items", source("stock-a"), { quantity: 4 }],\n      ["stock_movements", source("movement-a"), { type: "Used", quantity: 1 }],\n      ["purchase_lists", source("purchase-a"), { status: "Draft" }],\n      ["planner_entries", source("planner-a"), { startDate: "2026-08-01" }],\n      ["timesheets", source("timesheet-a"), { hours: 8 }],\n      ["certificates", source("certificate-a"), { status: "Draft" }],\n      ["electrical_testing_records", source("testing-a"), { status: "Draft" }],\n      ["job_documents", source("document-a"), { category: "Photo" }],\n    ];\n    for (const [table, sourceId, payload] of fieldCases) {\n      await expectAllowed(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Electrician should write \${table}\`);\n      await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);\n    }`;
 
@@ -15,7 +24,6 @@ const obsoleteSnippet = `    const revokeResult = await service(\`/auth/v1/admin
 const supportedSnippet = `    const revokeResult = await request("/auth/v1/logout?scope=global", {\n      method: "POST",\n      accessToken: accounts.B.electrician.accessToken,\n    });\n    await expectAllowed(revokeResult, "Authenticated user should globally revoke their session");`;
 
 const customerSeedSnippet = `    await expectAllowed(\n      await insertRecord(accounts.A.office, "customers", typedRecord(organisationA, customerA, customerA, null, { name: "Tenant A customer" })),\n      "Office should create its tenant customer",\n    );`;
-
 const safeCustomerSeedSnippet = `    await expectAllowed(\n      await insertRecord(accounts.A.office, "customers", typedRecord(organisationA, customerA, customerA, null, {\n        name: "Tenant A customer",\n        email: "customer-a@example.com",\n        phone: "07000000001",\n        address: "1 Customer Street",\n        notes: "Internal CRM note",\n      })),\n      "Office should create its tenant customer",\n    );`;
 
 const customerReadAnchor = `    await expectAllowed(\n      await insertRecord(accounts.B.office, "customers", typedRecord(organisationB, customerB, customerB, null, { name: "Tenant B customer" })),\n      "Tenant B office should create its customer",\n    );`;
@@ -67,6 +75,16 @@ for (const [label, snippet] of [
   if (occurrences !== 1) {
     throw new Error(`Expected exactly one ${label} snippet, found ${occurrences}`);
   }
+}
+
+const configuration = liveSupabaseTestConfiguration(process.env);
+if (configuration) {
+  await verifyDeployedMigration({
+    url: configuration.url,
+    projectRef: configuration.projectRef,
+    serviceRoleKey: configuration.serviceRoleKey,
+    confirmation: configuration.confirmation,
+  });
 }
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "jr-os-rls-"));
