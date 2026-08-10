@@ -18,6 +18,7 @@ import {
   sameSupabaseSession,
   sameSupabaseSessionOwnership,
   supabaseSessionFingerprint,
+  supabaseSessionUserId,
 } from "../lib/supabase/sessionOwnership-core.mjs";
 
 const page = readFileSync(new URL("../app/cloud/page.tsx", import.meta.url), "utf8");
@@ -182,6 +183,9 @@ test("global logout clears exact and same-user replacement sessions", () => {
   const recoveryWithoutUser = { access_token: "recovery-token-a", is_password_recovery: true };
   const sameUserReplacement = { access_token: "normal-token-a-2", user: { id: "user-a" } };
   const differentUserReplacement = { access_token: "normal-token-b", user: { id: "user-b" } };
+  const tokenFor = (subject) => `header.${Buffer.from(JSON.stringify({ sub: subject })).toString("base64url")}.signature`;
+  const sameUserRecoveryWithoutUser = { access_token: tokenFor("user-a"), is_password_recovery: true };
+  const differentUserRecoveryWithoutUser = { access_token: tokenFor("user-b"), is_password_recovery: true };
 
   assert.equal(
     globalSupabaseSignOutOwnsSession(recoveryWithoutUser, "epoch-a", recoveryWithoutUser, "epoch-a"),
@@ -195,6 +199,17 @@ test("global logout clears exact and same-user replacement sessions", () => {
     globalSupabaseSignOutOwnsSession(differentUserReplacement, "epoch-b", recoveryWithoutUser, "epoch-a", "user-a"),
     false,
   );
+  assert.equal(
+    globalSupabaseSignOutOwnsSession(sameUserRecoveryWithoutUser, "epoch-a-3", recoveryWithoutUser, "epoch-a", "user-a"),
+    true,
+  );
+  assert.equal(
+    globalSupabaseSignOutOwnsSession(differentUserRecoveryWithoutUser, "epoch-b-2", recoveryWithoutUser, "epoch-a", "user-a"),
+    false,
+  );
+  assert.equal(supabaseSessionUserId(sameUserRecoveryWithoutUser), "user-a");
+  assert.equal(supabaseSessionUserId({ ...sameUserRecoveryWithoutUser, user: { id: "user-b" } }), "user-a");
+  assert.equal(supabaseSessionUserId({ access_token: "not-a-jwt" }), null);
   assert.equal(
     globalSupabaseSignOutOwnsSession({ ...sameUserReplacement, access_token: "recovery-token-a" }, "epoch-returned", recoveryWithoutUser, "epoch-a", "user-a"),
     true,
