@@ -67,16 +67,20 @@ export default function CloudPage() {
   async function runAccountAction(action: () => Promise<unknown>, success: string) {
     setAccountBusy(true);
     setAccountMessage("");
+    let succeeded = false;
     try {
       await action();
+      succeeded = true;
       setAccountMessage(success);
+    } catch (error) {
+      setAccountMessage(error instanceof Error ? error.message : "The account action could not be completed.");
+    } finally {
+      if (succeeded) setEmail("");
+      setPassword("");
       const user = await getCurrentCloudUser();
       setUserEmail(user?.email ?? null);
       setLastSync(window.localStorage.getItem("jr-os-last-cloud-sync"));
       setSync(syncStatus.get());
-    } catch (error) {
-      setAccountMessage(error instanceof Error ? error.message : "The account action could not be completed.");
-    } finally {
       setAccountBusy(false);
     }
   }
@@ -110,6 +114,12 @@ export default function CloudPage() {
   async function createAccount() {
     if (!accountDetailsAreValid()) return;
     await runAccountAction(() => signUpWithEmail(email.trim(), password), "Account created. Check your email if confirmation is enabled.");
+  }
+
+  async function signOut() {
+    setEmail("");
+    setPassword("");
+    await runAccountAction(signOutCloudUser, "Signed out.");
   }
 
   function importTypedRecords(event: MouseEvent<HTMLButtonElement>) {
@@ -161,7 +171,7 @@ export default function CloudPage() {
       <Card><CheckCircle2 className="size-6 text-amber-300" /><p className="mt-3 font-bold">Last successful upload</p><p className="mt-2 text-sm text-slate-400">{lastSync ? new Date(lastSync).toLocaleString("en-GB") : "No cloud upload completed yet."}</p></Card>
     </div>
     {!configured ? <Card className="border-amber-500/30"><h2 className="text-xl font-bold">Connection required</h2><p className="mt-2 text-sm text-slate-400">Run both SQL files and add NEXT_PUBLIC_SUPABASE_URL plus NEXT_PUBLIC_SUPABASE_ANON_KEY. Local storage continues working meanwhile.</p></Card> : null}
-    <Card><h2 className="text-xl font-bold">JR OS account</h2>{userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button type="button" disabled={accountBusy} onClick={() => void runAccountAction(signOutCloudUser, "Signed out.")}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={signIn}><label className="grid gap-2 text-sm">Email<input type="email" autoComplete="email" required className={fieldClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="grid gap-2 text-sm">Password<input type="password" autoComplete="current-password" minLength={8} required className={fieldClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={accountBusy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={accountBusy || !configured} type="button" onClick={() => void createAccount()}>Create account</Button></div></form>}{accountMessage ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{accountMessage}</p> : null}</Card>
+    <Card><h2 className="text-xl font-bold">JR OS account</h2>{userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button type="button" disabled={accountBusy} onClick={() => void signOut()}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={signIn}><label className="grid gap-2 text-sm">Email<input type="email" autoComplete="email" required className={fieldClass} value={email} onChange={(event) => setEmail(event.target.value)} /></label><label className="grid gap-2 text-sm">Password<input type="password" autoComplete="current-password" minLength={8} required className={fieldClass} value={password} onChange={(event) => setPassword(event.target.value)} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={accountBusy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={accountBusy || !configured} type="button" onClick={() => void createAccount()}>Create account</Button></div></form>}{accountMessage ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{accountMessage}</p> : null}</Card>
     <Card>
       <h2 className="text-xl font-bold">Data migration controls</h2>
       <p className="mt-2 text-sm text-slate-400">The legacy backup copy remains available. The typed migration copies individual records using their existing local IDs and skips unchanged records.</p>

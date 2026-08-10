@@ -71,6 +71,7 @@ const requiredSuites = [
   "customer-payment-live-rls.test.mjs",
   "legacy-migration-storage-boundary.test.mjs",
   "cable-sizing-history-tenant-boundary.test.mjs",
+  "auth-credential-state-boundary.test.mjs",
 ];
 
 const testsDirectory = new URL("./", import.meta.url);
