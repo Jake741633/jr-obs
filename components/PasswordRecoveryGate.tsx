@@ -26,11 +26,17 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
   const [confirmation, setConfirmation] = useState("");
   const [message, setMessage] = useState("");
 
+  function clearRecoverySecrets() {
+    setPassword("");
+    setConfirmation("");
+  }
+
   useEffect(() => {
     let active = true;
 
     function handleSessionChange(event?: Event) {
       if (event instanceof StorageEvent && event.key !== "jr-os-supabase-session") return;
+      clearRecoverySecrets();
       if (hasRecoverySession()) {
         setState((current) => current === "saving" ? current : "ready");
         return;
@@ -88,6 +94,7 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
         method: "PUT",
         body: JSON.stringify({ password }),
       });
+      clearRecoverySecrets();
       let globalSignOutConfirmed = true;
       try {
         await signOutCloudUser();
@@ -105,6 +112,7 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
   }
 
   function returnToSignIn() {
+    clearRecoverySecrets();
     window.location.assign("/cloud");
   }
 
