@@ -18,17 +18,21 @@ test("legacy aggregate backup reads require active office authority", () => {
 test("all callable migration and restore paths enforce the same role boundary", () => {
   assert.match(cloudSync, /const cloudMigrationRoles = \["owner", "admin", "office"\] as const/);
   assert.match(cloudSync, /function assertCloudMigrationRole\(role: string \| undefined\)/);
-  assert.match(cloudSync, /migrateLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(\);\s*assertCloudMigrationRole\(role\);/);
-  assert.match(cloudSync, /migrateTypedLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(\);\s*assertCloudMigrationRole\(role\);/);
-  assert.match(cloudSync, /restoreCloudDataToLocal[\s\S]*const \{ user, organisationId, role, customerSourceId \} = await getCloudContext\(\);[\s\S]*assertCloudMigrationRole\(role\);/);
-  assert.match(cloudSync, /const current = await getCloudContext\(\);[\s\S]*sameAccountStorageContext\(startingContext,/);
+  assert.match(cloudSync, /migrateLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(operationIsCurrent, expectedContext\);\s*assertCloudMigrationRole\(role\);/);
+  assert.match(cloudSync, /migrateTypedLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(operationIsCurrent, expectedContext\);\s*assertCloudMigrationRole\(role\);/);
+  assert.match(cloudSync, /restoreCloudDataToLocal[\s\S]*const \{ user, organisationId, role, customerSourceId \} = await getCloudContext\(operationIsCurrent, expectedContext\);[\s\S]*assertCloudMigrationRole\(role\);/);
+  assert.match(cloudSync, /const current = await getCloudContext\(operationIsCurrent, expectedContext\);[\s\S]*sameAccountStorageContext\(startingContext,/);
   assert.match(cloudSync, /isLegacyAggregateStorageKey\(payload\.storageKey\)/);
   assert.match(cloudSync, /accountStorageKey\(payload\.storageKey, organisationId, user\.id, role, customerSourceId\)/);
 });
 
 test("field and customer sessions cannot enable migration controls", () => {
-  assert.match(cloudPage, /const \{ identity \} = useCloudIdentity\(\)/);
-  assert.match(cloudPage, /const migrationUnavailable = unavailable \|\| !canManageCloudMigration\(identity\?\.role\)/);
-  assert.equal((cloudPage.match(/disabled=\{migrationUnavailable \|\| activeAction ===/g) ?? []).length, 3);
-  assert.match(cloudPage, /disabled=\{unavailable \|\| activeAction === "retry-queue"\}/);
+  assert.match(cloudPage, /const \{ identity, isReady: identityReady \} = useCloudIdentity\(\)/);
+  assert.match(cloudPage, /matchedCloudPageIdentity\(identity, accountUser, identitySession\)/);
+  assert.match(cloudPage, /const settledOwnerMatchesDisplay = Boolean\(displayOwnerKey && settledIdentity\?\.key === displayOwnerKey\)/);
+  assert.match(cloudPage, /const migrationUnavailable = !configured \|\| !displayIdentity \|\| !identityReady \|\| !settledOwnerMatchesDisplay \|\| !canManageCloudMigration\(displayIdentity\.role\) \|\| operationBusy/);
+  assert.equal((cloudPage.match(/disabled=\{migrationUnavailable\}/g) ?? []).length, 3);
+  assert.match(cloudPage, /const retryUnavailable = !configured \|\| !displayIdentity \|\| !identityReady \|\| !settledOwnerMatchesDisplay \|\| operationBusy/);
+  assert.match(cloudPage, /disabled=\{retryUnavailable\}/);
+  assert.match(cloudPage, /disabled=\{operationBusy\}/);
 });

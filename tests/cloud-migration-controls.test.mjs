@@ -16,9 +16,9 @@ function functionBody(source, name, nextMarker) {
 test("typed import and legacy copy use distinct handlers", () => {
   const typed = functionBody(page, "importTypedRecords", "function copyLegacyBackup");
   const legacy = functionBody(page, "copyLegacyBackup", "function restoreLegacyBackup");
-  assert.match(typed, /migrateTypedLocalDataToCloud\(setImportProgress\)/);
+  assert.match(typed, /migrateTypedLocalDataToCloud\(onProgress, operationIsCurrent, owner\)/);
   assert.doesNotMatch(typed, /migrateLocalDataToCloud\(/);
-  assert.match(legacy, /migrateLocalDataToCloud\(\)/);
+  assert.match(legacy, /migrateLocalDataToCloud\(operationIsCurrent, owner\)/);
   assert.doesNotMatch(legacy, /migrateTypedLocalDataToCloud\(/);
 });
 
@@ -27,7 +27,7 @@ test("migration controls are non-submit actions and prevent reloads", () => {
     importTypedRecords: "function copyLegacyBackup",
     copyLegacyBackup: "function restoreLegacyBackup",
     restoreLegacyBackup: "function retryPendingChanges",
-    retryPendingChanges: "const unavailable",
+    retryPendingChanges: "const migrationUnavailable",
   };
   for (const [handler, boundary] of Object.entries(boundaries)) {
     const body = functionBody(page, handler, boundary);
@@ -53,11 +53,12 @@ test("each migration action has its own success result", () => {
 test("typed import displays live collection progress and counts", () => {
   assert.match(page, /Current collection:/);
   assert.match(page, /completedCollections/);
-  assert.match(page, /importProgress\.imported/);
-  assert.match(page, /importProgress\.skipped/);
-  assert.match(page, /importProgress\.failed/);
+  assert.match(page, /visibleProgress\.imported/);
+  assert.match(page, /visibleProgress\.skipped/);
+  assert.match(page, /visibleProgress\.failed/);
   assert.match(cloudSync, /report\(storageKey, index\)/);
   assert.match(cloudSync, /failed: result\.errors\.length/);
+  assert.match(page, /ownedOperationIsCurrent\(operationLease\)[\s\S]*setImportProgress\(\{ ownerKey: owner\.key, value: progress \}\)/);
 });
 
 test("typed import preserves table and PostgREST errors", () => {

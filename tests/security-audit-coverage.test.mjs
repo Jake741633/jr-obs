@@ -73,6 +73,7 @@ const requiredSuites = [
   "legacy-migration-storage-boundary.test.mjs",
   "cable-sizing-history-tenant-boundary.test.mjs",
   "auth-credential-state-boundary.test.mjs",
+  "cloud-account-identity-boundary.test.mjs",
   "backup-storage-key-isolation.test.mjs",
   "export-import-tenant-boundary.test.mjs",
   "portal-target-binding-guard.test.mjs",

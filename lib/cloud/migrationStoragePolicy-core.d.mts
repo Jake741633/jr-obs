@@ -8,6 +8,10 @@ export interface StorageWriter extends StorageReader {
   setItem(key: string, value: string): void;
 }
 
+export interface StorageMutator extends StorageWriter {
+  removeItem(key: string): void;
+}
+
 export interface AccountStorageContext {
   organisationId: string;
   userId: string;
@@ -46,3 +50,8 @@ export function collectOrganisationBusinessData(storage: StorageReader, organisa
 export function scopedBackupStorageKey(storageKey: string): ScopedBackupStorageKey | null;
 export function collectAccountBusinessData(storage: StorageReader, context: AccountStorageContext): Record<string, unknown>;
 export function claimLegacyMigrationStorage(storage: StorageWriter, organisationId: string): boolean;
+export function migrateClaimedLegacyStorageValues(
+  storage: StorageMutator,
+  organisationId: string,
+  mappings: readonly { legacyKey: string; scopedKey: string }[],
+): { claimedByOrganisation: boolean; migrated: number; removed: number };

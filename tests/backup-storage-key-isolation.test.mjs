@@ -101,6 +101,7 @@ test("authenticated backup collects only the exact active authorisation tuple", 
     ["jr-os-customers", JSON.stringify([{ id: "raw-legacy" }])],
     ["jr-os-cloud-sync-queue", JSON.stringify([{ organisationId: "org-b", payload: "PRIVATE" }])],
     ["jr-os-supabase-session", JSON.stringify({ access_token: "secret" })],
+    ["jr-os-supabase-session-epoch", "internal-epoch"],
     [accountKey("jr-os-unknown", active), JSON.stringify([{ id: "unknown" }])],
   ]);
 
@@ -110,6 +111,7 @@ test("authenticated backup collects only the exact active authorisation tuple", 
   });
   assert.equal(JSON.stringify(collectAccountBusinessData(storage, active)).includes("PRIVATE"), false);
   assert.equal(JSON.stringify(collectAccountBusinessData(storage, active)).includes("secret"), false);
+  assert.equal(JSON.stringify(collectAccountBusinessData(storage, active)).includes("internal-epoch"), false);
 });
 
 test("missing active account caches never fall back to stale organisation or role caches", () => {

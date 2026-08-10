@@ -34,14 +34,17 @@ test("recovery-only sessions stay blocked across reloads and account changes in 
   assert.match(gate, /window\.addEventListener\("jr-os-cloud-identity-changed", handleSessionChange\)/);
   assert.match(gate, /window\.addEventListener\("storage", handleSessionChange\)/);
   assert.match(gate, /event instanceof StorageEvent && event\.key !== "jr-os-supabase-session"/);
+  assert.match(gate, /sessionBoundaryVersionRef\.current \+= 1/);
+  assert.match(gate, /completeEmailVerificationFromUrl\(\(\) => active && sessionBoundaryVersionRef\.current === startingBoundaryVersion\)/);
+  assert.match(gate, /sameSupabaseSessionOwnership\([\s\S]*startingOwnership\.epoch/);
   assert.match(gate, /window\.removeEventListener\("storage", handleSessionChange\)/);
-  assert.match(cloudSync, /if \(!session\?\.access_token \|\| session\.is_password_recovery\) return null/);
+  assert.match(cloudSync, /const startingSession = startingOwnership\.session;[\s\S]*if \(!startingSession\?\.access_token \|\| startingSession\.is_password_recovery\) return null/);
   assert.match(cloudSync, /\/auth\/v1\/logout\?scope=global/);
 });
 
 test("successful recovery clears the privileged recovery session before unlocking sign-in", () => {
   const update = gate.indexOf('await supabaseFetch("/auth/v1/user"');
-  const signOut = gate.indexOf("await signOutCloudUser()", update);
+  const signOut = gate.indexOf("await signOutCloudUser(startingOwnership, operationIsCurrent)", update);
   const complete = gate.indexOf('setState("complete")', signOut);
   assert.ok(update !== -1 && signOut > update && complete > signOut);
   assert.doesNotMatch(gate, /async function returnToSignIn\(\) \{\s*await signOutCloudUser\(\)/);

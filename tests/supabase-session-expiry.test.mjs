@@ -9,7 +9,8 @@ test("stored Supabase sessions fail closed when the access token is missing or b
     source,
     /const hasAccessToken = typeof session\.access_token === "string" && session\.access_token\.trim\(\)\.length > 0;/,
   );
-  assert.match(source, /if \(!hasAccessToken \|\| hasExpired\) \{[\s\S]*?removeItem\(sessionKey\);[\s\S]*?return null;/);
+  assert.match(source, /if \(!hasAccessToken \|\| hasExpired\) \{[\s\S]*?clearStoredSupabaseSession\(\);[\s\S]*?return null;/);
+  assert.match(source, /function clearStoredSupabaseSession\(\) \{\s*window\.localStorage\.removeItem\(sessionKey\);\s*rotateSessionOwnershipEpoch\(\);\s*\}/);
 });
 
 test("stored Supabase sessions are removed when expires_at is reached", () => {
@@ -26,7 +27,7 @@ test("stored Supabase sessions are removed when expires_at is reached", () => {
 test("malformed stored session JSON is cleared rather than reused", () => {
   assert.match(
     source,
-    /catch \{\s*window\.localStorage\.removeItem\(sessionKey\);\s*return null;\s*\}/,
+    /catch \{\s*clearStoredSupabaseSession\(\);\s*return null;\s*\}/,
   );
 });
 

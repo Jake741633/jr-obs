@@ -1,12 +1,42 @@
+import { supabaseSessionFingerprint } from "./sessionOwnership-core.mjs";
+
 export interface SupabaseSession {
   access_token: string;
   refresh_token?: string;
+  expires_in?: number;
   expires_at?: number;
+  token_type?: string;
   user?: { id: string; email?: string };
   is_password_recovery?: boolean;
 }
 
 const sessionKey = "jr-os-supabase-session";
+const sessionOwnershipEpochKey = "jr-os-supabase-session-epoch";
+
+export interface SupabaseSessionOwnership {
+  session: SupabaseSession | null;
+  epoch: string | null;
+}
+
+function nextSessionOwnershipEpoch() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `${Date.now()}-${Math.random()}`;
+}
+
+function rotateSessionOwnershipEpoch() {
+  window.localStorage.setItem(sessionOwnershipEpochKey, nextSessionOwnershipEpoch());
+}
+
+function clearStoredSupabaseSession() {
+  window.localStorage.removeItem(sessionKey);
+  rotateSessionOwnershipEpoch();
+}
+
+function storedSessionFingerprint(raw: string | null) {
+  if (!raw) return null;
+  try { return supabaseSessionFingerprint(JSON.parse(raw) as SupabaseSession); }
+  catch { return null; }
+}
 
 export function getSupabaseConfig() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -31,21 +61,33 @@ export function readSupabaseSession(): SupabaseSession | null {
     const hasExpired = expiresAt !== undefined && expiresAt <= Math.floor(Date.now() / 1000);
 
     if (!hasAccessToken || hasExpired) {
-      window.localStorage.removeItem(sessionKey);
+      clearStoredSupabaseSession();
       return null;
     }
 
     return session as SupabaseSession;
   } catch {
-    window.localStorage.removeItem(sessionKey);
+    clearStoredSupabaseSession();
     return null;
   }
 }
 
+export function readSupabaseSessionOwnershipEpoch() {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(sessionOwnershipEpochKey);
+}
+
+export function captureSupabaseSessionOwnership(): SupabaseSessionOwnership {
+  const session = readSupabaseSession();
+  return { session, epoch: readSupabaseSessionOwnershipEpoch() };
+}
+
 export function saveSupabaseSession(session: SupabaseSession | null) {
   if (typeof window === "undefined") return;
+  const previousFingerprint = storedSessionFingerprint(window.localStorage.getItem(sessionKey));
   if (!session) window.localStorage.removeItem(sessionKey);
   else window.localStorage.setItem(sessionKey, JSON.stringify(session));
+  if (previousFingerprint !== supabaseSessionFingerprint(session)) rotateSessionOwnershipEpoch();
 }
 
 export async function supabaseFetch(path: string, init: RequestInit = {}, authenticated = true) {

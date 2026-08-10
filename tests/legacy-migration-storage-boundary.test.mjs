@@ -12,6 +12,7 @@ import {
   isCloudCollectionStorageKey,
   isLegacyAggregateStorageKey,
   legacyAggregateStorageKeys,
+  migrateClaimedLegacyStorageValues,
   typedCollectionTables,
   typedLegacyMigrationStorageKeys,
 } from "../lib/cloud/migrationStoragePolicy-core.mjs";
@@ -26,6 +27,7 @@ class FakeStorage {
   key(index) { return [...this.values.keys()][index] ?? null; }
   getItem(key) { return this.values.has(key) ? this.values.get(key) : null; }
   setItem(key, value) { this.values.set(key, String(value)); }
+  removeItem(key) { this.values.delete(key); }
 }
 
 function accountKey(storageKey, organisationId, userId) {
@@ -52,6 +54,7 @@ test("migration registry is exact, complete and deny-by-default", () => {
     "jr-os-private-file-upload-queue",
     "jr-os-cloud-sync-queue",
     "jr-os-supabase-session",
+    "jr-os-supabase-session-epoch",
     "jr-os-active-organisation",
     "jr-os-last-cloud-sync",
     "jr-os-cloud-versions:jr-os-customers",
@@ -74,6 +77,7 @@ test("legacy collectors never mix organisation caches or private queued bytes", 
     [orgBAccountKey, JSON.stringify([{ id: "org-b-account-job" }])],
     ["jr-os-private-file-upload-queue", JSON.stringify([{ id: "file-a", organisationId: "org-a", dataUrl: "data:image/png;base64,PRIVATE_BYTES" }])],
     ["jr-os-supabase-session", JSON.stringify({ access_token: "secret" })],
+    ["jr-os-supabase-session-epoch", "internal-epoch"],
     ["jr-os-unknown-future-key", JSON.stringify([{ id: "unknown" }])],
   ]);
 
@@ -113,10 +117,53 @@ test("legacy claims fail closed when another tenant left caches or private uploa
   assert.equal(storage.getItem(LEGACY_MIGRATION_CLAIM_KEY), null);
 });
 
+test("legacy upload markers migrate only through a matching organisation claim", () => {
+  const storage = new FakeStorage([
+    [LEGACY_MIGRATION_CLAIM_KEY, JSON.stringify({ organisationId: "org-a" })],
+    ["jr-os-last-cloud-sync", "2026-08-09T10:00:00.000Z"],
+    ["jr-os-last-typed-cloud-sync", "2026-08-09T11:00:00.000Z"],
+  ]);
+  const mappings = [
+    { legacyKey: "jr-os-last-cloud-sync", scopedKey: organisationKey("jr-os-last-cloud-sync", "org-a") },
+    { legacyKey: "jr-os-last-typed-cloud-sync", scopedKey: organisationKey("jr-os-last-typed-cloud-sync", "org-a") },
+  ];
+
+  assert.deepEqual(migrateClaimedLegacyStorageValues(storage, "org-a", mappings), {
+    claimedByOrganisation: true,
+    migrated: 2,
+    removed: 2,
+  });
+  assert.equal(storage.getItem(mappings[0].scopedKey), "2026-08-09T10:00:00.000Z");
+  assert.equal(storage.getItem(mappings[1].scopedKey), "2026-08-09T11:00:00.000Z");
+  assert.equal(storage.getItem("jr-os-last-cloud-sync"), null);
+  assert.equal(storage.getItem("jr-os-last-typed-cloud-sync"), null);
+});
+
+test("ambiguous legacy upload markers are removed without being assigned to a tenant", () => {
+  for (const claim of [null, { organisationId: "org-b" }, "malformed"]) {
+    const entries = [
+      ["jr-os-last-cloud-sync", "2026-08-09T10:00:00.000Z"],
+      ...(claim === null ? [] : [[LEGACY_MIGRATION_CLAIM_KEY, claim === "malformed" ? "{" : JSON.stringify(claim)]]),
+    ];
+    const storage = new FakeStorage(entries);
+    const scopedKey = organisationKey("jr-os-last-cloud-sync", "org-a");
+    const result = migrateClaimedLegacyStorageValues(storage, "org-a", [
+      { legacyKey: "jr-os-last-cloud-sync", scopedKey },
+    ]);
+
+    assert.equal(result.claimedByOrganisation, false);
+    assert.equal(result.migrated, 0);
+    assert.equal(result.removed, 1);
+    assert.equal(storage.getItem(scopedKey), null);
+    assert.equal(storage.getItem("jr-os-last-cloud-sync"), null);
+  }
+});
+
 test("both cloud migration paths claim exact legacy keys and restore only registered keys", () => {
   assert.match(cloudSync, /exportLegacyJrOsData\(organisationId\)/);
   assert.match(cloudSync, /typedLegacyMigrationStorageKeys\(window\.localStorage\)/);
   assert.match(cloudSync, /claimLegacyMigrationStorage\(window\.localStorage, organisationId\)/);
+  assert.match(cloudSync, /migrateClaimedLegacyStorageValues\(window\.localStorage, organisationId/);
   assert.match(cloudSync, /isLegacyAggregateStorageKey\(payload\.storageKey\)/);
   assert.doesNotMatch(cloudSync, /cloudInternalKeys/);
   assert.match(appData, /claimLegacyMigrationStorage\(window\.localStorage, organisationId\)/);

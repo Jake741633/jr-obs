@@ -133,6 +133,8 @@ test("typed import records the common successful upload timestamp", () => {
   assert.match(cloudSync, /recordSuccessfulCloudUpload/);
   assert.match(cloudSync, /jr-os-last-cloud-sync/);
   assert.match(cloudSync, /jr-os-last-typed-cloud-sync/);
+  assert.match(cloudSync, /organisationStorageKey\(typed \? LAST_TYPED_CLOUD_SYNC_STORAGE_KEY : LAST_CLOUD_SYNC_STORAGE_KEY, organisationId\)/);
+  assert.doesNotMatch(cloudSync, /localStorage\.setItem\("jr-os-last-(?:typed-)?cloud-sync"/);
 });
 
 test("cloud cutover page is reachable from navigation", () => {

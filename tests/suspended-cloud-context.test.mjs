@@ -21,8 +21,9 @@ test("cloud context excludes suspended profiles", () => {
 });
 
 test("migration and restore operations resolve their tenant through guarded cloud context", () => {
-  assert.match(cloudSync, /export async function migrateLocalDataToCloud\(\): Promise<CloudSyncResult> \{\s*const \{ user, organisationId, role \} = await getCloudContext\(\)/s);
-  assert.match(cloudSync, /export async function migrateTypedLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(\)/);
-  assert.match(cloudSync, /export async function restoreCloudDataToLocal\(\) \{\s*const \{ user, organisationId, role, customerSourceId \} = await getCloudContext\(\)/s);
-  assert.match(cloudSync, /const current = await getCloudContext\(\);[\s\S]*sameAccountStorageContext\(startingContext,/);
+  assert.match(cloudSync, /export async function migrateLocalDataToCloud\(operationIsCurrent\?: CloudOperationOwnershipGuard, expectedContext\?: CloudOperationExpectedContext\): Promise<CloudSyncResult> \{\s*const \{ user, organisationId, role \} = await getCloudContext\(operationIsCurrent, expectedContext\)/s);
+  assert.match(cloudSync, /export async function migrateTypedLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(operationIsCurrent, expectedContext\)/);
+  assert.match(cloudSync, /export async function restoreCloudDataToLocal\(operationIsCurrent\?: CloudOperationOwnershipGuard, expectedContext\?: CloudOperationExpectedContext\) \{\s*const \{ user, organisationId, role, customerSourceId \} = await getCloudContext\(operationIsCurrent, expectedContext\)/s);
+  assert.match(cloudSync, /const current = await getCloudContext\(operationIsCurrent, expectedContext\);[\s\S]*sameAccountStorageContext\(startingContext,/);
+  assert.ok((cloudSync.match(/assertCloudPageOperationCurrent\(operationIsCurrent\)/g) ?? []).length >= 12);
 });

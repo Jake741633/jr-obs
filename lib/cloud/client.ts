@@ -1,6 +1,15 @@
 "use client";
 
 import { cloudConfig, cloudStorageBucket } from "./config";
+import {
+  captureSupabaseSessionOwnership,
+  readSupabaseSession,
+  readSupabaseSessionOwnershipEpoch,
+  saveSupabaseSession,
+  type SupabaseSession,
+  type SupabaseSessionOwnership,
+} from "../supabase/client";
+import { sameSupabaseSessionOwnership } from "../supabase/sessionOwnership-core.mjs";
 
 export interface CloudSession {
   accessToken: string;
@@ -9,9 +18,6 @@ export interface CloudSession {
   user: { id: string; email?: string };
   isPasswordRecovery?: boolean;
 }
-
-type StoredSupabaseSession = { access_token?: string; refresh_token?: string; expires_in?: number; expires_at?: number; user?: { id: string; email?: string }; is_password_recovery?: boolean };
-const SESSION_KEY = "jr-os-supabase-session";
 
 function requestHeaders(session?: CloudSession, extra?: HeadersInit) {
   const result = new Headers();
@@ -34,7 +40,7 @@ async function request<T>(path: string, init: RequestInit = {}, session?: CloudS
   return response.json() as Promise<T>;
 }
 
-function normalizeSession(value: StoredSupabaseSession | null): CloudSession | null {
+function normalizeSession(value: SupabaseSession | null): CloudSession | null {
   if (!value?.access_token || !value.user) return null;
   return {
     accessToken: value.access_token,
@@ -45,50 +51,72 @@ function normalizeSession(value: StoredSupabaseSession | null): CloudSession | n
   };
 }
 
+function storedSession(value: CloudSession): SupabaseSession {
+  return {
+    access_token: value.accessToken,
+    refresh_token: value.refreshToken,
+    expires_at: Math.floor(value.expiresAt / 1000),
+    user: value.user,
+    is_password_recovery: value.isPasswordRecovery || undefined,
+  };
+}
+
+function activeSessionOwnershipMatches(expected: SupabaseSessionOwnership) {
+  return sameSupabaseSessionOwnership(
+    readSupabaseSession(),
+    readSupabaseSessionOwnershipEpoch(),
+    expected.session,
+    expected.epoch,
+  );
+}
+
+function assertActiveSessionOwnership(expected: SupabaseSessionOwnership) {
+  if (!activeSessionOwnershipMatches(expected)) {
+    throw new Error("The active JR OS account changed before the authentication request completed.");
+  }
+}
+
+function identityChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("jr-os-cloud-identity-changed"));
+}
+
 function encodedObjectPath(path: string) {
   return path.split("/").map((segment) => encodeURIComponent(segment)).join("/");
 }
 
 export const cloudSession = {
   load(): CloudSession | null {
-    if (typeof window === "undefined") return null;
-    try {
-      const session = normalizeSession(JSON.parse(window.localStorage.getItem(SESSION_KEY) || "null") as StoredSupabaseSession | null);
-      if (!session) return null;
-      if (session.expiresAt <= Date.now()) {
-        window.localStorage.removeItem(SESSION_KEY);
-        return null;
-      }
-      return session;
-    } catch {
-      window.localStorage.removeItem(SESSION_KEY);
-      return null;
-    }
+    return normalizeSession(readSupabaseSession());
   },
   save(session: CloudSession | null) {
-    if (typeof window === "undefined") return;
-    if (!session) window.localStorage.removeItem(SESSION_KEY);
-    else window.localStorage.setItem(SESSION_KEY, JSON.stringify({ access_token: session.accessToken, refresh_token: session.refreshToken, expires_at: Math.floor(session.expiresAt / 1000), user: session.user, is_password_recovery: session.isPasswordRecovery || undefined }));
+    saveSupabaseSession(session ? storedSession(session) : null);
+    identityChanged();
   },
 };
 
 export async function signInWithPassword(email: string, password: string) {
+  const startingOwnership = captureSupabaseSessionOwnership();
   const payload = await request<{ access_token: string; refresh_token: string; expires_in: number; user: { id: string; email?: string } }>("/auth/v1/token?grant_type=password", { method: "POST", body: JSON.stringify({ email, password }) }, undefined, false);
+  assertActiveSessionOwnership(startingOwnership);
   const session: CloudSession = { accessToken: payload.access_token, refreshToken: payload.refresh_token, expiresAt: Date.now() + payload.expires_in * 1000, user: payload.user };
   cloudSession.save(session); return session;
 }
 
 export async function signOut() {
-  const session = cloudSession.load();
+  const startingOwnership = captureSupabaseSessionOwnership();
+  const session = normalizeSession(startingOwnership.session);
   try {
     if (session) await request<void>("/auth/v1/logout?scope=global", { method: "POST" }, session, true, true);
   } finally {
-    cloudSession.save(null);
+    if (activeSessionOwnershipMatches(startingOwnership)) cloudSession.save(null);
   }
 }
 export async function refreshSession(session = cloudSession.load()) {
-  if (!session?.refreshToken || session.isPasswordRecovery) return null;
+  const startingOwnership = captureSupabaseSessionOwnership();
+  const activeSession = normalizeSession(startingOwnership.session);
+  if (!session?.refreshToken || session.isPasswordRecovery || session.accessToken !== activeSession?.accessToken) return null;
   const payload = await request<{ access_token: string; refresh_token: string; expires_in: number; user: { id: string; email?: string } }>("/auth/v1/token?grant_type=refresh_token", { method: "POST", body: JSON.stringify({ refresh_token: session.refreshToken }) }, undefined, false);
+  assertActiveSessionOwnership(startingOwnership);
   const refreshed: CloudSession = { accessToken: payload.access_token, refreshToken: payload.refresh_token, expiresAt: Date.now() + payload.expires_in * 1000, user: payload.user };
   cloudSession.save(refreshed); return refreshed;
 }

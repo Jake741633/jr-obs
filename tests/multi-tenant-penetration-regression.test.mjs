@@ -11,6 +11,7 @@ const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf
 const portal = readFileSync(new URL("../app/customer-portal/page.tsx", import.meta.url), "utf8");
 const guard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
 const client = readFileSync(new URL("../lib/cloud/client.ts", import.meta.url), "utf8");
+const supabaseClient = readFileSync(new URL("../lib/supabase/client.ts", import.meta.url), "utf8");
 
 test("record enumeration cannot remove the organisation filter", () => {
   assert.match(adapter, /const readTable = collectionCloudReadTable\(table, cacheRole\)/);
@@ -84,9 +85,9 @@ test("tenant-sensitive state is invalidated across identity and workspace change
 });
 
 test("forged or expired browser sessions cannot reach cloud requests", () => {
-  assert.match(client, /if \(session\.expiresAt <= Date\.now\(\)\) \{/);
-  assert.match(client, /window\.localStorage\.removeItem\(SESSION_KEY\);\s*return null;/s);
-  assert.match(client, /catch \{\s*window\.localStorage\.removeItem\(SESSION_KEY\);\s*return null;\s*\}/s);
+  assert.match(client, /load\(\): CloudSession \| null \{\s*return normalizeSession\(readSupabaseSession\(\)\)/);
+  assert.match(supabaseClient, /const hasExpired = expiresAt !== undefined && expiresAt <= Math\.floor\(Date\.now\(\) \/ 1000\)/);
+  assert.match(supabaseClient, /clearStoredSupabaseSession\(\);\s*return null/);
   assert.match(client, /cloudSelect[\s\S]*cloudSession\.load\(\) \|\| undefined/);
   assert.match(client, /uploadPrivateObject[\s\S]*cloudSession\.load\(\) \|\| undefined/);
   assert.match(client, /downloadPrivateObject[\s\S]*const session = cloudSession\.load\(\)/);

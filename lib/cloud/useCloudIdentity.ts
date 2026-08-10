@@ -2,7 +2,8 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { getCurrentCloudUser } from "../cloudSync";
-import { readSupabaseSession, supabaseFetch } from "../supabase/client";
+import { captureSupabaseSessionOwnership, readSupabaseSession, readSupabaseSessionOwnershipEpoch, supabaseFetch } from "../supabase/client";
+import { sameSupabaseSessionOwnership } from "../supabase/sessionOwnership-core.mjs";
 import { effectiveCloudMode } from "./config";
 import type { JrRole } from "./permissions";
 import { setActiveSyncIdentity } from "./repository";
@@ -66,9 +67,17 @@ async function loadIdentity(force = false) {
 
   const requestVersion = ++identityRequestVersion;
   const request = (async () => {
+    const startingOwnership = captureSupabaseSessionOwnership();
+    const ownershipIsCurrent = () => sameSupabaseSessionOwnership(
+      readSupabaseSession(),
+      readSupabaseSessionOwnershipEpoch(),
+      startingOwnership.session,
+      startingOwnership.epoch,
+    );
     const user = await getCurrentCloudUser();
-    if (!user) return null;
+    if (!user || !ownershipIsCurrent()) return null;
     const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(user.id)}&active=eq.true&select=organisation_id,role,customer_source_id,active`);
+    if (!ownershipIsCurrent()) return null;
     const profile = Array.isArray(rows) ? rows[0] : null;
     if (!profile?.active || !profile?.organisation_id || !profile?.role) return null;
     return {

@@ -16,25 +16,30 @@ function functionBody(source, name) {
   return source.slice(start, end);
 }
 
-test("every account action clears the submitted password and successful actions clear the email", () => {
+test("account actions clear submitted secrets without erasing later input revisions", () => {
   const action = functionBody(cloudPage, "runAccountAction");
   const finallyIndex = action.indexOf("finally");
+  const awaitIndex = action.indexOf("await action(operationIsCurrent)");
 
   assert.match(action, /let succeeded = false/);
   assert.match(action, /succeeded = true/);
   assert.ok(finallyIndex >= 0, "account cleanup must run from finally");
-  assert.ok(action.indexOf('if (succeeded) setEmail("")', finallyIndex) > finallyIndex);
-  assert.ok(action.indexOf('setPassword("")', finallyIndex) > finallyIndex);
-  assert.ok(action.indexOf("await getCurrentCloudUser()", finallyIndex) > finallyIndex);
+  assert.match(action, /const operationIsCurrent = \(\) => Boolean\(operationCoordinatorRef\.current\?\.isCurrent\(operation\)\)/);
+  assert.match(action, /passwordRevisionRef\.current === submittedPasswordRevision[\s\S]*passwordRevisionRef\.current \+= 1[\s\S]*setPassword\(""\)/);
+  assert.ok(action.indexOf('setPassword("")') < awaitIndex, "submitted password must clear before the request can finish");
+  assert.match(action, /succeeded && emailRevisionRef\.current === submittedEmailRevision/);
+  assert.match(action, /clearSubmittedValue\(current, submittedEmail, currentRevision, submittedEmailRevision\)/);
+  assert.ok(action.indexOf("await refreshAccountUser()", finallyIndex) > finallyIndex);
+  assert.doesNotMatch(action.slice(finallyIndex), /setPassword\(""\)/);
 });
 
 test("logout clears controlled credentials before the asynchronous session teardown", () => {
   const signOut = functionBody(cloudPage, "signOut");
-  const actionIndex = signOut.indexOf("await runAccountAction(signOutCloudUser");
+  const actionIndex = signOut.indexOf('await runAccountAction("sign-out", (operationIsCurrent) => signOutCloudUser(expectedOwnership, operationIsCurrent)');
 
   assert.ok(actionIndex >= 0, "logout must use the guarded account action");
-  assert.ok(signOut.indexOf('setEmail("")') < actionIndex);
-  assert.ok(signOut.indexOf('setPassword("")') < actionIndex);
+  assert.ok(signOut.indexOf("clearAccountInputs()") < actionIndex);
+  assert.ok(signOut.indexOf("const expectedOwnership = captureSupabaseSessionOwnership()") < actionIndex);
   assert.match(cloudPage, /onClick=\{\(\) => void signOut\(\)\}/);
   assert.match(accessGuard, /pathname === "\/cloud"/);
 });
@@ -45,11 +50,12 @@ test("recovery secrets clear when session ownership changes and after a successf
   const update = functionBody(recoveryGate, "updatePassword");
   const passwordUpdate = update.indexOf('await supabaseFetch("/auth/v1/user"');
   const secretClear = update.indexOf("clearRecoverySecrets()", passwordUpdate);
-  const signOut = update.indexOf("await signOutCloudUser()", passwordUpdate);
+  const signOut = update.indexOf("await signOutCloudUser(startingOwnership, operationIsCurrent)", passwordUpdate);
 
   assert.match(clear, /setPassword\(""\)/);
   assert.match(clear, /setConfirmation\(""\)/);
   assert.match(sessionChange, /clearRecoverySecrets\(\);\s*if \(hasRecoverySession\(\)\)/);
   assert.ok(passwordUpdate >= 0 && secretClear > passwordUpdate && signOut > secretClear);
+  assert.match(update, /sameSupabaseSessionOwnership\([\s\S]*startingOwnership\.epoch/);
   assert.match(functionBody(recoveryGate, "returnToSignIn"), /clearRecoverySecrets\(\)/);
 });
