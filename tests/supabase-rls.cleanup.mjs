@@ -10,7 +10,7 @@ const USER_PAGE_SIZE = 1000;
 const RUN_ID_SOURCE = String.raw`\d{13}-[a-z0-9]{6,16}`;
 const TEST_ORGANISATION_NAME = new RegExp(`^JR OS Security ([AB]) (${RUN_ID_SOURCE})$`);
 const TEST_USER_EMAIL = new RegExp(
-  `^jr-os-rls-[ab]-(?:owner|admin|office|electrician|customer)-(${RUN_ID_SOURCE})@example\\.com$`,
+  `^jr-os-rls-([ab])-(owner|admin|office|electrician|customer)-(${RUN_ID_SOURCE})@example\\.com$`,
 );
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -20,14 +20,29 @@ export function testOrganisationIdentity(record) {
   return Object.freeze({ id: record.id, name: record.name, tenant: match[1], runId: match[2] });
 }
 
-export function isTestUserForRuns(user, runIds) {
-  const emailMatch = TEST_USER_EMAIL.exec(user?.email ?? "");
-  const metadataRunId = user?.user_metadata?.jr_os_test_run;
+export function testUserIdentity(user) {
+  const match = TEST_USER_EMAIL.exec(user?.email ?? "");
+  if (!match || !UUID.test(user?.id ?? "")) return null;
+  return Object.freeze({
+    id: user.id,
+    email: user.email,
+    tenant: match[1].toUpperCase(),
+    role: match[2],
+    runId: match[3],
+  });
+}
+
+export function isTestUserForProfiles(user, organisationsByKey, profilesByUserId) {
+  const identity = testUserIdentity(user);
+  if (!identity) return false;
+  const organisation = organisationsByKey.get(`${identity.tenant}:${identity.runId}`);
+  const profile = profilesByUserId.get(identity.id);
   return Boolean(
-    emailMatch
-      && typeof metadataRunId === "string"
-      && emailMatch[1] === metadataRunId
-      && runIds.has(metadataRunId),
+    organisation
+      && profile
+      && profile.id === identity.id
+      && profile.organisation_id === organisation.id
+      && profile.role === identity.role,
   );
 }
 
@@ -89,7 +104,22 @@ export async function cleanupSupabaseRlsTest({
   );
   if (!Array.isArray(organisationPayload)) throw new Error("Supabase cleanup expected an organisation array");
   const organisations = organisationPayload.map(testOrganisationIdentity).filter(Boolean);
-  const runIds = new Set(organisations.map((organisation) => organisation.runId));
+  const organisationsByKey = new Map(
+    organisations.map((organisation) => [`${organisation.tenant}:${organisation.runId}`, organisation]),
+  );
+
+  const organisationIds = organisations.map((organisation) => organisation.id);
+  const profilePayload = organisationIds.length === 0
+    ? []
+    : await request(
+      `/rest/v1/profiles?select=id,organisation_id,role&organisation_id=in.(${organisationIds.join(",")})`,
+    );
+  if (!Array.isArray(profilePayload)) throw new Error("Supabase cleanup expected a profile array");
+  const profilesByUserId = new Map(
+    profilePayload
+      .filter((profile) => UUID.test(profile?.id ?? ""))
+      .map((profile) => [profile.id, profile]),
+  );
 
   const listFolder = async (bucket, prefix) => {
     const entries = [];
@@ -149,7 +179,7 @@ export async function cleanupSupabaseRlsTest({
 
   let deletedUsers = 0;
   for (const user of users) {
-    if (!isTestUserForRuns(user, runIds) || !UUID.test(user.id ?? "")) continue;
+    if (!isTestUserForProfiles(user, organisationsByKey, profilesByUserId)) continue;
     await request(`/auth/v1/admin/users/${user.id}`, { method: "DELETE" });
     deletedUsers += 1;
   }

@@ -129,7 +129,7 @@ Cleanup attempts to remove:
 
 Cleanup uses the service role only inside the Node test runner. Each cleanup operation is best-effort so later cleanup continues even if one deletion fails.
 
-The always-run fallback cleanup re-verifies the exact project ref and deployed migration before any destructive request. It never lists a Storage bucket root. It discovers only exact generated test organisations, removes only object paths under those organisation UUIDs that contain the matching run ID, requires exact generated Auth email and run metadata, and deletes organisations by validated UUID. Unrelated objects, users and organisations are left untouched.
+The always-run fallback cleanup re-verifies the exact project ref and deployed migration before any destructive request. It never lists a Storage bucket root. It discovers only exact generated test organisations, removes only object paths under those organisation UUIDs that contain the matching run ID, and deletes an Auth user only when its exact generated email, UUID, expected role and protected `profiles` membership all bind it to one of those organisations. User-editable Auth metadata is never trusted as deletion authority. Organisations are deleted only by validated UUID, and unrelated objects, users and organisations are left untouched.
 
 Use a disposable test project and enable Supabase project backups or periodic resets. A cancelled runner or infrastructure outage can still interrupt the final cleanup process.
 
