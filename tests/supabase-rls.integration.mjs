@@ -130,6 +130,19 @@ function typedRecord(organisationId, sourceId, customerSourceId, jobSourceId, ex
     payload: { id: sourceId, customerId: customerSourceId, jobId: jobSourceId, testRun: runId, ...extra },
   };
 }
+function approvalPayload(documentId, extra = {}) {
+  return {
+    documentId,
+    documentType: "Quote",
+    decision: "Accepted",
+    approvalName: "Portal customer",
+    comments: "",
+    termsAccepted: false,
+    termsSnapshot: "",
+    decidedAt: "1900-01-01T00:00:00.000Z",
+    ...extra,
+  };
+}
 function genericRecord(organisationId, collectionKey, sourceId, account, customerSourceId, jobSourceId, extra = {}) {
   return {
     organisation_id: organisationId,
@@ -591,52 +604,122 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
 
     const approvalA = source("approval-a");
     const requestA = source("request-a");
-    await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, approvalA, customerA, null, {
-      documentId: quoteA, documentType: "Quote", decision: "Accepted", approvalName: "Portal customer",
-    })), "Customer should approve their own Sent pricing document");
-    await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-after-status-sync"), customerA, null, {
-      documentId: acceptedQuoteA, documentType: "Quote", decision: "Accepted", approvalName: "Portal customer",
-    })), "Customer approval should tolerate the matching final status arriving first");
+    const approvalRequestStartedAt = Date.now();
+    const forgedApprovalTime = "1900-01-01T00:00:00.000Z";
+    const approvalResult = await insertRecord(accounts.A.customer, "portal_approvals", {
+      ...typedRecord(
+        organisationA,
+        approvalA,
+        customerA,
+        null,
+        approvalPayload(quoteA, { termsAccepted: true, termsSnapshot: "Customer-visible terms" }),
+      ),
+      source_updated_at: forgedApprovalTime,
+      created_at: forgedApprovalTime,
+      updated_at: forgedApprovalTime,
+    });
+    await expectAllowed(approvalResult, "Customer should approve their own Sent pricing document");
+    const storedApproval = approvalResult.payload[0];
+    const serverDecisionTime = Date.parse(storedApproval.payload.decidedAt);
+    assert.notEqual(storedApproval.payload.decidedAt, forgedApprovalTime, "Portal approval timestamp must be server-authored");
+    assert.ok(Number.isFinite(serverDecisionTime), "Server-authored portal approval timestamp must be valid");
+    assert.ok(serverDecisionTime >= approvalRequestStartedAt - 30_000 && serverDecisionTime <= Date.now() + 30_000, "Portal approval timestamp must match server receipt time");
+    assert.equal(Date.parse(storedApproval.created_at), serverDecisionTime, "Portal approval receipt and decision timestamps must agree");
+    assert.equal(Date.parse(storedApproval.updated_at), serverDecisionTime, "Portal approval update timestamp must be server-authored");
+    assert.equal(Date.parse(storedApproval.source_updated_at), serverDecisionTime, "Portal approval source timestamp must be server-authored");
+    await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+      organisationA,
+      source("approval-after-status-sync"),
+      customerA,
+      null,
+      approvalPayload(acceptedQuoteA),
+    )), "Customer approval should tolerate the matching final status arriving first");
     await expectAllowed(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, requestA, customerA, jobA, {
       plannerEntryId: portalPlannerA, type: "Appointment change", message: "Please move this visit", status: "Open",
     })), "Customer should create a request for their own active planner entry");
     await expectDeniedWithCode(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-other-customer-document"), customerA, null, { documentId: otherCustomerQuote, documentType: "Quote", decision: "Accepted" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-blank-name"), customerA, null, approvalPayload(quoteA, {
+        approvalName: "   ", termsAccepted: true, termsSnapshot: "Customer-visible terms",
+      }))),
+      "23514",
+      "Customer must not submit a portal approval without a signer name",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-invalid-comments"), customerA, null, approvalPayload(quoteA, {
+        comments: 42, termsAccepted: true, termsSnapshot: "Customer-visible terms",
+      }))),
+      "23514",
+      "Customer must not submit malformed portal approval comments",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-terms-not-accepted"), customerA, null, approvalPayload(quoteA, {
+        termsSnapshot: "Customer-visible terms",
+      }))),
+      "23514",
+      "Customer must explicitly accept nonempty quote terms",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-forged-terms"), customerA, null, approvalPayload(quoteA, {
+        termsAccepted: true, termsSnapshot: "Attacker-supplied replacement terms",
+      }))),
+      "23514",
+      "Customer must not forge the portal approval terms snapshot",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-invalid-timestamp"), customerA, null, approvalPayload(quoteA, {
+        termsAccepted: true, termsSnapshot: "Customer-visible terms", decidedAt: "not-a-timestamp",
+      }))),
+      "23514",
+      "Customer must not submit an invalid portal approval timestamp",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+        organisationA,
+        source("approval-forged-customer-envelope"),
+        otherCustomerA,
+        null,
+        approvalPayload(otherCustomerQuote),
+      )),
+      "42501",
+      "Customer must not probe another customer through a forged approval envelope",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-other-customer-document"), customerA, null, approvalPayload(otherCustomerQuote))),
       "23503",
       "Customer must not approve another customer's pricing document",
     );
     await expectDeniedWithCode(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-document"), customerA, null, { documentId: quoteB, documentType: "Quote", decision: "Accepted" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-document"), customerA, null, approvalPayload(quoteB))),
       "23503",
       "Customer must not approve another tenant's pricing document",
     );
     await expectDeniedWithCode(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-missing-document"), customerA, null, { documentId: source("missing-pricing-document"), documentType: "Quote", decision: "Accepted" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-missing-document"), customerA, null, approvalPayload(source("missing-pricing-document")))),
       "23503",
       "Customer must not approve a nonexistent pricing document",
     );
     await expectDeniedWithCode(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-draft-document"), customerA, null, { documentId: draftQuoteA, documentType: "Quote", decision: "Accepted" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-draft-document"), customerA, null, approvalPayload(draftQuoteA))),
       "23503",
       "Customer must not approve a Draft pricing document",
     );
     await expectDeniedWithCode(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-expired-document"), customerA, null, { documentId: expiredQuoteA, documentType: "Quote", decision: "Accepted" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-expired-document"), customerA, null, approvalPayload(expiredQuoteA))),
       "23503",
       "Customer must not approve an Expired pricing document",
     );
     await expectDeniedWithCode(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-deleted-document"), customerA, null, { documentId: deletedQuoteA, documentType: "Quote", decision: "Accepted" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-deleted-document"), customerA, null, approvalPayload(deletedQuoteA))),
       "23503",
       "Customer must not approve a soft-deleted pricing document",
     );
     await expectDeniedWithCode(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-type-mismatch"), customerA, null, { documentId: quoteA, documentType: "Estimate", decision: "Accepted" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-type-mismatch"), customerA, null, approvalPayload(quoteA, { documentType: "Estimate" }))),
       "23503",
       "Customer must not approve a pricing document under the wrong type",
     );
     await expectDeniedWithCode(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-final-status-mismatch"), customerA, null, { documentId: acceptedQuoteA, documentType: "Quote", decision: "Declined" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-final-status-mismatch"), customerA, null, approvalPayload(acceptedQuoteA, { decision: "Declined" }))),
       "23503",
       "Customer must not record a decision that conflicts with the final pricing status",
     );
@@ -675,7 +758,9 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
     await expectDenied(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, source("request-other"), otherCustomerA, jobA)), "Customer must not create another customer request");
     await expectDenied(
-      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-job"), customerA, jobB, { documentId: quoteA, documentType: "Quote", decision: "Accepted" })),
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(organisationA, source("approval-cross-tenant-job"), customerA, jobB, approvalPayload(quoteA, {
+        termsAccepted: true, termsSnapshot: "Customer-visible terms",
+      }))),
       "Customer must not attach an approval to another tenant's job while keeping their own customer ID",
     );
     await expectDenied(
@@ -694,6 +779,13 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       }),
       "23514",
       "Staff must not retarget an existing portal approval",
+    );
+    await expectDeniedWithCode(
+      await patchRecords(accounts.A.office, "portal_approvals", `source_id=eq.${approvalA}`, {
+        payload: { ...storedApproval.payload, approvalName: "Forged staff rewrite" },
+      }),
+      "23514",
+      "Staff must not rewrite recorded portal approval evidence",
     );
     await expectDeniedWithCode(
       await patchRecords(accounts.A.office, "portal_requests", `source_id=eq.${requestA}`, {

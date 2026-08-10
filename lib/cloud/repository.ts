@@ -2,12 +2,12 @@
 
 import { cloudPatch, cloudSelect, cloudUpsert } from "./client";
 import { effectiveCloudMode } from "./config";
-import { buildCloudEnvelope, coalesceQueue, hasVersionConflict, makeTombstone, pendingImports, tenantRecordQuery } from "./repository-core.mjs";
+import { buildCloudEnvelope, cloudRecordMatchesQueuedPayload, coalesceQueue, hasVersionConflict, makeTombstone, pendingImports, tenantRecordQuery } from "./repository-core.mjs";
 import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { assertCloudPageOperationCurrent } from "./cloudPageIdentity-core.mjs";
 
 export type SyncState = "Synced" | "Pending" | "Offline" | "Conflict" | "Failed";
-export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: string; customer_source_id?: string | null; job_source_id?: string | null; version: number; source_updated_at?: string; payload: T; updated_at?: string; deleted_at?: string | null; }
+export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: string; customer_source_id?: string | null; job_source_id?: string | null; version: number; source_updated_at?: string; payload: T; created_at?: string; updated_at?: string; deleted_at?: string | null; }
 export interface GenericCloudEnvelope<T> extends TypedCloudEnvelope<T> { collection_key: string; }
 export type CloudEnvelope<T> = TypedCloudEnvelope<T> | GenericCloudEnvelope<T>;
 export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; role?: string; customerSourceId?: string; payload?: T; expectedVersion?: number; queuedAt: string; attempts: number; state: SyncState; error?: string; }
@@ -52,7 +52,6 @@ export function activeSyncAuthorizationMatches(authorization: SyncAuthorizationC
   return Boolean(active && sameSyncAuthorization(active, authorization));
 }
 function collectionFilter(collectionKey?: string) { return collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : ""; }
-function samePayload(left: unknown, right: unknown) { return JSON.stringify(left ?? null) === JSON.stringify(right ?? null); }
 function updateCachedVersion(storageKey: string | undefined, sourceId: string, version?: number) {
   if (!storageKey) return;
   const key = `jr-os-cloud-versions:${storageKey}`;
@@ -193,7 +192,7 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
         cleared += 1;
         continue;
       }
-      if (item.operation === "upsert" && current && !current.deleted_at && samePayload(current.payload, item.payload)) {
+      if (item.operation === "upsert" && current && !current.deleted_at && cloudRecordMatchesQueuedPayload(item.table, current, item.payload)) {
         updateCachedVersion(item.storageKey, item.sourceId, current.version);
         cleared += 1;
         continue;
