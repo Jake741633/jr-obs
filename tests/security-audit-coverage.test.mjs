@@ -77,6 +77,7 @@ const requiredSuites = [
   "backup-storage-key-isolation.test.mjs",
   "export-import-tenant-boundary.test.mjs",
   "portal-approval-evidence-guard.test.mjs",
+  "portal-payment-link-binding-guard.test.mjs",
   "portal-target-binding-guard.test.mjs",
 ];
 
@@ -171,6 +172,17 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Office profile audit query should fail closed",
     "Office must not recover authentication profiles through audit history",
     "Office should retain operational audit rows",
+    "Customer should read the configured link for their exact invoice",
+    "Office must not bind a customer payment link to another customer's invoice",
+    "Office must not bind a payment link to another tenant's invoice",
+    "Payment link job scope must exactly match its invoice",
+    "Customer must not create their own payment URL",
+    "Electrician must not create customer payment URLs",
+    "Server should canonicalize a wholly unbound legacy payment link from its invoice",
+    "A full payment allocation must immediately hide the reusable payment URL",
+    "A fully allocated invoice must not permit payment-link reissue",
+    "Cancelling an invoice must immediately hide its existing payment URL",
+    "Direct Data API reads must not enumerate tombstoned payment URLs",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }
