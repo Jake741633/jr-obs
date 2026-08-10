@@ -14,8 +14,6 @@ create table if not exists public.customer_job_timeline (
   source_updated_at timestamptz,
   payload jsonb not null default '{}'::jsonb,
   deleted_at timestamptz,
-  created_by uuid references auth.users(id),
-  updated_by uuid references auth.users(id),
   created_at timestamptz not null,
   updated_at timestamptz not null,
   unique (organisation_id, collection_key, source_id)
@@ -97,8 +95,6 @@ begin
     source_updated_at,
     payload,
     deleted_at,
-    created_by,
-    updated_by,
     created_at,
     updated_at
   ) values (
@@ -112,8 +108,6 @@ begin
     new.source_updated_at,
     private.jr_customer_job_timeline_payload(new.payload),
     new.deleted_at,
-    new.created_by,
-    new.updated_by,
     new.created_at,
     new.updated_at
   )
@@ -127,8 +121,6 @@ begin
     source_updated_at = excluded.source_updated_at,
     payload = excluded.payload,
     deleted_at = excluded.deleted_at,
-    created_by = excluded.created_by,
-    updated_by = excluded.updated_by,
     created_at = excluded.created_at,
     updated_at = excluded.updated_at;
 
@@ -146,6 +138,86 @@ create trigger customer_job_timeline_projection
 after insert or update or delete on public.cloud_collections
 for each row execute function private.refresh_jr_customer_job_timeline();
 
+create or replace function private.refresh_jr_customer_job_timeline_for_job()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+declare
+  target_organisation_id uuid;
+  target_job_source_id text;
+  target_customer_source_id text;
+begin
+  target_organisation_id := case when tg_op = 'DELETE' then old.organisation_id else new.organisation_id end;
+  target_job_source_id := case when tg_op = 'DELETE' then old.source_id else new.source_id end;
+  target_customer_source_id := case when tg_op = 'DELETE' then null else new.customer_source_id end;
+
+  if tg_op = 'DELETE' or new.deleted_at is not null or target_customer_source_id is null then
+    delete from public.customer_job_timeline
+    where organisation_id = target_organisation_id
+      and job_source_id = target_job_source_id;
+    return case when tg_op = 'DELETE' then old else new end;
+  end if;
+
+  insert into public.customer_job_timeline (
+    id,
+    organisation_id,
+    collection_key,
+    source_id,
+    customer_source_id,
+    job_source_id,
+    version,
+    source_updated_at,
+    payload,
+    deleted_at,
+    created_at,
+    updated_at
+  )
+  select
+    timeline.id,
+    timeline.organisation_id,
+    timeline.collection_key,
+    timeline.source_id,
+    target_customer_source_id,
+    timeline.job_source_id,
+    timeline.version,
+    timeline.source_updated_at,
+    private.jr_customer_job_timeline_payload(timeline.payload),
+    timeline.deleted_at,
+    timeline.created_at,
+    timeline.updated_at
+  from public.cloud_collections timeline
+  where timeline.organisation_id = target_organisation_id
+    and timeline.collection_key = 'jr-os-job-timeline'
+    and timeline.job_source_id = target_job_source_id
+    and timeline.deleted_at is null
+  on conflict (id) do update set
+    organisation_id = excluded.organisation_id,
+    collection_key = excluded.collection_key,
+    source_id = excluded.source_id,
+    customer_source_id = excluded.customer_source_id,
+    job_source_id = excluded.job_source_id,
+    version = excluded.version,
+    source_updated_at = excluded.source_updated_at,
+    payload = excluded.payload,
+    deleted_at = excluded.deleted_at,
+    created_at = excluded.created_at,
+    updated_at = excluded.updated_at;
+
+  return new;
+end;
+$$;
+
+revoke execute on function private.refresh_jr_customer_job_timeline_for_job()
+from public, anon, authenticated;
+grant execute on function private.refresh_jr_customer_job_timeline_for_job()
+to service_role;
+
+drop trigger if exists customer_job_timeline_job_scope_projection on public.jobs;
+create trigger customer_job_timeline_job_scope_projection
+after insert or update or delete on public.jobs
+for each row execute function private.refresh_jr_customer_job_timeline_for_job();
+
 insert into public.customer_job_timeline (
   id,
   organisation_id,
@@ -157,8 +229,6 @@ insert into public.customer_job_timeline (
   source_updated_at,
   payload,
   deleted_at,
-  created_by,
-  updated_by,
   created_at,
   updated_at
 )
@@ -173,8 +243,6 @@ select
   timeline.source_updated_at,
   private.jr_customer_job_timeline_payload(timeline.payload),
   timeline.deleted_at,
-  timeline.created_by,
-  timeline.updated_by,
   timeline.created_at,
   timeline.updated_at
 from public.cloud_collections timeline
@@ -196,8 +264,6 @@ on conflict (id) do update set
   source_updated_at = excluded.source_updated_at,
   payload = excluded.payload,
   deleted_at = excluded.deleted_at,
-  created_by = excluded.created_by,
-  updated_by = excluded.updated_by,
   created_at = excluded.created_at,
   updated_at = excluded.updated_at;
 
