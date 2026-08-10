@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { typedCollectionTables } from "../lib/cloud/migrationStoragePolicy-core.mjs";
 
 const migration = readFileSync(
   new URL("../supabase/migrations/20260809_049_field_inventory_projections.sql", import.meta.url),
@@ -115,9 +116,9 @@ test("electrician repositories read price-safe typed inventory projections", () 
   assert.match(collections, /electrician:\s*\{[\s\S]*materials:\s*"field_materials"/i);
   assert.match(collections, /electrician:\s*\{[\s\S]*purchase_lists:\s*"field_purchase_lists"/i);
   assert.match(collections, /electrician:\s*\{[\s\S]*stock_items:\s*"field_stock_items"/i);
-  assert.match(collections, /"jr-os-materials":\s*"materials"/i);
-  assert.match(collections, /"jr-os-stock-items":\s*"stock_items"/i);
-  assert.match(collections, /"jr-os-purchase-lists":\s*"purchase_lists"/i);
+  assert.equal(typedCollectionTables["jr-os-materials"], "materials");
+  assert.equal(typedCollectionTables["jr-os-stock-items"], "stock_items");
+  assert.equal(typedCollectionTables["jr-os-purchase-lists"], "purchase_lists");
 });
 
 test("recovery and deployment guidance retain typed inventory pricing privacy", () => {

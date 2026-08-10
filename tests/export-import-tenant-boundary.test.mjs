@@ -7,9 +7,8 @@ const settingsPage = readFileSync(new URL("../app/settings/page.tsx", import.met
 
 test("authenticated exports include only the active organisation", () => {
   assert.match(appData, /export function exportJrOsData\(organisationId\?: string\)/);
-  assert.match(appData, /const exportedKey = backupStorageKey\(key, organisationId\)/);
-  assert.match(appData, /if \(organisationId && key\.includes\(ORGANISATION_MARKER\) && !key\.endsWith\(organisationStorageKey\("", organisationId\)\)\) continue;/);
-  assert.match(appData, /if \(organisationId && !key\.includes\(ORGANISATION_MARKER\)\) continue;/);
+  assert.match(appData, /collectOrganisationBusinessData\(window\.localStorage, organisationId\)/);
+  assert.match(appData, /collectLegacyAggregateData\(window\.localStorage\)/);
   assert.match(appData, /return \{ version: 1, exportedAt: new Date\(\)\.toISOString\(\), app: "JR OS", organisationId, data \}/);
 });
 
@@ -20,12 +19,9 @@ test("authenticated restore requires an exact organisation identity", () => {
 });
 
 test("restore cannot inject internal or already-scoped storage keys", () => {
-  assert.match(appData, /isInternalBackupKey\(key\)/);
-  assert.match(appData, /key\.includes\(ORGANISATION_MARKER\)/);
+  assert.match(appData, /isLegacyAggregateStorageKey\(key\)/);
   assert.match(appData, /const destinationKey = organisationId \? organisationStorageKey\(key, organisationId\) : key/);
-  assert.match(appData, /jr-os-supabase-session/);
-  assert.match(appData, /jr-os-cloud-sync-queue/);
-  assert.match(appData, /key\.startsWith\("jr-os-cloud-versions:"\)/);
+  assert.doesNotMatch(appData, /key\.startsWith\(JR_OS_STORAGE_PREFIX\)/);
 });
 
 test("settings backup actions use the resolved organisation identity", () => {

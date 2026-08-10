@@ -1,8 +1,13 @@
 "use client";
 
-import { exportJrOsData, JR_OS_STORAGE_PREFIX } from "./appData";
+import { exportLegacyJrOsData, JR_OS_STORAGE_PREFIX } from "./appData";
 import { organisationStorageKey } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
+import {
+  claimLegacyMigrationStorage,
+  isLegacyAggregateStorageKey,
+  typedLegacyMigrationStorageKeys,
+} from "./cloud/migrationStoragePolicy-core.mjs";
 import { importLocalCollection } from "./cloud/repository";
 import { readSupabaseSession, saveSupabaseSession, supabaseFetch, type SupabaseSession } from "./supabase/client";
 
@@ -22,14 +27,6 @@ export interface TypedMigrationProgress {
 }
 export type TypedMigrationProgressHandler = (progress: TypedMigrationProgress) => void;
 
-const cloudInternalKeys = [
-  "jr-os-cloud-session",
-  "jr-os-supabase-session",
-  "jr-os-cloud-sync-queue",
-  "jr-os-cloud-sync-status",
-  "jr-os-last-cloud-sync",
-  "jr-os-last-typed-cloud-sync",
-];
 const cloudMigrationRoles = ["owner", "admin", "office"] as const;
 
 export function canManageCloudMigration(role: string | undefined) {
@@ -219,7 +216,7 @@ export function legacyMigrationRecordId(organisationId: string, storageKey: stri
 export async function migrateLocalDataToCloud(): Promise<CloudSyncResult> {
   const { user, organisationId, role } = await getCloudContext();
   assertCloudMigrationRole(role);
-  const backup = exportJrOsData();
+  const backup = exportLegacyJrOsData(organisationId);
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
   for (const [storageKey, value] of Object.entries(backup.data)) {
     if (!storageKey.startsWith(JR_OS_STORAGE_PREFIX)) { result.skipped += 1; continue; }
@@ -238,10 +235,9 @@ export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationPr
   const { user, organisationId, role } = await getCloudContext();
   assertCloudMigrationRole(role);
   const result: CloudSyncResult = { uploaded: 0, skipped: 0, errors: [] };
-  const storageKeys = Array.from({ length: window.localStorage.length }, (_, index) => window.localStorage.key(index))
-    .filter((key): key is string => Boolean(key?.startsWith(JR_OS_STORAGE_PREFIX)))
-    .filter((key) => !cloudInternalKeys.includes(key) && !key.startsWith("jr-os-cloud-versions:") && !key.includes(":organisation:"))
+  const storageKeys = typedLegacyMigrationStorageKeys(window.localStorage)
     .sort((left, right) => typedMigrationPriority(left) - typedMigrationPriority(right));
+  if (storageKeys.length) claimLegacyMigrationStorage(window.localStorage, organisationId);
 
   const report = (currentCollection: string, completedCollections: number, latestError?: string) => onProgress?.({
     currentCollection,
@@ -290,7 +286,7 @@ export async function restoreCloudDataToLocal() {
   let restored = 0;
   for (const record of Array.isArray(rows) ? rows : []) {
     const payload = record.payload as { storageKey?: string; value?: unknown };
-    if (!payload.storageKey?.startsWith(JR_OS_STORAGE_PREFIX)) continue;
+    if (!payload.storageKey || !isLegacyAggregateStorageKey(payload.storageKey)) continue;
     const scopedKey = organisationStorageKey(payload.storageKey, organisationId);
     window.localStorage.setItem(scopedKey, JSON.stringify(payload.value));
     restored += 1;

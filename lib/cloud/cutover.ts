@@ -1,50 +1,10 @@
 "use client";
 
 import { cloudSelect } from "./client";
-import { collectionCloudTarget, typedCollectionTables } from "./collections";
+import { collectionCloudTarget } from "./collections";
+import { cloudCollectionStorageKeys } from "./migrationStoragePolicy-core.mjs";
 import type { SyncQueueItem } from "./repository";
 import type { PrivateFileUploadQueueItem } from "./privateFiles";
-
-const INFRASTRUCTURE_KEYS = new Set([
-  "jr-os-cloud-sync-queue",
-  "jr-os-cloud-sync-status",
-  "jr-os-private-file-upload-queue",
-  "jr-os-supabase-session",
-  "jr-os-last-cloud-sync",
-]);
-
-const CORE_COLLECTIONS = [
-  ...Object.keys(typedCollectionTables),
-  "jr-os-surveys",
-  "jr-os-rams",
-  "jr-os-job-packs",
-  "jr-os-ai-learning-memory",
-  "jr-os-customer-profiles",
-  "jr-os-customer-interactions",
-  "jr-os-leads",
-  "jr-os-lead-activities",
-  "jr-os-job-variations",
-  "jr-os-job-timeline",
-  "jr-os-site-diaries",
-  "jr-os-site-diary",
-  "jr-os-job-tasks",
-  "jr-os-job-progress",
-  "jr-os-job-payment-stages",
-  "jr-os-job-material-usage",
-  "jr-os-job-completion",
-  "jr-os-ai-reminders",
-  "jr-os-crm-follow-up-settings",
-  "jr-os-business-profile",
-  "jr-os-labour-rates",
-  "jr-os-business-overheads",
-  "jr-os-vat-settings",
-  "jr-os-bank-details",
-  "jr-os-payment-terms-templates",
-  "jr-os-business-terms-templates",
-  "jr-os-document-branding",
-  "jr-os-certificate-defaults",
-  "jr-os-fleet",
-];
 
 export type CutoverCollectionStatus = "Ready" | "Local only" | "Cloud only" | "Empty" | "Error";
 
@@ -95,10 +55,7 @@ function idsFromLocalCollection(storageKey: string) {
 }
 
 function collectionKeys() {
-  const discovered = Object.keys(window.localStorage)
-    .filter((key) => key.startsWith("jr-os-") && !key.startsWith("jr-os-cloud-versions:") && !INFRASTRUCTURE_KEYS.has(key))
-    .filter((key) => collectionCloudTarget(key));
-  return [...new Set([...CORE_COLLECTIONS, ...discovered])].sort();
+  return [...cloudCollectionStorageKeys].sort();
 }
 
 function queueSummary(organisationId: string) {

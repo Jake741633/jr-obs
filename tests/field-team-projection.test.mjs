@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { typedCollectionTables } from "../lib/cloud/migrationStoragePolicy-core.mjs";
 
 const migration = readFileSync(
   new URL("../supabase/migrations/20260809_046_field_team_member_projection.sql", import.meta.url),
@@ -45,7 +46,7 @@ test("complete team member rows are office-only after projection migration", () 
 
 test("electrician repositories read the safe projection while writes retain the source table", () => {
   assert.match(collections, /electrician:\s*\{[\s\S]*team_members:\s*"field_team_members"/i);
-  assert.match(collections, /"jr-os-team":\s*"team_members"/i);
+  assert.equal(typedCollectionTables["jr-os-team"], "team_members");
   assert.match(collections, /roleReadTables\[role\]\?\.\[table\] \?\? table/i);
 });
 

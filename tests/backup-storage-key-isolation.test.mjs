@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-
-const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf8");
+import { scopedBusinessStorageKey } from "../lib/cloud/migrationStoragePolicy-core.mjs";
 
 test("authenticated backup exports recognise encoded organisation storage suffixes", () => {
-  assert.match(appData, /const suffix = organisationStorageKey\("", organisationId\)/);
-  assert.match(appData, /key\.endsWith\(organisationStorageKey\("", organisationId\)\)/);
-  assert.doesNotMatch(appData, /const suffix = `\$\{ORGANISATION_MARKER\}\$\{organisationId\}`/);
-  assert.doesNotMatch(appData, /key\.endsWith\(`\$\{ORGANISATION_MARKER\}\$\{organisationId\}`\)/);
+  const organisationOnly = `jr-os-customers:organisation:${JSON.stringify(["org-b"])}`;
+  const accountScoped = `${organisationOnly}:account:${JSON.stringify(["user-b", "owner", null])}`;
+  assert.deepEqual(scopedBusinessStorageKey(organisationOnly), { baseStorageKey: "jr-os-customers", organisationId: "org-b", accountScoped: false });
+  assert.deepEqual(scopedBusinessStorageKey(accountScoped), { baseStorageKey: "jr-os-customers", organisationId: "org-b", accountScoped: true });
+  assert.equal(scopedBusinessStorageKey("jr-os-customers:organisation:org-b"), null);
+  assert.equal(scopedBusinessStorageKey(`jr-os-unknown:organisation:${JSON.stringify(["org-b"])}`), null);
 });

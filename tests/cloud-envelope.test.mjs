@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildCloudEnvelope, buildGenericEnvelope, buildTypedEnvelope } from "../lib/cloud/repository-core.mjs";
+import { typedCollectionTables } from "../lib/cloud/migrationStoragePolicy-core.mjs";
 
 const certificate = {
   id: "certificate-1",
@@ -80,6 +81,6 @@ test("customer and job roots use canonical relationship metadata", () => {
 
 test("certificate storage maps to the typed certificates table", async () => {
   const source = await readFile(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
-  assert.match(source, /"jr-os-certificates"\s*:\s*"certificates"/);
+  assert.equal(typedCollectionTables["jr-os-certificates"], "certificates");
   assert.doesNotMatch(source, /"jr-os-certificates"[^\n]*collectionKey/);
 });

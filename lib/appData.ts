@@ -1,16 +1,15 @@
 "use client";
 
 import { organisationStorageKey } from "./cloud/adapter";
+import {
+  aggregateLegacyMigrationStorageKeys,
+  claimLegacyMigrationStorage,
+  collectLegacyAggregateData,
+  collectOrganisationBusinessData,
+  isLegacyAggregateStorageKey,
+} from "./cloud/migrationStoragePolicy-core.mjs";
 
 export const JR_OS_STORAGE_PREFIX = "jr-os-";
-const ORGANISATION_MARKER = ":organisation:";
-const excludedBackupKeys = new Set([
-  "jr-os-supabase-session",
-  "jr-os-active-organisation",
-  "jr-os-cloud-sync-queue",
-  "jr-os-cloud-sync-status",
-  "jr-os-cloud-last-sync",
-]);
 
 export interface JrAiProfile {
   ownerName: string;
@@ -46,34 +45,24 @@ export interface JrOsBackup {
   data: Record<string, unknown>;
 }
 
-function isInternalBackupKey(key: string) {
-  return excludedBackupKeys.has(key) || key.startsWith("jr-os-cloud-versions:");
-}
-
-function backupStorageKey(key: string, organisationId?: string) {
-  if (!organisationId) return key;
-  const suffix = organisationStorageKey("", organisationId);
-  return key.endsWith(suffix) ? key.slice(0, -suffix.length) : null;
-}
-
 export function exportJrOsData(organisationId?: string): JrOsBackup {
-  const data: Record<string, unknown> = {};
-  for (let index = 0; index < window.localStorage.length; index += 1) {
-    const key = window.localStorage.key(index);
-    if (!key || !key.startsWith(JR_OS_STORAGE_PREFIX) || isInternalBackupKey(key)) continue;
-    const exportedKey = backupStorageKey(key, organisationId);
-    if (exportedKey === null) continue;
-    if (organisationId && key.includes(ORGANISATION_MARKER) && !key.endsWith(organisationStorageKey("", organisationId))) continue;
-    if (organisationId && !key.includes(ORGANISATION_MARKER)) continue;
-    const raw = window.localStorage.getItem(key);
-    if (raw === null) continue;
-    try {
-      data[exportedKey] = JSON.parse(raw);
-    } catch {
-      data[exportedKey] = raw;
-    }
-  }
+  const data = organisationId
+    ? collectOrganisationBusinessData(window.localStorage, organisationId)
+    : collectLegacyAggregateData(window.localStorage);
   return { version: 1, exportedAt: new Date().toISOString(), app: "JR OS", organisationId, data };
+}
+
+export function exportLegacyJrOsData(organisationId: string): JrOsBackup {
+  if (aggregateLegacyMigrationStorageKeys(window.localStorage).length) {
+    claimLegacyMigrationStorage(window.localStorage, organisationId);
+  }
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    app: "JR OS",
+    organisationId,
+    data: collectLegacyAggregateData(window.localStorage),
+  };
 }
 
 export function downloadJrOsBackup(organisationId?: string) {
@@ -98,7 +87,7 @@ export async function importJrOsBackup(file: File, organisationId?: string) {
   }
   let restored = 0;
   Object.entries(parsed.data).forEach(([key, value]) => {
-    if (!key.startsWith(JR_OS_STORAGE_PREFIX) || isInternalBackupKey(key) || key.includes(ORGANISATION_MARKER)) return;
+    if (!isLegacyAggregateStorageKey(key)) return;
     const destinationKey = organisationId ? organisationStorageKey(key, organisationId) : key;
     window.localStorage.setItem(destinationKey, typeof value === "string" ? value : JSON.stringify(value));
     restored += 1;

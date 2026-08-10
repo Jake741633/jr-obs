@@ -49,7 +49,8 @@ test("legacy restore writes only to the authenticated organisation cache", () =>
 });
 
 test("typed migration ignores already scoped tenant caches", () => {
-  assert.match(cloudSync, /!key\.includes\(":organisation:"\)/);
+  assert.match(cloudSync, /typedLegacyMigrationStorageKeys\(window\.localStorage\)/);
+  assert.doesNotMatch(cloudSync, /key\?\.startsWith\(JR_OS_STORAGE_PREFIX\)/);
 });
 
 test("sync queue visibility and retries are restricted to live authorisation", () => {
@@ -109,10 +110,8 @@ test("AI-created CRM interactions attribute the signed-in user instead of Jake",
 test("authenticated backups include only the active organisation and exclude account internals", () => {
   assert.match(appData, /organisationStorageKey/);
   assert.match(appData, /organisationId\?: string/);
-  assert.match(appData, /if \(organisationId && !key\.includes\(ORGANISATION_MARKER\)\) continue;/);
-  assert.match(appData, /jr-os-supabase-session/);
-  assert.match(appData, /jr-os-cloud-sync-queue/);
-  assert.match(appData, /key\.startsWith\("jr-os-cloud-versions:"\)/);
+  assert.match(appData, /collectOrganisationBusinessData\(window\.localStorage, organisationId\)/);
+  assert.match(appData, /isLegacyAggregateStorageKey\(key\)/);
   assert.match(appData, /This backup belongs to a different JR OS organisation/);
   assert.match(appData, /const destinationKey = organisationId \? organisationStorageKey\(key, organisationId\) : key/);
 });

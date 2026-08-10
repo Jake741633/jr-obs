@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { isGenericCloudCollectionStorageKey, typedCollectionTables } from "../lib/cloud/migrationStoragePolicy-core.mjs";
 
 const aiPage = readFileSync(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
 const aiMemoryHook = readFileSync(new URL("../lib/useAiLearningMemory.ts", import.meta.url), "utf8");
@@ -27,8 +28,9 @@ test("AI learning memory and recommendation evidence use tenant-scoped cloud col
   assert.match(collections, /aiLearningMemory: "jr-os-ai-learning-memory"/);
   assert.match(collections, /useAiRecommendationEvidenceCollection\(\).*useCloudLocalCollection/s);
   assert.match(collections, /useAiLearningMemoryCollection\(\).*useCloudLocalCollection/s);
-  assert.match(cloudCollections, /"jr-os-ai-recommendation-evidence": "ai_recommendation_evidence"/);
-  assert.match(cloudCollections, /if \(storageKey\.startsWith\("jr-os-"\)\) return \{ table: "cloud_collections", collectionKey: storageKey \}/);
+  assert.equal(typedCollectionTables["jr-os-ai-recommendation-evidence"], "ai_recommendation_evidence");
+  assert.equal(isGenericCloudCollectionStorageKey("jr-os-ai-learning-memory"), true);
+  assert.match(cloudCollections, /isGenericCloudCollectionStorageKey\(storageKey\)/);
   assert.match(repository, /organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}/);
 });
 

@@ -50,9 +50,9 @@ test("stale identity responses cannot restore an earlier tenant", () => {
 test("backup payloads cannot inject another tenant or internal sync state", () => {
   assert.match(appData, /parsed\.organisationId !== organisationId/);
   assert.match(appData, /This backup belongs to a different JR OS organisation/);
-  assert.match(appData, /key\.includes\(ORGANISATION_MARKER\)/);
-  assert.match(appData, /excludedBackupKeys/);
-  assert.match(appData, /jr-os-cloud-sync-queue/);
+  assert.match(appData, /isLegacyAggregateStorageKey\(key\)/);
+  assert.match(appData, /collectOrganisationBusinessData\(window\.localStorage, organisationId\)/);
+  assert.match(appData, /claimLegacyMigrationStorage\(window\.localStorage, organisationId\)/);
   assert.match(appData, /organisationStorageKey\(key, organisationId\)/);
 });
 
