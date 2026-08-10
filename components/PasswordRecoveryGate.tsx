@@ -124,14 +124,17 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
         method: "PUT",
         body: JSON.stringify({ password }),
       });
-      if (!operationIsCurrent()) return;
-      clearRecoverySecrets();
+      const passwordUpdateStillOwned = operationIsCurrent();
+      if (passwordUpdateStillOwned) clearRecoverySecrets();
       let globalSignOutConfirmed = true;
       try {
-        await signOutCloudUser(startingOwnership, operationIsCurrent);
+        // Revoke the exact recovery session that performed the password change,
+        // even if another tab replaced the browser's active account meanwhile.
+        await signOutCloudUser(startingOwnership);
       } catch {
         globalSignOutConfirmed = false;
       }
+      if (!passwordUpdateStillOwned) return;
       if (recoveryOperationVersionRef.current !== operationVersion
         || sessionBoundaryVersionRef.current !== startingBoundaryVersion + 1
         || readSupabaseSession() !== null) return;

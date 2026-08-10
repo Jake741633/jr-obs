@@ -39,14 +39,15 @@ test("recovery-only sessions stay blocked across reloads and account changes in 
   assert.match(gate, /sameSupabaseSessionOwnership\([\s\S]*startingOwnership\.epoch/);
   assert.match(gate, /window\.removeEventListener\("storage", handleSessionChange\)/);
   assert.match(cloudSync, /const startingSession = startingOwnership\.session;[\s\S]*if \(!startingSession\?\.access_token \|\| startingSession\.is_password_recovery\) return null/);
-  assert.match(cloudSync, /\/auth\/v1\/logout\?scope=global/);
+  assert.match(cloudSync, /revokeCapturedCloudSession\(expectedOwnership, "global"\)/);
 });
 
 test("successful recovery clears the privileged recovery session before unlocking sign-in", () => {
   const update = gate.indexOf('await supabaseFetch("/auth/v1/user"');
-  const signOut = gate.indexOf("await signOutCloudUser(startingOwnership, operationIsCurrent)", update);
+  const signOut = gate.indexOf("await signOutCloudUser(startingOwnership)", update);
   const complete = gate.indexOf('setState("complete")', signOut);
   assert.ok(update !== -1 && signOut > update && complete > signOut);
+  assert.match(gate, /const passwordUpdateStillOwned = operationIsCurrent\(\)[\s\S]*await signOutCloudUser\(startingOwnership\)[\s\S]*if \(!passwordUpdateStillOwned\) return/);
   assert.doesNotMatch(gate, /async function returnToSignIn\(\) \{\s*await signOutCloudUser\(\)/);
 });
 
