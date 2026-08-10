@@ -66,6 +66,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Verify disposable project has the latest migration
+        run: npm run verify:supabase-schema
+
       - name: Run multi-tenant RLS and private Storage integration tests
         run: npm run test:rls
 

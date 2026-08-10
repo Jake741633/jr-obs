@@ -202,4 +202,7 @@
 -- would reject valid completed/cancelled history whose team member is archived.
 \ir ../migrations/20260810_064_preserve_planner_history_team_lifecycle.sql
 
+\echo 'Publishing the deployed JR OS migration version'
+\ir ../migrations/20260810_065_publish_deployed_migration_version.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
