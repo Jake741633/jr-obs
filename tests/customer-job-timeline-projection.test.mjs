@@ -24,7 +24,7 @@ test("customer timeline uses a dedicated job-derived RLS projection", () => {
   assert.match(migration, /grant select on table public\.customer_job_timeline to authenticated/i);
   assert.match(migration, /private\.current_jr_role\(\) = 'customer'/i);
   assert.match(migration, /customer_source_id = private\.current_customer_source_id\(\)/i);
-  assert.match(migration, /from public\.jobs job[\s\S]*job\.customer_source_id/i);
+  assert.match(migration, /select\s+job\.customer_source_id[\s\S]*from public\.jobs job/i);
 });
 
 test("customer timeline payload omits internal actor and source metadata", () => {
