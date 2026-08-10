@@ -48,12 +48,14 @@ test("stale identity responses cannot restore an earlier tenant", () => {
 });
 
 test("backup payloads cannot inject another tenant or internal sync state", () => {
-  assert.match(appData, /parsed\.organisationId !== organisationId/);
+  assert.match(appData, /parsed\.organisationId !== context\.organisationId/);
   assert.match(appData, /This backup belongs to a different JR OS organisation/);
-  assert.match(appData, /isLegacyAggregateStorageKey\(key\)/);
-  assert.match(appData, /collectOrganisationBusinessData\(window\.localStorage, organisationId\)/);
+  assert.match(appData, /backupStorageScope\(key\)/);
+  assert.match(appData, /collectAccountBusinessData\(window\.localStorage, context\)/);
+  assert.match(appData, /sameAccountStorageContext\(context, currentContext\)/);
   assert.match(appData, /claimLegacyMigrationStorage\(window\.localStorage, organisationId\)/);
-  assert.match(appData, /organisationStorageKey\(key, organisationId\)/);
+  assert.match(appData, /accountStorageKey\(key, context\.organisationId, context\.userId, context\.role, context\.customerSourceId\)/);
+  assert.match(appData, /organisationStorageKey\(key, context\.organisationId\)/);
 });
 
 test("private file path and authenticated download tampering fail full authorisation checks", () => {

@@ -1,11 +1,13 @@
 "use client";
 
 import { exportLegacyJrOsData, JR_OS_STORAGE_PREFIX } from "./appData";
-import { organisationStorageKey } from "./cloud/adapter";
+import { accountStorageKey, organisationStorageKey } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
 import {
+  backupStorageScope,
   claimLegacyMigrationStorage,
   isLegacyAggregateStorageKey,
+  sameAccountStorageContext,
   typedLegacyMigrationStorageKeys,
 } from "./cloud/migrationStoragePolicy-core.mjs";
 import { importLocalCollection } from "./cloud/repository";
@@ -93,7 +95,7 @@ async function getProfile(userId: string) {
   const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&active=eq.true&select=organisation_id,role,customer_source_id,active`);
   const profile = Array.isArray(rows) ? rows[0] : null;
   if (!profile?.active || !profile?.organisation_id) throw new Error("Your JR OS organisation profile is not active or ready yet.");
-  return profile as { organisation_id: string; role: string; customer_source_id?: string; active: true };
+  return profile as { organisation_id: string; role: string; customer_source_id: string | null; active: true };
 }
 
 export async function getCurrentCloudUser() {
@@ -206,7 +208,12 @@ export async function getCloudContext() {
   const user = await getCurrentCloudUser();
   if (!user) throw new Error("Sign in before using cloud storage.");
   const profile = await getProfile(user.id);
-  return { user, organisationId: profile.organisation_id, role: profile.role, customerSourceId: profile.customer_source_id };
+  return {
+    user,
+    organisationId: profile.organisation_id,
+    role: profile.role,
+    customerSourceId: profile.customer_source_id || undefined,
+  };
 }
 
 export function legacyMigrationRecordId(organisationId: string, storageKey: string) {
@@ -280,14 +287,28 @@ export async function migrateTypedLocalDataToCloud(onProgress?: TypedMigrationPr
 }
 
 export async function restoreCloudDataToLocal() {
-  const { organisationId, role } = await getCloudContext();
+  const { user, organisationId, role, customerSourceId } = await getCloudContext();
+  const startingContext = { organisationId, userId: user.id, role, customerSourceId };
   assertCloudMigrationRole(role);
   const rows = await supabaseFetch(`/rest/v1/app_records?organisation_id=eq.${encodeURIComponent(organisationId)}&select=payload`);
+  const current = await getCloudContext();
+  if (!sameAccountStorageContext(startingContext, {
+    organisationId: current.organisationId,
+    userId: current.user.id,
+    role: current.role,
+    customerSourceId: current.customerSourceId,
+  })) {
+    throw new Error("The active JR OS account changed before cloud data could be restored.");
+  }
   let restored = 0;
   for (const record of Array.isArray(rows) ? rows : []) {
     const payload = record.payload as { storageKey?: string; value?: unknown };
     if (!payload.storageKey || !isLegacyAggregateStorageKey(payload.storageKey)) continue;
-    const scopedKey = organisationStorageKey(payload.storageKey, organisationId);
+    const scope = backupStorageScope(payload.storageKey);
+    if (!scope) continue;
+    const scopedKey = scope === "account"
+      ? accountStorageKey(payload.storageKey, organisationId, user.id, role, customerSourceId)
+      : organisationStorageKey(payload.storageKey, organisationId);
     window.localStorage.setItem(scopedKey, JSON.stringify(payload.value));
     restored += 1;
   }

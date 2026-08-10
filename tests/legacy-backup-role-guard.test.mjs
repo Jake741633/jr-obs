@@ -20,7 +20,10 @@ test("all callable migration and restore paths enforce the same role boundary", 
   assert.match(cloudSync, /function assertCloudMigrationRole\(role: string \| undefined\)/);
   assert.match(cloudSync, /migrateLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(\);\s*assertCloudMigrationRole\(role\);/);
   assert.match(cloudSync, /migrateTypedLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(\);\s*assertCloudMigrationRole\(role\);/);
-  assert.match(cloudSync, /restoreCloudDataToLocal[\s\S]*const \{ organisationId, role \} = await getCloudContext\(\);\s*assertCloudMigrationRole\(role\);/);
+  assert.match(cloudSync, /restoreCloudDataToLocal[\s\S]*const \{ user, organisationId, role, customerSourceId \} = await getCloudContext\(\);[\s\S]*assertCloudMigrationRole\(role\);/);
+  assert.match(cloudSync, /const current = await getCloudContext\(\);[\s\S]*sameAccountStorageContext\(startingContext,/);
+  assert.match(cloudSync, /isLegacyAggregateStorageKey\(payload\.storageKey\)/);
+  assert.match(cloudSync, /accountStorageKey\(payload\.storageKey, organisationId, user\.id, role, customerSourceId\)/);
 });
 
 test("field and customer sessions cannot enable migration controls", () => {

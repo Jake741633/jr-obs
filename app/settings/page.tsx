@@ -13,16 +13,16 @@ const profileKey = "jr-os-ai-profile";
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none focus:border-cyan-400";
 
 export default function SettingsPage() {
-  const { identity, isReady: identityReady } = useCloudIdentity();
-  const activeProfileKey = identity?.organisationId ? organisationStorageKey(profileKey, identity.organisationId) : profileKey;
+  const { identity, isReady: identityReady, refresh: refreshIdentity } = useCloudIdentity();
+  const activeProfileKey = identity ? organisationStorageKey(profileKey, identity.organisationId) : null;
   const [profile, setProfile] = useState<JrAiProfile>(defaultAiProfile);
   const [loadedProfileKey, setLoadedProfileKey] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const cloud = getCloudReadiness();
-  const ready = identityReady && loadedProfileKey === activeProfileKey;
+  const ready = identityReady && activeProfileKey !== null && loadedProfileKey === activeProfileKey;
 
   useEffect(() => {
-    if (!identityReady) return;
+    if (!identityReady || !activeProfileKey) return;
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
@@ -44,7 +44,8 @@ export default function SettingsPage() {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
-      const count = await importJrOsBackup(file, identity?.organisationId);
+      if (!identity) throw new Error("Sign in before restoring an authenticated backup.");
+      const count = await importJrOsBackup(file, identity, refreshIdentity);
       setMessage(`Restored ${count} JR OS data sections. Reloading…`);
       window.setTimeout(() => window.location.reload(), 800);
     } catch (error) {
@@ -95,11 +96,11 @@ export default function SettingsPage() {
       <h2 className="text-xl font-bold">Data protection and backup</h2>
       <p className="mt-2 text-sm text-slate-400">Download a backup for this organisation before changing browser, clearing website data or moving device. Restore it only into the matching organisation.</p>
       <div className="mt-5 flex flex-wrap gap-3">
-        <Button onClick={() => { downloadJrOsBackup(identity?.organisationId); setMessage("Backup downloaded."); }}><Download className="mr-2 size-4" />Download backup</Button>
+        <Button disabled={!identity} onClick={() => { if (!identity) return; downloadJrOsBackup(identity); setMessage("Backup downloaded."); }}><Download className="mr-2 size-4" />Download backup</Button>
         <label className="inline-flex min-h-11 cursor-pointer items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><Upload className="mr-2 size-4" />Restore backup<input type="file" accept="application/json,.json" className="hidden" onChange={restoreBackup} /></label>
       </div>
       {message ? <p className="mt-4 text-sm text-cyan-300">{message}</p> : null}
-      <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100"><strong>Protected backup scope:</strong> active organisation business data only. Authentication sessions, sync queues, version markers and other organisations&apos; caches are excluded.</div>
+      <div className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-100"><strong>Protected backup scope:</strong> the active account&apos;s registered business caches and shared organisation settings only. Authentication sessions, sync queues, version markers and other account, role, customer or organisation caches are excluded.</div>
     </Card>
   </div>;
 }

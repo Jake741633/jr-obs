@@ -15,12 +15,14 @@ test("cloud context excludes suspended profiles", () => {
   );
   assert.match(
     cloudSync,
-    /return profile as \{ organisation_id: string; role: string; customer_source_id\?: string; active: true \}/,
+    /return profile as \{ organisation_id: string; role: string; customer_source_id: string \| null; active: true \}/,
   );
+  assert.match(cloudSync, /customerSourceId: profile\.customer_source_id \|\| undefined/);
 });
 
 test("migration and restore operations resolve their tenant through guarded cloud context", () => {
   assert.match(cloudSync, /export async function migrateLocalDataToCloud\(\): Promise<CloudSyncResult> \{\s*const \{ user, organisationId, role \} = await getCloudContext\(\)/s);
   assert.match(cloudSync, /export async function migrateTypedLocalDataToCloud[\s\S]*const \{ user, organisationId, role \} = await getCloudContext\(\)/);
-  assert.match(cloudSync, /export async function restoreCloudDataToLocal\(\) \{\s*const \{ organisationId, role \} = await getCloudContext\(\)/s);
+  assert.match(cloudSync, /export async function restoreCloudDataToLocal\(\) \{\s*const \{ user, organisationId, role, customerSourceId \} = await getCloudContext\(\)/s);
+  assert.match(cloudSync, /const current = await getCloudContext\(\);[\s\S]*sameAccountStorageContext\(startingContext,/);
 });
