@@ -11,9 +11,10 @@ export function CloudAccessGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { identity, isReady } = useCloudIdentity();
 
-  // Account and password-recovery routes must remain reachable before a full
-  // organisation profile has resolved.
-  if (pathname === "/cloud" || pathname === "/auth/update-password") return children;
+  // The account route must remain reachable before a full organisation profile
+  // has resolved. Recovery callbacks are handled by PasswordRecoveryGate before
+  // this workspace guard renders.
+  if (pathname === "/cloud") return children;
   if (!isReady) return <div className="grid min-h-[50vh] place-items-center text-sm text-slate-400">Checking secure account access…</div>;
 
   if (!identity) {

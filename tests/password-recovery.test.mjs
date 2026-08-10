@@ -6,6 +6,9 @@ const gate = fs.readFileSync(new URL("../components/PasswordRecoveryGate.tsx", i
 const layout = fs.readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
 const cloudSync = fs.readFileSync(new URL("../lib/cloudSync.ts", import.meta.url), "utf8");
 const supabaseClient = fs.readFileSync(new URL("../lib/supabase/client.ts", import.meta.url), "utf8");
+const accessGuard = fs.readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
+const legacyPage = fs.readFileSync(new URL("../app/auth/update-password/page.tsx", import.meta.url), "utf8");
+const legacyHelper = new URL("../lib/passwordRecovery.ts", import.meta.url);
 
 test("Supabase recovery links require a new password before JR OS renders", () => {
   assert.match(gate, /hash\.get\("type"\) === "recovery" \|\| url\.searchParams\.get\("type"\) === "recovery"/);
@@ -55,6 +58,14 @@ test("password recovery gate wraps the application shell globally", () => {
   assert.match(layout, /PasswordRecoveryGate/);
   assert.match(layout, /<PasswordRecoveryGate><AppShell>/);
   assert.match(layout, /<\/AppShell><\/PasswordRecoveryGate>/);
+});
+
+test("the legacy recovery route cannot mutate credentials or bypass account access", () => {
+  assert.match(accessGuard, /pathname === "\/cloud"/);
+  assert.doesNotMatch(accessGuard, /pathname === "\/auth\/update-password"/);
+  assert.doesNotMatch(legacyPage, /FormEvent|useState|type="password"|updateRecoveredPassword|signOutCloudUser|\/auth\/v1\/user/);
+  assert.match(legacyPage, /This compatibility page cannot change account credentials/);
+  assert.equal(fs.existsSync(legacyHelper), false);
 });
 
 test("recovery validates password length and matching confirmation", () => {
