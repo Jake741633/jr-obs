@@ -205,4 +205,7 @@
 \echo 'Publishing the deployed JR OS migration version'
 \ir ../migrations/20260810_065_publish_deployed_migration_version.sql
 
+\echo 'Binding customer portal payment links and publishing the current migration version'
+\ir ../migrations/20260810_066_bind_portal_payment_links.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

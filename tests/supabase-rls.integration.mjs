@@ -143,6 +143,16 @@ function approvalPayload(documentId, extra = {}) {
     ...extra,
   };
 }
+function paymentLinkPayload(invoiceId, extra = {}) {
+  return {
+    invoiceId,
+    paymentUrl: `https://payments.example/${encodeURIComponent(invoiceId)}`,
+    providerName: "Test payment provider",
+    providerConfigured: true,
+    updatedAt: "2026-08-10T12:00:00.000Z",
+    ...extra,
+  };
+}
 function genericRecord(organisationId, collectionKey, sourceId, account, customerSourceId, jobSourceId, extra = {}) {
   return {
     organisation_id: organisationId,
@@ -550,6 +560,330 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       })),
       "Tenant B office should create its portal target fixture",
     );
+
+    // Customer payment links must resolve through the exact customer-visible
+    // invoice projection, not merely a caller-controlled generic envelope.
+    const portalInvoiceA = source("portal-payment-invoice-a");
+    const secondPortalInvoiceA = source("portal-payment-invoice-a-second");
+    const lifecyclePortalInvoiceA = source("portal-payment-invoice-a-lifecycle");
+    const settledPortalInvoiceA = source("portal-payment-invoice-a-settled");
+    const legacyPortalInvoiceA = source("portal-payment-invoice-a-legacy");
+    const unconfiguredPortalInvoiceA = source("portal-payment-invoice-a-unconfigured");
+    const draftPortalInvoiceA = source("portal-payment-invoice-draft");
+    const otherCustomerInvoiceA = source("portal-payment-invoice-other-customer");
+    const cancelledPortalInvoiceA = source("portal-payment-invoice-cancelled");
+    const paidPortalInvoiceA = source("portal-payment-invoice-paid");
+    const recordedPaidPortalInvoiceA = source("portal-payment-invoice-recorded-paid");
+    const deletedPortalInvoiceA = source("portal-payment-invoice-deleted");
+    const portalInvoiceB = source("portal-payment-invoice-b");
+    for (const [account, organisationId, invoiceId, customerId, invoiceJobId, status, amountPaid = 0] of [
+      [accounts.A.office, organisationA, portalInvoiceA, customerA, jobA, "Sent"],
+      [accounts.A.office, organisationA, secondPortalInvoiceA, customerA, jobA, "Part paid"],
+      [accounts.A.office, organisationA, lifecyclePortalInvoiceA, customerA, jobA, "Overdue"],
+      [accounts.A.office, organisationA, settledPortalInvoiceA, customerA, jobA, "Sent"],
+      [accounts.A.office, organisationA, legacyPortalInvoiceA, customerA, jobA, "Sent"],
+      [accounts.A.office, organisationA, unconfiguredPortalInvoiceA, customerA, jobA, "Sent"],
+      [accounts.A.office, organisationA, draftPortalInvoiceA, customerA, jobA, "Draft"],
+      [accounts.A.office, organisationA, otherCustomerInvoiceA, otherCustomerA, otherCustomerJobA, "Sent"],
+      [accounts.A.office, organisationA, cancelledPortalInvoiceA, customerA, jobA, "Cancelled"],
+      [accounts.A.office, organisationA, paidPortalInvoiceA, customerA, jobA, "Paid"],
+      [accounts.A.office, organisationA, recordedPaidPortalInvoiceA, customerA, jobA, "Sent", 100],
+      [accounts.A.office, organisationA, deletedPortalInvoiceA, customerA, jobA, "Sent"],
+      [accounts.B.office, organisationB, portalInvoiceB, customerB, jobB, "Sent"],
+    ]) {
+      await expectAllowed(
+        await insertRecord(account, "invoices", typedRecord(organisationId, invoiceId, customerId, invoiceJobId, {
+          status,
+          number: `INV-${invoiceId}`,
+          title: "Portal payment target",
+          issueDate: "2026-08-10",
+          dueDate: "2026-08-24",
+          vatEnabled: false,
+          vatRate: 0,
+          items: [{ id: `${invoiceId}-line`, description: "Customer work", quantity: 1, unitPrice: 100 }],
+          amountPaid,
+        })),
+        `Office should create portal payment invoice ${invoiceId}`,
+      );
+    }
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "invoices", `source_id=eq.${deletedPortalInvoiceA}`, { deleted_at: new Date().toISOString() }),
+      "Owner should soft-delete the portal payment target fixture",
+    );
+
+    const paymentLinkA = source("portal-payment-link-a");
+    const paymentLinkInsert = await insertRecord(
+      accounts.A.office,
+      "cloud_collections",
+      genericRecord(
+        organisationA,
+        "jr-os-portal-payment-links",
+        paymentLinkA,
+        accounts.A.office,
+        customerA,
+        jobA,
+        paymentLinkPayload(portalInvoiceA),
+      ),
+    );
+    await expectAllowed(paymentLinkInsert, "Office should create a payment link for the exact visible invoice");
+    const storedPaymentLink = paymentLinkInsert.payload[0];
+    assert.equal(storedPaymentLink.customer_source_id, customerA);
+    assert.equal(storedPaymentLink.job_source_id, jobA);
+
+    const customerPaymentLink = await listRecords(
+      accounts.A.customer,
+      "cloud_collections",
+      `select=source_id,payload&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${paymentLinkA}`,
+    );
+    await expectAllowed(customerPaymentLink, "Customer payment-link query should execute");
+    assert.equal(customerPaymentLink.payload.length, 1, "Customer should read the configured link for their exact invoice");
+    assert.equal(customerPaymentLink.payload[0].payload.invoiceId, portalInvoiceA);
+
+    const updatedPaymentUrl = `https://payments.example/updated-${runId}`;
+    await expectAllowed(
+      await patchRecords(accounts.A.office, "cloud_collections", `source_id=eq.${paymentLinkA}`, {
+        payload: { ...storedPaymentLink.payload, paymentUrl: updatedPaymentUrl, providerName: "Updated provider" },
+      }),
+      "Office should update payment-provider fields without changing the invoice target",
+    );
+    await expectDeniedWithCode(
+      await patchRecords(accounts.A.office, "cloud_collections", `source_id=eq.${paymentLinkA}`, {
+        payload: { ...storedPaymentLink.payload, invoiceId: secondPortalInvoiceA },
+      }),
+      "23514",
+      "Office must not retarget an existing portal payment link",
+    );
+    await expectDeniedWithCode(
+      await patchRecords(accounts.A.office, "cloud_collections", `source_id=eq.${paymentLinkA}`, {
+        customer_source_id: otherCustomerA,
+        job_source_id: otherCustomerJobA,
+        payload: { ...storedPaymentLink.payload, customerId: otherCustomerA, jobId: otherCustomerJobA },
+      }),
+      "23514",
+      "Office must not rebind an existing portal payment link to another customer",
+    );
+    const unchangedPaymentLink = await listRecords(
+      accounts.A.office,
+      "cloud_collections",
+      `select=payload&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${paymentLinkA}`,
+    );
+    assert.equal(unchangedPaymentLink.payload[0].payload.invoiceId, portalInvoiceA, "Denied retarget must preserve the original invoice");
+    assert.equal(unchangedPaymentLink.payload[0].payload.paymentUrl, updatedPaymentUrl, "Legitimate provider update must be retained");
+
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", source("portal-payment-link-duplicate"), accounts.A.office,
+        customerA, jobA, paymentLinkPayload(portalInvoiceA, { paymentUrl: `https://payments.example/duplicate-${runId}` }),
+      )),
+      "23505",
+      "An invoice must not expose two competing active payment links",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", source("portal-payment-link-other-customer"), accounts.A.office,
+        customerA, jobA, paymentLinkPayload(otherCustomerInvoiceA),
+      )),
+      "23503",
+      "Office must not bind a customer payment link to another customer's invoice",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", source("portal-payment-link-cross-tenant"), accounts.A.office,
+        customerA, jobA, paymentLinkPayload(portalInvoiceB),
+      )),
+      "23503",
+      "Office must not bind a payment link to another tenant's invoice",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationB, "jr-os-portal-payment-links", source("portal-payment-link-forged-tenant-envelope"), accounts.A.office,
+        customerB, jobB, paymentLinkPayload(portalInvoiceB),
+      )),
+      "42501",
+      "A forged payment-link organisation must fail before privileged invoice lookup",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", source("portal-payment-link-missing-job"), accounts.A.office,
+        customerA, null, paymentLinkPayload(portalInvoiceA),
+      )),
+      "23503",
+      "Payment link job scope must exactly match its invoice",
+    );
+    for (const [invoiceId, label] of [
+      [draftPortalInvoiceA, "Draft"],
+      [cancelledPortalInvoiceA, "Cancelled"],
+      [paidPortalInvoiceA, "Paid"],
+      [recordedPaidPortalInvoiceA, "fully recorded"],
+      [deletedPortalInvoiceA, "soft-deleted"],
+      [source("missing-portal-payment-invoice"), "nonexistent"],
+    ]) {
+      await expectDeniedWithCode(
+        await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+          organisationA, "jr-os-portal-payment-links", source(`portal-payment-link-${label}`), accounts.A.office,
+          customerA, jobA, paymentLinkPayload(invoiceId),
+        )),
+        "23503",
+        `Payment link must reject a ${label} invoice target`,
+      );
+    }
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", source("portal-payment-link-malformed-target"), accounts.A.office,
+        customerA, jobA, paymentLinkPayload(42),
+      )),
+      "23514",
+      "Payment link must reject a non-string invoice target",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", source("portal-payment-link-unsafe-url"), accounts.A.office,
+        customerA, jobA, paymentLinkPayload(secondPortalInvoiceA, { paymentUrl: "javascript:alert(1)" }),
+      )),
+      "23514",
+      "Configured customer payment links must use HTTPS",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", source("portal-payment-link-customer-write"), accounts.A.customer,
+        customerA, jobA, paymentLinkPayload(secondPortalInvoiceA),
+      )),
+      "42501",
+      "Customer must not create their own payment URL",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", source("portal-payment-link-electrician-write"), accounts.A.electrician,
+        customerA, jobA, paymentLinkPayload(secondPortalInvoiceA),
+      )),
+      "42501",
+      "Electrician must not create customer payment URLs",
+    );
+
+    const legacyPaymentLink = source("portal-payment-link-legacy-unbound");
+    const legacyInsert = await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+      organisationA, "jr-os-portal-payment-links", legacyPaymentLink, accounts.A.office,
+      null, null, paymentLinkPayload(legacyPortalInvoiceA),
+    ));
+    await expectAllowed(legacyInsert, "Server should canonicalize a wholly unbound legacy payment link from its invoice");
+    assert.equal(legacyInsert.payload[0].customer_source_id, customerA);
+    assert.equal(legacyInsert.payload[0].job_source_id, jobA);
+    assert.equal(legacyInsert.payload[0].payload.customerId, customerA);
+    assert.equal(legacyInsert.payload[0].payload.jobId, jobA);
+    const customerLegacyLink = await listRecords(
+      accounts.A.customer,
+      "cloud_collections",
+      `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${legacyPaymentLink}`,
+    );
+    assert.equal(customerLegacyLink.payload.length, 1, "Canonicalized legacy link should remain usable by the correct customer");
+
+    const unconfiguredLink = source("portal-payment-link-unconfigured");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", unconfiguredLink, accounts.A.office,
+        customerA, jobA, paymentLinkPayload(unconfiguredPortalInvoiceA, { paymentUrl: "", providerConfigured: false }),
+      )),
+      "Office may retain an unconfigured payment-link draft",
+    );
+    const hiddenUnconfiguredLink = await listRecords(
+      accounts.A.customer,
+      "cloud_collections",
+      `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${unconfiguredLink}`,
+    );
+    assert.deepEqual(hiddenUnconfiguredLink.payload, [], "Unconfigured payment links must not expose draft provider data");
+
+    const settledPaymentLink = source("portal-payment-link-settled");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", settledPaymentLink, accounts.A.office,
+        customerA, jobA, paymentLinkPayload(settledPortalInvoiceA),
+      )),
+      "Office should create a link while an invoice has an outstanding balance",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "payments", typedRecord(
+        organisationA,
+        source("portal-payment-full-allocation"),
+        customerA,
+        jobA,
+        {
+          invoiceId: settledPortalInvoiceA,
+          paymentDate: "2026-08-10",
+          amount: 100,
+          method: "Card",
+          reference: "FULL-ALLOCATION",
+          notes: "Payment link lifecycle test",
+          type: "Payment",
+          reconciliationStatus: "Allocated",
+          createdAt: "2026-08-10T12:30:00.000Z",
+        },
+      )),
+      "Office should record the full payment allocation",
+    );
+    const hiddenSettledInvoiceLink = await listRecords(
+      accounts.A.customer,
+      "cloud_collections",
+      `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${settledPaymentLink}`,
+    );
+    assert.deepEqual(hiddenSettledInvoiceLink.payload, [], "A full payment allocation must immediately hide the reusable payment URL");
+    await expectDeniedWithCode(
+      await patchRecords(accounts.A.office, "cloud_collections", `source_id=eq.${settledPaymentLink}`, {
+        payload: {
+          id: settledPaymentLink,
+          customerId: customerA,
+          jobId: jobA,
+          ...paymentLinkPayload(settledPortalInvoiceA, { providerName: "Settled provider update" }),
+        },
+      }),
+      "23503",
+      "A fully allocated invoice must not permit payment-link reissue",
+    );
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "cloud_collections", `source_id=eq.${settledPaymentLink}`, { deleted_at: new Date().toISOString() }),
+      "Owner should tombstone a payment link after full settlement",
+    );
+
+    const lifecyclePaymentLink = source("portal-payment-link-lifecycle");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(
+        organisationA, "jr-os-portal-payment-links", lifecyclePaymentLink, accounts.A.office,
+        customerA, jobA, paymentLinkPayload(lifecyclePortalInvoiceA),
+      )),
+      "Office should create a link for invoice lifecycle testing",
+    );
+    await expectAllowed(
+      await patchRecords(accounts.A.office, "invoices", `source_id=eq.${lifecyclePortalInvoiceA}`, {
+        payload: { id: lifecyclePortalInvoiceA, customerId: customerA, jobId: jobA, status: "Cancelled" },
+      }),
+      "Office should cancel the payment-link invoice",
+    );
+    const hiddenCancelledInvoiceLink = await listRecords(
+      accounts.A.customer,
+      "cloud_collections",
+      `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${lifecyclePaymentLink}`,
+    );
+    assert.deepEqual(hiddenCancelledInvoiceLink.payload, [], "Cancelling an invoice must immediately hide its existing payment URL");
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "cloud_collections", `source_id=eq.${lifecyclePaymentLink}`, { deleted_at: new Date().toISOString() }),
+      "Owner should tombstone a stale payment link after its invoice becomes ineligible",
+    );
+
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "cloud_collections", `source_id=eq.${paymentLinkA}`, { deleted_at: new Date().toISOString() }),
+      "Owner should tombstone an active payment link without rewriting its target",
+    );
+    const hiddenTombstoneLink = await listRecords(
+      accounts.A.customer,
+      "cloud_collections",
+      `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${paymentLinkA}`,
+    );
+    assert.deepEqual(hiddenTombstoneLink.payload, [], "Direct Data API reads must not enumerate tombstoned payment URLs");
+    const crossTenantPaymentLink = await listRecords(
+      accounts.B.customer,
+      "cloud_collections",
+      `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${legacyPaymentLink}`,
+    );
+    assert.deepEqual(crossTenantPaymentLink.payload, [], "Another tenant must not enumerate a configured portal payment link");
 
     // Field-write tables.
     const fieldCases = [

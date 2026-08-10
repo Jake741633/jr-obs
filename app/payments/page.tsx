@@ -10,7 +10,7 @@ import { usePaymentsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { BusinessExpense, Customer, Invoice, PricingDocument } from "../../lib/models";
 import type { DepositRequirement, PaymentEntryType, PaymentMethod, PaymentRecord, PortalPaymentLink, ReconciliationStatus, ScheduledCashFlow } from "../../lib/payments";
-import { allocatedPaid, calculatedInvoiceState, depositAmount, forecastWindow, invoiceBalance, invoiceGross } from "../../lib/payments";
+import { allocatedPaid, calculatedInvoiceState, depositAmount, forecastWindow, invoiceBalance, invoiceGross, invoiceHasOutstandingBalance, paymentTargetForInvoice } from "../../lib/payments";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const methods: PaymentMethod[] = ["Bank transfer", "Card", "Cash", "Cheque", "Direct debit", "Other"];
@@ -47,8 +47,33 @@ export default function PaymentsPage() {
     event.preventDefault();
     const amount = Number(form.amount);
     if (!form.paymentDate || !Number.isFinite(amount) || amount <= 0) return setMessage("Enter a valid payment date and amount.");
-    payments.setItems((current) => [{ id: makeId("payment"), customerId: form.customerId || undefined, invoiceId: form.invoiceId || undefined, paymentDate: form.paymentDate, amount, method: form.method, reference: form.reference.trim(), notes: form.notes.trim(), type: form.type, reconciliationStatus: form.invoiceId ? form.reconciliationStatus : "Needs review", createdAt: new Date().toISOString() }, ...current]);
+    const target = paymentTargetForInvoice(invoices.items, form.invoiceId, form.customerId);
+    if (!target) return setMessage("The selected invoice and customer do not match. Review the payment allocation.");
+    payments.setItems((current) => [{ id: makeId("payment"), customerId: target.customerId, invoiceId: target.invoiceId, paymentDate: form.paymentDate, amount, method: form.method, reference: form.reference.trim(), notes: form.notes.trim(), type: form.type, reconciliationStatus: target.invoiceId ? form.reconciliationStatus : "Needs review", createdAt: new Date().toISOString() }, ...current]);
     setForm(blankPayment); setMessage("Payment record added. Previous records were not changed.");
+  }
+
+  function reallocatePayment(payment: PaymentRecord, nextInvoiceId: string) {
+    const target = paymentTargetForInvoice(invoices.items, nextInvoiceId, payment.customerId);
+    if (!target) return setMessage("The selected invoice belongs to a different customer or is no longer available.");
+    payments.setItems((current) => current.map((item) => item.id === payment.id ? {
+      ...item,
+      customerId: target.customerId,
+      invoiceId: target.invoiceId,
+      reconciliationStatus: target.invoiceId ? "Allocated" : "Needs review",
+    } : item));
+  }
+
+  function reconcilePayment(payment: PaymentRecord) {
+    if (!payment.invoiceId) return setMessage("Allocate the payment to an invoice before reconciling it.");
+    const target = paymentTargetForInvoice(invoices.items, payment.invoiceId, payment.customerId);
+    if (!target?.invoiceId) return setMessage("The payment customer does not match its invoice. Review the allocation first.");
+    payments.setItems((current) => current.map((item) => item.id === payment.id ? {
+      ...item,
+      customerId: target.customerId,
+      invoiceId: target.invoiceId,
+      reconciliationStatus: "Reconciled",
+    } : item));
   }
 
   function saveDeposit(event: FormEvent) {
@@ -77,10 +102,29 @@ export default function PaymentsPage() {
   }
 
   function saveLink(invoice: Invoice, url: string, providerName: string, providerConfigured: boolean) {
+    const customerId = invoice.customerId;
+    if (!customerId) return setMessage("Assign the invoice to a customer before creating its payment link.");
+    if (!["Sent", "Part paid", "Overdue"].includes(invoice.status)) return setMessage("Only a sent or active unpaid customer invoice can have a portal payment link.");
+    if (!invoiceHasOutstandingBalance(invoice, payments.items)) return setMessage("This invoice has no outstanding balance, so its payment link cannot be issued.");
+    let paymentUrl = url.trim();
+    if (providerConfigured) {
+      try {
+        const parsedUrl = new URL(paymentUrl);
+        if (parsedUrl.protocol !== "https:") return setMessage("Configured customer payment links must use HTTPS.");
+        paymentUrl = parsedUrl.toString();
+      } catch {
+        return setMessage("Enter a valid HTTPS payment URL before enabling the provider.");
+      }
+    }
+    const existingLink = links.items.find((item) => item.invoiceId === invoice.id);
+    const existingLinkIsUnboundLegacy = existingLink && existingLink.customerId == null && existingLink.jobId == null;
+    if (existingLink && !existingLinkIsUnboundLegacy && (existingLink.customerId !== customerId || (existingLink.jobId ?? null) !== (invoice.jobId ?? null))) {
+      return setMessage("This invoice was reassigned. Retire its old payment link before issuing a replacement.");
+    }
     const now = new Date().toISOString();
     links.setItems((current) => {
       const existing = current.find((item) => item.invoiceId === invoice.id);
-      const record = { id: existing?.id || makeId("payment-link"), invoiceId: invoice.id, paymentUrl: url, providerName, providerConfigured, updatedAt: now };
+      const record = { id: existing?.id || makeId("payment-link"), customerId, jobId: invoice.jobId, invoiceId: invoice.id, paymentUrl, providerName: providerName.trim(), providerConfigured, updatedAt: now };
       return existing ? current.map((item) => item.id === existing.id ? record : item) : [record, ...current];
     });
   }
@@ -106,7 +150,7 @@ export default function PaymentsPage() {
 
     <section className="space-y-4"><h2 className="text-2xl font-bold">Cash-flow forecast</h2><div className="grid gap-4 md:grid-cols-3">{forecasts.map((forecast) => <Card key={forecast.days}><p className="text-sm text-slate-400">Next {forecast.days} days</p><p className="mt-3 text-sm">Cash in <span className="float-right font-semibold text-emerald-300">{money.format(forecast.cashIn)}</span></p><p className="mt-2 text-sm">Cash out <span className="float-right font-semibold text-rose-300">{money.format(forecast.cashOut)}</span></p><p className="mt-4 border-t border-slate-800 pt-3 text-lg font-bold">Net <span className={`float-right ${forecast.net < 0 ? "text-rose-300" : "text-cyan-300"}`}>{money.format(forecast.net)}</span></p></Card>)}</div></section>
 
-    <section className="grid gap-6 xl:grid-cols-2"><Card><h2 className="text-xl font-bold">Invoice balances and payment links</h2><div className="mt-4 space-y-3">{invoices.items.map((invoice) => { const link = links.items.find((item) => item.invoiceId === invoice.id); const state = calculatedInvoiceState(invoice, payments.items); return <div key={invoice.id} className="rounded-xl border border-slate-800 p-4"><div className="flex justify-between gap-4"><div><p className="font-semibold">{invoice.number} · {customerName(invoice.customerId)}</p><p className="text-sm text-slate-500">{state} · Paid {money.format(allocatedPaid(invoice.id, payments.items))} · Outstanding {money.format(invoiceBalance(invoice, payments.items))}</p></div><span className="text-sm font-semibold">{money.format(invoiceGross(invoice))}</span></div><div className="mt-3 grid gap-2 md:grid-cols-3"><input defaultValue={link?.providerName || ""} id={`provider-${invoice.id}`} placeholder="Provider" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" /><input defaultValue={link?.paymentUrl || ""} id={`url-${invoice.id}`} placeholder="Payment URL" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" /><label className="flex items-center gap-2 text-sm"><input id={`configured-${invoice.id}`} type="checkbox" defaultChecked={link?.providerConfigured || false} /> Real provider configured</label></div><Button variant="secondary" className="mt-3" onClick={() => saveLink(invoice, (document.getElementById(`url-${invoice.id}`) as HTMLInputElement)?.value || "", (document.getElementById(`provider-${invoice.id}`) as HTMLInputElement)?.value || "", (document.getElementById(`configured-${invoice.id}`) as HTMLInputElement)?.checked || false)}><CreditCard className="mr-2 size-4" />Save payment link</Button></div>; })}</div></Card><Card><h2 className="text-xl font-bold">Reconciliation queue</h2><div className="mt-4 space-y-3">{unallocated.length === 0 ? <p className="text-sm text-slate-400">No payments need review.</p> : unallocated.map((payment) => <div key={payment.id} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4"><p className="font-semibold">{money.format(payment.amount)} · {payment.type}</p><p className="text-sm text-slate-400">{customerName(payment.customerId)} · {invoiceName(payment.invoiceId)} · {payment.reference || "No reference"}</p><div className="mt-3 flex gap-2"><select value={payment.invoiceId || ""} onChange={(e) => payments.setItems((current) => current.map((item) => item.id === payment.id ? { ...item, invoiceId: e.target.value || undefined, reconciliationStatus: e.target.value ? "Allocated" : "Needs review" } : item))} className="min-h-10 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm"><option value="">Unallocated</option>{invoices.items.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.number}</option>)}</select><Button variant="secondary" onClick={() => payments.setItems((current) => current.map((item) => item.id === payment.id ? { ...item, reconciliationStatus: "Reconciled" } : item))}><CheckCircle2 className="mr-2 size-4" />Reconcile</Button></div></div>)}</div></Card></section>
+    <section className="grid gap-6 xl:grid-cols-2"><Card><h2 className="text-xl font-bold">Invoice balances and payment links</h2><div className="mt-4 space-y-3">{invoices.items.map((invoice) => { const link = links.items.find((item) => item.invoiceId === invoice.id); const state = calculatedInvoiceState(invoice, payments.items); return <div key={invoice.id} className="rounded-xl border border-slate-800 p-4"><div className="flex justify-between gap-4"><div><p className="font-semibold">{invoice.number} · {customerName(invoice.customerId)}</p><p className="text-sm text-slate-500">{state} · Paid {money.format(allocatedPaid(invoice.id, payments.items))} · Outstanding {money.format(invoiceBalance(invoice, payments.items))}</p></div><span className="text-sm font-semibold">{money.format(invoiceGross(invoice))}</span></div><div className="mt-3 grid gap-2 md:grid-cols-3"><input defaultValue={link?.providerName || ""} id={`provider-${invoice.id}`} placeholder="Provider" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" /><input defaultValue={link?.paymentUrl || ""} id={`url-${invoice.id}`} placeholder="Payment URL" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm" /><label className="flex items-center gap-2 text-sm"><input id={`configured-${invoice.id}`} type="checkbox" defaultChecked={link?.providerConfigured || false} /> Real provider configured</label></div><Button variant="secondary" className="mt-3" onClick={() => saveLink(invoice, (document.getElementById(`url-${invoice.id}`) as HTMLInputElement)?.value || "", (document.getElementById(`provider-${invoice.id}`) as HTMLInputElement)?.value || "", (document.getElementById(`configured-${invoice.id}`) as HTMLInputElement)?.checked || false)}><CreditCard className="mr-2 size-4" />Save payment link</Button></div>; })}</div></Card><Card><h2 className="text-xl font-bold">Reconciliation queue</h2><div className="mt-4 space-y-3">{unallocated.length === 0 ? <p className="text-sm text-slate-400">No payments need review.</p> : unallocated.map((payment) => <div key={payment.id} className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4"><p className="font-semibold">{money.format(payment.amount)} · {payment.type}</p><p className="text-sm text-slate-400">{customerName(payment.customerId)} · {invoiceName(payment.invoiceId)} · {payment.reference || "No reference"}</p><div className="mt-3 flex gap-2"><select value={payment.invoiceId || ""} onChange={(e) => reallocatePayment(payment, e.target.value)} className="min-h-10 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm"><option value="">Unallocated</option>{invoices.items.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.number}</option>)}</select><Button variant="secondary" onClick={() => reconcilePayment(payment)}><CheckCircle2 className="mr-2 size-4" />Reconcile</Button></div></div>)}</div></Card></section>
 
     <Card><h2 className="text-xl font-bold">Immutable payment history</h2><div className="mt-4 space-y-2">{payments.items.map((payment) => <div key={payment.id} className="grid gap-2 rounded-xl border border-slate-800 p-3 md:grid-cols-6"><span>{payment.paymentDate}</span><span>{customerName(payment.customerId)}</span><span>{invoiceName(payment.invoiceId)}</span><span>{payment.type}</span><span>{payment.method}</span><span className="text-right font-semibold">{money.format(payment.amount)}</span></div>)}</div></Card>
   </div>;

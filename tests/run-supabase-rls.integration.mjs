@@ -45,6 +45,12 @@ const genericReadSnippet = `      const electricianFieldRead = await listRecords
 
 const safeGenericReadSnippet = `      const electricianCompleteFieldRead = await listRecords(accounts.A.electrician, "cloud_collections", \`select=source_id,payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);\n      await expectAllowed(electricianCompleteFieldRead, \`Electrician complete generic \${collectionKey} query should fail closed\`);\n      assert.deepEqual(electricianCompleteFieldRead.payload, [], \`Electrician must not read complete generic field records: \${collectionKey}\`);\n\n      const electricianFieldRead = await listRecords(accounts.A.electrician, "field_cloud_collections", \`select=source_id,payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);\n      await expectAllowed(electricianFieldRead, \`Electrician projected field \${collectionKey} query should execute\`);\n      assert.equal(electricianFieldRead.payload.length, 1, \`Electrician should retain projected field collection reads: \${collectionKey}\`);\n      const fieldPayload = electricianFieldRead.payload[0].payload;\n      if (collectionKey === "jr-os-surveys") {\n        assert.equal(fieldPayload.labourRate, undefined, "Field survey projection must omit labour rates");\n      }\n      if (collectionKey === "jr-os-job-packs") {\n        assert.equal(fieldPayload.labourRate, undefined, "Field job pack projection must omit labour rates");\n        assert.equal(fieldPayload.materials[0].unitPrice, undefined, "Field job pack projection must omit material prices");\n\n        await expectAllowed(\n          await patchRecords(accounts.A.office, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, {\n            updated_by: accounts.A.office.id,\n            payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 8, labourRate: 90, materials: [{ id: "m1", description: "Cable", quantity: 10, unitPrice: 5.25 }] },\n          }),\n          "Office should add private job-pack pricing",\n        );\n        await expectAllowed(\n          await patchRecords(accounts.A.electrician, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, {\n            updated_by: accounts.A.electrician.id,\n            payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 9, materials: [{ id: "m1", description: "Cable", quantity: 12 }] },\n          }),\n          "Electrician should update field-safe job-pack details",\n        );\n        const officePackAfterFieldUpdate = await listRecords(accounts.A.office, "cloud_collections", \`select=payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);\n        await expectAllowed(officePackAfterFieldUpdate, "Office should read complete job pack after field update");\n        assert.equal(officePackAfterFieldUpdate.payload[0].payload.labourHours, 9);\n        assert.equal(officePackAfterFieldUpdate.payload[0].payload.labourRate, 90, "Field job-pack updates must preserve hidden labour rates");\n        assert.equal(officePackAfterFieldUpdate.payload[0].payload.materials[0].unitPrice, 5.25, "Field job-pack updates must preserve hidden material prices");\n      }\n      if (collectionKey === "jr-os-job-variations") {\n        assert.equal(fieldPayload.labourRate, undefined, "Field variation projection must omit labour rates");\n        assert.equal(fieldPayload.materialCost, undefined, "Field variation projection must omit material costs");\n        assert.equal(fieldPayload.fixedPrice, undefined, "Field variation projection must omit fixed prices");\n        assert.equal(fieldPayload.internalNotes, undefined, "Field variation projection must omit internal notes");\n      }\n      if (collectionKey === "jr-os-job-material-usage") {\n        assert.equal(fieldPayload.unitCost, undefined, "Field material usage projection must omit unit costs");\n      }`;
 
+const obsoleteCustomerInvoiceRead = `    assert.equal(customerInvoice.payload.length, 1, "Customer must retain own invoice reads");`;
+const safeCustomerInvoiceRead = `    assert.deepEqual(customerInvoice.payload, [], "Customer base invoice reads must fail closed in favour of the customer-safe projection");`;
+
+const obsoleteCustomerPaymentRead = `    assert.equal(customerPayment.payload.length, 1, "Customer must retain own payment reads");`;
+const safeCustomerPaymentRead = `    assert.deepEqual(customerPayment.payload, [], "Customer base payment reads must fail closed in favour of the customer-safe projection");`;
+
 for (const [label, snippet] of [
   ["obsolete Supabase logout", obsoleteSnippet],
   ["customer fixture", customerSeedSnippet],
@@ -77,11 +83,15 @@ try {
     .replace(jobReadAnchor, jobReadCoverage)
     .replace(fieldCasesSnippet, safeFieldCasesSnippet)
     .replace(genericCasesSnippet, safeGenericCasesSnippet)
-    .replace(genericReadSnippet, safeGenericReadSnippet);
+    .replace(genericReadSnippet, safeGenericReadSnippet)
+    .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
+    .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   writeFileSync(temporaryTest, supportedSource, "utf8");
+  const childEnvironment = { ...process.env };
+  delete childEnvironment.NODE_TEST_CONTEXT;
   const result = spawnSync(process.execPath, ["--test", temporaryTest], {
     cwd: process.cwd(),
-    env: process.env,
+    env: childEnvironment,
     stdio: "inherit",
   });
 
