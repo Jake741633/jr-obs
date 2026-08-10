@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
+const fieldCasesSnippet = `    // Field-write tables.\n    const fieldCases = [\n      ["materials", source("material-a"), { name: "Cable" }],\n      ["stock_items", source("stock-a"), { quantity: 4 }],\n      ["stock_movements", source("movement-a"), { type: "Used", quantity: 1 }],\n      ["purchase_lists", source("purchase-a"), { status: "Draft" }],\n      ["planner_entries", source("planner-a"), { startDate: "2026-08-01" }],\n      ["timesheets", source("timesheet-a"), { hours: 8 }],\n      ["certificates", source("certificate-a"), { status: "Draft" }],\n      ["electrical_testing_records", source("testing-a"), { status: "Draft" }],\n      ["job_documents", source("document-a"), { category: "Photo" }],\n    ];\n    for (const [table, sourceId, payload] of fieldCases) {\n      await expectAllowed(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Electrician should write \${table}\`);\n      await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);\n    }`;
+
+const safeFieldCasesSnippet = `    // Field-write tables use the exact team identity resolved from the\n    // authenticated electrician before relationship-bound planner/timesheet writes.\n    const fieldTeamA = source("field-team-a");\n    await expectAllowed(\n      await insertRecord(accounts.A.office, "team_members", typedRecord(organisationA, fieldTeamA, null, null, {\n        name: "Field write electrician",\n        email: accounts.A.electrician.email,\n        role: "Electrician",\n        status: "Active",\n      })),\n      "Office should create the field-write team identity",\n    );\n    const fieldCases = [\n      ["materials", source("material-a"), { name: "Cable" }],\n      ["stock_items", source("stock-a"), { quantity: 4 }],\n      ["stock_movements", source("movement-a"), { type: "Used", quantity: 1 }],\n      ["purchase_lists", source("purchase-a"), { status: "Draft" }],\n      ["planner_entries", source("planner-a"), { teamMemberIds: [fieldTeamA], startDate: "2026-08-01" }],\n      ["timesheets", source("timesheet-a"), { teamMemberId: fieldTeamA, hours: 8 }],\n      ["certificates", source("certificate-a"), { status: "Draft" }],\n      ["electrical_testing_records", source("testing-a"), { status: "Draft" }],\n      ["job_documents", source("document-a"), { category: "Photo" }],\n    ];\n    for (const [table, sourceId, payload] of fieldCases) {\n      await expectAllowed(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Electrician should write \${table}\`);\n      await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);\n    }\n    // Field identity fixtures are complete.`;
+
 const sourcePath = new URL("./supabase-rls.integration.mjs", import.meta.url);
 const source = readFileSync(sourcePath, "utf8");
 
@@ -49,6 +53,7 @@ for (const [label, snippet] of [
   ["team read expectation", teamReadSnippet],
   ["job fixture", jobSeedSnippet],
   ["job read anchor", jobReadAnchor],
+  ["field relationship fixtures", fieldCasesSnippet],
   ["generic field fixtures", genericCasesSnippet],
   ["generic field read expectation", genericReadSnippet],
 ]) {
@@ -70,6 +75,7 @@ try {
     .replace(teamReadSnippet, safeTeamReadSnippet)
     .replace(jobSeedSnippet, safeJobSeedSnippet)
     .replace(jobReadAnchor, jobReadCoverage)
+    .replace(fieldCasesSnippet, safeFieldCasesSnippet)
     .replace(genericCasesSnippet, safeGenericCasesSnippet)
     .replace(genericReadSnippet, safeGenericReadSnippet);
   writeFileSync(temporaryTest, supportedSource, "utf8");

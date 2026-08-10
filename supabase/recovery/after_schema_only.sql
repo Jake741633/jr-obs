@@ -194,4 +194,7 @@
 \echo 'Guarding customer portal workflow targets'
 \ir ../migrations/20260810_062_guard_portal_target_bindings.sql
 
+\echo 'Guarding planner team assignment relationships'
+\ir ../migrations/20260810_063_guard_planner_team_assignments.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
