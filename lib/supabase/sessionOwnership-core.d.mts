@@ -8,6 +8,7 @@ export function sameSupabaseSessionOwnership(
   expectedSession: SupabaseSession | null,
   expectedEpoch: string | null,
 ): boolean;
+export function supabaseSessionUserId(session: SupabaseSession | null): string | null;
 export function capturedSupabaseLogoutRequest(
   expectedOwnership: SupabaseSessionOwnership,
   scope: "global" | "local",
