@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 
 const REQUIRED_CONFIRMATION = "JR_OS_RLS_TEST";
 const MIGRATION_RPC_PATH = "/rest/v1/rpc/jr_os_deployed_migration";
+const PROJECT_REF_PATTERN = /^[a-z0-9]{20}$/;
 
 export function latestMigrationFilename(migrationsDirectory = "supabase/migrations") {
   const migrations = readdirSync(migrationsDirectory, { withFileTypes: true })
@@ -16,8 +17,30 @@ export function latestMigrationFilename(migrationsDirectory = "supabase/migratio
   return latest;
 }
 
+export function verifiedProjectOrigin(url, projectRef) {
+  if (!projectRef || !PROJECT_REF_PATTERN.test(projectRef)) {
+    throw new Error("SUPABASE_TEST_PROJECT_REF must be exactly 20 lowercase letters or digits");
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error("SUPABASE_TEST_URL must be a valid HTTPS URL");
+  }
+
+  const expectedOrigin = `https://${projectRef}.supabase.co`;
+  const hasBasePathOnly = parsed.pathname === "/" && !parsed.search && !parsed.hash;
+  const hasNoCredentials = !parsed.username && !parsed.password;
+  if (parsed.protocol !== "https:" || parsed.origin !== expectedOrigin || !hasBasePathOnly || !hasNoCredentials) {
+    throw new Error(`SUPABASE_TEST_URL must exactly match ${expectedOrigin}`);
+  }
+  return expectedOrigin;
+}
+
 export async function verifyDeployedMigration({
   url = process.env.SUPABASE_TEST_URL,
+  projectRef = process.env.SUPABASE_TEST_PROJECT_REF,
   serviceRoleKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY,
   confirmation = process.env.SUPABASE_TEST_CONFIRM,
   migrationsDirectory = "supabase/migrations",
@@ -26,9 +49,6 @@ export async function verifyDeployedMigration({
   if (confirmation !== REQUIRED_CONFIRMATION) {
     throw new Error(`SUPABASE_TEST_CONFIRM must exactly equal ${REQUIRED_CONFIRMATION}`);
   }
-  if (!url || !/^https:\/\//i.test(url)) {
-    throw new Error("SUPABASE_TEST_URL must be a non-empty HTTPS URL");
-  }
   if (!serviceRoleKey) {
     throw new Error("SUPABASE_TEST_SERVICE_ROLE_KEY is required");
   }
@@ -36,8 +56,9 @@ export async function verifyDeployedMigration({
     throw new Error("A Fetch API implementation is required");
   }
 
+  const origin = verifiedProjectOrigin(url, projectRef);
   const expectedMigration = latestMigrationFilename(migrationsDirectory);
-  const endpoint = `${url.replace(/\/+$/, "")}${MIGRATION_RPC_PATH}`;
+  const endpoint = `${origin}${MIGRATION_RPC_PATH}`;
   const response = await fetchImpl(endpoint, {
     method: "POST",
     headers: {

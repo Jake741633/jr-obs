@@ -22,6 +22,7 @@ jobs:
     timeout-minutes: 20
     env:
       SUPABASE_TEST_URL: ${{ secrets.SUPABASE_TEST_URL }}
+      SUPABASE_TEST_PROJECT_REF: ${{ vars.SUPABASE_TEST_PROJECT_REF }}
       SUPABASE_TEST_ANON_KEY: ${{ secrets.SUPABASE_TEST_ANON_KEY }}
       SUPABASE_TEST_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_TEST_SERVICE_ROLE_KEY }}
       SUPABASE_TEST_CONFIRM: ${{ inputs.confirmation }}
@@ -38,6 +39,14 @@ jobs:
             echo "Missing SUPABASE_TEST_URL in the supabase-test environment."
             exit 1
           }
+          test -n "$SUPABASE_TEST_PROJECT_REF" || {
+            echo "Missing SUPABASE_TEST_PROJECT_REF in the supabase-test environment."
+            exit 1
+          }
+          [[ "$SUPABASE_TEST_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]] || {
+            echo "SUPABASE_TEST_PROJECT_REF must be the exact 20-character hosted project reference."
+            exit 1
+          }
           test -n "$SUPABASE_TEST_ANON_KEY" || {
             echo "Missing SUPABASE_TEST_ANON_KEY in the supabase-test environment."
             exit 1
@@ -46,10 +55,11 @@ jobs:
             echo "Missing SUPABASE_TEST_SERVICE_ROLE_KEY in the supabase-test environment."
             exit 1
           }
+          expected_url="https://${SUPABASE_TEST_PROJECT_REF}.supabase.co"
           case "$SUPABASE_TEST_URL" in
-            https://*) ;;
+            "$expected_url"|"$expected_url/") ;;
             *)
-              echo "SUPABASE_TEST_URL must use HTTPS."
+              echo "SUPABASE_TEST_URL must exactly match the protected project reference."
               exit 1
               ;;
           esac

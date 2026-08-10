@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   latestMigrationFilename,
+  verifiedProjectOrigin,
   verifyDeployedMigration,
 } from "../scripts/verify-supabase-deployed-migration.mjs";
 
@@ -50,10 +51,14 @@ test("the latest migration publishes its exact service-role-only deployment mark
   assert.match(latestMigrationSql, /notify\s+pgrst\s*,\s*'reload schema'/i);
 });
 
-test("the protected workflow verifies the remote migration before live RLS tests", () => {
+test("the protected workflow pins the project ref and verifies the remote migration before live RLS tests", () => {
   assert.equal(
     packageJson.scripts["verify:supabase-schema"],
     "node scripts/verify-supabase-deployed-migration.mjs",
+  );
+  assert.match(
+    workflow,
+    /SUPABASE_TEST_PROJECT_REF:\s*\$\{\{\s*vars\.SUPABASE_TEST_PROJECT_REF\s*\}\}/,
   );
   const verification = workflow.indexOf("npm run verify:supabase-schema");
   const liveRls = workflow.indexOf("npm run test:rls");
@@ -73,10 +78,38 @@ test("latestMigrationFilename ignores non-migrations and sorts deterministically
   }
 });
 
+test("project verification accepts only the exact hosted Supabase origin", () => {
+  assert.equal(
+    verifiedProjectOrigin("https://abcdefghijklmnopqrst.supabase.co/", "abcdefghijklmnopqrst"),
+    "https://abcdefghijklmnopqrst.supabase.co",
+  );
+  assert.throws(
+    () => verifiedProjectOrigin("https://zzzzzzzzzzzzzzzzzzzz.supabase.co", "abcdefghijklmnopqrst"),
+    /must exactly match/i,
+  );
+  assert.throws(
+    () => verifiedProjectOrigin("https://abcdefghijklmnopqrst.supabase.co.evil.example", "abcdefghijklmnopqrst"),
+    /must exactly match/i,
+  );
+  assert.throws(
+    () => verifiedProjectOrigin("https://abcdefghijklmnopqrst.supabase.co/rest/v1", "abcdefghijklmnopqrst"),
+    /must exactly match/i,
+  );
+  assert.throws(
+    () => verifiedProjectOrigin("https://user:pass@abcdefghijklmnopqrst.supabase.co", "abcdefghijklmnopqrst"),
+    /must exactly match/i,
+  );
+  assert.throws(
+    () => verifiedProjectOrigin("https://abcdefghijklmnopqrst.supabase.co", "UPPERCASE"),
+    /exactly 20 lowercase letters or digits/i,
+  );
+});
+
 test("migration verification authenticates with the protected service role and accepts only the exact marker", async () => {
   let request;
   const verified = await verifyDeployedMigration({
-    url: "https://disposable.example.supabase.co/",
+    url: "https://abcdefghijklmnopqrst.supabase.co/",
+    projectRef: "abcdefghijklmnopqrst",
     serviceRoleKey: "test-service-role-key",
     confirmation: "JR_OS_RLS_TEST",
     migrationsDirectory,
@@ -87,16 +120,17 @@ test("migration verification authenticates with the protected service role and a
   });
 
   assert.equal(verified, latestMigration);
-  assert.equal(request.url, "https://disposable.example.supabase.co/rest/v1/rpc/jr_os_deployed_migration");
+  assert.equal(request.url, "https://abcdefghijklmnopqrst.supabase.co/rest/v1/rpc/jr_os_deployed_migration");
   assert.equal(request.init.method, "POST");
   assert.equal(request.init.headers.apikey, "test-service-role-key");
   assert.equal(request.init.headers.Authorization, "Bearer test-service-role-key");
   assert.equal(request.init.body, "{}");
 });
 
-test("migration verification fails closed for stale, inaccessible, or unconfirmed projects", async () => {
+test("migration verification fails closed for stale, inaccessible, unpinned, or unconfirmed projects", async () => {
   const options = {
-    url: "https://disposable.example.supabase.co",
+    url: "https://abcdefghijklmnopqrst.supabase.co",
+    projectRef: "abcdefghijklmnopqrst",
     serviceRoleKey: "test-service-role-key",
     confirmation: "JR_OS_RLS_TEST",
     migrationsDirectory,
@@ -115,6 +149,14 @@ test("migration verification fails closed for stale, inaccessible, or unconfirme
       fetchImpl: async () => response({ ok: false, status: 404, payload: { message: "missing" } }),
     }),
     /marker is unavailable \(HTTP 404\)/i,
+  );
+  await assert.rejects(
+    verifyDeployedMigration({ ...options, projectRef: "zzzzzzzzzzzzzzzzzzzz" }),
+    /must exactly match/i,
+  );
+  await assert.rejects(
+    verifyDeployedMigration({ ...options, projectRef: "" }),
+    /exactly 20 lowercase letters or digits/i,
   );
   await assert.rejects(
     verifyDeployedMigration({ ...options, confirmation: "wrong" }),
