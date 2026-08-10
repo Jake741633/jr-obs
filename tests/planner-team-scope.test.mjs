@@ -6,6 +6,10 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20260809_055_planner_team_scope.sql", import.meta.url),
   "utf8",
 );
+const assignmentGuard = readFileSync(
+  new URL("../supabase/migrations/20260810_063_guard_planner_team_assignments.sql", import.meta.url),
+  "utf8",
+);
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 
 function policyBody(name) {
@@ -51,4 +55,50 @@ test("planner assignment helper is not exposed anonymously and recovery reapplie
   assert.match(migration, /revoke execute on function private\.planner_entry_includes_current_team_member\(jsonb\)[\s\S]*from public, anon/i);
   assert.match(migration, /grant execute on function private\.planner_entry_includes_current_team_member\(jsonb\)[\s\S]*to authenticated, service_role/i);
   assert.match(recovery, /20260809_055_planner_team_scope\.sql/i);
+});
+
+test("planner assignment references resolve to unique same-organisation team members", () => {
+  assert.match(assignmentGuard, /create or replace function private\.jr_planner_team_assignments_are_valid\(\s*target_organisation_id uuid,\s*record_payload jsonb\s*\)/i);
+  assert.match(assignmentGuard, /jsonb_typeof\(record_payload -> 'teamMemberIds'\) = 'array'/i);
+  assert.match(assignmentGuard, /count\(\*\) = count\(distinct assignment\.team_member_source_id\)/i);
+  assert.match(assignmentGuard, /assignment\.team_member_source_id <> btrim\(assignment\.team_member_source_id\)/i);
+  assert.match(assignmentGuard, /member\.organisation_id = target_organisation_id/i);
+  assert.match(assignmentGuard, /member\.source_id = assignment\.team_member_source_id/i);
+  assert.match(assignmentGuard, /Planner assignments must reference unique team members in the same organisation[\s\S]*errcode = '23503'/i);
+});
+
+test("new and changed active assignments lock live team members", () => {
+  assert.match(assignmentGuard, /create or replace function private\.jr_planner_team_assignments_are_live\([\s\S]*member\.deleted_at is null/i);
+  assert.match(assignmentGuard, /require_live_assignments := new\.deleted_at is null/i);
+  assert.match(assignmentGuard, /old\.deleted_at is not null or assignments_changed/i);
+  assert.match(assignmentGuard, /private\.jr_planner_team_assignments_are_live\(new\.organisation_id, new\.payload\)/i);
+  assert.match(assignmentGuard, /member\.organisation_id = new\.organisation_id[\s\S]*member\.source_id = assignment_id[\s\S]*member\.deleted_at is null[\s\S]*for no key update/i);
+  assert.match(assignmentGuard, /New planner assignments must reference non-deleted team members in the same organisation[\s\S]*errcode = '23503'/i);
+});
+
+test("electrician planner inserts are self-only and assignment updates are immutable", () => {
+  assert.match(assignmentGuard, /private\.current_jr_role\(\) = 'electrician'[\s\S]*tg_op = 'INSERT'/i);
+  assert.match(assignmentGuard, /jsonb_array_length\(new\.payload -> 'teamMemberIds'\) <> 1/i);
+  assert.match(assignmentGuard, /new\.payload -> 'teamMemberIds' ->> 0 is distinct from actor_team_member_source_id/i);
+  assert.match(assignmentGuard, /assignments_changed := new\.payload -> 'teamMemberIds'[\s\S]*is distinct from old\.payload -> 'teamMemberIds'/i);
+  assert.match(assignmentGuard, /Electricians may create planner entries assigned only to themselves[\s\S]*errcode = '42501'/i);
+  assert.match(assignmentGuard, /Electricians cannot change planner team assignments[\s\S]*errcode = '42501'/i);
+});
+
+test("planner assignment guard preserves tombstones and protects team-member lifecycle", () => {
+  assert.match(assignmentGuard, /from public\.planner_entries planner[\s\S]*where planner\.deleted_at is null[\s\S]*jr_planner_team_assignments_are_live\(planner\.organisation_id, planner\.payload\)[\s\S]*Cannot secure planner entry/i);
+  assert.match(assignmentGuard, /new\.deleted_at is null or assignments_changed/i);
+  assert.match(assignmentGuard, /create or replace function private\.guard_jr_assigned_team_member_deletion\(\)[\s\S]*planner\.deleted_at is null[\s\S]*\(planner\.payload -> 'teamMemberIds'\) \? old\.source_id/i);
+  assert.match(assignmentGuard, /Reassign active planner entries before deleting this team member[\s\S]*errcode = '23503'/i);
+  assert.match(assignmentGuard, /lock table public\.planner_entries, public\.team_members in share row exclusive mode/i);
+  assert.match(assignmentGuard, /create trigger assigned_team_member_deletion_guard\s+before update of deleted_at or delete on public\.team_members\s+for each row execute function private\.guard_jr_assigned_team_member_deletion\(\)/is);
+});
+
+test("planner assignment guards are trigger-only and restored after schema recovery", () => {
+  assert.match(assignmentGuard, /create trigger planner_team_assignment_guard\s+before insert or update on public\.planner_entries\s+for each row execute function private\.guard_jr_planner_team_assignments\(\)/is);
+  assert.match(assignmentGuard, /revoke execute on function private\.jr_planner_team_assignments_are_valid\(uuid, jsonb\)[\s\S]*from public, anon, authenticated, service_role/i);
+  assert.match(assignmentGuard, /revoke execute on function private\.jr_planner_team_assignments_are_live\(uuid, jsonb\)[\s\S]*from public, anon, authenticated, service_role/i);
+  assert.match(assignmentGuard, /revoke execute on function private\.guard_jr_planner_team_assignments\(\)[\s\S]*from public, anon, authenticated/i);
+  assert.match(assignmentGuard, /revoke execute on function private\.guard_jr_assigned_team_member_deletion\(\)[\s\S]*from public, anon, authenticated/i);
+  assert.match(recovery, /20260810_063_guard_planner_team_assignments\.sql/i);
 });
