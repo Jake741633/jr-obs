@@ -114,6 +114,7 @@ test("fallback cleanup verifies the schema first and deletes only exact test-run
 
   const result = await cleanupSupabaseRlsTest({
     url: "https://disposable.example.supabase.co",
+    projectRef: "abcdefghijklmnopqrst",
     serviceRoleKey: "test-service-role-key",
     confirmation: "JR_OS_RLS_TEST",
     fetchImpl,
@@ -124,6 +125,7 @@ test("fallback cleanup verifies the schema first and deletes only exact test-run
   });
 
   assert.equal(calls[0].type, "verify", "Migration verification must precede every cleanup request");
+  assert.equal(calls[0].options.projectRef, "abcdefghijklmnopqrst");
   const storageLists = calls.filter((call) => call.type === "fetch" && call.path.startsWith("/storage/v1/object/list/"));
   assert.equal(storageLists.some((call) => JSON.parse(call.init.body).prefix === ""), false, "Cleanup must never list a bucket root");
   assert.equal(storageLists.every((call) => JSON.parse(call.init.body).limit === 100), true, "Storage listing must use bounded pages");
@@ -153,7 +155,8 @@ test("failed migration verification aborts before cleanup can contact a destruct
   let fetchCalled = false;
   await assert.rejects(
     cleanupSupabaseRlsTest({
-      url: "https://disposable.example.supabase.co",
+      url: "https://abcdefghijklmnopqrst.supabase.co",
+      projectRef: "abcdefghijklmnopqrst",
       serviceRoleKey: "test-service-role-key",
       confirmation: "JR_OS_RLS_TEST",
       fetchImpl: async () => {
@@ -181,6 +184,6 @@ test("cleanup source contains no production-name or root-bucket deletion fallbac
   const source = readFileSync(new URL("./supabase-rls.cleanup.mjs", import.meta.url), "utf8");
   assert.doesNotMatch(source, /name=eq\.JR%20Electrical%20Services/i);
   assert.doesNotMatch(source, /collectObjectPaths\(\s*\)/i);
-  assert.match(source, /await verifyMigration[\s\S]*organisationPayload/i);
+  assert.match(source, /await verifyMigration\(\{[\s\S]*projectRef[\s\S]*organisationPayload/i);
   assert.match(source, /STORAGE_BUCKETS[\s\S]*jr-os-private[\s\S]*jr-os-files/i);
 });

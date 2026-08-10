@@ -44,6 +44,7 @@ function chunks(values, size) {
 
 export async function cleanupSupabaseRlsTest({
   url = process.env.SUPABASE_TEST_URL,
+  projectRef = process.env.SUPABASE_TEST_PROJECT_REF,
   serviceRoleKey = process.env.SUPABASE_TEST_SERVICE_ROLE_KEY,
   confirmation = process.env.SUPABASE_TEST_CONFIRM,
   fetchImpl = globalThis.fetch,
@@ -57,7 +58,7 @@ export async function cleanupSupabaseRlsTest({
   if (typeof fetchImpl !== "function") throw new Error("A Fetch API implementation is required");
 
   const baseUrl = url.replace(/\/+$/, "");
-  await verifyMigration({ url: baseUrl, serviceRoleKey, confirmation, fetchImpl });
+  await verifyMigration({ url: baseUrl, projectRef, serviceRoleKey, confirmation, fetchImpl });
 
   const request = async (path, options = {}) => {
     const response = await fetchImpl(`${baseUrl}${path}`, {

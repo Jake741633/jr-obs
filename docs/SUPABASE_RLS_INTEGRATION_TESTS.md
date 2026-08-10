@@ -23,6 +23,8 @@ The recovery script applies the current effective migration sequence. It deliber
 
 The newest migration must create or replace `public.jr_os_deployed_migration()` with its own filename, revoke execution from `public`, `anon` and `authenticated`, and grant execution only to `service_role`. The protected workflow derives the expected filename from the checked-out repository and stops before any test data is created when the remote marker is missing or stale.
 
+The protected environment must also pin the dedicated hosted project by its exact 20-character Supabase project reference. The workflow accepts only the canonical base URL `https://<project-ref>.supabase.co`; a different project, custom domain, URL path or credential-bearing URL is rejected before the migration RPC or live suite runs.
+
 ## Temporary test identities
 
 Every run creates unique data using a random run ID.
@@ -127,6 +129,8 @@ Cleanup attempts to remove:
 
 Cleanup uses the service role only inside the Node test runner. Each cleanup operation is best-effort so later cleanup continues even if one deletion fails.
 
+The always-run fallback cleanup re-verifies the exact project ref and deployed migration before any destructive request. It never lists a Storage bucket root. It discovers only exact generated test organisations, removes only object paths under those organisation UUIDs that contain the matching run ID, requires exact generated Auth email and run metadata, and deletes organisations by validated UUID. Unrelated objects, users and organisations are left untouched.
+
 Use a disposable test project and enable Supabase project backups or periodic resets. A cancelled runner or infrastructure outage can still interrupt the final cleanup process.
 
 ## Protected GitHub environment
@@ -136,6 +140,14 @@ Create a GitHub environment named:
 ```text
 supabase-test
 ```
+
+Add the environment variable:
+
+```text
+SUPABASE_TEST_PROJECT_REF
+```
+
+Set it to the exact 20-character Reference ID shown in the dedicated test project's Supabase settings.
 
 Add environment secrets:
 
@@ -148,6 +160,7 @@ SUPABASE_TEST_SERVICE_ROLE_KEY
 Security requirements:
 
 - The project must contain no production customer data.
+- `SUPABASE_TEST_URL` must be the canonical hosted URL for `SUPABASE_TEST_PROJECT_REF`.
 - The service-role key must be from this dedicated test project only.
 - Do not prefix the service-role secret with `NEXT_PUBLIC_`.
 - Do not place it in Netlify browser variables.
@@ -176,14 +189,15 @@ npm run verify:supabase-schema
 npm run test:rls
 ```
 
-Migration verification runs before the live suite and fails closed if the service-role-only marker is missing or does not equal the repository's newest migration filename. Without all secrets and the exact confirmation input, the integration test does not run.
+Project-ref and migration verification run before the live suite and fail closed if the URL does not identify the pinned hosted project, the service-role-only marker is missing, or the marker does not equal the repository's newest migration filename. Without the environment variable, all secrets and the exact confirmation input, the integration test does not run.
 
 ## Running locally
 
 Use only the dedicated test project:
 
 ```bash
-export SUPABASE_TEST_URL="https://your-test-project.supabase.co"
+export SUPABASE_TEST_URL="https://your-project-ref.supabase.co"
+export SUPABASE_TEST_PROJECT_REF="your-20-character-ref"
 export SUPABASE_TEST_ANON_KEY="..."
 export SUPABASE_TEST_SERVICE_ROLE_KEY="..."
 export SUPABASE_TEST_CONFIRM="JR_OS_RLS_TEST"
