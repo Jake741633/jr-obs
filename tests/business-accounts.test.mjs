@@ -132,6 +132,20 @@ test("rejects expired invitations and honours explicit expiry dates", () => {
   );
 });
 
+test("malformed invitation authority fails closed", () => {
+  const base = {
+    organisationId: "org-1",
+    email: "staff@example.com",
+    role: "office",
+    status: "pending",
+    invitedBy: "owner-1",
+  };
+
+  assert.throws(() => acceptStaffInvite(base, "user-2", "2026-08-02T12:00:00.000Z"), /valid expiry window/);
+  assert.throws(() => acceptStaffInvite({ ...base, invitedAt: "not-a-date" }, "user-2", "2026-08-02T12:00:00.000Z"), /valid expiry window/);
+  assert.throws(() => acceptStaffInvite({ ...base, invitedAt: "2026-08-01T12:00:00.000Z", role: "owner" }, "user-2", "2026-08-02T12:00:00.000Z"), /invalid role/);
+});
+
 test("accepted and revoked invitations cannot be replayed", () => {
   const invite = buildStaffInvite({
     organisationId: "org-1",

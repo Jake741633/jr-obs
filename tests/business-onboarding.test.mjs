@@ -93,10 +93,14 @@ test("supports Supabase organisation ids but rejects unsafe invite linking", () 
     email: "office@example.com",
     role: "office",
     status: "pending",
+    invited_at: "2026-08-01T20:00:00.000Z",
   };
   assert.equal(linkAcceptedStaffInvite(invite, "user-3", "OFFICE@example.com", now).profile.organisationId, "org-2");
   assert.throws(() => linkAcceptedStaffInvite({ ...invite, status: "accepted" }, "user-3", "office@example.com", now), /Only pending/);
   assert.throws(() => linkAcceptedStaffInvite(invite, "", "office@example.com", now), /User account is required/);
   assert.throws(() => linkAcceptedStaffInvite(invite, "user-3", "other@example.com", now), /does not match/);
   assert.throws(() => linkAcceptedStaffInvite({ ...invite, organisation_id: "" }, "user-3", "office@example.com", now), /not linked to a business/);
+  assert.throws(() => linkAcceptedStaffInvite({ ...invite, invited_at: undefined }, "user-3", "office@example.com", now), /valid expiry window/);
+  assert.throws(() => linkAcceptedStaffInvite({ ...invite, invited_at: "invalid" }, "user-3", "office@example.com", now), /valid expiry window/);
+  assert.throws(() => linkAcceptedStaffInvite({ ...invite, role: "owner" }, "user-3", "office@example.com", now), /invalid role/);
 });
