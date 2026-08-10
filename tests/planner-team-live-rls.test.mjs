@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const runnerSource = readFileSync(new URL("./run-supabase-rls.integration.mjs", import.meta.url), "utf8");
+const verifiedRunnerSource = readFileSync(new URL("../scripts/run-supabase-rls.mjs", import.meta.url), "utf8");
 const integrationSourceUrl = new URL("./supabase-rls.integration.mjs", import.meta.url);
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
@@ -232,8 +233,13 @@ const plannerCoverage = `${anchor}\\n\\n${plannerLines.join("\\n")}`;
 test("live RLS runner proves planner entries are assignment scoped", () => {
   assert.equal(
     packageJson.scripts["test:rls"],
-    "node --test tests/planner-team-live-rls.test.mjs",
-    "The disposable Supabase workflow must execute the planner penetration wrapper",
+    "node scripts/run-supabase-rls.mjs",
+    "The disposable Supabase workflow must execute the verified RLS runner",
+  );
+  assert.match(
+    verifiedRunnerSource,
+    /spawn\(nodeExecutable, \["--test", "tests\/planner-team-live-rls\.test\.mjs"\]/,
+    "The verified RLS runner must execute the planner penetration wrapper",
   );
   const occurrences = runnerSource.split(anchor).length - 1;
   assert.equal(occurrences, 1, `Expected one completed field identity anchor, found ${occurrences}`);
