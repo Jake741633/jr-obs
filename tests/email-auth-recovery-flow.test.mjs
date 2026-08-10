@@ -43,13 +43,13 @@ test("email verification sessions require a normal sign-in before tenant resolut
 test("sign-out clears tenant replay ownership before remote logout", () => {
   assert.match(
     cloudSync,
-    /export async function signOutCloudUser\(expectedOwnership = captureSupabaseSessionOwnership\(\), operationIsCurrent\?: CloudOperationOwnershipGuard\) \{[\s\S]*activeSessionMatches\(expectedOwnership\)[\s\S]*assertCloudPageOperationCurrent\(operationIsCurrent\)[\s\S]*"jr-os-active-organisation"[\s\S]*"jr-os-active-user"[\s\S]*"jr-os-active-role"[\s\S]*"jr-os-active-customer-source"[\s\S]*revokeCapturedCloudSession\(expectedOwnership, "global"\)/,
+    /export async function signOutCloudUser\([\s\S]*operationIsCurrent\?: CloudOperationOwnershipGuard,[\s\S]*expectedUserId\?: string,[\s\S]*activeSessionOwnedByGlobalSignOut\(expectedOwnership, expectedUserId\)[\s\S]*assertCloudPageOperationCurrent\(operationIsCurrent\)[\s\S]*clearActiveCloudReplayOwnership\(\)[\s\S]*revokeCapturedCloudSession\(expectedOwnership, "global"\)/,
   );
   assert.match(
     cloudSync,
-    /finally \{\s*if \(activeSessionMatches\(expectedOwnership\)\) \{\s*saveSupabaseSession\(null\);\s*identityChanged\(\);\s*\}\s*\}/s,
+    /finally \{\s*if \(activeSessionOwnedByGlobalSignOut\(expectedOwnership, expectedUserId\)\) \{\s*clearActiveCloudReplayOwnership\(\);\s*saveSupabaseSession\(null\);\s*identityChanged\(\);\s*\}\s*\}/s,
   );
-  assert.match(cloudSync, /revokeCapturedCloudSession[\s\S]*headers: \{ Authorization: `Bearer \$\{accessToken\}` \}[\s\S]*\}, false\)/);
+  assert.match(cloudSync, /revokeCapturedCloudSession[\s\S]*capturedSupabaseLogoutRequest\(expectedOwnership, scope\)[\s\S]*headers: request\.headers[\s\S]*\}, false\)/);
 });
 
 test("password recovery sessions cannot call business APIs", () => {

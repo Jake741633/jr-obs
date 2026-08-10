@@ -120,17 +120,17 @@ export function PasswordRecoveryGate({ children }: { children: React.ReactNode }
 
     setState("saving");
     try {
-      await supabaseFetch("/auth/v1/user", {
+      const updatedUser = await supabaseFetch("/auth/v1/user", {
         method: "PUT",
         body: JSON.stringify({ password }),
-      });
+      }) as { id?: string } | null;
       const passwordUpdateStillOwned = operationIsCurrent();
       if (passwordUpdateStillOwned) clearRecoverySecrets();
       let globalSignOutConfirmed = true;
       try {
         // Revoke the exact recovery session that performed the password change,
         // even if another tab replaced the browser's active account meanwhile.
-        await signOutCloudUser(startingOwnership);
+        await signOutCloudUser(startingOwnership, undefined, updatedUser?.id);
       } catch {
         globalSignOutConfirmed = false;
       }
