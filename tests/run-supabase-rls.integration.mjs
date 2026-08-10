@@ -2,6 +2,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { liveSupabaseTestConfiguration } from "../scripts/run-supabase-rls.mjs";
+import { verifyDeployedMigration } from "../scripts/verify-supabase-deployed-migration.mjs";
 
 const fieldCasesSnippet = `    // Field-write tables.\n    const fieldCases = [\n      ["materials", source("material-a"), { name: "Cable" }],\n      ["stock_items", source("stock-a"), { quantity: 4 }],\n      ["stock_movements", source("movement-a"), { type: "Used", quantity: 1 }],\n      ["purchase_lists", source("purchase-a"), { status: "Draft" }],\n      ["planner_entries", source("planner-a"), { startDate: "2026-08-01" }],\n      ["timesheets", source("timesheet-a"), { hours: 8 }],\n      ["certificates", source("certificate-a"), { status: "Draft" }],\n      ["electrical_testing_records", source("testing-a"), { status: "Draft" }],\n      ["job_documents", source("document-a"), { category: "Photo" }],\n    ];\n    for (const [table, sourceId, payload] of fieldCases) {\n      await expectAllowed(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Electrician should write \${table}\`);\n      await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);\n    }`;
 
@@ -67,6 +69,16 @@ for (const [label, snippet] of [
   if (occurrences !== 1) {
     throw new Error(`Expected exactly one ${label} snippet, found ${occurrences}`);
   }
+}
+
+const configuration = liveSupabaseTestConfiguration(process.env);
+if (configuration) {
+  await verifyDeployedMigration({
+    url: configuration.url,
+    projectRef: configuration.projectRef,
+    serviceRoleKey: configuration.serviceRoleKey,
+    confirmation: configuration.confirmation,
+  });
 }
 
 const temporaryDirectory = mkdtempSync(join(tmpdir(), "jr-os-rls-"));
