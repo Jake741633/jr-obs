@@ -1,12 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Cable, CircleAlert, RotateCcw, Save, Trash2 } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { cableSizingSummary } from "../../../lib/cableSizingCalculator-core.mjs";
+import { accountStorageKey } from "../../../lib/cloud/adapter";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { voltageDropSummary } from "../../../lib/voltageDropCalculator-core.mjs";
 
 type Phase = "Single phase" | "Three phase";
@@ -40,11 +42,11 @@ type CableOption = {
 const STORAGE_KEY = "jr-os:electrical-calculators:cable-sizing:recent:v1";
 const number = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
 
-function readRecentCalculations(): RecentCalculation[] {
+function readRecentCalculations(storageKey: string): RecentCalculation[] {
   if (typeof window === "undefined") return [];
 
   try {
-    const saved = window.localStorage.getItem(STORAGE_KEY);
+    const saved = window.localStorage.getItem(storageKey);
     if (!saved) return [];
     const parsed = JSON.parse(saved);
     return Array.isArray(parsed) ? parsed : [];
@@ -65,6 +67,10 @@ function SelectField({ label, value, onChange, options }: { label: string; value
 }
 
 export default function CableSizingPage() {
+  const { identity, isReady: identityReady } = useCloudIdentity();
+  const activeHistoryKey = identity
+    ? accountStorageKey(STORAGE_KEY, identity.organisationId, identity.userId, identity.role, identity.customerSourceId)
+    : null;
   const [phase, setPhase] = useState<Phase>("Single phase");
   const [designCurrentAmps, setDesignCurrentAmps] = useState("20");
   const [installationMethod, setInstallationMethod] = useState("Reference method C");
@@ -80,7 +86,27 @@ export default function CableSizingPage() {
   const [cableSizeMm2, setCableSizeMm2] = useState("2.5");
   const [tabulatedCurrentAmps, setTabulatedCurrentAmps] = useState("27");
   const [protectiveDeviceAmps, setProtectiveDeviceAmps] = useState("20");
-  const [recent, setRecent] = useState<RecentCalculation[]>(readRecentCalculations);
+  const [recent, setRecent] = useState<RecentCalculation[]>([]);
+  const [loadedHistoryKey, setLoadedHistoryKey] = useState<string | null>(null);
+  const historyReady = identityReady && activeHistoryKey !== null && loadedHistoryKey === activeHistoryKey;
+  const visibleRecent = historyReady ? recent : [];
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      if (!identityReady || !activeHistoryKey) {
+        setRecent([]);
+        setLoadedHistoryKey(null);
+        return;
+      }
+      setRecent(readRecentCalculations(activeHistoryKey));
+      setLoadedHistoryKey(activeHistoryKey);
+    });
+    return () => {
+      active = false;
+    };
+  }, [activeHistoryKey, identityReady]);
 
   const cableOptions = useMemo<CableOption[]>(() => [{
     sizeMm2: Number(cableSizeMm2),
@@ -131,6 +157,7 @@ export default function CableSizingPage() {
   }
 
   function saveCalculation() {
+    if (!historyReady || !activeHistoryKey) return;
     const next: RecentCalculation = {
       id: `${Date.now()}`,
       savedAt: new Date().toISOString(),
@@ -154,12 +181,13 @@ export default function CableSizingPage() {
     };
     const updated = [next, ...recent].slice(0, 5);
     setRecent(updated);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    window.localStorage.setItem(activeHistoryKey, JSON.stringify(updated));
   }
 
   function clearHistory() {
+    if (!historyReady || !activeHistoryKey) return;
     setRecent([]);
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(activeHistoryKey);
   }
 
   function loadCalculation(item: RecentCalculation) {
@@ -230,16 +258,16 @@ export default function CableSizingPage() {
             <h2 className="font-semibold">Earth fault loop impedance guidance</h2>
             <p className="mt-2 text-sm text-slate-400">No maximum Zs is invented by this calculator. Confirm the protective device type and rating against current BS 7671 or manufacturer data, then verify measured Zs and disconnection time on site.</p>
           </Card>
-          <button type="button" onClick={saveCalculation} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 font-bold text-slate-950"><Save className="size-5" />Save recent calculation</button>
+          <button type="button" onClick={saveCalculation} disabled={!historyReady} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 font-bold text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"><Save className="size-5" />Save recent calculation</button>
         </div>
       </div>
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">Recent calculations</h2>
-          {recent.length > 0 ? <button type="button" onClick={clearHistory} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-rose-400/30 px-3 font-semibold text-rose-200"><Trash2 className="size-4" />Clear history</button> : null}
+          {visibleRecent.length > 0 ? <button type="button" onClick={clearHistory} disabled={!historyReady} className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-rose-400/30 px-3 font-semibold text-rose-200 disabled:cursor-not-allowed disabled:opacity-50"><Trash2 className="size-4" />Clear history</button> : null}
         </div>
-        {recent.length === 0 ? <p className="mt-2 text-sm text-slate-500">No locally saved calculations yet.</p> : <div className="mt-3 grid gap-3">{recent.map((item) => <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950 p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><span className="font-semibold">{item.phase} · {number.format(item.designCurrentAmps)} A</span><span className="text-slate-500">{new Date(item.savedAt).toLocaleString("en-GB")}</span></div><p className="mt-1 text-slate-400">{number.format(item.cableSizeMm2)} mm² · corrected {number.format(item.requiredTabulatedCurrentAmps)} A · drop {number.format(item.voltageDropVolts)} V</p><button type="button" onClick={() => loadCalculation(item)} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 px-3 font-semibold text-slate-200"><RotateCcw className="size-4" />Load into calculator</button></div>)}</div>}
+        {!historyReady ? <p className="mt-2 text-sm text-slate-500">Loading saved calculations…</p> : visibleRecent.length === 0 ? <p className="mt-2 text-sm text-slate-500">No locally saved calculations yet.</p> : <div className="mt-3 grid gap-3">{visibleRecent.map((item) => <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950 p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><span className="font-semibold">{item.phase} · {number.format(item.designCurrentAmps)} A</span><span className="text-slate-500">{new Date(item.savedAt).toLocaleString("en-GB")}</span></div><p className="mt-1 text-slate-400">{number.format(item.cableSizeMm2)} mm² · corrected {number.format(item.requiredTabulatedCurrentAmps)} A · drop {number.format(item.voltageDropVolts)} V</p><button type="button" onClick={() => loadCalculation(item)} disabled={!historyReady} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 px-3 font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"><RotateCcw className="size-4" />Load into calculator</button></div>)}</div>}
       </Card>
     </main>
   );

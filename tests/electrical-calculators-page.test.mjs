@@ -62,7 +62,7 @@ test("workspace links to the dedicated cable-sizing route", async () => {
   assert.match(page, /Open dedicated Cable Sizing/);
 });
 
-test("dedicated cable-sizing route keeps deterministic calculations and local history", async () => {
+test("dedicated cable-sizing route keeps deterministic calculations and account-scoped local history", async () => {
   const page = await read(cableSizingPagePath);
 
   for (const text of [
@@ -86,6 +86,7 @@ test("dedicated cable-sizing route keeps deterministic calculations and local hi
   assert.match(page, /voltageDropSummary/);
   assert.match(page, /window\.localStorage/);
   assert.match(page, /jr-os:electrical-calculators:cable-sizing:recent:v1/);
+  assert.match(page, /accountStorageKey\(STORAGE_KEY, identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId\)/);
   assert.match(page, /BS 7671/);
   assert.match(page, /manufacturer data/i);
 });
@@ -95,7 +96,8 @@ test("cable-sizing history can be cleared from state and local storage", async (
 
   assert.match(page, /function clearHistory\(\)/);
   assert.match(page, /setRecent\(\[\]\)/);
-  assert.match(page, /window\.localStorage\.removeItem\(STORAGE_KEY\)/);
+  assert.match(page, /window\.localStorage\.removeItem\(activeHistoryKey\)/);
+  assert.doesNotMatch(page, /window\.localStorage\.(?:getItem|setItem|removeItem)\(STORAGE_KEY/);
   assert.match(page, /Clear history/);
 });
 
