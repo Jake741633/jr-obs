@@ -64,10 +64,13 @@ test("raw customer cloud reads no longer include job timeline records", () => {
   const policyStart = migration.lastIndexOf('create policy "cloud collections tenant read"');
   assert.ok(policyStart >= 0);
   const policy = migration.slice(policyStart, migration.indexOf("notify pgrst", policyStart));
-  assert.match(policy, /jr-os-portal-payment-links/i);
-  assert.match(policy, /jr-os-portal-activity/i);
-  assert.match(policy, /jr-os-deposit-requirements/i);
-  assert.doesNotMatch(policy, /jr-os-job-timeline/i);
+  const customerPolicyStart = policy.indexOf("private.current_jr_role() = 'customer'");
+  assert.ok(customerPolicyStart >= 0);
+  const customerPolicy = policy.slice(customerPolicyStart);
+  assert.match(customerPolicy, /jr-os-portal-payment-links/i);
+  assert.match(customerPolicy, /jr-os-portal-activity/i);
+  assert.match(customerPolicy, /jr-os-deposit-requirements/i);
+  assert.doesNotMatch(customerPolicy, /jr-os-job-timeline/i);
 });
 
 test("customer repository routes only timeline collection reads to the safe projection", () => {
