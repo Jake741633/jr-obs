@@ -772,11 +772,26 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
 
     // Audit log is trigger-written and direct writes/updates/deletes are blocked.
     await expectDenied(await insertRecord(accounts.A.owner, "audit_log", { organisation_id: organisationA, action: "forged", entity_table: "payments", source_id: source("forged-audit") }), "Authenticated users must not forge audit rows");
-    const auditRows = await listRecords(accounts.A.office, "audit_log", `select=action,entity_table,source_id&source_id=eq.${officeCases[3][1]}`);
-    await expectAllowed(auditRows, "Office should read tenant audit rows");
+    const profileAuditQuery = `select=action,entity_table,source_id,before_data,after_data&entity_table=eq.profiles&source_id=eq.${accounts.A.office.id}`;
+    const ownerProfileAudit = await listRecords(accounts.A.owner, "audit_log", profileAuditQuery);
+    await expectAllowed(ownerProfileAudit, "Owner should retain profile audit history");
+    assert.equal(ownerProfileAudit.payload.length >= 2, true, "Owner should read the office role-change history");
+    assert.equal(
+      ownerProfileAudit.payload.some((row) => row.before_data?.role === "office" && row.after_data?.role === "admin"),
+      true,
+      "Owner profile history should retain the changed authorization values",
+    );
+    const adminProfileAudit = await listRecords(accounts.A.admin, "audit_log", profileAuditQuery);
+    await expectAllowed(adminProfileAudit, "Admin should retain profile audit history");
+    assert.equal(adminProfileAudit.payload.length, ownerProfileAudit.payload.length, "Admin should retain the manager audit view");
+    const officeProfileAudit = await listRecords(accounts.A.office, "audit_log", profileAuditQuery);
+    await expectAllowed(officeProfileAudit, "Office profile audit query should fail closed");
+    assert.deepEqual(officeProfileAudit.payload, [], "Office must not recover authentication profiles through audit history");
+    const auditRows = await listRecords(accounts.A.office, "audit_log", `select=action,entity_table,source_id&entity_table=eq.payments&source_id=eq.${paymentA}`);
+    await expectAllowed(auditRows, "Office should retain operational audit rows");
     assert.equal(auditRows.payload.some((row) => row.action === "payment_changed"), true, "Payment trigger should write an audit row");
-    await expectDenied(await patchRecords(accounts.A.owner, "audit_log", `source_id=eq.${officeCases[3][1]}`, { action: "tampered" }), "Audit rows must be immutable");
-    await expectDenied(await deleteRecords(accounts.A.owner, "audit_log", `source_id=eq.${officeCases[3][1]}`), "Audit rows must not be deleted through authenticated REST");
+    await expectDenied(await patchRecords(accounts.A.owner, "audit_log", `entity_table=eq.payments&source_id=eq.${paymentA}`, { action: "tampered" }), "Audit rows must be immutable");
+    await expectDenied(await deleteRecords(accounts.A.owner, "audit_log", `entity_table=eq.payments&source_id=eq.${paymentA}`), "Audit rows must not be deleted through authenticated REST");
 
     // Private Storage: signed upload/download, path enforcement, content controls and customer scope.
     const ownPath = `${organisationA}/jobs/${jobA}/${source("file-own")}/photo.png`;
