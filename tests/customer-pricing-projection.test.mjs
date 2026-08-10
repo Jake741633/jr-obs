@@ -53,7 +53,7 @@ test("the projection is trigger-maintained and internal helpers are not RPCs", (
 test("customer clients read the projection while other roles keep role-specific read routing", () => {
   assert.match(collections, /customer:\s*\{[\s\S]*pricing_documents:\s*"customer_pricing_documents"/i);
   assert.match(collections, /roleReadTables\[role\]\?\.\[table\] \?\? table/i);
-  assert.match(adapter, /const readTable = collectionCloudReadTable\(table, cacheRole\)/);
+  assert.match(adapter, /const readTable = collectionCloudReadTable\(table, cacheRole, collectionKey\)/);
   assert.match(adapter, /cloudSelect<CloudEnvelope<T>>\(readTable,/);
 });
 
