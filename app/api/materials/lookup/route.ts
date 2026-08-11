@@ -31,7 +31,6 @@ const supplierHosts: Record<SupplierKey, ReadonlySet<string>> = {
 };
 
 const materialLookupRoles = new Set(["owner", "admin", "office", "electrician"]);
-const materialLookupSessionCookie = "jr-os-materials-api-session";
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -54,21 +53,7 @@ function sameOriginRequest(request: Request) {
 
 function requestAccessToken(request: Request) {
   const authorization = request.headers.get("authorization")?.trim() || "";
-  const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1]?.trim();
-  if (bearer) return bearer;
-
-  const cookie = request.headers.get("cookie") || "";
-  const encoded = cookie
-    .split(";")
-    .map((entry) => entry.trim())
-    .find((entry) => entry.startsWith(`${materialLookupSessionCookie}=`))
-    ?.slice(materialLookupSessionCookie.length + 1);
-  if (!encoded) return null;
-  try {
-    return decodeURIComponent(encoded).trim() || null;
-  } catch {
-    return null;
-  }
+  return /^Bearer\s+(.+)$/i.exec(authorization)?.[1]?.trim() || null;
 }
 
 async function materialLookupAccess(request: Request): Promise<LookupAccess> {
