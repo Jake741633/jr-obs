@@ -6,6 +6,7 @@ import test from "node:test";
 const apiRoot = fileURLToPath(new URL("../app/api", import.meta.url));
 const lookupRoutePath = fileURLToPath(new URL("../app/api/materials/lookup/route.ts", import.meta.url));
 const lookupRoute = readFileSync(lookupRoutePath, "utf8");
+const supabaseClient = readFileSync(new URL("../lib/supabase/client.ts", import.meta.url), "utf8");
 
 function listRouteFiles(directory, prefix = "") {
   return readdirSync(directory).flatMap((entry) => {
@@ -23,9 +24,10 @@ test("server API route inventory stays explicit for security review", () => {
   assert.deepEqual(listRouteFiles(apiRoot).sort(), ["materials/lookup/route.ts"]);
 });
 
-test("supplier lookup remains tenant-neutral and accepts no organisation selector", () => {
+test("supplier lookup accepts no request-controlled organisation selector", () => {
   assert.match(lookupRoute, /let body: \{ supplier\?: string; stockCode\?: string \}/);
-  assert.doesNotMatch(lookupRoute, /organisation_id|organisationId|supabaseFetch|\/rest\/v1|\.from\(/);
+  assert.doesNotMatch(lookupRoute, /organisation_id|organisationId/);
+  assert.match(lookupRoute, /\/rest\/v1\/profiles\?id=eq\.\$\{encodeURIComponent\(userId\)\}&active=eq\.true&select=role,active&limit=1/);
 });
 
 test("supplier lookup rejects cross-origin production calls", () => {
@@ -33,6 +35,30 @@ test("supplier lookup rejects cross-origin production calls", () => {
   assert.match(lookupRoute, /process\.env\.NODE_ENV !== "production"/);
   assert.match(lookupRoute, /new URL\(origin\)\.origin === new URL\(request\.url\)\.origin/);
   assert.match(lookupRoute, /Cross-origin supplier lookups are not allowed/);
+});
+
+test("supplier lookup authenticates an active permitted profile before supplier access", () => {
+  assert.match(lookupRoute, /\/auth\/v1\/user/);
+  assert.match(lookupRoute, /active=eq\.true&select=role,active&limit=1/);
+  assert.match(lookupRoute, /new Set\(\["owner", "admin", "office", "electrician"\]\)/);
+  assert.match(lookupRoute, /Sign in before using supplier lookups/);
+  assert.match(lookupRoute, /Supplier lookups are not permitted for this account/);
+  assert.match(lookupRoute, /Supplier lookup authentication is temporarily unavailable/);
+  const accessCheck = lookupRoute.indexOf("const access = await materialLookupAccess(request);");
+  const bodyRead = lookupRoute.indexOf("body = await request.json();");
+  const supplierFetch = lookupRoute.indexOf("const response = await fetchSupplierPage(searchUrl, supplier, controller.signal);");
+  assert.ok(accessCheck >= 0 && bodyRead > accessCheck, "Authentication must complete before request payload processing");
+  assert.ok(supplierFetch > bodyRead, "Supplier network access must remain behind authentication and validation");
+});
+
+test("browser sessions expose only the short-lived access token to the route-scoped lookup cookie", () => {
+  assert.match(supabaseClient, /const materialLookupSessionCookie = "jr-os-materials-api-session"/);
+  assert.match(supabaseClient, /encodeURIComponent\(session\.access_token\)/);
+  assert.match(supabaseClient, /Path=\/api\/materials\/lookup/);
+  assert.match(supabaseClient, /SameSite=Strict/);
+  assert.match(supabaseClient, /Max-Age=0/);
+  assert.match(supabaseClient, /session\.is_password_recovery/);
+  assert.doesNotMatch(supabaseClient, /encodeURIComponent\(session\.refresh_token\)/);
 });
 
 test("supplier fetches and returned links stay on audited HTTPS hosts", () => {
