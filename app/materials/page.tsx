@@ -9,6 +9,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { useMaterialsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
+import { readSupabaseSession } from "../../lib/supabase/client";
 import { makeId } from "../../lib/storage";
 import type { Material, MaterialCategory, MaterialPriceHistory, MaterialPriceSource, MaterialUnit } from "../../lib/models";
 
@@ -127,9 +128,16 @@ export default function MaterialsPage() {
     setLookupMessage("");
     setLookupResult(null);
     try {
+      const session = readSupabaseSession();
+      if (!session || session.is_password_recovery) {
+        throw new Error("Sign in before using supplier lookups.");
+      }
       const response = await fetch("/api/materials/lookup", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({ supplier: lookupSupplier, stockCode }),
       });
       const result = await response.json() as LookupResult & { error?: string };
@@ -226,35 +234,25 @@ export default function MaterialsPage() {
       {!priceRestricted ? <InputField label="Selling price (£)" type="number" min="0" step="0.01" value={form.sellPrice} onChange={(e) => setForm({ ...form, sellPrice: e.target.value })} /> : null}
       <label className="flex items-center gap-3 pt-8 text-sm text-slate-300"><input type="checkbox" checked={form.favourite} onChange={(e) => setForm({ ...form, favourite: e.target.checked })} />Favourite material</label>
       <div className="md:col-span-2 xl:col-span-4"><TextareaField label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
-      {error ? <p className="text-sm text-red-300 md:col-span-2 xl:col-span-4">{error}</p> : null}
-      <div className="flex justify-end md:col-span-2 xl:col-span-4"><Button type="submit">{editingId ? "Update material" : "Save material"}</Button></div>
+      {error ? <p className="md:col-span-2 xl:col-span-4 text-sm text-rose-300">{error}</p> : null}
+      <div className="md:col-span-2 xl:col-span-4 flex gap-3"><Button type="submit">{editingId ? "Save changes" : "Add material"}</Button><Button type="button" variant="secondary" onClick={reset}>Cancel</Button></div>
     </form></Card> : null}
 
-    <div className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
-      <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search materials, supplier or stock code" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
-      <select value={category} onChange={(e) => setCategory(e.target.value as "All" | MaterialCategory)} className="min-h-11 rounded-xl border border-slate-800 bg-slate-900 px-4 text-sm"><option>All</option>{categories.map((item) => <option key={item}>{item}</option>)}</select>
-      <Button variant={favouritesOnly ? "primary" : "secondary"} onClick={() => setFavouritesOnly((value) => !value)}><Star className="mr-2 size-4" />Favourites</Button>
-    </div>
+    <Card><div className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
+      <InputField label="Search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Material, manufacturer, supplier or code" />
+      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={category} onChange={(e) => setCategory(e.target.value as "All" | MaterialCategory)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>All</option>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
+      <label className="flex min-h-11 items-center gap-3 self-end rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-300"><input type="checkbox" checked={favouritesOnly} onChange={(e) => setFavouritesOnly(e.target.checked)} />Favourites</label>
+    </div></Card>
 
-    {!materials.isReady ? <Card>Loading materials…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<Package className="size-6" />} title={materials.items.length ? "No matching materials" : "No materials yet"} description={materials.items.length ? "Change the search or filters." : "Search a supplier stock code or add a commonly used product."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((item) => {
-      const tradeCost = item.tradeCost ?? 0;
-      const sellPrice = item.sellPrice ?? 0;
-      const markup = tradeCost > 0 ? ((sellPrice - tradeCost) / tradeCost) * 100 : 0;
-      const daysOld = ageInDays(item.lastPriceCheckedAt);
-      const stale = daysOld > 30;
-      const lastHistory = priceRestricted ? [] : (item.priceHistory ?? []).slice(-3).reverse();
-      return <Card key={item.id}>
-        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category} · {item.unit}</p><h2 className="mt-1 text-lg font-bold">{item.name}</h2><p className="text-sm text-slate-500">{item.manufacturer || item.supplier || "No manufacturer or supplier"}</p></div><div className="flex"><button onClick={() => toggleFavourite(item)} aria-label={`Favourite ${item.name}`} className={`rounded-lg p-2 ${item.favourite ? "text-amber-300" : "text-slate-500 hover:text-amber-300"}`}><Star className="size-4" fill={item.favourite ? "currentColor" : "none"} /></button><button onClick={() => startEdit(item)} aria-label={`Edit ${item.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Pencil className="size-4" /></button>{!priceRestricted ? <button onClick={() => remove(item)} aria-label={`Delete ${item.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div></div>
-        {!priceRestricted ? <>
-          <div className="mt-5 grid grid-cols-2 gap-3 border-t border-slate-800 pt-4 text-sm"><div><p className="text-slate-500">Trade cost</p><p className="font-semibold">{money.format(tradeCost)}</p></div><div><p className="text-slate-500">Selling price</p><p className="font-semibold">{money.format(sellPrice)}</p></div><div><p className="text-slate-500">Markup</p><p className="font-semibold">{markup.toFixed(1)}%</p></div><div><p className="text-slate-500">Stock code</p><p className="font-semibold">{item.stockCode || "—"}</p></div></div>
-          <div className={`mt-4 rounded-xl border p-3 text-xs ${stale ? "border-amber-500/30 bg-amber-500/5 text-amber-200" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-200"}`}>{item.lastPriceCheckedAt ? `Price checked ${daysOld} day${daysOld === 1 ? "" : "s"} ago` : "Price has not been checked yet"}</div>
-          {quickEditId === item.id ? <div className="mt-4 grid gap-3 rounded-xl border border-cyan-400/30 bg-slate-950 p-4"><InputField label="New trade cost (£)" type="number" min="0" step="0.01" value={quickTradeCost} onChange={(e) => setQuickTradeCost(e.target.value)} /><InputField label="Markup (%)" type="number" min="0" step="0.1" value={quickMarkup} onChange={(e) => setQuickMarkup(e.target.value)} /><div className="flex gap-2"><Button onClick={() => saveQuickUpdate(item)}>Save price</Button><Button variant="secondary" onClick={() => setQuickEditId(null)}>Cancel</Button></div></div> : <div className="mt-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => openQuickUpdate(item)}><RefreshCw className="mr-2 size-4" />Quick update</Button>{item.supplierUrl ? <a href={item.supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a> : null}</div>}
-          {lastHistory.length ? <details className="mt-4"><summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-400"><History className="size-4" />Recent price history</summary><div className="mt-2 space-y-2">{lastHistory.map((entry) => <div key={entry.id} className="flex justify-between rounded-lg bg-slate-950 p-2 text-xs text-slate-400"><span>{new Date(entry.recordedAt).toLocaleDateString("en-GB")}</span><span>{money.format(entry.tradeCost)} → {money.format(entry.sellPrice)}</span></div>)}</div></details> : null}
-        </> : <>
-          <div className="mt-5 border-t border-slate-800 pt-4 text-sm"><p className="text-slate-500">Stock code</p><p className="font-semibold">{item.stockCode || "—"}</p></div>
-          {item.supplierUrl ? <div className="mt-4"><a href={item.supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a></div> : null}
-        </>}
-      </Card>;
-    })}</section>}
+    <section className="grid gap-4 xl:grid-cols-2">
+      {filtered.map((item) => <Card key={item.id} className="min-w-0"><div className="flex min-w-0 items-start justify-between gap-4"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="break-words font-semibold">{item.name}</p>{item.favourite ? <Star className="size-4 fill-amber-300 text-amber-300" /> : null}</div><p className="mt-1 break-words text-sm text-slate-400">{[item.manufacturer, item.supplier, item.stockCode].filter(Boolean).join(" · ") || "No supplier details"}</p></div><Package className="size-5 shrink-0 text-cyan-300" /></div>
+        {!priceRestricted ? <div className="mt-4 grid gap-3 sm:grid-cols-3"><div><p className="text-xs uppercase tracking-wide text-slate-500">Trade cost</p><p className="mt-1 font-semibold">{money.format(item.tradeCost ?? 0)}</p></div><div><p className="text-xs uppercase tracking-wide text-slate-500">Sell price</p><p className="mt-1 font-semibold">{money.format(item.sellPrice ?? 0)}</p></div><div><p className="text-xs uppercase tracking-wide text-slate-500">Last checked</p><p className={`mt-1 font-semibold ${ageInDays(item.lastPriceCheckedAt) > 30 ? "text-amber-300" : ""}`}>{item.lastPriceCheckedAt ? new Date(item.lastPriceCheckedAt).toLocaleDateString("en-GB") : "Never"}</p></div></div> : null}
+        <div className="mt-4 flex flex-wrap gap-2">{item.supplierUrl ? <a href={item.supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-semibold"><ExternalLink className="size-4" />Supplier</a> : null}<Button variant="secondary" onClick={() => toggleFavourite(item)}><Star className="mr-2 size-4" />Favourite</Button>{!priceRestricted ? <Button variant="secondary" onClick={() => startEdit(item)}><Pencil className="mr-2 size-4" />Edit</Button> : null}{!priceRestricted ? <Button variant="secondary" onClick={() => openQuickUpdate(item)}><RefreshCw className="mr-2 size-4" />Update price</Button> : null}{!priceRestricted ? <Button variant="danger" onClick={() => remove(item)}><Trash2 className="mr-2 size-4" />Delete</Button> : null}</div>
+        {!priceRestricted && quickEditId === item.id ? <div className="mt-4 grid gap-3 rounded-xl border border-slate-700 bg-slate-950 p-4 sm:grid-cols-2"><InputField label="Trade cost (£)" type="number" min="0" step="0.01" value={quickTradeCost} onChange={(e) => setQuickTradeCost(e.target.value)} /><InputField label="Markup (%)" type="number" min="0" step="0.1" value={quickMarkup} onChange={(e) => setQuickMarkup(e.target.value)} /><div className="sm:col-span-2 flex gap-2"><Button onClick={() => saveQuickUpdate(item)}>Save price</Button><Button variant="secondary" onClick={() => setQuickEditId(null)}>Cancel</Button></div></div> : null}
+        {!priceRestricted && item.priceHistory?.length ? <div className="mt-4 rounded-xl border border-slate-800 bg-slate-950 p-4"><div className="flex items-center gap-2 text-sm font-semibold"><History className="size-4 text-cyan-300" />Recent price history</div><div className="mt-3 space-y-2">{item.priceHistory.slice(-4).reverse().map((entry) => <div key={entry.id} className="flex flex-wrap justify-between gap-2 text-sm text-slate-400"><span>{new Date(entry.recordedAt).toLocaleDateString("en-GB")} · {entry.source}</span><span>{money.format(entry.tradeCost)} → {money.format(entry.sellPrice)}</span></div>)}</div></div> : null}
+      </Card>)}
+    </section>
+
+    {!filtered.length ? <EntityEmptyState icon={<Package className="size-6" />} title="No materials found" description="Add supplier-linked materials or adjust your filters." /> : null}
   </div>;
 }
