@@ -6,6 +6,7 @@ import test from "node:test";
 const apiRoot = fileURLToPath(new URL("../app/api", import.meta.url));
 const lookupRoutePath = fileURLToPath(new URL("../app/api/materials/lookup/route.ts", import.meta.url));
 const lookupRoute = readFileSync(lookupRoutePath, "utf8");
+const materialsPage = readFileSync(new URL("../app/materials/page.tsx", import.meta.url), "utf8");
 const supabaseClient = readFileSync(new URL("../lib/supabase/client.ts", import.meta.url), "utf8");
 
 function listRouteFiles(directory, prefix = "") {
@@ -51,14 +52,15 @@ test("supplier lookup authenticates an active permitted profile before supplier 
   assert.ok(supplierFetch > bodyRead, "Supplier network access must remain behind authentication and validation");
 });
 
-test("browser sessions expose only the short-lived access token to the route-scoped lookup cookie", () => {
-  assert.match(supabaseClient, /const materialLookupSessionCookie = "jr-os-materials-api-session"/);
-  assert.match(supabaseClient, /encodeURIComponent\(session\.access_token\)/);
-  assert.match(supabaseClient, /Path=\/api\/materials\/lookup/);
-  assert.match(supabaseClient, /SameSite=Strict/);
-  assert.match(supabaseClient, /Max-Age=0/);
-  assert.match(supabaseClient, /session\.is_password_recovery/);
-  assert.doesNotMatch(supabaseClient, /encodeURIComponent\(session\.refresh_token\)/);
+test("supplier lookup uses explicit validated bearer authority without duplicating the session into cookies", () => {
+  assert.match(materialsPage, /import \{ readSupabaseSession \} from "\.\.\/\.\.\/lib\/supabase\/client"/);
+  assert.match(materialsPage, /const session = readSupabaseSession\(\);/);
+  assert.match(materialsPage, /if \(!session \|\| session\.is_password_recovery\)/);
+  assert.match(materialsPage, /Authorization: `Bearer \$\{session\.access_token\}`/);
+  assert.match(lookupRoute, /request\.headers\.get\("authorization"\)/);
+  assert.match(lookupRoute, /\^Bearer\\s\+\(\.\+\)\$\/i/);
+  assert.doesNotMatch(lookupRoute, /request\.headers\.get\("cookie"\)|materialLookupSessionCookie/);
+  assert.doesNotMatch(supabaseClient, /materialLookupSessionCookie|document\.cookie/);
 });
 
 test("supplier fetches and returned links stay on audited HTTPS hosts", () => {
