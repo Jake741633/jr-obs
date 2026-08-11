@@ -23,18 +23,14 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Generate dependency remediation preview
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm audit fix --package-lock-only
-          git diff -- package-lock.json
-          exit 1
-      - name: Audit dependencies
-        run: npm audit --audit-level=moderate
-      - name: Test
-        run: npm test
-      - name: Lint
-        run: npm run lint
-      - name: Production build
-        run: npm run build
+      - name: Generate dependency remediation
+        run: npm audit fix --package-lock-only
+      - name: Upload remediated lockfile
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: remediated-package-lock
+          path: package-lock.json
+          if-no-files-found: error
+          retention-days: 1
+      - name: Stop diagnostic run
+        run: exit 1
