@@ -4,6 +4,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 type SupplierKey = "CEF" | "Screwfix" | "TLC Direct";
+type LookupAccess = "allowed" | "unauthorized" | "forbidden" | "unavailable";
 
 type ProductResult = {
   supplier: SupplierKey;
@@ -29,6 +30,9 @@ const supplierHosts: Record<SupplierKey, ReadonlySet<string>> = {
   "TLC Direct": new Set(["tlc-direct.co.uk", "www.tlc-direct.co.uk"]),
 };
 
+const materialLookupRoles = new Set(["owner", "admin", "office", "electrician"]);
+const materialLookupSessionCookie = "jr-os-materials-api-session";
+
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -45,6 +49,65 @@ function sameOriginRequest(request: Request) {
     return new URL(origin).origin === new URL(request.url).origin;
   } catch {
     return false;
+  }
+}
+
+function requestAccessToken(request: Request) {
+  const authorization = request.headers.get("authorization")?.trim() || "";
+  const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1]?.trim();
+  if (bearer) return bearer;
+
+  const cookie = request.headers.get("cookie") || "";
+  const encoded = cookie
+    .split(";")
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(`${materialLookupSessionCookie}=`))
+    ?.slice(materialLookupSessionCookie.length + 1);
+  if (!encoded) return null;
+  try {
+    return decodeURIComponent(encoded).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function materialLookupAccess(request: Request): Promise<LookupAccess> {
+  const token = requestAccessToken(request);
+  if (!token) return "unauthorized";
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !anonKey) return "unavailable";
+
+  const headers = {
+    apikey: anonKey,
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+  };
+
+  try {
+    const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      cache: "no-store",
+      headers,
+    });
+    if (userResponse.status === 401 || userResponse.status === 403) return "unauthorized";
+    if (!userResponse.ok) return "unavailable";
+    const user = await userResponse.json().catch(() => null) as { id?: unknown } | null;
+    const userId = text(user?.id);
+    if (!userId) return "unauthorized";
+
+    const profileResponse = await fetch(
+      `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&active=eq.true&select=role,active&limit=1`,
+      { cache: "no-store", headers },
+    );
+    if (profileResponse.status === 401 || profileResponse.status === 403) return "unauthorized";
+    if (!profileResponse.ok) return "unavailable";
+    const rows = await profileResponse.json().catch(() => null) as Array<{ role?: unknown; active?: unknown }> | null;
+    const profile = Array.isArray(rows) ? rows[0] : null;
+    if (!profile?.active) return "forbidden";
+    return materialLookupRoles.has(text(profile.role)) ? "allowed" : "forbidden";
+  } catch {
+    return "unavailable";
   }
 }
 
@@ -142,6 +205,17 @@ function productFromJsonLd(html: string, stockCode: string) {
 export async function POST(request: Request) {
   if (!sameOriginRequest(request)) {
     return NextResponse.json({ error: "Cross-origin supplier lookups are not allowed." }, { status: 403 });
+  }
+
+  const access = await materialLookupAccess(request);
+  if (access === "unauthorized") {
+    return NextResponse.json({ error: "Sign in before using supplier lookups." }, { status: 401 });
+  }
+  if (access === "forbidden") {
+    return NextResponse.json({ error: "Supplier lookups are not permitted for this account." }, { status: 403 });
+  }
+  if (access !== "allowed") {
+    return NextResponse.json({ error: "Supplier lookup authentication is temporarily unavailable." }, { status: 503 });
   }
 
   let body: { supplier?: string; stockCode?: string };
