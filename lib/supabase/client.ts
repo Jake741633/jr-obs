@@ -12,6 +12,7 @@ export interface SupabaseSession {
 
 const sessionKey = "jr-os-supabase-session";
 const sessionOwnershipEpochKey = "jr-os-supabase-session-epoch";
+const materialLookupSessionCookie = "jr-os-materials-api-session";
 
 export interface SupabaseSessionOwnership {
   session: SupabaseSession | null;
@@ -27,8 +28,26 @@ function rotateSessionOwnershipEpoch() {
   window.localStorage.setItem(sessionOwnershipEpochKey, nextSessionOwnershipEpoch());
 }
 
+function syncMaterialLookupSessionCookie(session: SupabaseSession | null) {
+  if (typeof document === "undefined") return;
+  if (!session?.access_token || session.is_password_recovery) {
+    document.cookie = `${materialLookupSessionCookie}=; Path=/api/materials/lookup; Max-Age=0; SameSite=Strict`;
+    return;
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const maxAge = typeof session.expires_at === "number" && Number.isFinite(session.expires_at)
+    ? Math.max(0, Math.floor(session.expires_at - now))
+    : typeof session.expires_in === "number" && Number.isFinite(session.expires_in)
+      ? Math.max(0, Math.floor(session.expires_in))
+      : 3600;
+  const secure = typeof window !== "undefined" && window.location?.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${materialLookupSessionCookie}=${encodeURIComponent(session.access_token)}; Path=/api/materials/lookup; Max-Age=${maxAge}; SameSite=Strict${secure}`;
+}
+
 function clearStoredSupabaseSession() {
   window.localStorage.removeItem(sessionKey);
+  syncMaterialLookupSessionCookie(null);
   rotateSessionOwnershipEpoch();
 }
 
@@ -87,6 +106,7 @@ export function saveSupabaseSession(session: SupabaseSession | null) {
   const previousFingerprint = storedSessionFingerprint(window.localStorage.getItem(sessionKey));
   if (!session) window.localStorage.removeItem(sessionKey);
   else window.localStorage.setItem(sessionKey, JSON.stringify(session));
+  syncMaterialLookupSessionCookie(session);
   if (previousFingerprint !== supabaseSessionFingerprint(session)) rotateSessionOwnershipEpoch();
 }
 
