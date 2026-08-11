@@ -38,7 +38,14 @@ export function portalAppointments(entries: PlannerEntry[], jobs: Job[], custome
 }
 
 export function customerDocuments<T extends PricingDocument | Invoice | ElectricalCertificate>(items: T[], customerId: string, jobIds: Set<string>) {
-  return items.filter((item) => item.customerId === customerId || (item.jobId && jobIds.has(item.jobId)));
+  return items.filter((item) => (
+    item.customerId === customerId
+    || (item.jobId && jobIds.has(item.jobId))
+  ) && !(
+    "type" in item
+    && (item.type === "Quote" || item.type === "Estimate")
+    && item.status === "Draft"
+  ));
 }
 
 export function sharedPhotos(documents: JobDocument[], jobIds: Set<string>, shares: PortalPhotoShare[]) {

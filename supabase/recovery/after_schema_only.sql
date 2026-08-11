@@ -211,4 +211,7 @@
 \echo 'Projecting customer-safe job timeline records'
 \ir ../migrations/20260810_067_customer_timeline_projection.sql
 
+\echo 'Hiding unsent customer pricing drafts'
+\ir ../migrations/20260811_068_hide_customer_draft_pricing.sql
+
 \echo 'JR OS schema-only recovery completed successfully'
