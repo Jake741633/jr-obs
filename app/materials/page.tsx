@@ -9,6 +9,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { useMaterialsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
+import { readSupabaseSession } from "../../lib/supabase/client";
 import { makeId } from "../../lib/storage";
 import type { Material, MaterialCategory, MaterialPriceHistory, MaterialPriceSource, MaterialUnit } from "../../lib/models";
 
@@ -127,9 +128,16 @@ export default function MaterialsPage() {
     setLookupMessage("");
     setLookupResult(null);
     try {
+      const session = readSupabaseSession();
+      if (!session || session.is_password_recovery) {
+        throw new Error("Sign in before using supplier lookups.");
+      }
       const response = await fetch("/api/materials/lookup", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({ supplier: lookupSupplier, stockCode }),
       });
       const result = await response.json() as LookupResult & { error?: string };
