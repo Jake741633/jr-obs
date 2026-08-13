@@ -4,6 +4,7 @@ import { cloudSelect } from "./client";
 import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
 import { queueChange, type CloudEnvelope } from "./repository";
+import { sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
 
@@ -50,8 +51,10 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     mode: effectiveCloudMode(),
     storageKey: scopedStorageKey,
     async list(): Promise<T[]> {
-      const local = readLocal<T>(scopedStorageKey);
       const mode = effectiveCloudMode();
+      const cached = readLocal<T>(scopedStorageKey);
+      const local = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cached });
+      if (local !== cached) writeLocal(scopedStorageKey, local);
 
       if (mode === "local" || !navigator.onLine) return local;
 
@@ -63,9 +66,10 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       try {
         const rows = await cloudSelect<CloudEnvelope<T>>(readTable, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`);
         const cloudRecords = rows.map((row) => row.payload);
-        writeLocal(scopedStorageKey, cloudRecords);
+        const roleProjectionRecords = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cloudRecords });
+        writeLocal(scopedStorageKey, roleProjectionRecords);
         writeVersions(scopedStorageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));
-        return cloudRecords;
+        return roleProjectionRecords;
       } catch { return local; }
     },
     save(record: T, expectedVersion?: number) {

@@ -137,7 +137,8 @@ test("variation activity and invoice lines retain stable source links", () => {
   assert.equal(timeline.jobId, "job-1");
   assert.equal(timeline.sourceId, "variation-1");
   assert.equal(timeline.eventType, "Variation");
-  assert.match(timeline.note, /£450\.00/);
+  assert.equal(timeline.note, "VAR-001 · Add two kitchen sockets changed from Sent to Accepted.");
+  assert.doesNotMatch(timeline.note, /£|fixed price/i);
 
   const line = variationInvoiceLine({ ...variation, status: "Accepted" }, "invoice-line-1");
   assert.equal(line.variationId, "variation-1");
