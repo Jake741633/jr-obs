@@ -133,6 +133,7 @@ function typedRecord(organisationId, sourceId, customerSourceId, jobSourceId, ex
 function approvalPayload(documentId, extra = {}) {
   return {
     documentId,
+    documentVersion: 1,
     documentType: "Quote",
     decision: "Accepted",
     approvalName: "Portal customer",
@@ -544,6 +545,28 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       })),
       "Office should create a final-status quote for sync-order testing",
     );
+    const concurrentQuoteA = source("quote-a-concurrent-decision");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, concurrentQuoteA, customerA, jobA, {
+        type: "Quote", status: "Sent", number: "Q-SEC-RACE", title: "Concurrent decision quote", items: [],
+      })),
+      "Office should create a Sent quote for concurrent approval testing",
+    );
+    const matchingConcurrentQuoteA = source("quote-a-matching-concurrent-decision");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, matchingConcurrentQuoteA, customerA, jobA, {
+        type: "Quote", status: "Sent", number: "Q-SEC-SAME-RACE", title: "Matching concurrent decision quote", items: [],
+      })),
+      "Office should create a Sent quote for matching concurrent approval testing",
+    );
+    const staleRevisionQuoteA = source("quote-a-stale-revision");
+    const staleRevisionQuotePayload = {
+      type: "Quote", status: "Sent", number: "Q-SEC-STALE", title: "Original customer-viewed revision", items: [],
+    };
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, staleRevisionQuoteA, customerA, jobA, staleRevisionQuotePayload)),
+      "Office should create a Sent quote for stale-revision approval testing",
+    );
     const expiredQuoteA = source("quote-a-expired");
     await expectAllowed(
       await insertRecord(accounts.A.office, "pricing_documents", typedRecord(organisationA, expiredQuoteA, customerA, jobA, {
@@ -949,7 +972,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const requestA = source("request-a");
     const approvalRequestStartedAt = Date.now();
     const forgedApprovalTime = "1900-01-01T00:00:00.000Z";
-    const approvalResult = await insertRecord(accounts.A.customer, "portal_approvals", {
+    const approvalSubmission = {
       ...typedRecord(
         organisationA,
         approvalA,
@@ -960,7 +983,8 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       source_updated_at: forgedApprovalTime,
       created_at: forgedApprovalTime,
       updated_at: forgedApprovalTime,
-    });
+    };
+    const approvalResult = await insertRecord(accounts.A.customer, "portal_approvals", approvalSubmission);
     await expectAllowed(approvalResult, "Customer should approve their own Sent pricing document");
     const storedApproval = approvalResult.payload[0];
     const serverDecisionTime = Date.parse(storedApproval.payload.decidedAt);
@@ -970,13 +994,135 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     assert.equal(Date.parse(storedApproval.created_at), serverDecisionTime, "Portal approval receipt and decision timestamps must agree");
     assert.equal(Date.parse(storedApproval.updated_at), serverDecisionTime, "Portal approval update timestamp must be server-authored");
     assert.equal(Date.parse(storedApproval.source_updated_at), serverDecisionTime, "Portal approval source timestamp must be server-authored");
-    await expectAllowed(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+    assert.equal(storedApproval.payload.documentVersion, 1, "Portal approval must retain the exact validated customer-viewed document version");
+
+    const canonicalApprovedQuote = await listRecords(accounts.A.office, "pricing_documents", `select=version,payload,source_updated_at&source_id=eq.${quoteA}`);
+    await expectAllowed(canonicalApprovedQuote, "Office should read the atomically finalised pricing document");
+    assert.equal(canonicalApprovedQuote.payload[0].payload.status, "Accepted", "Portal approval must atomically finalise the canonical pricing document");
+    assert.equal(canonicalApprovedQuote.payload[0].version, storedApproval.payload.documentVersion + 1, "Canonical pricing version must advance exactly once after approval");
+    assert.equal(Date.parse(canonicalApprovedQuote.payload[0].payload.updatedAt), serverDecisionTime, "Canonical pricing update time must match the approval receipt");
+
+    const projectedApprovedQuote = await listRecords(accounts.A.customer, "customer_pricing_documents", `select=payload&source_id=eq.${quoteA}`);
+    await expectAllowed(projectedApprovedQuote, "Customer should read the atomically refreshed pricing projection");
+    assert.equal(projectedApprovedQuote.payload[0].payload.status, "Accepted", "Portal approval projection must reflect the atomic final status");
+
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+        organisationA,
+        source("approval-repeat-same-decision"),
+        customerA,
+        null,
+        approvalPayload(quoteA, { termsAccepted: true, termsSnapshot: "Customer-visible terms" }),
+      )),
+      "23503",
+      "Customer must not repeat the same decision for one pricing version",
+    );
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+        organisationA,
+        source("approval-repeat-opposite-decision"),
+        customerA,
+        null,
+        approvalPayload(quoteA, { decision: "Declined", termsSnapshot: "Customer-visible terms" }),
+      )),
+      "23503",
+      "Customer must not record an opposite decision for one pricing version",
+    );
+
+    const concurrentApprovalSources = [source("approval-race-accepted"), source("approval-race-declined")];
+    const concurrentDecisionResults = await Promise.allSettled([
+      insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+        organisationA,
+        concurrentApprovalSources[0],
+        customerA,
+        null,
+        approvalPayload(concurrentQuoteA, { decision: "Accepted" }),
+      )),
+      insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+        organisationA,
+        concurrentApprovalSources[1],
+        customerA,
+        null,
+        approvalPayload(concurrentQuoteA, { decision: "Declined" }),
+      )),
+    ]);
+    const concurrentHttpResults = concurrentDecisionResults
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    assert.equal(concurrentHttpResults.length, 2, "Both concurrent approval requests must complete at the HTTP boundary");
+    assert.equal(concurrentHttpResults.filter((result) => result.response.ok).length, 1, "Concurrent opposite portal decisions must produce exactly one winner");
+
+    const concurrentEvidenceQuery = await listRecords(accounts.A.customer, "portal_approvals", "select=source_id,payload");
+    await expectAllowed(concurrentEvidenceQuery, "Customer should inspect their concurrent approval result");
+    const concurrentEvidence = concurrentEvidenceQuery.payload.filter((row) => row.payload.documentId === concurrentQuoteA);
+    assert.equal(concurrentEvidence.length, 1, "Concurrent portal decisions must leave exactly one evidence row");
+
+    const concurrentCanonicalQuote = await listRecords(accounts.A.office, "pricing_documents", `select=payload&source_id=eq.${concurrentQuoteA}`);
+    await expectAllowed(concurrentCanonicalQuote, "Office should inspect the concurrent approval winner");
+    assert.equal(concurrentCanonicalQuote.payload[0].payload.status, concurrentEvidence[0].payload.decision, "Canonical pricing status must equal the winning concurrent decision");
+
+    const matchingConcurrentApprovalSources = [source("approval-same-race-a"), source("approval-same-race-b")];
+    const matchingConcurrentResults = await Promise.all([
+      insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+        organisationA,
+        matchingConcurrentApprovalSources[0],
+        customerA,
+        null,
+        approvalPayload(matchingConcurrentQuoteA, { decision: "Accepted" }),
+      )),
+      insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+        organisationA,
+        matchingConcurrentApprovalSources[1],
+        customerA,
+        null,
+        approvalPayload(matchingConcurrentQuoteA, { decision: "Accepted" }),
+      )),
+    ]);
+    assert.equal(matchingConcurrentResults.filter((result) => result.response.ok).length, 1, "Concurrent matching portal decisions must produce exactly one winner");
+
+    const staleCustomerProjection = await listRecords(accounts.A.customer, "customer_pricing_documents", `select=payload&source_id=eq.${staleRevisionQuoteA}`);
+    await expectAllowed(staleCustomerProjection, "Customer should read the original pricing revision before deciding");
+    const viewedStaleDocumentVersion = staleCustomerProjection.payload[0].payload.documentVersion;
+    assert.equal(viewedStaleDocumentVersion, 1, "Customer pricing projection must expose its server-authored document version");
+    await expectAllowed(
+      await patchRecords(accounts.A.office, "pricing_documents", `source_id=eq.${staleRevisionQuoteA}`, {
+        payload: {
+          ...staleRevisionQuotePayload,
+          title: "Unseen revised commercial offer",
+          items: [{ id: source("stale-revision-line"), description: "Revised scope", quantity: 1, unitPrice: 999 }],
+        },
+      }),
+      "Office should revise and re-send the quote after the customer viewed it",
+    );
+    const refreshedStaleProjection = await listRecords(accounts.A.customer, "customer_pricing_documents", `select=payload&source_id=eq.${staleRevisionQuoteA}`);
+    await expectAllowed(refreshedStaleProjection, "Customer should receive the revised pricing projection version");
+    assert.equal(refreshedStaleProjection.payload[0].payload.documentVersion, viewedStaleDocumentVersion + 1, "Customer pricing projection version must advance after an office revision");
+    await expectDeniedWithCode(
+      await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
+        organisationA,
+        source("approval-stale-revision"),
+        customerA,
+        null,
+        approvalPayload(staleRevisionQuoteA, { documentVersion: viewedStaleDocumentVersion }),
+      )),
+      "23503",
+      "Stale portal approval must not finalise an unseen pricing revision",
+    );
+    const staleRevisionEvidence = await listRecords(accounts.A.customer, "portal_approvals", "select=payload");
+    await expectAllowed(staleRevisionEvidence, "Customer should inspect approval evidence after stale rejection");
+    assert.equal(staleRevisionEvidence.payload.some((row) => row.payload.documentId === staleRevisionQuoteA), false, "Stale portal approval must not create legal evidence");
+    const canonicalStaleRevision = await listRecords(accounts.A.office, "pricing_documents", `select=version,payload&source_id=eq.${staleRevisionQuoteA}`);
+    await expectAllowed(canonicalStaleRevision, "Office should inspect the unapproved revised quote");
+    assert.equal(canonicalStaleRevision.payload[0].version, viewedStaleDocumentVersion + 1);
+    assert.equal(canonicalStaleRevision.payload[0].payload.status, "Sent", "Rejected stale approval must leave the revised quote awaiting a decision");
+
+    await expectDeniedWithCode(await insertRecord(accounts.A.customer, "portal_approvals", typedRecord(
       organisationA,
       source("approval-after-status-sync"),
       customerA,
       null,
       approvalPayload(acceptedQuoteA),
-    )), "Customer approval should tolerate the matching final status arriving first");
+    )), "23503", "Customer must not create approval evidence after an office-only final status");
     await expectAllowed(await insertRecord(accounts.A.customer, "portal_requests", typedRecord(organisationA, requestA, customerA, jobA, {
       plannerEntryId: portalPlannerA, type: "Appointment change", message: "Please move this visit", status: "Open",
     })), "Customer should create a request for their own active planner entry");

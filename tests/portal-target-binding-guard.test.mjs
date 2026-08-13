@@ -7,6 +7,10 @@ const migration = readFileSync(
   "utf8",
 );
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
+const atomicMigration = readFileSync(
+  new URL("../supabase/migrations/20260813222646_make_portal_approval_atomic.sql", import.meta.url),
+  "utf8",
+);
 const liveRls = readFileSync(new URL("./supabase-rls.integration.mjs", import.meta.url), "utf8");
 
 test("portal target guard is private, definer-safe and not directly callable", () => {
@@ -49,10 +53,8 @@ test("portal approvals require an eligible pricing target in the same customer s
     migration,
     /from public\.pricing_documents pricing[\s\S]*pricing\.organisation_id = new\.organisation_id[\s\S]*pricing\.source_id = target_document_id[\s\S]*pricing\.customer_source_id is not distinct from new\.customer_source_id[\s\S]*from public\.jobs pricing_job[\s\S]*pricing_job\.customer_source_id is not distinct from new\.customer_source_id[\s\S]*pricing\.payload ->> 'type' = target_document_type/i,
   );
-  assert.match(
-    migration,
-    /tg_op <> 'INSERT'[\s\S]*pricing\.deleted_at is null[\s\S]*pricing\.payload ->> 'status' = 'Sent'[\s\S]*pricing\.payload ->> 'status' = target_decision/i,
-  );
+  assert.match(atomicMigration, /drop trigger if exists portal_approvals_target_binding_guard on public\.portal_approvals/i);
+  assert.match(atomicMigration, /canonical_status is distinct from 'Sent'[\s\S]*no longer awaiting a decision/i);
   assert.match(migration, /Portal approval document must be eligible[\s\S]*errcode = '23503'/i);
   assert.doesNotMatch(migration, /from public\.customer_pricing_documents/i);
 });
@@ -105,7 +107,7 @@ test("existing target relationships are preflighted and both portal tables insta
 test("live RLS coverage exercises valid, cross-scope, missing, inactive and retargeted references", () => {
   for (const phrase of [
     "Customer should approve their own Sent pricing document",
-    "Customer approval should tolerate the matching final status arriving first",
+    "Customer must not create approval evidence after an office-only final status",
     "Customer must not approve another customer's pricing document",
     "Customer must not approve another tenant's pricing document",
     "Customer must not approve a nonexistent pricing document",

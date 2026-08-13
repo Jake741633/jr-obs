@@ -10,6 +10,10 @@ const statusMigration = readFileSync(
   new URL("../supabase/migrations/20260811_068_hide_customer_draft_pricing.sql", import.meta.url),
   "utf8",
 );
+const approvalMigration = readFileSync(
+  new URL("../supabase/migrations/20260813222646_make_portal_approval_atomic.sql", import.meta.url),
+  "utf8",
+);
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url), "utf8");
@@ -45,6 +49,8 @@ test("the customer payload is allowlisted and strips staff-only pricing data", (
   for (const privateKey of ["unitCost", "pricingSettings", "profitability", "internalNotes", "revisions", "lastFollowUpAt", "nextFollowUpDate"]) {
     assert.doesNotMatch(projection, new RegExp(`'${privateKey}'`));
   }
+  assert.match(approvalMigration, /bind_jr_customer_pricing_document_version[\s\S]*'\{documentVersion\}'[\s\S]*to_jsonb\(new\.version\)/i);
+  assert.match(approvalMigration, /before insert or update on public\.customer_pricing_documents/i);
 });
 
 test("customer pricing projections exclude unsent malformed and orphaned documents", () => {
