@@ -31,8 +31,10 @@ test("portal target guard is private, definer-safe and not directly callable", (
     migration.indexOf("create or replace function private.guard_jr_portal_target_binding"),
   );
   for (const policy of [approvalPolicy, requestPolicy]) {
-    assert.match(policy, /organisation_id = public\.current_organisation_id\(\)/i);
-    assert.match(policy, /customer_source_id = public\.current_customer_source_id\(\)/i);
+    assert.match(policy, /organisation_id = private\.current_organisation_id\(\)/i);
+    assert.match(policy, /private\.current_jr_role\(\) = 'customer'/i);
+    assert.match(policy, /customer_source_id = private\.current_customer_source_id\(\)/i);
+    assert.doesNotMatch(policy, /public\.current_(?:organisation_id|jr_role|customer_source_id)\(\)/i);
     assert.match(policy, /created_by = auth\.uid\(\)[\s\S]*updated_by = auth\.uid\(\)/i);
     assert.doesNotMatch(policy, /from public\.jobs/i);
   }
