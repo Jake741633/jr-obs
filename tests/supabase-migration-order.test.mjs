@@ -62,6 +62,16 @@ test("all helpers referenced by generic collection RLS are defined earlier", () 
   }
 });
 
+test("migrations after the private-helper move do not recreate policies against removed public helpers", () => {
+  const privateHelperMove = "supabase/migrations/20260809_030_private_authorization_helpers.sql";
+  const laterMigrations = allMigrationFiles.filter((file) => file > privateHelperMove);
+  const movedPublicHelper = /public\.(?:current_organisation_id|current_jr_role|current_customer_source_id|is_organisation_member|can_manage_business|can_manage_office_data|can_manage_field_data|can_write_cloud_collection)\s*\(/i;
+
+  for (const file of laterMigrations) {
+    assert.doesNotMatch(readFileSync(file, "utf8"), movedPublicHelper, `${file} must use private authorization helpers`);
+  }
+});
+
 test("RLS helper functions use explicit search paths and restricted execution", () => {
   const prerequisite = sql[files[1]];
   for (const helper of ["current_jr_role", "current_customer_source_id", "is_organisation_member"]) {

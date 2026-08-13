@@ -52,9 +52,9 @@ drop policy if exists portal_approvals_customer_insert on public.portal_approval
 create policy portal_approvals_customer_insert on public.portal_approvals
 for insert to authenticated
 with check (
-  organisation_id = public.current_organisation_id()
-  and public.current_jr_role() = 'customer'
-  and customer_source_id = public.current_customer_source_id()
+  organisation_id = private.current_organisation_id()
+  and private.current_jr_role() = 'customer'
+  and customer_source_id = private.current_customer_source_id()
   and created_by = auth.uid()
   and updated_by = auth.uid()
 );
@@ -63,9 +63,9 @@ drop policy if exists portal_requests_customer_insert on public.portal_requests;
 create policy portal_requests_customer_insert on public.portal_requests
 for insert to authenticated
 with check (
-  organisation_id = public.current_organisation_id()
-  and public.current_jr_role() = 'customer'
-  and customer_source_id = public.current_customer_source_id()
+  organisation_id = private.current_organisation_id()
+  and private.current_jr_role() = 'customer'
+  and customer_source_id = private.current_customer_source_id()
   and created_by = auth.uid()
   and updated_by = auth.uid()
 );
