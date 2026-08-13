@@ -142,7 +142,8 @@ export async function revalidateSyncAuthorization(expected: SyncAuthorizationCon
   try {
     const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(expected.userId)}&active=eq.true&select=organisation_id,role,customer_source_id,active`);
     const profile = Array.isArray(rows) ? rows[0] : null;
-    const live: SyncAuthorizationContext | null = profile?.active && profile?.organisation_id && profile?.role
+    const hasCustomerScope = profile?.role !== "customer" || Boolean(profile?.customer_source_id);
+    const live: SyncAuthorizationContext | null = hasCustomerScope && profile?.active && profile?.organisation_id && profile?.role
       ? { organisationId: profile.organisation_id, userId: expected.userId, role: profile.role, customerSourceId: profile.customer_source_id || undefined }
       : null;
     if (!live || !sameSyncAuthorization(live, expected)) {

@@ -315,7 +315,6 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     for (const [role, message] of [
       ["office", "Office must not enumerate authentication profiles"],
       ["electrician", "Electrician must not enumerate authentication profiles"],
-      ["customer", "Customer must not enumerate authentication profiles"],
     ]) {
       const ownProfileOnly = await listRecords(accounts.A[role], "profiles", "select=id,role,organisation_id");
       await expectAllowed(ownProfileOnly, `${role} own-profile query should execute`);
@@ -325,6 +324,9 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
         message,
       );
     }
+    const unboundCustomerProfile = await listRecords(accounts.A.customer, "profiles", "select=id,role,organisation_id");
+    await expectAllowed(unboundCustomerProfile, "Customer profile query should fail closed before its canonical customer exists");
+    assert.deepEqual(unboundCustomerProfile.payload, [], "Unbound customer profiles must not resolve a tenant identity");
     const crossTenantProfiles = await listRecords(accounts.A.owner, "profiles", `select=id&organisation_id=eq.${organisationB}`);
     await expectAllowed(crossTenantProfiles, "Cross-tenant profile directory query should execute safely");
     assert.deepEqual(crossTenantProfiles.payload, [], "Owners must not enumerate another organisation's authentication profiles");
@@ -374,6 +376,13 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     await expectAllowed(
       await insertRecord(accounts.B.office, "customers", typedRecord(organisationB, customerB, customerB, null, { name: "Tenant B customer" })),
       "Tenant B office should create its customer",
+    );
+    const boundCustomerProfile = await listRecords(accounts.A.customer, "profiles", "select=id,role,organisation_id");
+    await expectAllowed(boundCustomerProfile, "Customer own-profile query should execute after canonical binding");
+    assert.deepEqual(
+      boundCustomerProfile.payload.map((profile) => profile.id),
+      [accounts.A.customer.id],
+      "Customer must not enumerate authentication profiles after its scope becomes live",
     );
     await expectAllowed(
       await insertRecord(accounts.A.electrician, "jobs", typedRecord(organisationA, jobA, customerA, null, { title: "Tenant A job" })),
@@ -1597,6 +1606,105 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
     await expectAllowed(crossTenantDeleteAudit, "Cross-tenant deletion audit query should fail closed");
     assert.deepEqual(crossTenantDeleteAudit.payload, [], "Another tenant must not read deletion audit evidence");
+
+    // Customer lifecycle revocation: tombstones and hard deletes deactivate
+    // linked portal profiles in the same transaction. Restoring the customer
+    // never restores access without an explicit account-management action.
+    const activeCustomerJobBeforeDelete = await listRecords(
+      accounts.B.customer,
+      "customer_jobs",
+      `select=source_id&source_id=eq.${jobB}`,
+    );
+    await expectAllowed(activeCustomerJobBeforeDelete, "Active portal customer job query should execute");
+    assert.equal(activeCustomerJobBeforeDelete.payload.length, 1, "Active portal customer should read their live job before deletion");
+
+    await expectAllowed(
+      await patchRecords(accounts.B.owner, "customers", `source_id=eq.${customerB}`, { deleted_at: new Date().toISOString() }),
+      "Owner should tombstone a customer and revoke portal access atomically",
+    );
+    const tombstonedCustomerProfile = await listRecords(
+      accounts.B.owner,
+      "profiles",
+      `select=id,active,customer_source_id&id=eq.${accounts.B.customer.id}`,
+    );
+    await expectAllowed(tombstonedCustomerProfile, "Owner should inspect the revoked customer profile");
+    assert.equal(tombstonedCustomerProfile.payload[0]?.active, false, "Tombstoning a customer must deactivate linked portal profiles");
+
+    const deletedCustomerOwnProfile = await listRecords(
+      accounts.B.customer,
+      "profiles",
+      `select=id,active&id=eq.${accounts.B.customer.id}`,
+    );
+    await expectAllowed(deletedCustomerOwnProfile, "Deleted-customer profile query should fail closed");
+    assert.deepEqual(deletedCustomerOwnProfile.payload, [], "Deleted-customer tokens must not retain tenant reads");
+
+    const revokedPortalCustomer = await listRecords(accounts.B.customer, "portal_customers", `select=source_id&source_id=eq.${customerB}`);
+    await expectAllowed(revokedPortalCustomer, "Deleted customer projection query should fail closed");
+    assert.deepEqual(revokedPortalCustomer.payload, [], "Deleted customer must immediately lose its portal contact projection");
+    const revokedCustomerJob = await listRecords(accounts.B.customer, "customer_jobs", `select=source_id&source_id=eq.${jobB}`);
+    await expectAllowed(revokedCustomerJob, "Stale customer job query should fail closed");
+    assert.deepEqual(revokedCustomerJob.payload, [], "Stale customer profiles must not retain downstream job reads");
+    await expectDenied(
+      await insertRecord(
+        accounts.B.customer,
+        "portal_requests",
+        typedRecord(organisationB, source("stale-customer-request"), customerB, jobB, { type: "Appointment change" }),
+      ),
+      "Stale customer profiles must not retain portal writes",
+    );
+
+    await expectAllowed(
+      await patchRecords(accounts.B.owner, "customers", `source_id=eq.${customerB}`, { deleted_at: null }),
+      "Owner should restore a customer without restoring portal access",
+    );
+    const restoredCustomerProfile = await listRecords(
+      accounts.B.owner,
+      "profiles",
+      `select=id,active&id=eq.${accounts.B.customer.id}`,
+    );
+    await expectAllowed(restoredCustomerProfile, "Owner should inspect the profile after customer restoration");
+    assert.equal(restoredCustomerProfile.payload[0]?.active, false, "Restoring a customer must not reactivate its portal profile");
+
+    await expectAllowed(
+      await patchRecords(accounts.B.owner, "profiles", `id=eq.${accounts.B.customer.id}`, { active: true }),
+      "Owner should explicitly reactivate portal access after restoring the customer",
+    );
+    const reactivatedCustomerJob = await listRecords(accounts.B.customer, "customer_jobs", `select=source_id&source_id=eq.${jobB}`);
+    await expectAllowed(reactivatedCustomerJob, "Reactivated customer job query should execute");
+    assert.equal(reactivatedCustomerJob.payload.length, 1, "Explicit portal reactivation should restore live customer access");
+
+    await expectAllowed(
+      await service(`/rest/v1/customers?source_id=eq.${customerB}`, {
+        method: "DELETE",
+        extraHeaders: { Prefer: "return=representation" },
+      }),
+      "Service-role hard deletion should execute the same portal revocation lifecycle",
+    );
+    const hardDeletedCustomerProfile = await listRecords(
+      accounts.B.owner,
+      "profiles",
+      `select=id,active&id=eq.${accounts.B.customer.id}`,
+    );
+    await expectAllowed(hardDeletedCustomerProfile, "Owner should inspect the profile after hard deletion");
+    assert.equal(hardDeletedCustomerProfile.payload[0]?.active, false, "Service-role hard deletion must deactivate linked portal profiles");
+    const hardDeletedCustomerJob = await listRecords(accounts.B.customer, "customer_jobs", `select=source_id&source_id=eq.${jobB}`);
+    await expectAllowed(hardDeletedCustomerJob, "Hard-deleted customer job query should fail closed");
+    assert.deepEqual(hardDeletedCustomerJob.payload, [], "Hard-deleted customer tokens must not retain downstream reads");
+
+    await expectAllowed(
+      await deleteRecords(accounts.A.owner, "customers", `source_id=eq.${customerA}`),
+      "Authenticated owner should hard-delete a customer and revoke portal access atomically",
+    );
+    const ownerHardDeletedCustomerProfile = await listRecords(
+      accounts.A.owner,
+      "profiles",
+      `select=id,active&id=eq.${accounts.A.customer.id}`,
+    );
+    await expectAllowed(ownerHardDeletedCustomerProfile, "Owner should inspect the profile after authenticated hard deletion");
+    assert.equal(ownerHardDeletedCustomerProfile.payload[0]?.active, false, "Authenticated owner hard deletion must deactivate linked portal profiles");
+    const ownerHardDeletedCustomerJob = await listRecords(accounts.A.customer, "customer_jobs", `select=source_id&source_id=eq.${jobA}`);
+    await expectAllowed(ownerHardDeletedCustomerJob, "Owner-deleted customer job query should fail closed");
+    assert.deepEqual(ownerHardDeletedCustomerJob.payload, [], "Owner-deleted customer tokens must not retain downstream reads");
   } finally {
     await cleanup(context);
   }

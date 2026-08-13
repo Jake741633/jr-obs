@@ -214,4 +214,7 @@
 \echo 'Hiding unsent customer pricing drafts'
 \ir ../migrations/20260811_068_hide_customer_draft_pricing.sql
 
+\echo 'Revoking portal access when a customer is deleted'
+\ir ../migrations/20260813215116_revoke_deleted_customer_portals.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -82,6 +82,7 @@ const requiredSuites = [
   "portal-target-binding-guard.test.mjs",
   "customer-timeline-projection.test.mjs",
   "customer-timeline-live-rls.test.mjs",
+  "customer-lifecycle-revocation.test.mjs",
 ];
 
 const testsDirectory = resolve(process.cwd(), "tests");
@@ -186,6 +187,13 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "A fully allocated invoice must not permit payment-link reissue",
     "Cancelling an invoice must immediately hide its existing payment URL",
     "Direct Data API reads must not enumerate tombstoned payment URLs",
+    "Tombstoning a customer must deactivate linked portal profiles",
+    "Restoring a customer must not reactivate its portal profile",
+    "Service-role hard deletion must deactivate linked portal profiles",
+    "Authenticated owner hard deletion must deactivate linked portal profiles",
+    "Deleted-customer tokens must not retain tenant reads",
+    "Stale customer profiles must not retain downstream job reads",
+    "Stale customer profiles must not retain portal writes",
   ]) {
     assert.match(liveRls, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }

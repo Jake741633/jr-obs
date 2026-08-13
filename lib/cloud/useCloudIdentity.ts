@@ -80,6 +80,7 @@ async function loadIdentity(force = false) {
     if (!ownershipIsCurrent()) return null;
     const profile = Array.isArray(rows) ? rows[0] : null;
     if (!profile?.active || !profile?.organisation_id || !profile?.role) return null;
+    if (profile.role === "customer" && !profile.customer_source_id) return null;
     return {
       userId: user.id,
       email: user.email,

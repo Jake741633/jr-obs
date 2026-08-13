@@ -11,7 +11,7 @@ test("cloud context excludes suspended profiles", () => {
   );
   assert.match(
     cloudSync,
-    /if \(!profile\?\.active \|\| !profile\?\.organisation_id\) throw new Error\("Your JR OS organisation profile is not active or ready yet\."\)/,
+    /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) throw new Error\("Your JR OS organisation profile is not active or ready yet\."\)/,
   );
   assert.match(
     cloudSync,

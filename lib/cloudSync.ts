@@ -176,7 +176,8 @@ function recordSuccessfulCloudUpload(organisationId: string, operationIsCurrent?
 async function getProfile(userId: string) {
   const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&active=eq.true&select=organisation_id,role,customer_source_id,active`);
   const profile = Array.isArray(rows) ? rows[0] : null;
-  if (!profile?.active || !profile?.organisation_id) throw new Error("Your JR OS organisation profile is not active or ready yet.");
+  if (!profile?.active || !profile?.organisation_id || !profile?.role) throw new Error("Your JR OS organisation profile is not active or ready yet.");
+  if (profile.role === "customer" && !profile.customer_source_id) throw new Error("Your JR OS customer portal access is not active or ready yet.");
   return profile as { organisation_id: string; role: string; customer_source_id: string | null; active: true };
 }
 
