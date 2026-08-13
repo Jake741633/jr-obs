@@ -12,13 +12,35 @@ JR OS remains usable with browser local storage when Supabase is not configured.
 
 ## 2. Run the SQL
 
-Run these files in order in the Supabase SQL editor:
+From a trusted workstation with `psql` installed, run the supported schema-only
+recovery path from the repository root:
 
-1. `supabase/schema.sql`
-2. `supabase/migrations/20260730_001_cloud_foundation.sql`
-3. `supabase/migrations/20260730_002_audit_triggers.sql`
+```sh
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/schema.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/recovery/after_schema_only.sql
+```
 
-The first file creates the original organisations, profiles and legacy app-record backup. The migrations extend that same tenant model with typed entity tables, version fields, audit logging, private file metadata and customer-scoped RLS.
+The first command creates the original organisations, profiles and legacy
+app-record backup. The recovery script then applies the complete current
+effective migration chain in order, including permission, role-escalation,
+session, Storage and projection hardening. It stops on the first error and the
+last migration publishes the deployed-migration marker.
+
+Do not run only a hand-picked subset of `supabase/migrations`, do not continue
+after an error, and do not use the Supabase SQL editor for the recovery file:
+the script relies on `psql` `\ir` includes to install the entire chain.
+
+Before enabling cloud mode, set the protected verification variables described
+in [SUPABASE_RLS_INTEGRATION_TESTS.md](./SUPABASE_RLS_INTEGRATION_TESTS.md) for a
+dedicated staging/test project and run:
+
+```sh
+npm run verify:supabase-schema
+```
+
+The command must report the newest migration filename from the current checkout.
+Never put the database URL, database password or service-role key in a browser
+environment variable, committed file or command example.
 
 ## 3. Configure environment variables
 
