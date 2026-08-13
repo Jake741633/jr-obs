@@ -217,4 +217,9 @@
 \echo 'Revoking portal access when a customer is deleted'
 \ir ../migrations/20260813215116_revoke_deleted_customer_portals.sql
 
+\echo 'Making customer portal approval decisions atomic'
+begin;
+\ir ../migrations/20260813222646_make_portal_approval_atomic.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -78,6 +78,7 @@ const requiredSuites = [
   "backup-storage-key-isolation.test.mjs",
   "export-import-tenant-boundary.test.mjs",
   "portal-approval-evidence-guard.test.mjs",
+  "portal-approval-atomicity.test.mjs",
   "portal-payment-link-binding-guard.test.mjs",
   "portal-target-binding-guard.test.mjs",
   "customer-timeline-projection.test.mjs",

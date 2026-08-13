@@ -95,6 +95,7 @@ test("server-authored portal approval timestamps safely deduplicate an offline r
     id: "approval-1",
     customerId: "customer-1",
     documentId: "quote-1",
+    documentVersion: 7,
     documentType: "Quote",
     decision: "Accepted",
     approvalName: "Customer",
@@ -113,6 +114,7 @@ test("server-authored portal approval timestamps safely deduplicate an offline r
       customerId: "customer-1",
       comments: "Approved offline",
       documentId: "quote-1",
+      documentVersion: 7,
       decidedAt: "2026-08-10T09:15:30.250Z",
       decision: "Accepted",
       id: "approval-1",
@@ -123,6 +125,7 @@ test("server-authored portal approval timestamps safely deduplicate an offline r
   assert.equal(cloudRecordMatchesQueuedPayload("portal_requests", current, queued), false);
   assert.equal(cloudRecordMatchesQueuedPayload("portal_approvals", current, { ...queued, approvalName: "Attacker" }), false);
   assert.equal(cloudRecordMatchesQueuedPayload("portal_approvals", current, { ...queued, termsSnapshot: "Forged terms" }), false);
+  assert.equal(cloudRecordMatchesQueuedPayload("portal_approvals", current, { ...queued, documentVersion: 8 }), false);
   assert.equal(cloudRecordMatchesQueuedPayload("portal_approvals", { ...current, created_at: "2026-08-10T09:16:00.000Z" }, queued), false);
   assert.equal(cloudRecordMatchesQueuedPayload("portal_approvals", current, { ...queued, decidedAt: "not-a-timestamp" }), false);
 });
