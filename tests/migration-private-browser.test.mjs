@@ -42,11 +42,11 @@ test("switching organisations, users, roles or customer assignments changes the 
 test("fresh browsers hydrate only tenant-filtered cloud records", () => {
   assert.match(adapter, /organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}/);
   assert.match(adapter, /const cloudRecords = rows\.map\(\(row\) => row\.payload\)/);
-  assert.match(adapter, /writeLocal\(scopedStorageKey, cloudRecords\)/);
+  assert.match(adapter, /writeLocal\(scopedStorageKey, roleProjectionRecords\)/);
 });
 
 test("empty tenant cloud results do not fall back to another organisation's legacy data", () => {
-  assert.match(adapter, /return cloudRecords/);
+  assert.match(adapter, /return roleProjectionRecords/);
   assert.doesNotMatch(adapter, /return readLocal<T>\(storageKey\)/);
   assert.doesNotMatch(storage, /window\.localStorage\.setItem\(key, JSON\.stringify\(items\)\)/);
   assert.match(storage, /window\.localStorage\.setItem\(activeStorageKey, JSON\.stringify\(items\)\)/);

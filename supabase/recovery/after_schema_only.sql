@@ -222,4 +222,9 @@ begin;
 \ir ../migrations/20260813222646_make_portal_approval_atomic.sql
 commit;
 
+\echo 'Removing commercial notes from field job and timeline projections'
+begin;
+\ir ../migrations/20260813230319_protect_field_job_confidentiality.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -53,6 +53,35 @@ const genericReadSnippet = `      const electricianFieldRead = await listRecords
 
 const safeGenericReadSnippet = `      const electricianCompleteFieldRead = await listRecords(accounts.A.electrician, "cloud_collections", \`select=source_id,payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);\n      await expectAllowed(electricianCompleteFieldRead, \`Electrician complete generic \${collectionKey} query should fail closed\`);\n      assert.deepEqual(electricianCompleteFieldRead.payload, [], \`Electrician must not read complete generic field records: \${collectionKey}\`);\n\n      const electricianFieldRead = await listRecords(accounts.A.electrician, "field_cloud_collections", \`select=source_id,payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);\n      await expectAllowed(electricianFieldRead, \`Electrician projected field \${collectionKey} query should execute\`);\n      assert.equal(electricianFieldRead.payload.length, 1, \`Electrician should retain projected field collection reads: \${collectionKey}\`);\n      const fieldPayload = electricianFieldRead.payload[0].payload;\n      if (collectionKey === "jr-os-surveys") {\n        assert.equal(fieldPayload.labourRate, undefined, "Field survey projection must omit labour rates");\n      }\n      if (collectionKey === "jr-os-job-packs") {\n        assert.equal(fieldPayload.labourRate, undefined, "Field job pack projection must omit labour rates");\n        assert.equal(fieldPayload.materials[0].unitPrice, undefined, "Field job pack projection must omit material prices");\n\n        await expectAllowed(\n          await patchRecords(accounts.A.office, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, {\n            updated_by: accounts.A.office.id,\n            payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 8, labourRate: 90, materials: [{ id: "m1", description: "Cable", quantity: 10, unitPrice: 5.25 }] },\n          }),\n          "Office should add private job-pack pricing",\n        );\n        await expectAllowed(\n          await patchRecords(accounts.A.electrician, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, {\n            updated_by: accounts.A.electrician.id,\n            payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 9, materials: [{ id: "m1", description: "Cable", quantity: 12 }] },\n          }),\n          "Electrician should update field-safe job-pack details",\n        );\n        const officePackAfterFieldUpdate = await listRecords(accounts.A.office, "cloud_collections", \`select=payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);\n        await expectAllowed(officePackAfterFieldUpdate, "Office should read complete job pack after field update");\n        assert.equal(officePackAfterFieldUpdate.payload[0].payload.labourHours, 9);\n        assert.equal(officePackAfterFieldUpdate.payload[0].payload.labourRate, 90, "Field job-pack updates must preserve hidden labour rates");\n        assert.equal(officePackAfterFieldUpdate.payload[0].payload.materials[0].unitPrice, 5.25, "Field job-pack updates must preserve hidden material prices");\n      }\n      if (collectionKey === "jr-os-job-variations") {\n        assert.equal(fieldPayload.labourRate, undefined, "Field variation projection must omit labour rates");\n        assert.equal(fieldPayload.materialCost, undefined, "Field variation projection must omit material costs");\n        assert.equal(fieldPayload.fixedPrice, undefined, "Field variation projection must omit fixed prices");\n        assert.equal(fieldPayload.internalNotes, undefined, "Field variation projection must omit internal notes");\n      }\n      if (collectionKey === "jr-os-job-material-usage") {\n        assert.equal(fieldPayload.unitCost, undefined, "Field material usage projection must omit unit costs");\n      }`;
 
+const fieldJobSeedNote = '        notes: "Field operational note",';
+const confidentialFieldJobSeedNote = '        notes: "Created from quote Q-JOB-SEC.\\n\\nInternal quote notes: PRIVATE-JOB-MARGIN-8742\\n\\nAgreed scope:\\n- Private priced line (1 × £12500.37)",';
+const fieldJobReadExpectation = '    assert.equal(electricianFieldJob.payload[0].payload.notes, "Field operational note");';
+const confidentialFieldJobReadExpectation = '    assert.equal(electricianFieldJob.payload[0].payload.notes, undefined, "Field job projection must omit mixed commercial notes");';
+const officeJobReadAnchor = '    assert.equal(officeCommercialJob.payload[0].payload.quoteSnapshot.profitability.expectedProfit, 5000, "Office should retain job profitability snapshot");';
+const confidentialOfficeJobRead = `${officeJobReadAnchor}\n    assert.match(officeCommercialJob.payload[0].payload.notes, /PRIVATE-JOB-MARGIN-8742/, "Office should retain canonical accepted-quote notes");`;
+
+const genericCasesStart = "    const genericCases = [";
+const fieldTimelineCoverage = [
+  '    const confidentialFieldTimeline = source("field-confidential-timeline-a");',
+  '    const confidentialTimelineNote = "VAR-SEC · Extra socket changed from Sent to Accepted. Fixed price £9876.54. PRIVATE-VARIATION-MARGIN-91";',
+  '    await expectAllowed(',
+  '      await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-timeline", confidentialFieldTimeline, accounts.A.office, customerA, jobA, { milestone: "Custom update", eventType: "  vArIaTiOn  ", sourceId: source("field-confidential-variation-a"), sourceType: "LegacyTimeline", fromStatus: "Sent", toStatus: "Accepted", note: confidentialTimelineNote, completedBy: "JR OS Office", completedAt: "2026-08-13T22:00:00.000Z", createdAt: "2026-08-13T22:00:00.000Z" })),',
+  '      "Office should create a complete variation timeline record with commercial detail",',
+  '    );',
+  '    const officeConfidentialTimeline = await listRecords(accounts.A.office, "cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-timeline&source_id=eq." + confidentialFieldTimeline);',
+  '    await expectAllowed(officeConfidentialTimeline, "Office commercial timeline query should execute");',
+  '    assert.equal(officeConfidentialTimeline.payload[0].payload.note, confidentialTimelineNote, "Office should retain the canonical variation financial note");',
+  '    const electricianConfidentialTimeline = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-timeline&source_id=eq." + confidentialFieldTimeline);',
+  '    await expectAllowed(electricianConfidentialTimeline, "Electrician field timeline query should execute");',
+  '    assert.equal(electricianConfidentialTimeline.payload.length, 1, "Electrician should retain the variation status event");',
+  '    assert.equal(electricianConfidentialTimeline.payload[0].payload.note, "Variation status updated.", "Field timeline projection must mask variation financial notes");',
+  '    assert.doesNotMatch(JSON.stringify(electricianConfidentialTimeline.payload[0].payload), /9876[.]54|PRIVATE-VARIATION-MARGIN-91/, "Field timeline projection must omit every variation price marker");',
+  '    const crossTenantConfidentialTimeline = await listRecords(accounts.B.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-timeline&source_id=eq." + confidentialFieldTimeline);',
+  '    await expectAllowed(crossTenantConfidentialTimeline, "Cross-tenant field timeline query should execute safely");',
+  '    assert.deepEqual(crossTenantConfidentialTimeline.payload, [], "Another organisation must not read the field timeline projection");',
+  '',
+].join("\n");
+
 const obsoleteCustomerInvoiceRead = `    assert.equal(customerInvoice.payload.length, 1, "Customer must retain own invoice reads");`;
 const safeCustomerInvoiceRead = `    assert.deepEqual(customerInvoice.payload, [], "Customer base invoice reads must fail closed in favour of the customer-safe projection");`;
 
@@ -102,8 +131,23 @@ try {
     .replace(fieldCasesSnippet, safeFieldCasesSnippet)
     .replace(genericCasesSnippet, safeGenericCasesSnippet)
     .replace(genericReadSnippet, safeGenericReadSnippet)
+    .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
+    .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
+    .replace(officeJobReadAnchor, confidentialOfficeJobRead)
+    .replace(genericCasesStart, `${fieldTimelineCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
+  for (const requiredPhrase of [
+    "Field job projection must omit mixed commercial notes",
+    "Office should retain the canonical variation financial note",
+    "Field timeline projection must mask variation financial notes",
+    "Field timeline projection must omit every variation price marker",
+    "Another organisation must not read the field timeline projection",
+  ]) {
+    if (!supportedSource.includes(requiredPhrase)) {
+      throw new Error(`Generated live RLS test is missing field confidentiality coverage: ${requiredPhrase}`);
+    }
+  }
   writeFileSync(temporaryTest, supportedSource, "utf8");
   const childEnvironment = { ...process.env };
   delete childEnvironment.NODE_TEST_CONTEXT;
