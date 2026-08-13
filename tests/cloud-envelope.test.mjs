@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { buildCloudEnvelope, buildGenericEnvelope, buildTypedEnvelope } from "../lib/cloud/repository-core.mjs";
+import { buildCloudEnvelope, buildCloudUpdatePatch, buildGenericEnvelope, buildTypedEnvelope } from "../lib/cloud/repository-core.mjs";
 import { typedCollectionTables } from "../lib/cloud/migrationStoragePolicy-core.mjs";
 
 const certificate = {
@@ -57,6 +57,29 @@ test("canonical envelope selector keeps typed and generic rows separate", () => 
   const generic = buildCloudEnvelope({ ...common, collectionKey: "jr-os-custom-data" });
   assert.equal(Object.hasOwn(typed, "collection_key"), false);
   assert.equal(Object.hasOwn(generic, "collection_key"), true);
+});
+
+test("existing typed and generic edits use a creator-preserving patch shape", () => {
+  const typed = buildCloudUpdatePatch(common);
+  const generic = buildCloudUpdatePatch({ ...common, collectionKey: "jr-os-custom-data" });
+  const expectedKeys = [
+    "customer_source_id",
+    "job_source_id",
+    "payload",
+    "source_updated_at",
+  ].sort();
+
+  assert.deepEqual(Object.keys(typed).sort(), expectedKeys);
+  assert.deepEqual(Object.keys(generic).sort(), expectedKeys);
+  for (const patch of [typed, generic]) {
+    assert.equal(Object.hasOwn(patch, "created_by"), false);
+    assert.equal(Object.hasOwn(patch, "organisation_id"), false);
+    assert.equal(Object.hasOwn(patch, "source_id"), false);
+    assert.equal(Object.hasOwn(patch, "collection_key"), false);
+    assert.equal(Object.hasOwn(patch, "updated_by"), false);
+    assert.equal(Object.hasOwn(patch, "version"), false);
+    assert.equal(Object.hasOwn(patch, "deleted_at"), false);
+  }
 });
 
 test("customer and job roots use canonical relationship metadata", () => {

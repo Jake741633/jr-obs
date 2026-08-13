@@ -1,8 +1,9 @@
 "use client";
 
 import { cloudPatch, cloudSelect, cloudUpsert } from "./client";
+import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
-import { buildCloudEnvelope, cloudRecordMatchesQueuedPayload, coalesceQueue, hasVersionConflict, makeTombstone, pendingImports, tenantRecordQuery } from "./repository-core.mjs";
+import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, hasVersionConflict, makeTombstone, pendingImports, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, tenantRecordQuery, tenantRecordVersionQuery } from "./repository-core.mjs";
 import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { assertCloudPageOperationCurrent } from "./cloudPageIdentity-core.mjs";
 
@@ -181,7 +182,9 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
     }
     processed += 1;
     try {
-      const existing = await cloudSelect<CloudEnvelope<unknown>>(item.table, tenantRecordQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, includeDeleted: true }));
+      const readTable = collectionCloudReadTable(item.table, item.role, item.collectionKey);
+      const readsThroughProjection = readTable !== item.table;
+      const existing = await cloudSelect<CloudEnvelope<unknown>>(readTable, tenantRecordQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, includeDeleted: true }));
       if (!activeSyncAuthorizationMatches(authorization)) {
         remaining.push(item, ...queue.slice(processed));
         break;
@@ -202,18 +205,36 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
         remaining.push({ ...item, state: "Conflict", error: `Cloud version ${current?.version} differs from expected ${item.expectedVersion}.` });
         continue;
       }
+      if (item.operation === "upsert" && current?.deleted_at) {
+        remaining.push(...retainDeletedRecordConflict([], item));
+        continue;
+      }
+
+      // PostgreSQL requires canonical SELECT visibility for a direct UPDATE.
+      // A role projection can safely prove equality/version, but it must never
+      // be used to rebuild canonical relationship columns from redacted JSON.
+      // Keep the operation queued until the narrow server-side field mutation
+      // service applies it without reopening the source table.
+      if (readsThroughProjection && (current || item.operation === "delete" || item.expectedVersion !== undefined)) {
+        remaining.push(...retainProjectionMutationConflict([], item));
+        continue;
+      }
 
       if (item.operation === "delete") {
         if (!current) { updateCachedVersion(item.storageKey, item.sourceId); cleared += 1; continue; }
         const deletedAt = new Date().toISOString();
-        const query = `organisation_id=eq.${encodeURIComponent(item.organisationId)}&source_id=eq.${encodeURIComponent(item.sourceId)}${collectionFilter(item.collectionKey)}`;
+        const query = tenantRecordVersionQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, currentVersion: current.version });
         const tombstone = makeTombstone({ currentVersion: current.version, userId: item.userId, deletedAt });
-        await cloudPatch(item.table, query, { ...tombstone, source_updated_at: deletedAt });
-        updateCachedVersion(item.storageKey, item.sourceId, tombstone.version);
+        const updated = await cloudPatch<CloudEnvelope<unknown>>(item.table, query, { deleted_at: tombstone.deleted_at, source_updated_at: deletedAt });
+        if (updated.length !== 1) {
+          remaining.push(...retainPatchConflict([], item, current.version, updated.length));
+          continue;
+        }
+        updateCachedVersion(item.storageKey, item.sourceId, updated[0].version);
         cleared += 1;
       } else {
         const sourceUpdatedAt = (item.payload as { updatedAt?: string } | undefined)?.updatedAt || new Date().toISOString();
-        const record = buildCloudEnvelope({
+        const envelopeInput = {
           organisationId: item.organisationId,
           sourceId: item.sourceId,
           recordTable: item.table,
@@ -221,11 +242,22 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
           payload: item.payload,
           version: (current?.version || 0) + 1,
           sourceUpdatedAt,
-          createdBy: current ? null : item.userId,
           updatedBy: item.userId,
-        });
-        await cloudUpsert(item.table, [record], item.collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
-        updateCachedVersion(item.storageKey, item.sourceId, record.version);
+        };
+        if (current) {
+          const query = tenantRecordVersionQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, currentVersion: current.version });
+          const patch = buildCloudUpdatePatch(envelopeInput);
+          const updated = await cloudPatch<CloudEnvelope<unknown>>(item.table, query, patch);
+          if (updated.length !== 1) {
+            remaining.push(...retainPatchConflict([], item, current.version, updated.length));
+            continue;
+          }
+          updateCachedVersion(item.storageKey, item.sourceId, updated[0].version);
+        } else {
+          const record = buildCloudEnvelope({ ...envelopeInput, createdBy: item.userId });
+          await cloudUpsert(item.table, [record], item.collectionKey ? "organisation_id,collection_key,source_id" : "organisation_id,source_id");
+          updateCachedVersion(item.storageKey, item.sourceId, record.version);
+        }
         cleared += 1;
       }
     } catch (error) { remaining.push({ ...item, attempts: item.attempts + 1, state: "Failed", error: error instanceof Error ? error.message : "Sync failed" }); }
