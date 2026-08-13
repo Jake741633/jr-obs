@@ -41,6 +41,20 @@ test("JR OS Supabase bootstrap files exist and recovery applies every current mi
   assert.match(recovery, /\\set ON_ERROR_STOP on/);
 });
 
+test("deployment guidance bootstraps the complete recovery chain and verifies its marker", () => {
+  const setup = readFileSync("docs/SUPABASE_SETUP.md", "utf8");
+  const sqlSection = setup.slice(setup.indexOf("## 2. Run the SQL"), setup.indexOf("## 3. Configure environment variables"));
+  const schemaCommand = sqlSection.indexOf('psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/schema.sql');
+  const recoveryCommand = sqlSection.indexOf('psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f supabase/recovery/after_schema_only.sql');
+
+  assert.ok(schemaCommand >= 0, "setup must apply the base schema with fail-fast psql");
+  assert.ok(recoveryCommand > schemaCommand, "setup must apply the complete recovery chain after the base schema");
+  assert.doesNotMatch(sqlSection, /supabase\/migrations\/\d+_.+\.sql/i, "setup must not prescribe an incomplete migration subset");
+  assert.match(sqlSection, /do not continue\s+after an error/i);
+  assert.match(sqlSection, /npm run verify:supabase-schema/i);
+  assert.match(sqlSection, /newest migration filename from the current checkout/i);
+});
+
 test("base-profile columns and five roles exist before RLS helpers compile", () => {
   const prerequisite = sql[files[1]];
   const activeColumn = prerequisite.indexOf("add column if not exists active");
