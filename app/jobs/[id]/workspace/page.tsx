@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   BookOpenText,
@@ -49,6 +49,27 @@ type NormalisedJobProgress = {
   payments: number;
 };
 
+type EditableProgressMetric = Exclude<keyof NormalisedJobProgress, "payments">;
+
+const editableProgressMetrics: { key: EditableProgressMetric; label: string }[] = [
+  { key: "overall", label: "Overall" },
+  { key: "firstFix", label: "First fix" },
+  { key: "secondFix", label: "Second fix" },
+  { key: "testing", label: "Testing" },
+  { key: "certificates", label: "Certificates" },
+  { key: "materials", label: "Materials" },
+];
+
+const emptyProgress: NormalisedJobProgress = {
+  overall: 0,
+  firstFix: 0,
+  secondFix: 0,
+  testing: 0,
+  certificates: 0,
+  materials: 0,
+  payments: 0,
+};
+
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 
 function quickLink(href: string, label: string, detail: string, icon: typeof FileText) {
@@ -78,6 +99,16 @@ export default function JobWorkspacePage() {
   const timeline = useJobTimelineCollection();
   const [selectedStatus, setSelectedStatus] = useState<CanonicalJobStatus>("Enquiry");
   const [statusMessage, setStatusMessage] = useState("");
+  const [progressDraft, setProgressDraft] = useState<NormalisedJobProgress>(emptyProgress);
+  const [progressMessage, setProgressMessage] = useState("");
+
+  const progressRecord = progress.items.find((item) => item.jobId === jobId);
+  const progressValue = normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress;
+
+  useEffect(() => {
+    setProgressDraft(normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress);
+    setProgressMessage("");
+  }, [jobId, progressRecord?.id, progressRecord?.updatedAt]);
 
   const ready = [jobs, customers, builders, team, tasks, diaries, variations, documents, progress, timeline].every((store) => store.isReady);
   if (!ready) return <Card>Loading job workspace…</Card>;
@@ -93,13 +124,10 @@ export default function JobWorkspacePage() {
   const jobVariations = variations.items.filter((item) => item.jobId === jobId);
   const acceptedVariationValue = jobVariations.filter((item) => ["Accepted", "Approved", "Invoiced"].includes(item.status)).reduce((sum, item) => sum + (item.fixedPrice ?? item.labourHours * item.labourRate + item.materialCharge + item.otherCharge), 0);
   const jobDocuments = documents.items.filter((item) => item.jobId === jobId);
-  const progressRecord = progress.items.find((item) => item.jobId === jobId);
-  const progressValue = normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress;
   const recentActivity = timeline.items.filter((item) => item.jobId === jobId).toSorted((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, 5);
   const currentStatus = canonicalJobStatuses.includes(job.status) ? job.status as CanonicalJobStatus : "Enquiry";
 
   function updateStatus() {
-    if (!job) return;
     const nextStatus = selectedStatus === "Enquiry" && currentStatus !== "Enquiry" ? currentStatus : selectedStatus;
     if (nextStatus === currentStatus) { setStatusMessage("Choose a different status before saving."); return; }
     const now = new Date().toISOString();
@@ -111,6 +139,38 @@ export default function JobWorkspacePage() {
     }
     setSelectedStatus(nextStatus);
     setStatusMessage(`Job status updated to ${nextStatus}.`);
+  }
+
+  function updateProgressMetric(metric: EditableProgressMetric, value: string) {
+    const numericValue = Number(value);
+    const boundedValue = Number.isFinite(numericValue) ? Math.min(100, Math.max(0, Math.round(numericValue))) : 0;
+    setProgressDraft((current) => ({ ...current, [metric]: boundedValue }));
+    setProgressMessage("");
+  }
+
+  function saveProgress() {
+    const now = new Date().toISOString();
+    const normalised = normaliseJobProgress({
+      ...progressDraft,
+      payments: progressValue.payments,
+    }) as NormalisedJobProgress;
+    const nextRecord = {
+      id: progressRecord?.id ?? `job-progress-${jobId}`,
+      jobId,
+      manual: normalised,
+      suggestions: progressRecord?.suggestions ?? [],
+      updatedBy: "JR OS mobile workspace",
+      createdAt: progressRecord?.createdAt ?? now,
+      updatedAt: now,
+    } as unknown as (typeof progress.items)[number];
+
+    progress.setItems((current) => {
+      const existingIndex = current.findIndex((item) => item.id === nextRecord.id);
+      if (existingIndex < 0) return [nextRecord, ...current];
+      return current.map((item, index) => index === existingIndex ? nextRecord : item);
+    });
+    setProgressDraft(normalised);
+    setProgressMessage("Operational progress saved and queued for secure sync.");
   }
 
   return <main className="space-y-6 pb-28">
@@ -127,17 +187,17 @@ export default function JobWorkspacePage() {
     </Card>
 
     <Card>
-      <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-300"><Gauge className="size-5" /></span><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Live progress</p><h2 className="mt-1 text-xl font-bold">Operational completion</h2><p className="mt-2 text-sm text-slate-400">Read-only snapshot from the existing job progress record.</p></div></div>
+      <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-300"><Gauge className="size-5" /></span><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Live progress</p><h2 className="mt-1 text-xl font-bold">Operational completion</h2><p className="mt-2 text-sm text-slate-400">Update assigned-job progress on site. Payment progress stays read-only and office controlled.</p></div></div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
-        {progressBar("Overall", progressValue.overall)}
-        {progressBar("First fix", progressValue.firstFix)}
-        {progressBar("Second fix", progressValue.secondFix)}
-        {progressBar("Testing", progressValue.testing)}
-        {progressBar("Certificates", progressValue.certificates)}
-        {progressBar("Materials", progressValue.materials)}
-        {progressBar("Payments", progressValue.payments)}
+        {editableProgressMetrics.map(({ key, label }) => <label key={key} htmlFor={`progress-${key}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+          <span className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-300">{label}</span><span className="font-semibold text-cyan-200">{progressDraft[key]}%</span></span>
+          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraft[key]} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-11 w-full accent-cyan-400" />
+        </label>)}
+        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">{progressBar("Payments (office controlled)", progressValue.payments)}</div>
       </div>
-      {!progressRecord ? <p className="mt-4 text-sm text-amber-300">No saved progress record yet. Add one from the full job management controls.</p> : <p className="mt-4 text-xs text-slate-500">Last updated {new Date(progressRecord.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} by {progressRecord.updatedBy || "JR OS"}.</p>}
+      <div className="mt-5 flex flex-wrap items-center gap-3"><Button type="button" onClick={saveProgress}>Save field progress</Button><p className="text-xs text-slate-500">Only operational percentages are sent by the field app.</p></div>
+      {progressMessage ? <p role="status" className="mt-3 text-sm text-cyan-200">{progressMessage}</p> : null}
+      {!progressRecord ? <p className="mt-4 text-sm text-amber-300">No saved progress record yet. Saving will create one for this assigned job.</p> : <p className="mt-4 text-xs text-slate-500">Last updated {new Date(progressRecord.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} by {progressRecord.updatedBy || "JR OS"}.</p>}
     </Card>
 
     <Card>
