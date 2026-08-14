@@ -6,6 +6,10 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20260809_048_field_cloud_collection_projection.sql", import.meta.url),
   "utf8",
 );
+const boundary = readFileSync(
+  new URL("../supabase/migrations/20260813235633_secure_field_mutation_boundary.sql", import.meta.url),
+  "utf8",
+);
 const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 const setup = readFileSync(new URL("../docs/SUPABASE_SETUP.md", import.meta.url), "utf8");
@@ -72,13 +76,20 @@ test("survey, job-pack, variation and material-usage projections remove pricing 
   assert.match(payloadFunction, /else record_payload/i);
 });
 
-test("electrician writes preserve hidden office pricing on sensitive generic records", () => {
+test("historical write guards preserved hidden pricing before direct field writes closed", () => {
   assert.match(migration, /private\.jr_field_cloud_collection_has_private_fields/i);
   assert.match(migration, /new\.payload := private\.jr_field_cloud_payload\(new\.collection_key, new\.payload\)/i);
   assert.match(migration, /new\.payload := private\.jr_merge_field_cloud_payload\(new\.collection_key, old\.payload, new\.payload\)/i);
   assert.match(mergeFunction, /old_payload \|\| private\.jr_field_cloud_payload/i);
   assert.match(mergeFunction, /old_material ->> 'id' = new_material ->> 'id'/i);
   assert.match(mergeFunction, /old_material[\s\S]*\|\| new_material/i);
+});
+
+test("final boundary closes generic direct writes and exposes only the minimal mutation RPC", () => {
+  assert.match(boundary, /create policy "cloud collections staff insert"[\s\S]*private\.can_manage_office_data\(\)/i);
+  assert.match(boundary, /create policy "cloud collections staff update"[\s\S]*private\.can_manage_office_data\(\)/i);
+  assert.match(boundary, /create or replace function public\.jr_field_save_collection/i);
+  assert.match(boundary, /'jr-os-surveys'[\s\S]*'jr-os-site-diaries'[\s\S]*'jr-os-job-tasks'[\s\S]*'jr-os-job-timeline'/i);
 });
 
 test("complete generic rows no longer expose an electrician SELECT branch", () => {
@@ -94,7 +105,7 @@ test("electrician repositories route generic reads to the field projection", () 
   assert.match(collections, /roleReadTables\[role\]\?\.\[table\] \?\? table/i);
 });
 
-test("live RLS runner covers generic base denial and sensitive redaction", () => {
+test("live RLS runner covers generic base denial, redaction and narrow RPC writes", () => {
   for (const phrase of [
     "Electrician must not read complete generic field records",
     "Electrician should retain projected field collection reads",
@@ -104,8 +115,9 @@ test("live RLS runner covers generic base denial and sensitive redaction", () =>
     "Field variation projection must omit labour rates",
     "Field variation projection must omit material costs",
     "Field material usage projection must omit unit costs",
-    "Field job-pack updates must preserve hidden labour rates",
-    "Field job-pack updates must preserve hidden material prices",
+    "Electrician direct job-pack updates must fail closed",
+    "Assigned electrician should create a survey through the field RPC",
+    "Survey update must preserve office labour rate",
   ]) {
     assert.match(runner, new RegExp(phrase.replaceAll(" ", "\\s+"), "i"));
   }

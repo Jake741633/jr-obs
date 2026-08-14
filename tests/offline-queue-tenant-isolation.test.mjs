@@ -8,7 +8,7 @@ const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url)
 
 test("offline queue items are tagged with their complete authorisation context", () => {
   assert.match(repository, /export interface SyncQueueItem<[^>]*> \{[^}]*organisationId: string;[^}]*userId\?: string;[^}]*role\?: string;[^}]*customerSourceId\?: string;/s);
-  assert.match(repository, /syncQueueItemId\(item\.organisationId, item\.userId, item\.role, item\.customerSourceId, item\.table, item\.collectionKey, item\.sourceId, queuedAt\)/);
+  assert.match(repository, /syncQueueItemId\(item\.organisationId, item\.userId, item\.role, item\.customerSourceId, item\.table, item\.collectionKey, item\.sourceId, queuedAt, mutationId\)/);
   assert.match(repository, /coalesceQueue\(queue, next\)/);
   assert.match(adapter, /queueChange\(\{[^}]*userId, role: cacheRole, customerSourceId: cacheCustomerSourceId \}\)/);
 });
@@ -22,8 +22,8 @@ test("suspended, deleted or reassigned memberships fail live replay preflight", 
 });
 
 test("offline queue identities cannot collide when values contain separators", () => {
-  assert.match(repository, /export function syncQueueItemId\(organisationId: string, userId: string \| undefined, role: string \| undefined, customerSourceId: string \| undefined, table: string, collectionKey: string \| undefined, sourceId: string, queuedAt: number\)/);
-  assert.match(repository, /return JSON\.stringify\(\[organisationId, userId \?\? null, role \?\? null, customerSourceId \?\? null, table, collectionKey \|\| "typed", sourceId, queuedAt\]\)/);
+  assert.match(repository, /export function syncQueueItemId\(organisationId: string, userId: string \| undefined, role: string \| undefined, customerSourceId: string \| undefined, table: string, collectionKey: string \| undefined, sourceId: string, queuedAt: number, mutationId\?: string\)/);
+  assert.match(repository, /return JSON\.stringify\(\[organisationId, userId \?\? null, role \?\? null, customerSourceId \?\? null, table, collectionKey \|\| "typed", sourceId, queuedAt, mutationId \?\? null\]\)/);
   assert.doesNotMatch(repository, /id: `\$\{item\.organisationId\}:\$\{item\.table\}:/);
 });
 
@@ -46,14 +46,13 @@ test("identity changes abort an in-flight replay before foreign writes", () => {
 });
 
 test("replay preserves queues owned by other authorisation contexts", () => {
-  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => !queueItemMatchesAuthorization\(item, authorization\) \|\| !originalIds\.has\(item\.id\)\)/);
-  assert.match(repository, /const nextQueue = \[\.\.\.untouched, \.\.\.retained\]/);
+  assert.match(repository, /const nextQueue = mergeProcessedQueue\(liveQueue, queue, remaining\)/);
   assert.match(repository, /if \(activeSyncAuthorizationMatches\(authorization\)\) syncStatus\.set\(statusForQueue\(activeRemaining\)\)/);
 });
 
 test("failed retries stay bound to their original tenant", () => {
-  assert.match(repository, /remaining\.push\(\{ \.\.\.item, attempts: item\.attempts \+ 1, state: "Failed"/);
-  assert.match(repository, /const retained = remaining\.filter\(\(item\) => liveIds\.has\(item\.id\)\)/);
+  assert.match(repository, /attempts: item\.attempts \+ 1,[\s\S]*state: isCloudConflictError\(error\) \? "Conflict" : "Failed"/);
+  assert.match(repository, /const nextQueue = mergeProcessedQueue\(liveQueue, queue, remaining\)/);
   assert.doesNotMatch(repository, /organisationId:\s*activeOrganisationId\(\)/);
 });
 

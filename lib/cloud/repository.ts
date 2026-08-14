@@ -1,9 +1,9 @@
 "use client";
 
-import { cloudPatch, cloudSelect, cloudUpsert } from "./client";
-import { collectionCloudReadTable } from "./collections";
+import { cloudPatch, cloudRpc, cloudSelect, cloudUpsert, isCloudConflictError } from "./client";
+import { collectionCloudMutationRoute, collectionCloudReadTable, fieldMutationRouteAllows, isServerAuthoredFieldTimeline, normaliseFieldRequestedJobStatus } from "./collections";
 import { effectiveCloudMode } from "./config";
-import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, hasVersionConflict, makeTombstone, pendingImports, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, tenantRecordQuery, tenantRecordVersionQuery } from "./repository-core.mjs";
+import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, fieldMutationReplayExpired, hasVersionConflict, makeTombstone, mergeProcessedQueue, pendingImports, rebaseQueuedFieldMutation, reconcileVersionedRecordCache, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, sameQueueTarget, serialSingleFlightByKey, shouldReconcileFieldMutationPayload, tenantRecordQuery, tenantRecordVersionQuery, validateFieldMutationResponse, withExclusiveBrowserLock } from "./repository-core.mjs";
 import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { assertCloudPageOperationCurrent } from "./cloudPageIdentity-core.mjs";
 
@@ -11,9 +11,10 @@ export type SyncState = "Synced" | "Pending" | "Offline" | "Conflict" | "Failed"
 export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: string; customer_source_id?: string | null; job_source_id?: string | null; version: number; source_updated_at?: string; payload: T; created_at?: string; updated_at?: string; deleted_at?: string | null; }
 export interface GenericCloudEnvelope<T> extends TypedCloudEnvelope<T> { collection_key: string; }
 export type CloudEnvelope<T> = TypedCloudEnvelope<T> | GenericCloudEnvelope<T>;
-export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; role?: string; customerSourceId?: string; payload?: T; expectedVersion?: number; queuedAt: string; attempts: number; state: SyncState; error?: string; }
+export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; role?: string; customerSourceId?: string; payload?: T; expectedVersion?: number; baseVersion?: number; baseIntent?: "create" | "update" | "unknown"; mutationId?: string; sentAt?: string; queuedAt: string; attempts: number; state: SyncState; error?: string; }
 export interface SyncQueueFlushResult { processed: number; cleared: number; remaining: number; conflicts: number; failed: number; }
 export interface SyncAuthorizationContext { organisationId: string; userId: string; role: string; customerSourceId?: string; }
+interface FieldMutationResponse<T = Record<string, unknown>> { status: "applied" | "replayed"; resource: "jobs" | "cloud_collections"; sourceId: string; collectionKey?: string; version: number; sourceUpdatedAt: string; payload: T; }
 
 const QUEUE_KEY = "jr-os-cloud-sync-queue";
 const STATUS_KEY = "jr-os-cloud-sync-status";
@@ -61,8 +62,57 @@ function updateCachedVersion(storageKey: string | undefined, sourceId: string, v
   write(key, versions);
 }
 
-export function syncQueueItemId(organisationId: string, userId: string | undefined, role: string | undefined, customerSourceId: string | undefined, table: string, collectionKey: string | undefined, sourceId: string, queuedAt: number) {
-  return JSON.stringify([organisationId, userId ?? null, role ?? null, customerSourceId ?? null, table, collectionKey || "typed", sourceId, queuedAt]);
+function reconcileCachedFieldMutation(storageKey: string | undefined, sourceId: string, version: number, payload?: unknown) {
+  if (!storageKey) return false;
+  const versionStorageKey = `jr-os-cloud-versions:${storageKey}`;
+  const versions = read<Record<string, number>>(versionStorageKey, {});
+  const records = read<Record<string, unknown>[]>(storageKey, []);
+  const recordPayload = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown>
+    : undefined;
+  const result = reconcileVersionedRecordCache({ versions, records, sourceId, version, payload: recordPayload });
+  if (!result.applied) return false;
+  if (result.records !== records) write(storageKey, result.records);
+  write(versionStorageKey, result.versions);
+  if (result.records !== records) {
+    window.dispatchEvent(new CustomEvent("jr-os-cloud-cache-reconciled", {
+      detail: { storageKey, sourceId, payload },
+    }));
+  }
+  return true;
+}
+
+function markFieldMutationSent(item: SyncQueueItem) {
+  const queue = readAllSyncQueue();
+  const index = queue.findIndex((entry) => entry.id === item.id);
+  if (index < 0) return null;
+  const prepared: SyncQueueItem = {
+    ...queue[index],
+    baseIntent: item.baseIntent,
+    baseVersion: item.baseVersion,
+    expectedVersion: item.expectedVersion,
+    mutationId: queue[index].mutationId || crypto.randomUUID(),
+    sentAt: queue[index].sentAt || new Date().toISOString(),
+  };
+  queue[index] = prepared;
+  write(QUEUE_KEY, queue);
+  return prepared;
+}
+
+function fieldMutationTargetKey(item: SyncQueueItem) {
+  return JSON.stringify([
+    item.organisationId,
+    item.userId ?? null,
+    item.role ?? null,
+    item.customerSourceId ?? null,
+    item.table,
+    item.collectionKey ?? null,
+    item.sourceId,
+  ]);
+}
+
+export function syncQueueItemId(organisationId: string, userId: string | undefined, role: string | undefined, customerSourceId: string | undefined, table: string, collectionKey: string | undefined, sourceId: string, queuedAt: number, mutationId?: string) {
+  return JSON.stringify([organisationId, userId ?? null, role ?? null, customerSourceId ?? null, table, collectionKey || "typed", sourceId, queuedAt, mutationId ?? null]);
 }
 
 function statusForQueue(queue: SyncQueueItem[]): SyncState {
@@ -123,13 +173,19 @@ export function discardSyncQueueItem(itemId: string) {
   return { removed: true, remaining: activeRemaining.length, item };
 }
 
-export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "queuedAt" | "attempts" | "state">) {
+export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "mutationId" | "sentAt" | "queuedAt" | "attempts" | "state">) {
   const queue = readAllSyncQueue();
+  if (isServerAuthoredFieldTimeline(item.table, item.role, item.collectionKey, item.payload)) return;
   const queuedAt = Date.now();
-  const next: SyncQueueItem<T> = { ...item, id: syncQueueItemId(item.organisationId, item.userId, item.role, item.customerSourceId, item.table, item.collectionKey, item.sourceId, queuedAt), queuedAt: new Date(queuedAt).toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
-  write(QUEUE_KEY, coalesceQueue(queue, next));
+  const mutationId = crypto.randomUUID();
+  const next: SyncQueueItem<T> = { ...item, id: syncQueueItemId(item.organisationId, item.userId, item.role, item.customerSourceId, item.table, item.collectionKey, item.sourceId, queuedAt, mutationId), mutationId, queuedAt: new Date(queuedAt).toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
+  const coalesced = coalesceQueue(queue, next);
+  write(QUEUE_KEY, coalesced);
   const authorization = currentSyncAuthorization();
-  if (authorization && queueItemMatchesAuthorization(next, authorization)) syncStatus.set(navigator.onLine ? "Pending" : "Offline");
+  if (authorization && queueItemMatchesAuthorization(next, authorization)) {
+    const activeQueue = coalesced.filter((entry) => queueItemMatchesAuthorization(entry, authorization));
+    syncStatus.set(navigator.onLine ? statusForQueue(activeQueue) : "Offline");
+  }
 }
 
 export async function revalidateSyncAuthorization(expected: SyncAuthorizationContext) {
@@ -158,7 +214,7 @@ export async function revalidateSyncAuthorization(expected: SyncAuthorizationCon
   }
 }
 
-export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
+async function flushSyncQueueOnce(): Promise<SyncQueueFlushResult> {
   const authorization = currentSyncAuthorization();
   const allQueue = readAllSyncQueue();
   if (!authorization) return { processed: 0, cleared: 0, remaining: 0, conflicts: 0, failed: 0 };
@@ -173,15 +229,117 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
   }
 
   const remaining: SyncQueueItem[] = [];
+  const fieldMutationSuccesses: { item: SyncQueueItem; response: FieldMutationResponse }[] = [];
+  const fieldMutationVersions = new Map<string, number>();
+  const blockedFieldMutationTargets = new Set<string>();
   let cleared = 0;
   let processed = 0;
-  for (const item of queue) {
+  for (const queuedItem of queue) {
+    let item = queuedItem;
+    let activeFieldMutationTarget: string | undefined;
     if (!activeSyncAuthorizationMatches(authorization)) {
       remaining.push(...queue.slice(processed));
       break;
     }
     processed += 1;
     try {
+      const mutationRoute = collectionCloudMutationRoute(item.table, item.role, item.collectionKey);
+      if (mutationRoute.kind === "deny") {
+        remaining.push(...retainProjectionMutationConflict(
+          [],
+          item,
+          "This electrician resource does not have an approved secure mutation route.",
+        ));
+        continue;
+      }
+      if (mutationRoute.kind === "rpc") {
+        const targetKey = fieldMutationTargetKey(item);
+        activeFieldMutationTarget = targetKey;
+        if (blockedFieldMutationTargets.has(targetKey)) {
+          remaining.push(item);
+          continue;
+        }
+        if (isServerAuthoredFieldTimeline(item.table, item.role, item.collectionKey, item.payload)) {
+          cleared += 1;
+          continue;
+        }
+        if (fieldMutationReplayExpired(item.sentAt)) {
+          blockedFieldMutationTargets.add(targetKey);
+          remaining.push(...retainProjectionMutationConflict(
+            [],
+            item,
+            "This field change was sent more than 30 days ago and its replay receipt may have expired. Refresh the record and resolve the change manually before retrying.",
+          ));
+          continue;
+        }
+        const priorVersion = fieldMutationVersions.get(targetKey);
+        if (priorVersion !== undefined && item.sentAt === undefined) {
+          item = rebaseQueuedFieldMutation(item, priorVersion);
+        }
+        if (!fieldMutationRouteAllows(mutationRoute, item.operation, item.baseIntent)) {
+          const reason = item.operation === "delete"
+            ? "Projected field records cannot be deleted from the offline queue."
+            : item.baseIntent === "unknown" || item.baseIntent === undefined
+              ? "This field change has no trustworthy create or update base and cannot be replayed."
+              : `Secure ${mutationRoute.resource} mutations do not allow ${item.baseIntent} operations.`;
+          remaining.push(...retainProjectionMutationConflict([], item, reason));
+          continue;
+        }
+
+        const expectedVersion = item.baseIntent === "create" ? 0 : item.baseVersion;
+        if (!Number.isInteger(expectedVersion) || Number(expectedVersion) < 0) {
+          remaining.push(...retainProjectionMutationConflict(
+            [],
+            item,
+            "This field change has no trustworthy base version and cannot be replayed.",
+          ));
+          continue;
+        }
+        if (!item.payload || typeof item.payload !== "object" || Array.isArray(item.payload)) {
+          throw new Error("The queued field mutation payload is invalid.");
+        }
+
+        const prepared = markFieldMutationSent(item);
+        if (!prepared) continue;
+        item = prepared;
+        const payload = item.payload as Record<string, unknown>;
+        const requestedStatus = mutationRoute.resource === "jobs"
+          ? normaliseFieldRequestedJobStatus(payload.status)
+          : undefined;
+        if (mutationRoute.resource === "jobs" && (typeof requestedStatus !== "string" || !requestedStatus.trim())) {
+          throw new Error("A secure job mutation requires the requested status.");
+        }
+        const args = mutationRoute.resource === "jobs"
+          ? {
+              record_source_id: item.sourceId,
+              expected_version: expectedVersion,
+              requested_status: requestedStatus,
+              mutation_id: item.mutationId,
+            }
+          : {
+              collection_key_value: item.collectionKey,
+              record_source_id: item.sourceId,
+              expected_version: expectedVersion,
+              record_payload: payload,
+              mutation_id: item.mutationId,
+            };
+        const rawResponse = await cloudRpc<FieldMutationResponse>(mutationRoute.functionName, args);
+        if (!activeSyncAuthorizationMatches(authorization)) {
+          remaining.push(item, ...queue.slice(processed));
+          break;
+        }
+        const response = validateFieldMutationResponse(rawResponse, {
+          resource: mutationRoute.resource,
+          sourceId: item.sourceId,
+          collectionKey: item.collectionKey,
+          requestedStatus,
+        }) as FieldMutationResponse;
+        fieldMutationSuccesses.push({ item, response });
+        fieldMutationVersions.set(targetKey, response.version);
+        cleared += 1;
+        continue;
+      }
+
       const readTable = collectionCloudReadTable(item.table, item.role, item.collectionKey);
       const readsThroughProjection = readTable !== item.table;
       const existing = await cloudSelect<CloudEnvelope<unknown>>(readTable, tenantRecordQuery({ organisationId: item.organisationId, sourceId: item.sourceId, collectionKey: item.collectionKey, includeDeleted: true }));
@@ -260,22 +418,78 @@ export async function flushSyncQueue(): Promise<SyncQueueFlushResult> {
         }
         cleared += 1;
       }
-    } catch (error) { remaining.push({ ...item, attempts: item.attempts + 1, state: "Failed", error: error instanceof Error ? error.message : "Sync failed" }); }
+    } catch (error) {
+      if (activeFieldMutationTarget) blockedFieldMutationTargets.add(activeFieldMutationTarget);
+      remaining.push({
+        ...item,
+        attempts: item.attempts + 1,
+        state: isCloudConflictError(error) ? "Conflict" : "Failed",
+        error: error instanceof Error ? error.message : "Sync failed",
+      });
+    }
   }
 
   const liveQueue = readAllSyncQueue();
-  const originalIds = new Set(queue.map((item) => item.id));
-  const liveIds = new Set(liveQueue.map((item) => item.id));
-  const untouched = liveQueue.filter((item) => !queueItemMatchesAuthorization(item, authorization) || !originalIds.has(item.id));
-  const retained = remaining.filter((item) => liveIds.has(item.id));
-  const nextQueue = [...untouched, ...retained];
+  const processedIds = new Set(queue.map((item) => item.id));
+  const latestSuccessByTarget = new Map<string, { item: SyncQueueItem; response: FieldMutationResponse }>();
+  for (const success of fieldMutationSuccesses) {
+    latestSuccessByTarget.set(fieldMutationTargetKey(success.item), success);
+  }
+  for (const success of latestSuccessByTarget.values()) {
+    const concurrentIndices = liveQueue
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => !processedIds.has(entry.id) && sameQueueTarget(entry, success.item))
+      .map(({ index }) => index);
+    if (concurrentIndices.length) {
+      for (const index of concurrentIndices) {
+        liveQueue[index] = rebaseQueuedFieldMutation(liveQueue[index], success.response.version);
+      }
+    }
+  }
+  const nextQueue = mergeProcessedQueue(liveQueue, queue, remaining);
   write(QUEUE_KEY, nextQueue);
+  for (const success of latestSuccessByTarget.values()) {
+    // A retained mutation is the newer optimistic UI state, whether it was
+    // added during this request or was processed later in the same snapshot
+    // and failed. Only an unshadowed receipt may replace the cached payload.
+    const payload = shouldReconcileFieldMutationPayload(nextQueue, success.item)
+      ? success.response.payload
+      : undefined;
+    reconcileCachedFieldMutation(success.item.storageKey, success.item.sourceId, success.response.version, payload);
+  }
 
   const activeRemaining = nextQueue.filter((item) => queueItemMatchesAuthorization(item, authorization));
   const conflicts = activeRemaining.filter((item) => item.state === "Conflict").length;
   const failed = activeRemaining.filter((item) => item.state === "Failed").length;
   if (activeSyncAuthorizationMatches(authorization)) syncStatus.set(statusForQueue(activeRemaining));
   return { processed, cleared, remaining: activeRemaining.length, conflicts, failed };
+}
+
+function syncAuthorizationFlightKey() {
+  const authorization = currentSyncAuthorization();
+  return authorization
+    ? JSON.stringify([authorization.organisationId, authorization.userId, authorization.role, authorization.customerSourceId ?? null])
+    : "no-active-authorization";
+}
+
+const EMPTY_SYNC_QUEUE_FLUSH_RESULT: SyncQueueFlushResult = {
+  processed: 0,
+  cleared: 0,
+  remaining: 0,
+  conflicts: 0,
+  failed: 0,
+};
+
+const runSyncQueueFlush = serialSingleFlightByKey<[string], SyncQueueFlushResult>((expectedAuthorizationKey) => withExclusiveBrowserLock<SyncQueueFlushResult>(
+  typeof navigator === "undefined" ? undefined : navigator.locks,
+  "jr-os-cloud-sync-queue-flush",
+  () => syncAuthorizationFlightKey() === expectedAuthorizationKey
+    ? flushSyncQueueOnce()
+    : Promise.resolve(EMPTY_SYNC_QUEUE_FLUSH_RESULT),
+), (authorizationKey) => authorizationKey);
+
+export function flushSyncQueue(): Promise<SyncQueueFlushResult> {
+  return runSyncQueueFlush(syncAuthorizationFlightKey());
 }
 
 export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; customerSourceId?: string; jobId?: string; jobSourceId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string, operationIsCurrent?: () => boolean) {

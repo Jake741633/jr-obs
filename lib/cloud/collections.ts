@@ -2,6 +2,7 @@ import {
   isGenericCloudCollectionStorageKey,
   typedCollectionTables,
 } from "./migrationStoragePolicy-core.mjs";
+export { collectionCloudMutationRoute, fieldMutationRouteAllows, isServerAuthoredFieldTimeline, normaliseFieldRequestedJobStatus } from "./fieldMutationPolicy-core.mjs";
 
 export { typedCollectionTables };
 

@@ -19,6 +19,34 @@ export interface CloudSession {
   isPasswordRecovery?: boolean;
 }
 
+interface PostgrestErrorBody {
+  code?: string;
+  message?: string;
+  details?: string | null;
+  hint?: string | null;
+}
+
+export class CloudRequestError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly details?: string | null;
+  readonly hint?: string | null;
+
+  constructor(status: number, body: PostgrestErrorBody | null, fallbackMessage: string) {
+    super(body?.message || fallbackMessage);
+    this.name = "CloudRequestError";
+    this.status = status;
+    this.code = body?.code;
+    this.details = body?.details;
+    this.hint = body?.hint;
+  }
+}
+
+export function isCloudConflictError(error: unknown) {
+  return error instanceof CloudRequestError
+    && (error.status === 409 || error.code === "PT409");
+}
+
 function requestHeaders(session?: CloudSession, extra?: HeadersInit) {
   const result = new Headers();
   result.set("apikey", cloudConfig.anonKey);
@@ -35,7 +63,12 @@ async function request<T>(path: string, init: RequestInit = {}, session?: CloudS
     throw new Error("Complete password recovery before accessing JR OS data.");
   }
   const response = await fetch(`${cloudConfig.url}${path}`, { ...init, headers: requestHeaders(session, init.headers) });
-  if (!response.ok) throw new Error((await response.text()) || `Supabase request failed (${response.status}).`);
+  if (!response.ok) {
+    const responseText = await response.text();
+    let body: PostgrestErrorBody | null = null;
+    try { body = JSON.parse(responseText) as PostgrestErrorBody; } catch { /* PostgREST may return plain text upstream errors. */ }
+    throw new CloudRequestError(response.status, body, responseText || `Supabase request failed (${response.status}).`);
+  }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
@@ -126,6 +159,12 @@ export async function cloudInsert<T extends object>(table: string, records: T[])
 export async function cloudUpsert<T extends object>(table: string, records: T[], conflictColumns = "organisation_id,source_id") { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}?on_conflict=${encodeURIComponent(conflictColumns)}`, { method: "POST", body: JSON.stringify(records), headers: { Prefer: "resolution=merge-duplicates,return=representation" } }, cloudSession.load() || undefined); }
 export async function cloudPatch<TResult extends object = Record<string, unknown>, TPatch extends object = Record<string, unknown>>(table: string, query: string, patch: TPatch) { return request<TResult[]>(`/rest/v1/${encodeURIComponent(table)}?${query}`, { method: "PATCH", body: JSON.stringify(patch), headers: { Prefer: "return=representation" } }, cloudSession.load() || undefined); }
 export async function cloudDelete(table: string, sourceId: string, extraFilters = "") { return request<void>(`/rest/v1/${encodeURIComponent(table)}?source_id=eq.${encodeURIComponent(sourceId)}${extraFilters}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }, cloudSession.load() || undefined); }
+export async function cloudRpc<TResult>(functionName: string, args: Record<string, unknown>) {
+  return request<TResult>(`/rest/v1/rpc/${encodeURIComponent(functionName)}`, {
+    method: "POST",
+    body: JSON.stringify(args),
+  }, cloudSession.load() || undefined);
+}
 export async function uploadPrivateObject(path: string, body: Blob, mimeType: string) {
   return request<unknown>(`/storage/v1/object/${cloudStorageBucket}/${encodedObjectPath(path)}`, {
     method: "POST",

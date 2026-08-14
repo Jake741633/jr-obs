@@ -20,10 +20,14 @@ const ownMetadata = lines(
 );
 
 const safeOwnMetadata = lines(
-  '    await expectAllowed(await insertRecord(accounts.A.electrician, "private_files", {',
+  '    await expectDenied(await insertRecord(accounts.A.electrician, "private_files", {',
+  '      organisation_id: organisationA, source_id: source("file-field-denied"), storage_key: "jr-os-job-documents", job_source_id: jobA, customer_source_id: customerA,',
+  '      bucket, object_path: ownPath, file_name: "photo.png", mime_type: "image/png",',
+  '    }), "Electrician must not register field file metadata without an assigned upload intent");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "private_files", {',
   '      organisation_id: organisationA, source_id: source("file-own"), storage_key: "jr-os-job-documents", job_source_id: jobA, customer_source_id: customerA,',
   '      bucket, object_path: ownPath, file_name: "photo.png", mime_type: "image/png",',
-  '    }), "Staff should write private file metadata");',
+  '    }), "Office should register field file metadata");',
 );
 
 const otherCustomerMetadata = lines(
@@ -54,14 +58,22 @@ const roleCoverage = lines(
   '    const surveyPhotoFile = source("survey-photo-role");',
   '    const surveyPhotoPath = organisationA + "/jobs/" + jobA + "/" + surveyPhotoFile + "/survey.jpg";',
   '    context.objectPaths.push(surveyPhotoPath);',
-  '    await expectAllowed(',
+  '    await expectDenied(',
   '      await uploadStorageObject(accounts.A.electrician, surveyPhotoPath, pngBytes, "image/jpeg"),',
-  '      "Electrician should upload a field survey photo",',
+  '      "Electrician must not upload a field survey photo without an assigned upload intent",',
   '    );',
-  '    await expectAllowed(await insertRecord(accounts.A.electrician, "private_files", {',
+  '    await expectDenied(await insertRecord(accounts.A.electrician, "private_files", {',
+  '      organisation_id: organisationA, source_id: source("survey-photo-field-denied"), storage_key: "jr-os-surveys", job_source_id: jobA, customer_source_id: customerA,',
+  '      bucket, object_path: surveyPhotoPath, file_name: "survey.jpg", mime_type: "image/jpeg",',
+  '    }), "Electrician must not register field survey photo metadata without an assigned upload intent");',
+  '    await expectAllowed(',
+  '      await uploadStorageObject(accounts.A.office, surveyPhotoPath, pngBytes, "image/jpeg"),',
+  '      "Office should upload the survey fixture",',
+  '    );',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "private_files", {',
   '      organisation_id: organisationA, source_id: surveyPhotoFile, storage_key: "jr-os-surveys", job_source_id: jobA, customer_source_id: customerA,',
   '      bucket, object_path: surveyPhotoPath, file_name: "survey.jpg", mime_type: "image/jpeg",',
-  '    }), "Electrician should register field survey photo metadata");',
+  '    }), "Office should register field survey photo metadata");',
   '    await expectAllowed(',
   '      await downloadStorageObject(accounts.A.electrician, surveyPhotoPath),',
   '      "Electrician should download a field survey photo",',
@@ -176,6 +188,8 @@ const patchedIntegration = integrationSource
 for (const phrase of [
   "Electrician should download a field job document",
   "Customer must not download an unshared job document",
+  "Electrician must not upload a field survey photo without an assigned upload intent",
+  "Electrician must not register field survey photo metadata without an assigned upload intent",
   "Electrician should download a field survey photo",
   "Customer must not download an internal survey photo",
   "Electrician must not read expense receipt metadata",

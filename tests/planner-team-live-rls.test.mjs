@@ -10,7 +10,7 @@ const verifiedRunnerSource = readFileSync(new URL("../scripts/run-supabase-rls.m
 const integrationSourceUrl = new URL("./supabase-rls.integration.mjs", import.meta.url);
 const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
-const anchor = "    // Field identity fixtures are complete.";
+const anchor = "    // Secure field identity fixtures are complete.";
 
 const plannerLines = [
   "    const plannerTeamA = fieldTeamA;",

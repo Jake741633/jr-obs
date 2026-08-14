@@ -115,7 +115,10 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     for (const [id, item] of nextById) {
       const before = previousById.get(id);
       if (!before || JSON.stringify(before) !== JSON.stringify(item)) {
-        repository.save(cloudSafeFileRecord(key, item as unknown as object) as RepositoryRecord);
+        repository.save(
+          cloudSafeFileRecord(key, item as unknown as object) as RepositoryRecord,
+          before ? undefined : 0,
+        );
       }
     }
     for (const id of previousById.keys()) {
@@ -123,6 +126,26 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     }
     previousRef.current = items;
   }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, items, key, mode, organisationId, target, userId]);
+
+  useEffect(() => {
+    function reconcileCloudCache(event: Event) {
+      const detail = (event as CustomEvent<{ storageKey?: string; sourceId?: string; payload?: T }>).detail;
+      if (!detail || detail.storageKey !== activeStorageKey || !detail.sourceId || !detail.payload) return;
+      suppressSyncRef.current = true;
+      setItems((current) => {
+        const index = current.findIndex((item) => recordId(item) === detail.sourceId);
+        const next = index < 0
+          ? [detail.payload as T, ...current]
+          : current.map((item, itemIndex) => itemIndex === index ? detail.payload as T : item);
+        previousRef.current = next;
+        return next;
+      });
+      queueMicrotask(() => { suppressSyncRef.current = false; });
+    }
+
+    window.addEventListener("jr-os-cloud-cache-reconciled", reconcileCloudCache);
+    return () => window.removeEventListener("jr-os-cloud-cache-reconciled", reconcileCloudCache);
+  }, [activeStorageKey]);
 
   const { items: displayItems } = usePrivateFileCollectionBridge({ storageKey: key, items, setItems, isReady, identity, mode });
 

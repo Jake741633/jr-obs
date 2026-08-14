@@ -227,4 +227,9 @@ begin;
 \ir ../migrations/20260813230319_protect_field_job_confidentiality.sql
 commit;
 
+\echo 'Installing the secure assigned-field mutation boundary'
+begin;
+\ir ../migrations/20260813235633_secure_field_mutation_boundary.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -11,6 +11,10 @@ const metadataHardening = readFileSync(
   new URL("../supabase/migrations/20260809_050_restrict_field_material_price_metadata.sql", import.meta.url),
   "utf8",
 );
+const boundary = readFileSync(
+  new URL("../supabase/migrations/20260813235633_secure_field_mutation_boundary.sql", import.meta.url),
+  "utf8",
+);
 const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 const setup = readFileSync(new URL("../docs/SUPABASE_SETUP.md", import.meta.url), "utf8");
@@ -90,7 +94,7 @@ test("purchase projection removes item costs and quote linkage", () => {
   assert.doesNotMatch(purchaseProjection, /'unitCost'|'pricingDocumentId'/i);
 });
 
-test("electrician inventory writes cannot inject prices and preserve existing hidden values", () => {
+test("historical inventory guards stripped prices before direct field writes closed", () => {
   assert.match(writeGuard, /private\.current_jr_role\(\) <> 'electrician'/i);
   assert.match(writeGuard, /new\.payload := private\.jr_field_material_payload\(new\.payload\)/i);
   assert.match(writeGuard, /new\.payload := old\.payload \|\| private\.jr_field_material_payload\(new\.payload\)/i);
@@ -98,6 +102,17 @@ test("electrician inventory writes cannot inject prices and preserve existing hi
   assert.match(writeGuard, /new\.payload := old\.payload \|\| private\.jr_field_stock_item_payload\(new\.payload\)/i);
   assert.match(writeGuard, /new\.payload := private\.jr_field_purchase_list_payload\(new\.payload\)/i);
   assert.match(writeGuard, /new\.payload := private\.jr_merge_field_purchase_list_payload\(old\.payload, new\.payload\)/i);
+});
+
+test("final boundary makes inventory writes office-only pending an atomic inventory RPC", () => {
+  for (const table of ["materials", "stock_items", "stock_movements", "purchase_lists"]) {
+    assert.match(boundary, new RegExp(`'${table}'`));
+  }
+  assert.match(boundary, /table_name \|\| '_office_insert'[\s\S]*private\.can_manage_office_data\(\)/i);
+  const rpcStart = boundary.indexOf("create or replace function public.jr_field_save_collection");
+  const rpcEnd = boundary.indexOf("revoke execute on function public.jr_field_save_collection", rpcStart);
+  const rpc = boundary.slice(rpcStart, rpcEnd);
+  assert.doesNotMatch(rpc, /jr-os-job-material-usage|jr-os-stock-locations/i);
 });
 
 test("purchase-list field edits preserve hidden per-item cost by stable item id", () => {

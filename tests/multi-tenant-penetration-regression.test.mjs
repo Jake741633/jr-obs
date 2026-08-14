@@ -33,7 +33,7 @@ test("browser cache tampering cannot alias two organisations or authorisation id
 test("offline queue replay cannot process another authorisation context after a switch", () => {
   assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)/);
   assert.match(repository, /if \(!activeSyncAuthorizationMatches\(authorization\)\)/);
-  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => !queueItemMatchesAuthorization\(item, authorization\) \|\| !originalIds\.has\(item\.id\)\)/);
+  assert.match(repository, /const nextQueue = mergeProcessedQueue\(liveQueue, queue, remaining\)/);
   assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
   assert.match(repository, /await revalidateSyncAuthorization\(authorization\)/);
   assert.doesNotMatch(repository, /readAllSyncQueue\(\)\.forEach/);
