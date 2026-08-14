@@ -108,7 +108,7 @@ export default function JobWorkspacePage() {
   useEffect(() => {
     setProgressDraft(normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress);
     setProgressMessage("");
-  }, [jobId, progressRecord?.id, progressRecord?.updatedAt]);
+  }, [jobId, progressRecord?.id, progressRecord?.manual, progressRecord?.updatedAt]);
 
   const ready = [jobs, customers, builders, team, tasks, diaries, variations, documents, progress, timeline].every((store) => store.isReady);
   if (!ready) return <Card>Loading job workspace…</Card>;
