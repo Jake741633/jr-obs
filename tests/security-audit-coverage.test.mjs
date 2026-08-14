@@ -86,6 +86,8 @@ const requiredSuites = [
   "portal-target-binding-guard.test.mjs",
   "customer-timeline-projection.test.mjs",
   "customer-timeline-live-rls.test.mjs",
+  "customer-portal-finance-projections.test.mjs",
+  "customer-portal-finance-live-rls.test.mjs",
   "customer-lifecycle-revocation.test.mjs",
 ];
 
@@ -119,6 +121,7 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
   const liveRls = [
     readFileSync(resolve(testsDirectory, "supabase-rls.integration.mjs"), "utf8"),
     readFileSync(resolve(testsDirectory, "run-supabase-rls.integration.mjs"), "utf8"),
+    readFileSync(resolve(testsDirectory, "customer-portal-finance-live-rls.test.mjs"), "utf8"),
   ].join("\n");
 
   for (const requiredPhrase of [
@@ -192,6 +195,13 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Server should canonicalize a wholly unbound legacy payment link from its invoice",
     "A full payment allocation must immediately hide the reusable payment URL",
     "A fully allocated invoice must not permit payment-link reissue",
+    "A full refund must restore the still-configured safe payment link",
+    "Customer must not read complete generic deposit rows",
+    "Conflicting deposit envelopes must fail closed rather than rebind customers",
+    "Another customer must not read the customer deposit projection",
+    "Malformed deposits must not enter the customer projection",
+    "Customer must not write the deposit projection",
+    "Customer must not read raw portal activity",
     "Cancelling an invoice must immediately hide its existing payment URL",
     "Direct Data API reads must not enumerate tombstoned payment URLs",
     "Tombstoning a customer must deactivate linked portal profiles",

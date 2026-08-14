@@ -4,7 +4,7 @@ import { cloudSelect } from "./client";
 import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
 import { queueChange, type CloudEnvelope } from "./repository";
-import { sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
+import { CUSTOMER_PROJECTION_CACHE_GENERATION, customerProjectionCachePolicy, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
 
@@ -27,6 +27,7 @@ function writeLocal<T>(storageKey: string, records: T[]) {
 }
 
 function versionKey(storageKey: string) { return `jr-os-cloud-versions:${storageKey}`; }
+function projectionGenerationKey(storageKey: string) { return `jr-os-cloud-projection-generation:${storageKey}`; }
 function readVersions(storageKey: string): Record<string, number> {
   try { return JSON.parse(window.localStorage.getItem(versionKey(storageKey)) || "{}") as Record<string, number>; } catch { return {}; }
 }
@@ -53,7 +54,11 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     async list(): Promise<T[]> {
       const mode = effectiveCloudMode();
       const cached = readLocal<T>(scopedStorageKey);
-      const local = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cached });
+      const cachedGeneration = window.localStorage.getItem(projectionGenerationKey(scopedStorageKey)) ?? undefined;
+      const cachePolicy = customerProjectionCachePolicy({ storageKey, role: cacheRole, mode, generation: cachedGeneration });
+      const local = cachePolicy === "purge"
+        ? []
+        : sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cached });
       if (local !== cached) writeLocal(scopedStorageKey, local);
 
       if (mode === "local" || !navigator.onLine) return local;
@@ -69,6 +74,9 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         const roleProjectionRecords = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cloudRecords });
         writeLocal(scopedStorageKey, roleProjectionRecords);
         writeVersions(scopedStorageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));
+        if (cacheRole === "customer") {
+          window.localStorage.setItem(projectionGenerationKey(scopedStorageKey), CUSTOMER_PROJECTION_CACHE_GENERATION);
+        }
         return roleProjectionRecords;
       } catch { return local; }
     },
