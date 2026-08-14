@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const migration = readFileSync(new URL("../supabase/migrations/20260810_067_customer_timeline_projection.sql", import.meta.url), "utf8");
+const finalFinanceMigration = readFileSync(
+  new URL("../supabase/migrations/20260814091500_project_customer_portal_finance.sql", import.meta.url),
+  "utf8",
+);
 const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
@@ -14,6 +18,9 @@ const payloadFunction = migration.slice(
 const latestPolicyStart = migration.lastIndexOf('drop policy if exists "cloud collections tenant read"');
 const latestPolicyEnd = migration.indexOf("create or replace function public.jr_os_deployed_migration", latestPolicyStart);
 const latestSourcePolicy = migration.slice(latestPolicyStart, latestPolicyEnd);
+const finalSourcePolicy = finalFinanceMigration.slice(
+  finalFinanceMigration.lastIndexOf('drop policy if exists "cloud collections tenant read"'),
+);
 
 test("customer timeline projection is tenant, customer and live-job scoped", () => {
   assert.match(migration, /create table if not exists public\.customer_job_timeline/i);
@@ -34,13 +41,19 @@ test("customer timeline payload omits internal note and staff/source attribution
   assert.doesNotMatch(payloadFunction, /sourceType/i);
 });
 
-test("customer sessions cannot bypass the projection through the generic source table", () => {
+test("the historical timeline migration removed raw timeline reads while temporarily retaining other portal sources", () => {
   assert.ok(latestPolicyStart >= 0, "Expected the final cloud collection read policy");
   assert.ok(latestPolicyEnd > latestPolicyStart, "Expected a bounded final cloud collection read policy");
   assert.doesNotMatch(latestSourcePolicy, /'jr-os-job-timeline'/i);
   assert.match(latestSourcePolicy, /'jr-os-portal-activity'/i);
   assert.match(latestSourcePolicy, /'jr-os-deposit-requirements'/i);
   assert.match(latestSourcePolicy, /collection_key = 'jr-os-portal-payment-links'/i);
+});
+
+test("the final finance migration removes every remaining raw customer source branch", () => {
+  assert.match(finalSourcePolicy, /private\.can_manage_office_data\(\)/i);
+  assert.doesNotMatch(finalSourcePolicy, /current_jr_role\(\) = 'customer'|current_customer_source_id/i);
+  assert.doesNotMatch(finalSourcePolicy, /jr-os-job-timeline|jr-os-portal-activity|jr-os-deposit-requirements|jr-os-portal-payment-links/i);
 });
 
 test("customer timeline repositories read the safe projection", () => {

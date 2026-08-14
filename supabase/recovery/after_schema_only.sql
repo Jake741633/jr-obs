@@ -232,4 +232,9 @@ begin;
 \ir ../migrations/20260813235633_secure_field_mutation_boundary.sql
 commit;
 
+\echo 'Projecting customer-safe portal finance records'
+begin;
+\ir ../migrations/20260814091500_project_customer_portal_finance.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -8,6 +8,11 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20260810_066_bind_portal_payment_links.sql", import.meta.url),
   "utf8",
 );
+const finalFinanceMigration = readFileSync(
+  new URL("../supabase/migrations/20260814091500_project_customer_portal_finance.sql", import.meta.url),
+  "utf8",
+);
+const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 const payments = readFileSync(new URL("../app/payments/page.tsx", import.meta.url), "utf8");
 const portal = readFileSync(new URL("../app/customer-portal/page.tsx", import.meta.url), "utf8");
@@ -95,7 +100,7 @@ test("preflight, uniqueness and tombstone cleanup close historical ambiguity", (
   );
 });
 
-test("customer reads require a configured HTTPS link and a current invoice projection", () => {
+test("the historical raw-link policy required a configured HTTPS link and a current invoice projection", () => {
   const customerPolicy = migration.slice(migration.lastIndexOf('create policy "cloud collections tenant read"'));
   assert.match(customerPolicy, /collection_key = 'jr-os-portal-payment-links'[\s\S]*deleted_at is null/i);
   assert.match(customerPolicy, /payload -> 'providerConfigured' = 'true'::jsonb/i);
@@ -108,9 +113,26 @@ test("customer reads require a configured HTTPS link and a current invoice proje
   assert.doesNotMatch(customerPolicy, /'jr-os-portal-payment-links'\s*,/i);
 });
 
+test("the final contract replaces raw link reads with a narrow dynamic projection", () => {
+  const finalSourcePolicy = finalFinanceMigration.slice(
+    finalFinanceMigration.lastIndexOf('drop policy if exists "cloud collections tenant read"'),
+  );
+  const projectionPolicy = finalFinanceMigration.slice(
+    finalFinanceMigration.indexOf("create policy customer_portal_payment_links_customer_select"),
+    finalFinanceMigration.indexOf('-- Customers now read only explicit projections.'),
+  );
+  assert.match(collections, /"jr-os-portal-payment-links": "customer_portal_payment_links"/i);
+  assert.match(finalFinanceMigration, /create table if not exists public\.customer_portal_payment_links/i);
+  assert.match(projectionPolicy, /from public\.customer_invoices invoice/i);
+  assert.match(projectionPolicy, /private\.jr_customer_invoice_has_outstanding_balance/i);
+  assert.match(finalSourcePolicy, /private\.can_manage_office_data\(\)/i);
+  assert.doesNotMatch(finalSourcePolicy, /jr-os-portal-payment-links|current_jr_role\(\) = 'customer'/i);
+});
+
 test("staff writers and the portal UI carry the complete invoice ownership tuple", () => {
   for (const model of [paymentModel, portalModel]) {
     assert.match(model, /interface PortalPaymentLink \{[^}]*customerId: string;[^}]*jobId\?: string;[^}]*invoiceId: string;/i);
+    assert.match(model, /providerName\?: string;/i);
   }
   assert.match(payments, /if \(!customerId\)[\s\S]*Assign the invoice to a customer/i);
   assert.match(payments, /\["Sent", "Part paid", "Overdue"\]\.includes\(invoice\.status\)/i);

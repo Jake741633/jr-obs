@@ -29,7 +29,9 @@ const roleReadTables: Record<string, Record<string, string>> = {
 
 const roleCollectionReadTables: Record<string, Record<string, string>> = {
   customer: {
+    "jr-os-deposit-requirements": "customer_deposit_requirements",
     "jr-os-job-timeline": "customer_job_timeline",
+    "jr-os-portal-payment-links": "customer_portal_payment_links",
   },
 };
 

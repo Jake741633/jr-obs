@@ -662,14 +662,23 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     assert.equal(storedPaymentLink.customer_source_id, customerA);
     assert.equal(storedPaymentLink.job_source_id, jobA);
 
-    const customerPaymentLink = await listRecords(
+    const customerRawPaymentLink = await listRecords(
       accounts.A.customer,
       "cloud_collections",
+      `select=source_id,payload&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${paymentLinkA}`,
+    );
+    await expectAllowed(customerRawPaymentLink, "Customer raw payment-link query should fail closed");
+    assert.deepEqual(customerRawPaymentLink.payload, [], "Customer must not read complete generic payment-link rows");
+    const customerPaymentLink = await listRecords(
+      accounts.A.customer,
+      "customer_portal_payment_links",
       `select=source_id,payload&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${paymentLinkA}`,
     );
     await expectAllowed(customerPaymentLink, "Customer payment-link query should execute");
     assert.equal(customerPaymentLink.payload.length, 1, "Customer should read the configured link for their exact invoice");
     assert.equal(customerPaymentLink.payload[0].payload.invoiceId, portalInvoiceA);
+    assert.equal(customerPaymentLink.payload[0].payload.providerName, undefined, "Customer payment-link projection must omit internal provider labels");
+    assert.equal(customerPaymentLink.payload[0].payload.testRun, undefined, "Customer payment-link projection must omit unrecognized source metadata");
 
     const updatedPaymentUrl = `https://payments.example/updated-${runId}`;
     await expectAllowed(
@@ -804,7 +813,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     assert.equal(legacyInsert.payload[0].payload.jobId, jobA);
     const customerLegacyLink = await listRecords(
       accounts.A.customer,
-      "cloud_collections",
+      "customer_portal_payment_links",
       `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${legacyPaymentLink}`,
     );
     assert.equal(customerLegacyLink.payload.length, 1, "Canonicalized legacy link should remain usable by the correct customer");
@@ -819,7 +828,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
     const hiddenUnconfiguredLink = await listRecords(
       accounts.A.customer,
-      "cloud_collections",
+      "customer_portal_payment_links",
       `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${unconfiguredLink}`,
     );
     assert.deepEqual(hiddenUnconfiguredLink.payload, [], "Unconfigured payment links must not expose draft provider data");
@@ -854,7 +863,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
     const hiddenSettledInvoiceLink = await listRecords(
       accounts.A.customer,
-      "cloud_collections",
+      "customer_portal_payment_links",
       `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${settledPaymentLink}`,
     );
     assert.deepEqual(hiddenSettledInvoiceLink.payload, [], "A full payment allocation must immediately hide the reusable payment URL");
@@ -871,8 +880,34 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       "A fully allocated invoice must not permit payment-link reissue",
     );
     await expectAllowed(
+      await insertRecord(accounts.A.office, "payments", typedRecord(
+        organisationA,
+        source("portal-payment-refund-allocation"),
+        customerA,
+        jobA,
+        {
+          invoiceId: settledPortalInvoiceA,
+          paymentDate: "2026-08-11",
+          amount: 100,
+          method: "Card",
+          reference: "REFUND-ALLOCATION",
+          notes: "Payment-link reversal test",
+          type: "Refund",
+          reconciliationStatus: "Allocated",
+          createdAt: "2026-08-11T12:30:00.000Z",
+        },
+      )),
+      "Office should record the full payment refund",
+    );
+    const restoredRefundedInvoiceLink = await listRecords(
+      accounts.A.customer,
+      "customer_portal_payment_links",
+      `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${settledPaymentLink}`,
+    );
+    assert.equal(restoredRefundedInvoiceLink.payload.length, 1, "A full refund must restore the still-configured safe payment link");
+    await expectAllowed(
       await patchRecords(accounts.A.owner, "cloud_collections", `source_id=eq.${settledPaymentLink}`, { deleted_at: new Date().toISOString() }),
-      "Owner should tombstone a payment link after full settlement",
+      "Owner should tombstone a payment link after lifecycle testing",
     );
 
     const lifecyclePaymentLink = source("portal-payment-link-lifecycle");
@@ -891,7 +926,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
     const hiddenCancelledInvoiceLink = await listRecords(
       accounts.A.customer,
-      "cloud_collections",
+      "customer_portal_payment_links",
       `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${lifecyclePaymentLink}`,
     );
     assert.deepEqual(hiddenCancelledInvoiceLink.payload, [], "Cancelling an invoice must immediately hide its existing payment URL");
@@ -906,13 +941,13 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
     const hiddenTombstoneLink = await listRecords(
       accounts.A.customer,
-      "cloud_collections",
+      "customer_portal_payment_links",
       `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${paymentLinkA}`,
     );
     assert.deepEqual(hiddenTombstoneLink.payload, [], "Direct Data API reads must not enumerate tombstoned payment URLs");
     const crossTenantPaymentLink = await listRecords(
       accounts.B.customer,
-      "cloud_collections",
+      "customer_portal_payment_links",
       `select=source_id&collection_key=eq.${encodeURIComponent("jr-os-portal-payment-links")}&source_id=eq.${legacyPaymentLink}`,
     );
     assert.deepEqual(crossTenantPaymentLink.payload, [], "Another tenant must not enumerate a configured portal payment link");

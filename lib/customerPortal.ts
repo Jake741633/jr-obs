@@ -8,7 +8,7 @@ export type PortalRequestType = "Appointment change" | "Question" | "Additional 
 export interface PortalAccessRecord { id: string; customerId: string; accessCode: string; enabled: boolean; createdAt: string; updatedAt: string; }
 export interface PortalApprovalRecord { id: string; customerId: string; documentId: string; documentVersion?: number; documentType: "Quote" | "Estimate"; decision: PortalDecision; approvalName: string; comments: string; termsAccepted: boolean; termsSnapshot: string; decidedAt: string; }
 export interface PortalRequest { id: string; customerId: string; jobId?: string; plannerEntryId?: string; type: PortalRequestType; message: string; requestedDate?: string; status: "Open" | "In review" | "Resolved"; createdAt: string; updatedAt: string; }
-export interface PortalPaymentLink { id: string; customerId: string; jobId?: string; invoiceId: string; paymentUrl: string; providerName: string; providerConfigured: boolean; updatedAt: string; }
+export interface PortalPaymentLink { id: string; customerId: string; jobId?: string; invoiceId: string; paymentUrl: string; providerName?: string; providerConfigured: boolean; updatedAt: string; }
 export interface PortalPhotoShare { id: string; documentId: string; safeToShare: boolean; caption: string; updatedAt: string; }
 export interface PortalActivity { id: string; customerId: string; jobId?: string; action: string; detail: string; createdAt: string; }
 

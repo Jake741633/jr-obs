@@ -10,7 +10,7 @@ export type DepositDueRule = "On acceptance" | "Specified date";
 export interface PaymentRecord { id: string; customerId?: string; invoiceId?: string; paymentDate: string; amount: number; method: PaymentMethod; reference: string; notes: string; type: PaymentEntryType; reconciliationStatus: ReconciliationStatus; createdAt: string; }
 export interface DepositRequirement { id: string; pricingDocumentId: string; mode: DepositMode; value: number; dueRule: DepositDueRule; dueDate?: string; createdAt: string; updatedAt: string; }
 export interface ScheduledCashFlow { id: string; sourceType: "Stage payment" | "Expected deposit" | "Manual cash in" | "Manual cash out"; sourceId?: string; description: string; dueDate: string; amount: number; direction: "In" | "Out"; customerId?: string; invoiceId?: string; createdAt: string; }
-export interface PortalPaymentLink { id: string; customerId: string; jobId?: string; invoiceId: string; paymentUrl: string; providerName: string; providerConfigured: boolean; updatedAt: string; }
+export interface PortalPaymentLink { id: string; customerId: string; jobId?: string; invoiceId: string; paymentUrl: string; providerName?: string; providerConfigured: boolean; updatedAt: string; }
 
 export function invoiceGross(invoice: Invoice) { const net = invoice.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); return net + (invoice.vatEnabled ? net * invoice.vatRate / 100 : 0); }
 export function paymentEffect(payment: PaymentRecord) { return payment.type === "Refund" ? -Math.abs(payment.amount) : Math.abs(payment.amount); }
