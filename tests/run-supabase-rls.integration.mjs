@@ -88,6 +88,351 @@ const safeCustomerInvoiceRead = `    assert.deepEqual(customerInvoice.payload, [
 const obsoleteCustomerPaymentRead = `    assert.equal(customerPayment.payload.length, 1, "Customer must retain own payment reads");`;
 const safeCustomerPaymentRead = `    assert.deepEqual(customerPayment.payload, [], "Customer base payment reads must fail closed in favour of the customer-safe projection");`;
 
+const otherCustomerJobSnippet = `    await expectAllowed(
+      await insertRecord(accounts.A.electrician, "jobs", typedRecord(organisationA, otherCustomerJobA, otherCustomerA, null, { title: "Other customer job" })),
+      "Electrician should create a same-tenant job for the other customer",
+    );`;
+
+const secureOtherCustomerJobSnippet = `    await expectAllowed(
+      await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, otherCustomerJobA, otherCustomerA, null, {
+        title: "Other customer job",
+        status: "First fix",
+        assignedTo: [],
+      })),
+      "Office should create the unassigned comparison job",
+    );`;
+
+const secureJobSeedSnippet = `    const fieldTeamA = source("field-team-a");
+    const fieldCoworkerUser = await createUser("a-electrician-coworker");
+    context.users.push(fieldCoworkerUser);
+    await createProfile(fieldCoworkerUser, organisationA, "electrician");
+    accounts.A.coworker = { ...fieldCoworkerUser, ...(await signIn(fieldCoworkerUser)), organisationId: organisationA };
+    const fieldTeamCoworkerA = source("field-team-coworker-a");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "team_members", typedRecord(organisationA, fieldTeamA, null, null, {
+        name: "Field write electrician",
+        email: accounts.A.electrician.email,
+        role: "Electrician",
+        status: "Active",
+      })),
+      "Office should create the active field identity",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "team_members", typedRecord(organisationA, fieldTeamCoworkerA, null, null, {
+        name: "Field coworker",
+        email: accounts.A.coworker.email,
+        role: "Electrician",
+        status: "Active",
+      })),
+      "Office should create a second active field identity",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, jobA, customerA, null, {
+        title: "Tenant A job",
+        siteAddress: "1 Test Street",
+        status: "First fix",
+        assignedTo: [fieldTeamA, fieldTeamCoworkerA],
+        startDate: "2026-08-01",
+        value: 12500,
+        originalContractValue: 12000,
+        retentionPercent: 5,
+        retentionDueDate: "2026-12-01",
+        quoteSnapshot: {
+          quoteId: source("job-quote-a"),
+          quoteNumber: "Q-JOB-SEC",
+          items: [{ id: source("job-quote-line-a"), description: "Private priced line", quantity: 1, unitPrice: 12500, unitCost: 4000 }],
+          profitability: { expectedProfit: 5000, grossMargin: 40 },
+          attachments: [], vatEnabled: true, vatRate: 20,
+          notes: "Visible quote note", internalNotes: "Private commercial note",
+          terms: "Test terms", convertedAt: "2026-08-01T00:00:00.000Z",
+        },
+        notes: "Field operational note",
+      })),
+      "Office should create a complete assigned commercial job",
+    );`;
+
+const secureJobReadAnchor = `    await expectAllowed(
+      await insertRecord(accounts.B.office, "jobs", typedRecord(organisationB, jobB, customerB, null, { title: "Tenant B job" })),
+      "Tenant B office should create its own job",
+    );`;
+
+const secureJobReadCoverage = `${secureJobReadAnchor}
+
+    const officeCommercialJob = await listRecords(accounts.A.office, "jobs", \`select=source_id,payload,version&source_id=eq.\${jobA}\`);
+    await expectAllowed(officeCommercialJob, "Office complete job query should execute");
+    assert.equal(officeCommercialJob.payload[0].payload.value, 12500, "Office should retain job contract value");
+    assert.equal(officeCommercialJob.payload[0].payload.quoteSnapshot.profitability.expectedProfit, 5000, "Office should retain job profitability snapshot");
+
+    const electricianCommercialJob = await listRecords(accounts.A.electrician, "jobs", \`select=source_id,payload&source_id=eq.\${jobA}\`);
+    await expectAllowed(electricianCommercialJob, "Electrician complete job query should fail closed");
+    assert.deepEqual(electricianCommercialJob.payload, [], "Electrician must not read complete commercial job records");
+
+    const electricianFieldJob = await listRecords(accounts.A.electrician, "field_jobs", \`select=source_id,payload,version&source_id=eq.\${jobA}\`);
+    await expectAllowed(electricianFieldJob, "Electrician field-safe job query should execute");
+    assert.equal(electricianFieldJob.payload.length, 1, "Electrician should retain field-safe job reads");
+    assert.equal(electricianFieldJob.payload[0].payload.title, "Tenant A job");
+    assert.equal(electricianFieldJob.payload[0].payload.notes, undefined, "Field job projection must omit mixed commercial notes");
+    assert.equal(electricianFieldJob.payload[0].payload.value, undefined, "Field job projection must omit contract value");
+    assert.equal(electricianFieldJob.payload[0].payload.quoteSnapshot, undefined, "Field job projection must omit quote profitability snapshots");
+
+    const customerCommercialJob = await listRecords(accounts.A.customer, "jobs", \`select=source_id,payload&source_id=eq.\${jobA}\`);
+    await expectAllowed(customerCommercialJob, "Customer complete job query should fail closed");
+    assert.deepEqual(customerCommercialJob.payload, [], "Customer must not read complete commercial job records");
+    const customerPortalJob = await listRecords(accounts.A.customer, "customer_jobs", \`select=source_id,payload&source_id=eq.\${jobA}\`);
+    await expectAllowed(customerPortalJob, "Customer portal-safe job query should execute");
+    assert.equal(customerPortalJob.payload.length, 1, "Customer should retain portal-safe job reads");
+    assert.equal(customerPortalJob.payload[0].payload.notes, undefined, "Customer job projection must omit private job notes");
+    assert.deepEqual((await listRecords(accounts.A.customer, "customer_jobs", \`select=source_id&source_id=eq.\${otherCustomerJobA}\`)).payload, [], "Another customer must not read the portal job projection");
+    assert.deepEqual((await listRecords(accounts.B.customer, "customer_jobs", \`select=source_id&source_id=eq.\${jobA}\`)).payload, [], "Another organisation must not read the portal job projection");
+
+    await expectDenied(
+      await patchRecords(accounts.A.electrician, "jobs", \`source_id=eq.\${jobA}\`, { payload: { id: jobA, status: "Second fix" } }),
+      "Electrician direct job updates must fail closed",
+    );
+    const jobStatusMutationId = crypto.randomUUID();
+    const statusMutation = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", {
+      method: "POST",
+      body: { record_source_id: jobA, expected_version: electricianFieldJob.payload[0].version, requested_status: "Second fix", mutation_id: jobStatusMutationId },
+    });
+    await expectAllowed(statusMutation, "Assigned electrician should apply a valid job status transition through the RPC");
+    assert.equal(statusMutation.payload.status, "applied");
+    assert.equal(statusMutation.payload.resource, "jobs");
+    assert.equal(statusMutation.payload.sourceId, jobA);
+    assert.equal(statusMutation.payload.payload.status, "Second fix");
+    assert.equal(statusMutation.payload.payload.notes, undefined, "Status RPC response must use the latest field-safe job projection");
+    const statusReplay = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", {
+      method: "POST",
+      body: { record_source_id: jobA, expected_version: electricianFieldJob.payload[0].version, requested_status: "Second fix", mutation_id: jobStatusMutationId },
+    });
+    await expectAllowed(statusReplay, "A response-loss retry should return the exact prior job mutation result");
+    assert.deepEqual(statusReplay.payload, statusMutation.payload, "Job mutation replay must be byte-equivalent JSON");
+    await expectDeniedWithCode(
+      await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", {
+        method: "POST",
+        body: { record_source_id: jobA, expected_version: electricianFieldJob.payload[0].version, requested_status: "Testing", mutation_id: jobStatusMutationId },
+      }),
+      "PT409",
+      "A mutation id must not be reused with changed job arguments",
+    );
+    await expectDeniedWithCode(
+      await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", {
+        method: "POST",
+        body: { record_source_id: otherCustomerJobA, expected_version: 1, requested_status: "Second fix", mutation_id: crypto.randomUUID() },
+      }),
+      "42501",
+      "Electrician must not mutate an unassigned same-tenant job",
+    );
+    const statusTimelineSource = "field-status-" + accounts.A.electrician.id + "-" + jobStatusMutationId;
+    const statusTimeline = await listRecords(accounts.A.office, "cloud_collections", "select=source_id,customer_source_id,job_source_id,payload&collection_key=eq.jr-os-job-timeline&source_id=eq." + statusTimelineSource);
+    await expectAllowed(statusTimeline, "Office should read the authoritative status timeline evidence");
+    assert.equal(statusTimeline.payload.length, 1, "Status RPC must atomically create one timeline record");
+    assert.equal(statusTimeline.payload[0].customer_source_id, customerA, "Status evidence must bind the canonical linked customer");
+    assert.equal(statusTimeline.payload[0].job_source_id, jobA);
+    assert.equal(statusTimeline.payload[0].payload.customerId, customerA);
+    assert.equal(statusTimeline.payload[0].payload.eventType, "Status change");
+    assert.equal(statusTimeline.payload[0].payload.fromStatus, "First fix");
+    assert.equal(statusTimeline.payload[0].payload.toStatus, "Second fix");
+    const officeJobAfterFieldUpdate = await listRecords(accounts.A.office, "jobs", \`select=payload&source_id=eq.\${jobA}\`);
+    assert.equal(officeJobAfterFieldUpdate.payload[0].payload.value, 12500, "Field RPC updates must preserve hidden commercial job data");
+    assert.equal(officeJobAfterFieldUpdate.payload[0].payload.quoteSnapshot.profitability.expectedProfit, 5000, "Field RPC updates must preserve hidden profitability snapshots");
+
+    const legacyPlannerJob = source("legacy-planner-status-job");
+    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, legacyPlannerJob, otherCustomerA, null, { title: "Legacy planner status job", status: "Scheduled", assignedTo: [fieldTeamA] })), "Office should create a Scheduled job for legacy field status compatibility");
+    const legacyStatusMutation = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", { method: "POST", body: { record_source_id: legacyPlannerJob, expected_version: 1, requested_status: "In progress", mutation_id: crypto.randomUUID() } });
+    await expectAllowed(legacyStatusMutation, "Legacy In progress request should canonicalize through the status RPC");
+    assert.equal(legacyStatusMutation.payload.payload.status, "First fix", "Legacy requested status must return the canonical lifecycle state");`;
+
+const secureFieldCasesSnippet = `    // Direct field writes are closed; only existing planner/timesheet identity-bound policies remain.
+    const closedFieldCases = [
+      ["materials", source("material-a"), { name: "Cable" }],
+      ["stock_items", source("stock-a"), { quantity: 4 }],
+      ["stock_movements", source("movement-a"), { type: "Used", quantity: 1 }],
+      ["purchase_lists", source("purchase-a"), { status: "Draft" }],
+      ["certificates", source("certificate-a"), { status: "Draft" }],
+      ["electrical_testing_records", source("testing-a"), { status: "Draft" }],
+      ["job_documents", source("document-a"), { category: "Photo" }],
+    ];
+    for (const [table, sourceId, payload] of closedFieldCases) {
+      await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Electrician direct write must fail closed for \${table}\`);
+      await expectAllowed(await insertRecord(accounts.A.office, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Office should retain direct write access for \${table}\`);
+      await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);
+    }
+    for (const [table, sourceId, payload] of [
+      ["planner_entries", source("planner-a"), { teamMemberIds: [fieldTeamA], startDate: "2026-08-01" }],
+      ["timesheets", source("timesheet-a"), { teamMemberId: fieldTeamA, hours: 8 }],
+    ]) {
+      await expectAllowed(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Electrician should retain own-team \${table} writes\`);
+      await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);
+    }
+    await expectDenied(
+      await insertRecord(accounts.A.electrician, "planner_entries", typedRecord(organisationA, source("planner-unassigned-job"), otherCustomerA, otherCustomerJobA, { teamMemberIds: [fieldTeamA], startDate: "2026-08-02" })),
+      "Electrician must not create a planner entry for an unassigned same-tenant job",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, source("timesheet-unassigned-job"), otherCustomerA, otherCustomerJobA, { teamMemberId: fieldTeamA, hours: 1 })),
+      "Electrician must not create a timesheet for an unassigned same-tenant job",
+    );
+    // Secure field identity fixtures are complete.`;
+
+const genericInsertSnippet = `      await expectAllowed(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.electrician, customerA, jobA, payload)), \`Field staff should write \${collectionKey}\`);
+      await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationB, collectionKey, \`\${sourceId}-cross\`, accounts.A.electrician, customerB, jobB, payload)), \`Cross-tenant generic write must fail for \${collectionKey}\`);
+      assert.deepEqual((await listRecords(accounts.B.owner, "cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`)).payload, []);`;
+
+const secureGenericInsertSnippet = `      await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.electrician, customerA, jobA, payload)), \`Electrician direct generic write must fail closed for \${collectionKey}\`);
+      await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.office, customerA, jobA, payload)), \`Office should seed complete generic record \${collectionKey}\`);
+      await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationB, collectionKey, \`\${sourceId}-cross\`, accounts.A.electrician, customerB, jobB, payload)), \`Cross-tenant generic write must fail for \${collectionKey}\`);
+      assert.deepEqual((await listRecords(accounts.B.owner, "cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`)).payload, []);`;
+
+const secureGenericReadSnippet = `      const electricianCompleteFieldRead = await listRecords(accounts.A.electrician, "cloud_collections", \`select=source_id,payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
+      await expectAllowed(electricianCompleteFieldRead, \`Electrician complete generic \${collectionKey} query should fail closed\`);
+      assert.deepEqual(electricianCompleteFieldRead.payload, [], \`Electrician must not read complete generic field records: \${collectionKey}\`);
+      const electricianFieldRead = await listRecords(accounts.A.electrician, "field_cloud_collections", \`select=source_id,payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
+      await expectAllowed(electricianFieldRead, \`Electrician projected field \${collectionKey} query should execute\`);
+      assert.equal(electricianFieldRead.payload.length, 1, \`Electrician should retain projected field collection reads: \${collectionKey}\`);
+      const fieldPayload = electricianFieldRead.payload[0].payload;
+      if (collectionKey === "jr-os-surveys") assert.equal(fieldPayload.labourRate, undefined, "Field survey projection must omit labour rates");
+      if (collectionKey === "jr-os-job-packs") {
+        assert.equal(fieldPayload.labourRate, undefined, "Field job pack projection must omit labour rates");
+        assert.equal(fieldPayload.materials[0].unitPrice, undefined, "Field job pack projection must omit material prices");
+        await expectDenied(
+          await patchRecords(accounts.A.electrician, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, { payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 9 } }),
+          "Electrician direct job-pack updates must fail closed",
+        );
+      }
+      if (collectionKey === "jr-os-job-variations") {
+        assert.equal(fieldPayload.labourRate, undefined, "Field variation projection must omit labour rates");
+        assert.equal(fieldPayload.materialCost, undefined, "Field variation projection must omit material costs");
+        assert.equal(fieldPayload.fixedPrice, undefined, "Field variation projection must omit fixed prices");
+        assert.equal(fieldPayload.internalNotes, undefined, "Field variation projection must omit internal notes");
+      }
+      if (collectionKey === "jr-os-job-material-usage") assert.equal(fieldPayload.unitCost, undefined, "Field material usage projection must omit unit costs");`;
+
+const fieldMutationCoverage = [
+  '    await expectDenied(await request("/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: source("anonymous-rpc"), expected_version: 0, record_payload: { id: source("anonymous-rpc"), jobId: jobA, status: "Draft" }, mutation_id: crypto.randomUUID() } }), "Anonymous field mutation RPC calls must fail");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.office, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: source("office-rpc"), expected_version: 0, record_payload: { id: source("office-rpc"), jobId: jobA, status: "Draft" }, mutation_id: crypto.randomUUID() } }), "42501", "Office sessions must not use the electrician mutation RPC");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.customer, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: source("customer-rpc"), expected_version: 0, record_payload: { id: source("customer-rpc"), jobId: jobA, status: "Draft" }, mutation_id: crypto.randomUUID() } }), "42501", "Customer sessions must not use the electrician mutation RPC");',
+  '    const oversizedSurveyId = source("rpc-survey-oversized");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: oversizedSurveyId, expected_version: 0, record_payload: { id: oversizedSurveyId, jobId: jobA, status: "Draft", ignoredDataUrl: "x".repeat(131073) }, mutation_id: crypto.randomUUID() } }), "22023", "Oversized field payloads must be rejected before receipt persistence");',
+  '    const fieldSurveyId = source("rpc-survey-a");',
+  '    const fieldSurveyPayload = { id: fieldSurveyId, jobId: jobA, customerId: otherCustomerA, builderId: "forged-builder", number: "SUR-RPC-001", status: "Draft", propertyType: "House", circuits: [], photos: [{ id: "forged-photo", dataUrl: "data:image/png;base64,AAAA" }], labourHours: 2, labourRate: 999 };',
+  '    const surveyMutationId = crypto.randomUUID();',
+  '    const surveyCreate = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: fieldSurveyId, expected_version: 0, record_payload: fieldSurveyPayload, mutation_id: surveyMutationId } });',
+  '    await expectAllowed(surveyCreate, "Assigned electrician should create a survey through the field RPC");',
+  '    assert.equal(surveyCreate.payload.status, "applied");',
+  '    assert.equal(surveyCreate.payload.collectionKey, "jr-os-surveys");',
+  '    assert.equal(surveyCreate.payload.payload.customerId, customerA, "Survey RPC must bind the canonical linked customer");',
+  '    assert.deepEqual(surveyCreate.payload.payload.photos, [], "Survey RPC must discard client attachment bytes");',
+  '    assert.equal(surveyCreate.payload.payload.labourRate, undefined, "Survey RPC must not accept an office labour rate");',
+  '    const surveyReplay = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: fieldSurveyId, expected_version: 0, record_payload: fieldSurveyPayload, mutation_id: surveyMutationId } });',
+  '    await expectAllowed(surveyReplay, "Survey response-loss retry should return the exact prior result");',
+  '    assert.deepEqual(surveyReplay.payload, surveyCreate.payload);',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: fieldSurveyId, expected_version: 0, record_payload: { ...fieldSurveyPayload, surveyNotes: "changed" }, mutation_id: surveyMutationId } }), "PT409", "Generic mutation id reuse with changed payload must fail");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: fieldSurveyId, expected_version: 0, record_payload: fieldSurveyPayload, mutation_id: crypto.randomUUID() } }), "PT409", "Create-only retry with a fresh mutation id must collide");',
+  '    const concurrentSurveyId = source("rpc-survey-concurrent");',
+  '    const concurrentSurveyPayload = { ...fieldSurveyPayload, id: concurrentSurveyId };',
+  '    const concurrentCreates = await Promise.all([crypto.randomUUID(), crypto.randomUUID()].map((concurrentMutationId) => authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: concurrentSurveyId, expected_version: 0, record_payload: concurrentSurveyPayload, mutation_id: concurrentMutationId } })));',
+  '    assert.equal(concurrentCreates.filter((result) => result.response.ok).length, 1, "Exactly one simultaneous field create must apply");',
+  '    assert.equal(concurrentCreates.filter((result) => !result.response.ok)[0]?.payload?.code, "PT409", "Concurrent field create loser must use the conflict contract");',
+  '    const officeSurveyId = source("rpc-survey-office-owned");',
+  '    const officeSurveyPayload = { id: officeSurveyId, jobId: jobA, customerId: customerA, number: "SUR-OFFICE-001", status: "Draft", circuits: [] };',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-surveys", officeSurveyId, accounts.A.office, customerA, jobA, officeSurveyPayload)), "Office should create a survey that has no field-owner grant");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: officeSurveyId, expected_version: 1, record_payload: { ...officeSurveyPayload, status: "In progress" }, mutation_id: crypto.randomUUID() } }), "42501", "Electrician must not update an office or coworker-owned survey");',
+  '    const coworkerSurveyId = source("rpc-survey-coworker-owned");',
+  '    const coworkerSurveyPayload = { id: coworkerSurveyId, jobId: jobA, customerId: customerA, number: "SUR-COWORKER-001", status: "Draft", circuits: [] };',
+  '    const coworkerSurveyCreate = await authenticated(accounts.A.coworker, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: coworkerSurveyId, expected_version: 0, record_payload: coworkerSurveyPayload, mutation_id: crypto.randomUUID() } });',
+  '    await expectAllowed(coworkerSurveyCreate, "Co-assigned electrician should create their own survey");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: coworkerSurveyId, expected_version: coworkerSurveyCreate.payload.version, record_payload: { ...coworkerSurveyPayload, status: "In progress" }, mutation_id: crypto.randomUUID() } }), "42501", "Electrician must not update a co-assigned coworker survey");',
+  '    const duplicateCoworkerTeamA = source("field-team-coworker-duplicate-a");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "team_members", typedRecord(organisationA, duplicateCoworkerTeamA, null, null, { name: "Duplicate field coworker", email: accounts.A.coworker.email, role: "Electrician", status: "Active" })), "Office should create a duplicate team identity for fail-closed testing");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.coworker, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-job-timeline", record_source_id: source("duplicate-identity-note"), expected_version: 0, record_payload: { id: source("duplicate-identity-note"), jobId: jobA, note: "Must fail" }, mutation_id: crypto.randomUUID() } }), "42501", "Duplicate active team identities must fail closed");',
+  '    await expectAllowed(await patchRecords(accounts.A.office, "team_members", "source_id=eq." + fieldTeamCoworkerA, { payload: { id: fieldTeamCoworkerA, name: "Field coworker", email: accounts.A.coworker.email, role: "Electrician", status: "Inactive" } }), "Office should inactivate the original coworker identity");',
+  '    await expectAllowed(await patchRecords(accounts.A.office, "team_members", "source_id=eq." + duplicateCoworkerTeamA, { payload: { id: duplicateCoworkerTeamA, name: "Duplicate field coworker", email: accounts.A.coworker.email, role: "Electrician", status: "Inactive" } }), "Office should inactivate the duplicate coworker identity");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.coworker, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-job-timeline", record_source_id: source("inactive-identity-note"), expected_version: 0, record_payload: { id: source("inactive-identity-note"), jobId: jobA, note: "Must fail" }, mutation_id: crypto.randomUUID() } }), "42501", "Inactive team identities must fail closed");',
+  '',
+  '    await expectAllowed(await patchRecords(accounts.A.office, "cloud_collections", "collection_key=eq.jr-os-surveys&source_id=eq." + fieldSurveyId, { updated_by: accounts.A.office.id, payload: { ...surveyCreate.payload.payload, customerId: customerA, jobId: jobA, labourRate: 81, photos: [{ id: "canonical-photo", documentId: "office-file" }] } }), "Office should add canonical hidden survey values");',
+  '    const canonicalSurvey = await listRecords(accounts.A.office, "cloud_collections", "select=version,payload&collection_key=eq.jr-os-surveys&source_id=eq." + fieldSurveyId);',
+  '    const surveyUpdate = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: fieldSurveyId, expected_version: canonicalSurvey.payload[0].version, record_payload: { ...fieldSurveyPayload, status: "In progress", photos: [{ id: "replacement-forgery" }], labourRate: 1 }, mutation_id: crypto.randomUUID() } });',
+  '    await expectAllowed(surveyUpdate, "Assigned electrician should update allowlisted survey fields");',
+  '    const preservedSurvey = await listRecords(accounts.A.office, "cloud_collections", "select=payload&collection_key=eq.jr-os-surveys&source_id=eq." + fieldSurveyId);',
+  '    assert.equal(preservedSurvey.payload[0].payload.labourRate, 81, "Survey update must preserve office labour rate");',
+  '    assert.equal(preservedSurvey.payload[0].payload.photos[0].id, "canonical-photo", "Survey update must preserve canonical attachments");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: fieldSurveyId, expected_version: canonicalSurvey.payload[0].version, record_payload: fieldSurveyPayload, mutation_id: crypto.randomUUID() } }), "PT409", "Stale survey version must fail");',
+  '',
+  '    const diaryId = source("rpc-diary-a");',
+  '    const diaryCreate = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-site-diaries", record_source_id: diaryId, expected_version: 0, record_payload: { id: diaryId, jobId: jobA, customerId: otherCustomerA, workDate: "2026-08-14", completedBy: "Forged", staffPresent: ["forged"], otherStaffPresent: "  Subcontractor  ", photoDocumentIds: ["forged-file"], workCompleted: "First fix", delays: "", customerRequests: "", materialsUsed: "", voiceNotes: "" }, mutation_id: crypto.randomUUID() } });',
+  '    await expectAllowed(diaryCreate, "Assigned electrician should create a canonical site diary");',
+  '    assert.deepEqual(diaryCreate.payload.payload.staffPresent, [fieldTeamA], "Diary RPC must bind staff presence to the actor");',
+  '    assert.equal(diaryCreate.payload.payload.customerId, customerA);',
+  '    assert.equal(diaryCreate.payload.payload.photoDocumentIds, undefined, "Diary RPC must discard attachment references");',
+  '',
+  '    const taskId = source("rpc-task-a");',
+  '    const taskCreate = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-job-tasks", record_source_id: taskId, expected_version: 0, record_payload: { id: taskId, jobId: jobA, customerId: otherCustomerA, type: "Snag", title: "Socket snag", description: "Repair", category: "Second fix", priority: "High", assignedTo: "forged", dueDate: "2026-08-20", status: "Open", photos: [{ id: "forged" }], notes: "Field note" }, mutation_id: crypto.randomUUID() } });',
+  '    await expectAllowed(taskCreate, "Assigned electrician should create an actor-bound task");',
+  '    assert.equal(taskCreate.payload.payload.assignedTo, fieldTeamA);',
+  '    assert.equal(taskCreate.payload.payload.status, "Open");',
+  '    assert.deepEqual(taskCreate.payload.payload.photos, []);',
+  '    const taskUpdate = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-job-tasks", record_source_id: taskId, expected_version: taskCreate.payload.version, record_payload: { ...taskCreate.payload.payload, title: "Forged rewrite", status: "Completed", customerConfirmedAt: "1900-01-01T00:00:00Z" }, mutation_id: crypto.randomUUID() } });',
+  '    await expectAllowed(taskUpdate, "Assigned electrician should update task status only");',
+  '    assert.equal(taskUpdate.payload.payload.title, "Socket snag", "Task update must preserve canonical content");',
+  '    assert.equal(taskUpdate.payload.payload.customerConfirmedAt, undefined);',
+  '',
+  '    const legacyTaskId = source("legacy-null-customer-task");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", { organisation_id: organisationA, collection_key: "jr-os-job-tasks", source_id: legacyTaskId, customer_source_id: null, job_source_id: jobA, payload: { id: legacyTaskId, jobId: jobA, type: "Task", title: "Legacy task", description: "", category: "General", priority: "Normal", assignedTo: fieldTeamA, dueDate: "2026-08-21", status: "Open", photos: [], notes: "" }, created_by: accounts.A.office.id, updated_by: accounts.A.office.id }), "Office should seed a legacy task without customer envelope");',
+  '    const legacyTaskUpdate = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-job-tasks", record_source_id: legacyTaskId, expected_version: 1, record_payload: { id: legacyTaskId, jobId: jobA, type: "Task", category: "General", priority: "Normal", status: "In progress" }, mutation_id: crypto.randomUUID() } });',
+  '    await expectAllowed(legacyTaskUpdate, "Legacy null-customer task should remain status-updatable");',
+  '    const legacyTaskStored = await listRecords(accounts.A.office, "cloud_collections", "select=customer_source_id,payload&collection_key=eq.jr-os-job-tasks&source_id=eq." + legacyTaskId);',
+  '    assert.equal(legacyTaskStored.payload[0].customer_source_id, null, "Legacy task update must preserve its canonical null envelope");',
+  '    assert.equal(legacyTaskStored.payload[0].payload.customerId, undefined);',
+  '',
+  '    const noteId = source("rpc-note-a");',
+  '    const noteCreate = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-job-timeline", record_source_id: noteId, expected_version: 0, record_payload: { id: noteId, jobId: jobA, customerId: otherCustomerA, eventType: "Variation", sourceType: "JobVariation", sourceId: "forged-source", fromStatus: "Sent", toStatus: "Accepted", note: "Plain site observation" }, mutation_id: crypto.randomUUID() } });',
+  '    await expectAllowed(noteCreate, "Assigned electrician should create a plain field note");',
+  '    assert.equal(noteCreate.payload.payload.eventType, "Note");',
+  '    assert.equal(noteCreate.payload.payload.milestone, "Custom update");',
+  '    assert.equal(noteCreate.payload.payload.customerId, customerA);',
+  '    assert.equal(noteCreate.payload.payload.sourceType, undefined, "Field note must not forge authoritative evidence classification");',
+  '    assert.equal(noteCreate.payload.payload.fromStatus, undefined, "Field note must discard client status-evidence fields");',
+  '    assert.equal(noteCreate.payload.payload.toStatus, undefined, "Field note output must always remain a plain server-authored note");',
+  '',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-rams", record_source_id: source("denied-rams"), expected_version: 0, record_payload: { id: source("denied-rams"), jobId: jobA }, mutation_id: crypto.randomUUID() } }), "42501", "Read-only field collections must remain denied");',
+  '',
+].join("\n");
+
+const fieldPrivateUploadSnippet = `    await expectAllowed(
+      await uploadStorageObject(accounts.A.electrician, ownPath, pngBytes, "image/png"),
+      "Authenticated staff upload must succeed",
+    );`;
+const secureFieldPrivateUploadSnippet = `    await expectDenied(
+      await uploadStorageObject(accounts.A.electrician, ownPath, pngBytes, "image/png"),
+      "Electrician private object upload must fail closed without an assigned upload intent",
+    );
+    await expectAllowed(
+      await uploadStorageObject(accounts.A.office, ownPath, pngBytes, "image/png"),
+      "Authenticated office upload should succeed",
+    );`;
+
+const fieldPrivateMetadataSnippet = `    await expectAllowed(await insertRecord(accounts.A.electrician, "private_files", {
+      organisation_id: organisationA, source_id: source("file-own"), job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: ownPath, file_name: "photo.png", mime_type: "image/png",
+    }), "Staff should write private file metadata");`;
+const secureFieldPrivateMetadataSnippet = `    await expectDenied(await insertRecord(accounts.A.electrician, "private_files", {
+      organisation_id: organisationA, source_id: source("file-field-denied"), storage_key: "jr-os-job-documents", job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: ownPath, file_name: "photo.png", mime_type: "image/png",
+    }), "Electrician private-file metadata write must fail closed without an assigned upload intent");
+    await expectAllowed(await insertRecord(accounts.A.office, "private_files", {
+      organisation_id: organisationA, source_id: source("file-own"), storage_key: "jr-os-job-documents", job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: ownPath, file_name: "photo.png", mime_type: "image/png",
+    }), "Office should register private file metadata");`;
+
+const legacyFieldUploadSnippet = `    await expectAllowed(
+      await uploadStorageObject(accounts.A.electrician, legacyPath, pngBytes, "image/png", legacyBucket),
+      "Electrician should retain authenticated legacy upload compatibility",
+    );`;
+const secureLegacyFieldUploadSnippet = `    await expectDenied(
+      await uploadStorageObject(accounts.A.electrician, legacyPath, pngBytes, "image/png", legacyBucket),
+      "Electrician legacy object upload must fail closed",
+    );`;
+
 for (const [label, snippet] of [
   ["obsolete Supabase logout", obsoleteSnippet],
   ["customer fixture", customerSeedSnippet],
@@ -95,10 +440,13 @@ for (const [label, snippet] of [
   ["team fixture", teamSeedSnippet],
   ["team read expectation", teamReadSnippet],
   ["job fixture", jobSeedSnippet],
+  ["other-customer job fixture", otherCustomerJobSnippet],
   ["job read anchor", jobReadAnchor],
   ["field relationship fixtures", fieldCasesSnippet],
   ["generic field fixtures", genericCasesSnippet],
+  ["generic direct-write loop", genericInsertSnippet],
   ["generic field read expectation", genericReadSnippet],
+  ["field private object upload", fieldPrivateUploadSnippet],
 ]) {
   const occurrences = source.split(snippet).length - 1;
   if (occurrences !== 1) {
@@ -126,23 +474,59 @@ try {
     .replace(customerReadAnchor, customerReadCoverage)
     .replace(teamSeedSnippet, safeTeamSeedSnippet)
     .replace(teamReadSnippet, safeTeamReadSnippet)
-    .replace(jobSeedSnippet, safeJobSeedSnippet)
-    .replace(jobReadAnchor, jobReadCoverage)
-    .replace(fieldCasesSnippet, safeFieldCasesSnippet)
+    .replace(jobSeedSnippet, secureJobSeedSnippet)
+    .replace(otherCustomerJobSnippet, secureOtherCustomerJobSnippet)
+    .replace(jobReadAnchor, secureJobReadCoverage)
+    .replace(fieldCasesSnippet, secureFieldCasesSnippet)
     .replace(genericCasesSnippet, safeGenericCasesSnippet)
-    .replace(genericReadSnippet, safeGenericReadSnippet)
+    .replace(genericInsertSnippet, secureGenericInsertSnippet)
+    .replace(genericReadSnippet, secureGenericReadSnippet)
+    .replace(fieldPrivateUploadSnippet, secureFieldPrivateUploadSnippet)
+    .replace(fieldPrivateMetadataSnippet, secureFieldPrivateMetadataSnippet)
+    .replace(legacyFieldUploadSnippet, secureLegacyFieldUploadSnippet)
     .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
     .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
     .replace(officeJobReadAnchor, confidentialOfficeJobRead)
-    .replace(genericCasesStart, `${fieldTimelineCoverage}${genericCasesStart}`)
+    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldMutationCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   for (const requiredPhrase of [
+    "Anonymous field mutation RPC calls must fail",
+    "Office sessions must not use the electrician mutation RPC",
+    "Customer sessions must not use the electrician mutation RPC",
+    "Oversized field payloads must be rejected before receipt persistence",
     "Field job projection must omit mixed commercial notes",
     "Office should retain the canonical variation financial note",
     "Field timeline projection must mask variation financial notes",
     "Field timeline projection must omit every variation price marker",
     "Another organisation must not read the field timeline projection",
+    "Assigned electrician should apply a valid job status transition through the RPC",
+    "A response-loss retry should return the exact prior job mutation result",
+    "A mutation id must not be reused with changed job arguments",
+    "Electrician direct job updates must fail closed",
+    "Status evidence must bind the canonical linked customer",
+    "Legacy In progress request should canonicalize through the status RPC",
+    "Electrician direct write must fail closed for",
+    "Electrician must not create a planner entry for an unassigned same-tenant job",
+    "Electrician must not create a timesheet for an unassigned same-tenant job",
+    "Assigned electrician should create a survey through the field RPC",
+    "Survey response-loss retry should return the exact prior result",
+    "Concurrent field create loser must use the conflict contract",
+    "Electrician must not update an office or coworker-owned survey",
+    "Co-assigned electrician should create their own survey",
+    "Electrician must not update a co-assigned coworker survey",
+    "Duplicate active team identities must fail closed",
+    "Inactive team identities must fail closed",
+    "Survey update must preserve office labour rate",
+    "Diary RPC must bind staff presence to the actor",
+    "Assigned electrician should update task status only",
+    "Legacy null-customer task should remain status-updatable",
+    "Field note must not forge authoritative evidence classification",
+    "Field note must discard client status-evidence fields",
+    "Field note output must always remain a plain server-authored note",
+    "Read-only field collections must remain denied",
+    "Electrician direct generic write must fail closed for",
+    "Electrician private object upload must fail closed without an assigned upload intent",
   ]) {
     if (!supportedSource.includes(requiredPhrase)) {
       throw new Error(`Generated live RLS test is missing field confidentiality coverage: ${requiredPhrase}`);

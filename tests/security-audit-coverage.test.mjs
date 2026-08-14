@@ -53,6 +53,8 @@ const requiredSuites = [
   "job-role-projections.test.mjs",
   "field-cloud-collection-projection.test.mjs",
   "field-job-confidentiality.test.mjs",
+  "field-mutation-boundary.test.mjs",
+  "field-mutation-boundary-live-rls.test.mjs",
   "field-inventory-projections.test.mjs",
   "field-inventory-ui-privacy.test.mjs",
   "customer-role-projections.test.mjs",
@@ -114,7 +116,10 @@ test("penetration suite retains every final attack class", () => {
 });
 
 test("live RLS coverage preserves privileged AI and tombstone boundaries", () => {
-  const liveRls = readFileSync(resolve(testsDirectory, "supabase-rls.integration.mjs"), "utf8");
+  const liveRls = [
+    readFileSync(resolve(testsDirectory, "supabase-rls.integration.mjs"), "utf8"),
+    readFileSync(resolve(testsDirectory, "run-supabase-rls.integration.mjs"), "utf8"),
+  ].join("\n");
 
   for (const requiredPhrase of [
     "Electrician must not write office-only AI learning memory",
@@ -151,7 +156,7 @@ test("live RLS coverage preserves privileged AI and tombstone boundaries", () =>
     "Signed upload URL creation must be disabled",
     "Pre-existing signed upload tokens must be rejected",
     "Signed download URL creation must be disabled",
-    "Authenticated staff upload must succeed",
+    "Electrician private object upload must fail closed without an assigned upload intent",
     "Revoked sessions must not upload private objects",
     "Revoked sessions must not download private objects",
     "Customer base pricing query should fail closed",

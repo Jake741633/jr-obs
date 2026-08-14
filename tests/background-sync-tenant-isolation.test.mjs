@@ -22,9 +22,8 @@ test("in-flight background replay aborts when identity ownership changes", () =>
 });
 
 test("failed background retries retain their originating identity and cannot migrate", () => {
-  assert.match(repository, /remaining\.push\(\{ \.\.\.item, attempts: item\.attempts \+ 1, state: "Failed"/);
-  assert.match(repository, /const untouched = liveQueue\.filter\(\(item\) => !queueItemMatchesAuthorization\(item, authorization\) \|\| !originalIds\.has\(item\.id\)\)/);
-  assert.match(repository, /const retained = remaining\.filter\(\(item\) => liveIds\.has\(item\.id\)\)/);
+  assert.match(repository, /attempts: item\.attempts \+ 1,[\s\S]*state: isCloudConflictError\(error\) \? "Conflict" : "Failed"/);
+  assert.match(repository, /const nextQueue = mergeProcessedQueue\(liveQueue, queue, remaining\)/);
   assert.doesNotMatch(repository, /organisationId:\s*activeOrganisationId\(\)/);
 });
 

@@ -145,24 +145,14 @@ test("background sync merges results into the live queue without crossing tenant
   const activeOrganisation = repository.indexOf("const authorization = currentSyncAuthorization()");
   const tenantSnapshot = repository.indexOf("const queue = allQueue.filter", activeOrganisation);
   const liveQueueRead = repository.indexOf("const liveQueue = readAllSyncQueue()", tenantSnapshot);
-  const originalIds = repository.indexOf("const originalIds = new Set(queue.map((item) => item.id))", liveQueueRead);
-  const liveIds = repository.indexOf("const liveIds = new Set(liveQueue.map((item) => item.id))", originalIds);
-  const untouched = repository.indexOf("const untouched = liveQueue.filter", liveIds);
-  const tenantPreservation = repository.indexOf("!queueItemMatchesAuthorization(item, authorization) || !originalIds.has(item.id)", untouched);
-  const retained = repository.indexOf("const retained = remaining.filter((item) => liveIds.has(item.id))", tenantPreservation);
-  const mergedQueue = repository.indexOf("const nextQueue = [...untouched, ...retained]", retained);
+  const mergedQueue = repository.indexOf("const nextQueue = mergeProcessedQueue(liveQueue, queue, remaining)", liveQueueRead);
   const writeMerged = repository.indexOf("write(QUEUE_KEY, nextQueue)", mergedQueue);
   const activeRemaining = repository.indexOf("const activeRemaining = nextQueue.filter", writeMerged);
 
   assert.ok(activeOrganisation >= 0);
   assert.ok(tenantSnapshot > activeOrganisation);
   assert.ok(liveQueueRead > tenantSnapshot);
-  assert.ok(originalIds > liveQueueRead);
-  assert.ok(liveIds > originalIds);
-  assert.ok(untouched > liveIds);
-  assert.ok(tenantPreservation > untouched);
-  assert.ok(retained > tenantPreservation);
-  assert.ok(mergedQueue > retained);
+  assert.ok(mergedQueue > liveQueueRead);
   assert.ok(writeMerged > mergedQueue);
   assert.ok(activeRemaining > writeMerged);
   assert.match(repository, /tenantRecordQuery\(\{ organisationId: item\.organisationId/);
@@ -178,13 +168,12 @@ test("existing edits preselect through role projections and patch exactly one ca
 });
 
 test("live queue merge preserves new work and respects concurrent discards", () => {
-  assert.ok(repository.indexOf("!originalIds.has(item.id)") >= 0);
-  assert.ok(repository.indexOf("remaining.filter((item) => liveIds.has(item.id))") >= 0);
+  assert.ok(repository.indexOf("mergeProcessedQueue(liveQueue, queue, remaining)") >= 0);
   assert.doesNotMatch(repository, /write\(QUEUE_KEY, \[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 
 test("background sync stops processing when active authorisation changes", () => {
-  const loopStart = repository.indexOf("for (const item of queue)");
+  const loopStart = repository.indexOf("for (const queuedItem of queue)");
   const loopGuard = repository.indexOf("if (!activeSyncAuthorizationMatches(authorization))", loopStart);
   const loopRetain = repository.indexOf("remaining.push(...queue.slice(processed));", loopGuard);
   const cloudRead = repository.indexOf("const existing = await cloudSelect", loopRetain);
