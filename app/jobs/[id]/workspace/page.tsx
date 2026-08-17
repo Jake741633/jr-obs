@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   ArrowLeft,
   BookOpenText,
@@ -51,6 +51,16 @@ type NormalisedJobProgress = {
 
 type EditableProgressMetric = Exclude<keyof NormalisedJobProgress, "payments">;
 
+type ProgressDraftState = {
+  targetKey: string;
+  values: Partial<Record<EditableProgressMetric, number>>;
+};
+
+type ProgressMessageState = {
+  targetKey: string;
+  text: string;
+};
+
 const editableProgressMetrics: { key: EditableProgressMetric; label: string }[] = [
   { key: "overall", label: "Overall" },
   { key: "firstFix", label: "First fix" },
@@ -59,16 +69,6 @@ const editableProgressMetrics: { key: EditableProgressMetric; label: string }[] 
   { key: "certificates", label: "Certificates" },
   { key: "materials", label: "Materials" },
 ];
-
-const emptyProgress: NormalisedJobProgress = {
-  overall: 0,
-  firstFix: 0,
-  secondFix: 0,
-  testing: 0,
-  certificates: 0,
-  materials: 0,
-  payments: 0,
-};
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 
@@ -99,16 +99,15 @@ export default function JobWorkspacePage() {
   const timeline = useJobTimelineCollection();
   const [selectedStatus, setSelectedStatus] = useState<CanonicalJobStatus>("Enquiry");
   const [statusMessage, setStatusMessage] = useState("");
-  const [progressDraft, setProgressDraft] = useState<NormalisedJobProgress>(emptyProgress);
-  const [progressMessage, setProgressMessage] = useState("");
+  const [progressDraft, setProgressDraft] = useState<ProgressDraftState>({ targetKey: "", values: {} });
+  const [progressMessage, setProgressMessage] = useState<ProgressMessageState>({ targetKey: "", text: "" });
 
   const progressRecord = progress.items.find((item) => item.jobId === jobId);
   const progressValue = normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress;
-
-  useEffect(() => {
-    setProgressDraft(normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress);
-    setProgressMessage("");
-  }, [jobId, progressRecord?.id, progressRecord?.manual, progressRecord?.updatedAt]);
+  const progressTargetKey = `${jobId}:${progressRecord?.id ?? `job-progress-${jobId}`}`;
+  const activeProgressDraft = progressDraft.targetKey === progressTargetKey ? progressDraft.values : {};
+  const progressDraftValue: NormalisedJobProgress = { ...progressValue, ...activeProgressDraft };
+  const progressStatusMessage = progressMessage.targetKey === progressTargetKey ? progressMessage.text : "";
 
   const ready = [jobs, customers, builders, team, tasks, diaries, variations, documents, progress, timeline].every((store) => store.isReady);
   if (!ready) return <Card>Loading job workspace…</Card>;
@@ -144,14 +143,20 @@ export default function JobWorkspacePage() {
   function updateProgressMetric(metric: EditableProgressMetric, value: string) {
     const numericValue = Number(value);
     const boundedValue = Number.isFinite(numericValue) ? Math.min(100, Math.max(0, Math.round(numericValue))) : 0;
-    setProgressDraft((current) => ({ ...current, [metric]: boundedValue }));
-    setProgressMessage("");
+    setProgressDraft((current) => ({
+      targetKey: progressTargetKey,
+      values: {
+        ...(current.targetKey === progressTargetKey ? current.values : {}),
+        [metric]: boundedValue,
+      },
+    }));
+    setProgressMessage({ targetKey: progressTargetKey, text: "" });
   }
 
   function saveProgress() {
     const now = new Date().toISOString();
     const normalised = normaliseJobProgress({
-      ...progressDraft,
+      ...progressDraftValue,
       payments: progressValue.payments,
     }) as NormalisedJobProgress;
     const nextRecord = {
@@ -169,8 +174,8 @@ export default function JobWorkspacePage() {
       if (existingIndex < 0) return [nextRecord, ...current];
       return current.map((item, index) => index === existingIndex ? nextRecord : item);
     });
-    setProgressDraft(normalised);
-    setProgressMessage("Operational progress saved and queued for secure sync.");
+    setProgressDraft({ targetKey: progressTargetKey, values: {} });
+    setProgressMessage({ targetKey: progressTargetKey, text: "Operational progress saved and queued for secure sync." });
   }
 
   return <main className="space-y-6 pb-28">
@@ -190,13 +195,13 @@ export default function JobWorkspacePage() {
       <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-300"><Gauge className="size-5" /></span><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Live progress</p><h2 className="mt-1 text-xl font-bold">Operational completion</h2><p className="mt-2 text-sm text-slate-400">Update assigned-job progress on site. Payment progress stays read-only and office controlled.</p></div></div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         {editableProgressMetrics.map(({ key, label }) => <label key={key} htmlFor={`progress-${key}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-          <span className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-300">{label}</span><span className="font-semibold text-cyan-200">{progressDraft[key]}%</span></span>
-          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraft[key]} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-11 w-full accent-cyan-400" />
+          <span className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-300">{label}</span><span className="font-semibold text-cyan-200">{progressDraftValue[key]}%</span></span>
+          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraftValue[key]} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-11 w-full accent-cyan-400" />
         </label>)}
         <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">{progressBar("Payments (office controlled)", progressValue.payments)}</div>
       </div>
       <div className="mt-5 flex flex-wrap items-center gap-3"><Button type="button" onClick={saveProgress}>Save field progress</Button><p className="text-xs text-slate-500">Only operational percentages are sent by the field app.</p></div>
-      {progressMessage ? <p role="status" className="mt-3 text-sm text-cyan-200">{progressMessage}</p> : null}
+      {progressStatusMessage ? <p role="status" className="mt-3 text-sm text-cyan-200">{progressStatusMessage}</p> : null}
       {!progressRecord ? <p className="mt-4 text-sm text-amber-300">No saved progress record yet. Saving will create one for this assigned job.</p> : <p className="mt-4 text-xs text-slate-500">Last updated {new Date(progressRecord.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} by {progressRecord.updatedBy || "JR OS"}.</p>}
     </Card>
 
