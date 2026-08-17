@@ -1,25 +1,10 @@
 import {
   assert,
   test,
-  collectionCloudMutationRoute,
-  fieldMutationRouteAllows,
   isServerAuthoredFieldTimeline,
   normaliseFieldRequestedJobStatus,
-  coalesceQueue,
-  fieldMutationReplayExpired,
-  mergeProcessedQueue,
-  rebaseQueuedFieldMutation,
-  reconcileVersionedRecordCache,
-  serialSingleFlightByKey,
-  shouldReconcileFieldMutationPayload,
-  singleFlight,
   validateFieldMutationResponse,
-  withExclusiveBrowserLock,
   repository,
-  adapter,
-  storage,
-  client,
-  fieldChange,
 } from "./field-mutation-client-helpers.mjs";
 
 test("job status evidence is server-owned while explicit field notes remain routable", () => {
@@ -87,4 +72,3 @@ test("RPC responses are identity-checked before safe cache reconciliation", () =
   }), /unsafe timeline note/i, "client evidence classification must never enter the safe cache");
   assert.match(repository, /success\.response\.payload/);
 });
-
