@@ -237,4 +237,9 @@ begin;
 \ir ../migrations/20260814091500_project_customer_portal_finance.sql
 commit;
 
+\echo 'Securing assigned field job progress updates'
+begin;
+\ir ../migrations/20260814114500_secure_field_job_progress_updates.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

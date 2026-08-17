@@ -4,22 +4,28 @@ import test from "node:test";
 
 const workspace = readFileSync(new URL("../app/jobs/[id]/workspace/page.tsx", import.meta.url), "utf8");
 
-test("mobile job workspace loads the existing job progress collection", () => {
+test("mobile job workspace loads and updates the existing job progress collection", () => {
   assert.match(workspace, /useJobProgressCollection/);
   assert.match(workspace, /const progress = useJobProgressCollection\(\)/);
   assert.match(workspace, /progress\.items\.find\(\(item\) => item\.jobId === jobId\)/);
+  assert.match(workspace, /progress\.setItems/);
 });
 
-test("mobile job workspace normalises and displays operational progress metrics", () => {
+test("mobile job workspace edits only operational progress metrics", () => {
   assert.match(workspace, /normaliseJobProgress/);
-  assert.match(workspace, /progressValue\.overall/);
-  for (const metric of ["firstFix", "secondFix", "testing", "certificates", "materials", "payments"]) {
-    assert.match(workspace, new RegExp(`progressValue\\.${metric}`));
+  assert.match(workspace, /Save field progress/);
+  assert.match(workspace, /Operational progress saved and queued for secure sync/);
+  for (const metric of ["overall", "firstFix", "secondFix", "testing", "certificates", "materials"]) {
+    assert.match(workspace, new RegExp(`key: \"${metric}\"`));
   }
-  assert.match(workspace, /Read-only snapshot from the existing job progress record/);
+  assert.match(workspace, /id=\{`progress-\$\{key\}`\}/);
+  assert.doesNotMatch(workspace, /id=\{?`progress-payments`/);
+  assert.match(workspace, /Payments \(office controlled\)/);
+  assert.match(workspace, /payments: progressValue\.payments/);
 });
 
-test("mobile job workspace keeps progress editing out of this read-only slice", () => {
-  assert.doesNotMatch(workspace, /progress\.setItems/);
-  assert.match(workspace, /No saved progress record yet/);
+test("mobile job workspace creates one canonical progress record shape when none exists", () => {
+  assert.match(workspace, /`job-progress-\$\{jobId\}`/);
+  assert.match(workspace, /suggestions: progressRecord\?\.suggestions \?\? \[\]/);
+  assert.match(workspace, /No saved progress record yet\. Saving will create one for this assigned job\./);
 });
