@@ -114,6 +114,7 @@ export default function JobWorkspacePage() {
 
   const job = jobs.items.find((item) => item.id === jobId);
   if (!job) return <main className="space-y-6"><Link href="/jobs" className="inline-flex items-center gap-2 text-sm text-cyan-300"><ArrowLeft className="size-4" />Back to jobs</Link><Card><h1 className="text-xl font-bold">Job not found</h1><p className="mt-2 text-sm text-slate-400">This job may have been removed or the link is no longer available.</p></Card></main>;
+  const currentJob = job;
 
   const customer = customers.items.find((item) => item.id === job.customerId);
   const builder = builders.items.find((item) => item.id === job.builderId);
@@ -130,8 +131,8 @@ export default function JobWorkspacePage() {
     const nextStatus = selectedStatus === "Enquiry" && currentStatus !== "Enquiry" ? currentStatus : selectedStatus;
     if (nextStatus === currentStatus) { setStatusMessage("Choose a different status before saving."); return; }
     const now = new Date().toISOString();
-    const result = transitionJobStatus({ job, nextStatus, now, timelineId: makeId("timeline"), completedBy: "JR OS mobile workspace" });
-    jobs.setItems((current) => current.map((item) => item.id === job.id ? result.job : item));
+    const result = transitionJobStatus({ job: currentJob, nextStatus, now, timelineId: makeId("timeline"), completedBy: "JR OS mobile workspace" });
+    jobs.setItems((current) => current.map((item) => item.id === currentJob.id ? result.job : item));
     if (result.timelineEntry) {
       const entry = result.timelineEntry as JobTimelineEntry;
       timeline.setItems((current) => [entry, ...current]);
