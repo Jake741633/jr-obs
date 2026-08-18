@@ -26,7 +26,8 @@ test("server API route inventory stays explicit for security review", () => {
 });
 
 test("supplier lookup accepts no request-controlled organisation selector", () => {
-  assert.match(lookupRoute, /let body: \{ supplier\?: string; stockCode\?: string \}/);
+  assert.match(lookupRoute, /let body: unknown;/);
+  assert.match(lookupRoute, /if \(!plainRecord\(body\)\)/);
   assert.doesNotMatch(lookupRoute, /organisation_id|organisationId/);
   assert.match(lookupRoute, /\/rest\/v1\/profiles\?id=eq\.\$\{encodeURIComponent\(userId\)\}&active=eq\.true&select=role,active&limit=1/);
 });
