@@ -96,12 +96,12 @@ test("mobile site diary reuses cloud-aware collections and existing job timeline
 test("mobile site diary binds author attribution to the live account identity", () => {
   assert.match(page, /useCloudIdentity\(\)/);
   assert.match(page, /siteDiaryOperatorName\(\{/);
-  assert.match(page, /completedBy: ""/);
   assert.match(page, /completedBy: operatorName/);
   assert.match(page, /identityState\.isReady/);
-  assert.match(page, /label="Completed by"[^>]+readOnly[^>]+aria-readonly="true"/);
+  assert.match(page, /label="Completed by" value=\{operatorName\} readOnly aria-readonly="true"/);
   assert.doesNotMatch(page, /completedBy: "Jake"/);
-  assert.doesNotMatch(page, /completedBy: form\.completedBy\.trim\(\)/);
+  assert.doesNotMatch(page, /form\.completedBy/);
+  assert.doesNotMatch(page, /useEffect/);
 });
 
 test("site diary attention items retain source links and prioritise safety and delays", () => {
