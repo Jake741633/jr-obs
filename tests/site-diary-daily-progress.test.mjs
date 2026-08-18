@@ -65,12 +65,17 @@ test("site diary attribution resolves only the signed-in active team member", ()
     identity: { email: "former@example.com" },
     teamMembers,
     mode: "cloud",
-  }), "former@example.com");
+  }), "");
   assert.equal(siteDiaryOperatorName({
     identity: { email: "unknown@example.com" },
     teamMembers,
     mode: "cloud",
-  }), "unknown@example.com");
+  }), "");
+  assert.equal(siteDiaryOperatorName({
+    identity: { email: "field@example.com" },
+    teamMembers: [...teamMembers, { name: "Duplicate", email: "field@example.com", role: "Electrician", status: "Active" }],
+    mode: "cloud",
+  }), "");
 });
 
 test("local site diary attribution prefers the active owner without inventing a person", () => {
