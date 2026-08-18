@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ClipboardList, HardHat, PackageCheck, ShieldAlert, UsersRound } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useJobsCollection, useJobTimelineCollection, useSiteDiariesCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isJobInactiveStatus, siteDiaryTimelineEntry } from "../../../lib/jobManagement-core.mjs";
 import { buildDailyProgressSummary, dailyProgressWarnings } from "../../../lib/siteDiaryDailyProgress-core.mjs";
+import { siteDiaryOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { makeId } from "../../../lib/storage";
 import type { JobTimelineEntry, SiteDiaryEntry } from "../../../lib/models";
 
@@ -34,7 +36,7 @@ const blankForm = {
   startedAt: "",
   finishedAt: "",
   breakMinutes: "0",
-  completedBy: "Jake",
+  completedBy: "",
   staffPresent: [] as string[],
   otherStaffPresent: "",
   weather: "",
@@ -60,11 +62,22 @@ export default function MobileSiteDiaryPage() {
   const diaries = useSiteDiariesCollection();
   const timeline = useJobTimelineCollection();
   const team = useTeamCollection();
+  const identityState = useCloudIdentity();
   const [form, setForm] = useState(blankForm);
   const [message, setMessage] = useState("");
 
   const activeJobs = useMemo(() => jobs.items.filter((job) => !isJobInactiveStatus(job.status)), [jobs.items]);
-  const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady);
+  const operatorName = useMemo(() => siteDiaryOperatorName({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
+  const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
+
+  useEffect(() => {
+    if (!operatorName) return;
+    setForm((current) => current.completedBy ? current : { ...current, completedBy: operatorName });
+  }, [operatorName]);
 
   function toggleStaff(memberId: string) {
     setForm((current) => ({
@@ -78,6 +91,7 @@ export default function MobileSiteDiaryPage() {
   function saveDiary(event: FormEvent) {
     event.preventDefault();
     if (!form.jobId) return setMessage("Choose a job before saving the daily progress record.");
+    if (!operatorName) return setMessage("Your active team identity could not be resolved. Refresh your account before saving.");
     if (!form.workCompleted.trim()) return setMessage("Record the work completed before saving.");
 
     const now = new Date().toISOString();
@@ -88,7 +102,7 @@ export default function MobileSiteDiaryPage() {
       startedAt: form.startedAt,
       finishedAt: form.finishedAt,
       breakMinutes: Math.max(0, Number(form.breakMinutes || 0)),
-      completedBy: form.completedBy.trim() || "JR OS engineer",
+      completedBy: operatorName,
       staffPresent: form.staffPresent,
       otherStaffPresent: form.otherStaffPresent.trim(),
       workCompleted: form.workCompleted.trim(),
@@ -124,7 +138,7 @@ export default function MobileSiteDiaryPage() {
     timeline.setItems((current) => [timelineEntry, ...current]);
     const warningCount = dailyProgressWarnings(entry).length;
     setMessage(`Daily progress saved and added to the job timeline${warningCount ? ` with ${warningCount} action${warningCount === 1 ? "" : "s"} to review` : ""}.`);
-    setForm({ ...blankForm, jobId: form.jobId, completedBy: form.completedBy, workDate: today() });
+    setForm({ ...blankForm, jobId: form.jobId, completedBy: operatorName, workDate: today() });
   }
 
   if (!ready) return <Card>Loading mobile site diary…</Card>;
@@ -138,7 +152,7 @@ export default function MobileSiteDiaryPage() {
       <Card className="space-y-4">
         <h2 className="flex items-center gap-2 font-semibold"><ClipboardList className="size-5 text-cyan-300" />Job and working time</h2>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
-        <div className="grid gap-3 sm:grid-cols-2"><InputField label="Work date" type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.target.value })} /><InputField label="Completed by" value={form.completedBy} onChange={(event) => setForm({ ...form, completedBy: event.target.value })} /></div>
+        <div className="grid gap-3 sm:grid-cols-2"><InputField label="Work date" type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.target.value })} /><InputField label="Completed by" value={form.completedBy} readOnly aria-readonly="true" /></div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3"><InputField label="Started" type="time" value={form.startedAt} onChange={(event) => setForm({ ...form, startedAt: event.target.value })} /><InputField label="Finished" type="time" value={form.finishedAt} onChange={(event) => setForm({ ...form, finishedAt: event.target.value })} /><div className="col-span-2 sm:col-span-1"><InputField label="Break minutes" type="number" min="0" value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /></div></div>
         <div className="grid grid-cols-2 gap-2"><Button type="button" variant="secondary" onClick={() => setForm((current) => ({ ...current, startedAt: nowTime() }))}>Set arrival</Button><Button type="button" variant="secondary" onClick={() => setForm((current) => ({ ...current, finishedAt: nowTime() }))}>Set departure</Button></div>
       </Card>
