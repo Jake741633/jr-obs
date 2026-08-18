@@ -36,6 +36,10 @@ function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function plainRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function numberValue(value: unknown) {
   const parsed = Number(String(value ?? "").replace(/[^0-9.]/g, ""));
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
@@ -203,10 +207,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Supplier lookup authentication is temporarily unavailable." }, { status: 503 });
   }
 
-  let body: { supplier?: string; stockCode?: string };
+  let body: unknown;
   try {
     body = await request.json();
   } catch {
+    return NextResponse.json({ error: "Invalid lookup request." }, { status: 400 });
+  }
+  if (!plainRecord(body)) {
     return NextResponse.json({ error: "Invalid lookup request." }, { status: 400 });
   }
 
