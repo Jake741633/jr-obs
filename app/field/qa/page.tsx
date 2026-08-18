@@ -8,6 +8,7 @@ import { Card } from "../../../components/ui/Card";
 import { TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useJobsCollection, useJobQaInspectionsCollection, useJobTasksCollection, useJobTimelineCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { buildQaInspection, completeQaInspection, failedQaTask, jobQaTypes, qaCompletion, qaSummary, qaTimelineEntry } from "../../../lib/jobQa-core.mjs";
 import { qaTaskCategory } from "../../../lib/jobQaTypes";
 import { makeId } from "../../../lib/storage";
@@ -22,6 +23,7 @@ export default function MobileQaPage() {
   const tasks = useJobTasksCollection();
   const timeline = useJobTimelineCollection();
   const team = useTeamCollection();
+  const identityState = useCloudIdentity();
   const [form, setForm] = useState(blankForm);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [message, setMessage] = useState("");
@@ -30,12 +32,17 @@ export default function MobileQaPage() {
   const visibleJobId = selectedJobId || form.jobId || activeJobs[0]?.id || "";
   const visibleInspections = useMemo(() => inspections.items.filter((inspection) => inspection.jobId === visibleJobId).toSorted((a, b) => b.inspectedAt.localeCompare(a.inspectedAt)), [inspections.items, visibleJobId]);
   const summary = useMemo(() => qaSummary(inspections.items, visibleJobId), [inspections.items, visibleJobId]);
-  const ready = [jobs, inspections, tasks, timeline, team].every((collection) => collection.isReady);
+  const cloudFieldMode = identityState.mode !== "local";
+  const ready = [jobs, inspections, tasks, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
 
   if (!ready) return <Card>Loading mobile QA inspections…</Card>;
 
   function createInspection(event: FormEvent) {
     event.preventDefault();
+    if (cloudFieldMode) {
+      setMessage("QA inspections are read-only for field cloud sessions until the dedicated secure QA mutation route is available.");
+      return;
+    }
     const jobId = form.jobId || visibleJobId;
     const inspector = team.items.find((member) => member.id === form.inspectorId);
     try {
@@ -50,11 +57,19 @@ export default function MobileQaPage() {
   }
 
   function toggleCheck(inspection: JobQaInspection, checkId: string) {
+    if (cloudFieldMode) {
+      setMessage("QA checklist changes are read-only for field cloud sessions until the dedicated secure QA mutation route is available.");
+      return;
+    }
     const now = new Date().toISOString();
     inspections.setItems((current) => current.map((item) => item.id === inspection.id ? { ...item, checks: item.checks.map((check) => check.id === checkId ? { ...check, completed: !check.completed } : check), updatedAt: now } : item));
   }
 
   function finishInspection(inspection: JobQaInspection, result: "Pass" | "Fail") {
+    if (cloudFieldMode) {
+      setMessage("QA results are read-only for field cloud sessions until the dedicated secure QA mutation route is available.");
+      return;
+    }
     const now = new Date().toISOString();
     try {
       const updated = completeQaInspection({ inspection, result, notes: inspection.notes, now }) as JobQaInspection;
@@ -87,7 +102,9 @@ export default function MobileQaPage() {
   }
 
   return <div className="space-y-5 pb-24 sm:space-y-6 sm:pb-0">
-    <PageHeader eyebrow="Job Management Pro" title="Mobile QA inspections" description="Run first fix, second fix, testing, commissioning and handover checks from your phone. Failed checks create linked snag actions automatically." />
+    <PageHeader eyebrow="Job Management Pro" title="Mobile QA inspections" description="Review first fix, second fix, testing, commissioning and handover checks from your phone. Cloud field sessions stay read-only until QA has its own secured mutation route." />
+
+    {cloudFieldMode ? <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-100"><p className="font-semibold">QA cloud writes are currently locked.</p><p className="mt-1 text-xs text-amber-100/70">Existing inspections can be reviewed here, but creating inspections, changing checks or recording pass/fail results is blocked rather than stored only in optimistic browser state.</p></div> : null}
 
     <Card>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job QA record</span><select value={visibleJobId} onChange={(event) => { setSelectedJobId(event.target.value); setForm((current) => ({ ...current, jobId: event.target.value })); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
@@ -103,7 +120,7 @@ export default function MobileQaPage() {
 
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
-    <Card>
+    {!cloudFieldMode ? <Card>
       <form onSubmit={createInspection} className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Inspection type</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as JobQaInspectionType })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">{jobQaTypes.map((type) => <option key={type}>{type}</option>)}</select></label>
@@ -111,17 +128,17 @@ export default function MobileQaPage() {
         <div className="md:col-span-2"><TextareaField label="Inspection notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Area inspected, limitations or supervisor notes…" /></div>
         <div className="md:col-span-2"><Button type="submit" className="w-full"><Plus className="mr-2 size-4" />Create QA inspection</Button></div>
       </form>
-    </Card>
+    </Card> : null}
 
     <section className="space-y-4">
-      {!visibleInspections.length ? <Card><ClipboardCheck className="size-5 text-slate-500" /><h2 className="mt-3 font-semibold">No QA inspections recorded</h2><p className="mt-2 text-sm text-slate-400">Choose a job and create the first quality inspection above.</p></Card> : visibleInspections.map((inspection) => {
+      {!visibleInspections.length ? <Card><ClipboardCheck className="size-5 text-slate-500" /><h2 className="mt-3 font-semibold">No QA inspections recorded</h2><p className="mt-2 text-sm text-slate-400">{cloudFieldMode ? "No QA inspections are available to review for this job." : "Choose a job and create the first quality inspection above."}</p></Card> : visibleInspections.map((inspection) => {
         const completion = qaCompletion(inspection);
         return <Card key={inspection.id} className={inspection.result === "Fail" ? "border-rose-400/30" : inspection.result === "Pass" ? "border-emerald-400/30" : undefined}>
           <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{inspection.type}</p><h2 className="mt-1 text-lg font-bold">{inspection.inspectorName}</h2></div><span className="rounded-full border border-slate-700 px-3 py-1 text-xs font-semibold">{inspection.result}</span></div>
           <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full bg-cyan-400" style={{ width: `${completion}%` }} /></div><p className="mt-2 text-xs text-slate-400">Checklist {completion}% complete</p>
-          <div className="mt-4 grid gap-2">{inspection.checks.map((check) => <button key={check.id} type="button" disabled={inspection.result !== "Pending"} onClick={() => toggleCheck(inspection, check.id)} className="flex min-h-12 items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-4 text-left text-sm disabled:opacity-70">{check.completed ? <CheckCircle2 className="size-5 shrink-0 text-emerald-300" /> : <span className="size-5 shrink-0 rounded-full border border-slate-600" />}<span>{check.label}</span></button>)}</div>
+          <div className="mt-4 grid gap-2">{inspection.checks.map((check) => <button key={check.id} type="button" disabled={cloudFieldMode || inspection.result !== "Pending"} onClick={() => toggleCheck(inspection, check.id)} className="flex min-h-12 items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-4 text-left text-sm disabled:opacity-70">{check.completed ? <CheckCircle2 className="size-5 shrink-0 text-emerald-300" /> : <span className="size-5 shrink-0 rounded-full border border-slate-600" />}<span>{check.label}</span></button>)}</div>
           {inspection.notes ? <p className="mt-4 rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm text-slate-300">{inspection.notes}</p> : null}
-          {inspection.result === "Pending" ? <div className="mt-4 grid grid-cols-2 gap-2"><Button type="button" variant="secondary" onClick={() => finishInspection(inspection, "Fail")}><XCircle className="mr-2 size-4" />Fail</Button><Button type="button" onClick={() => finishInspection(inspection, "Pass")}><ShieldCheck className="mr-2 size-4" />Pass</Button></div> : inspection.result === "Fail" ? <p className="mt-4 flex items-center gap-2 text-sm text-rose-300"><AlertTriangle className="size-4" />Linked snag action created</p> : <p className="mt-4 flex items-center gap-2 text-sm text-emerald-300"><CheckCircle2 className="size-4" />Inspection passed</p>}
+          {inspection.result === "Pending" ? cloudFieldMode ? <p className="mt-4 text-sm text-amber-200">Pass/fail changes are locked in field cloud mode.</p> : <div className="mt-4 grid grid-cols-2 gap-2"><Button type="button" variant="secondary" onClick={() => finishInspection(inspection, "Fail")}><XCircle className="mr-2 size-4" />Fail</Button><Button type="button" onClick={() => finishInspection(inspection, "Pass")}><ShieldCheck className="mr-2 size-4" />Pass</Button></div> : inspection.result === "Fail" ? <p className="mt-4 flex items-center gap-2 text-sm text-rose-300"><AlertTriangle className="size-4" />Linked snag action created</p> : <p className="mt-4 flex items-center gap-2 text-sm text-emerald-300"><CheckCircle2 className="size-4" />Inspection passed</p>}
           <Link href={`/jobs/${inspection.jobId}`} className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link>
         </Card>;
       })}
