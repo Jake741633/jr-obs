@@ -7,7 +7,9 @@ import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
-import { useElectricalTestingCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { useElectricalTestingCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
+import { fieldOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { isJobOnSiteStatus, normaliseJobStatus } from "../../../lib/jobManagement-core.mjs";
 import { makeId, useCloudLocalCollection } from "../../../lib/storage";
 import type { Customer, ElectricalCertificate, Job } from "../../../lib/models";
@@ -31,7 +33,7 @@ function blankCircuit(): CircuitTestResult {
 
 function blankRecord(jobId = "", customerId?: string): ElectricalTestingRecord {
   const now = new Date().toISOString();
-  return { id: makeId("testing"), jobId, customerId, status: "Draft", inspectorName: "Jake", testDate: now.slice(0, 10), supplyDetails: "", earthingArrangement: "", circuits: [blankCircuit()], outstandingActions: [], generalNotes: "", createdAt: now, updatedAt: now };
+  return { id: makeId("testing"), jobId, customerId, status: "Draft", inspectorName: "", testDate: now.slice(0, 10), supplyDetails: "", earthingArrangement: "", circuits: [blankCircuit()], outstandingActions: [], generalNotes: "", createdAt: now, updatedAt: now };
 }
 
 export default function MobileTestingPage() {
@@ -39,17 +41,25 @@ export default function MobileTestingPage() {
   const customers = useCloudLocalCollection<Customer>("jr-os-customers");
   const certificates = useCloudLocalCollection<ElectricalCertificate>("jr-os-certificates");
   const records = useElectricalTestingCollection();
+  const team = useTeamCollection();
+  const identityState = useCloudIdentity();
   const [form, setForm] = useState<ElectricalTestingRecord>(() => blankRecord());
   const [actionText, setActionText] = useState("");
   const [message, setMessage] = useState("");
 
   const activeJobs = useMemo(() => jobs.items.filter((job) => normaliseJobStatus(job.status) === "Scheduled" || isJobOnSiteStatus(job.status)), [jobs.items]);
+  const operatorName = useMemo(() => fieldOperatorName({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
   const selectedJob = jobs.items.find((job) => job.id === form.jobId);
   const selectedCustomer = customers.items.find((customer) => customer.id === form.customerId);
   const linkedCertificate = certificates.items.find((certificate) => certificate.id === form.certificateId);
-  const warnings = validateTestingRecord(form);
-  const progress = testingProgress(form);
-  const summary = certificateReadySummary(form, selectedJob?.title ?? "", selectedCustomer?.name ?? "");
+  const effectiveForm = useMemo(() => ({ ...form, inspectorName: operatorName || form.inspectorName }), [form, operatorName]);
+  const warnings = validateTestingRecord(effectiveForm);
+  const progress = testingProgress(effectiveForm);
+  const summary = certificateReadySummary(effectiveForm, selectedJob?.title ?? "", selectedCustomer?.name ?? "");
 
   function chooseJob(jobId: string) {
     const job = jobs.items.find((item) => item.id === jobId);
@@ -67,7 +77,8 @@ export default function MobileTestingPage() {
   function saveRecord(event?: FormEvent) {
     event?.preventDefault();
     if (!form.jobId) { setMessage("Choose the active job before saving the testing record."); return; }
-    const record = { ...form, customerId: selectedJob?.customerId ?? form.customerId, updatedAt: new Date().toISOString() };
+    if (!operatorName) { setMessage("Your active team identity could not be resolved. Refresh your account before saving."); return; }
+    const record = { ...effectiveForm, customerId: selectedJob?.customerId ?? form.customerId, inspectorName: operatorName, updatedAt: new Date().toISOString() };
     persistRecord(record);
     setForm(record);
     setMessage("Testing draft saved locally. You can leave and resume it later.");
@@ -86,17 +97,22 @@ export default function MobileTestingPage() {
   }
 
   function markCertificateReady() {
+    if (!operatorName) {
+      setMessage("Your active team identity could not be resolved. Refresh your account before changing testing status.");
+      return;
+    }
     if (warnings.some((warning) => warning.severity === "Missing")) {
       setMessage("Complete the missing fields before marking this testing record ready for certificate preparation.");
       return;
     }
-    const record = { ...form, status: "Ready for certificate" as const, updatedAt: new Date().toISOString() };
+    const record = { ...effectiveForm, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: new Date().toISOString() };
     persistRecord(record);
     setForm(record);
     setMessage("Testing record marked ready for certificate preparation. Inspector review is still required.");
   }
 
   function sendSummaryToCertificate() {
+    if (!operatorName) { setMessage("Your active team identity could not be resolved. Refresh your account before sending testing evidence."); return; }
     if (!linkedCertificate) { setMessage("Choose an existing certificate before sending the testing summary."); return; }
     const now = new Date().toISOString();
     certificates.setItems((current) => current.map((certificate) => certificate.id === linkedCertificate.id ? {
@@ -108,13 +124,13 @@ export default function MobileTestingPage() {
       status: certificate.status === "Draft" ? "In progress" : certificate.status,
       updatedAt: now,
     } : certificate));
-    const record = { ...form, status: "Ready for certificate" as const, updatedAt: now };
+    const record = { ...effectiveForm, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: now };
     persistRecord(record);
     setForm(record);
     setMessage(`Testing summary added to ${linkedCertificate.number}. Review and transfer the results into the appropriate certificate fields.`);
   }
 
-  const ready = jobs.isReady && customers.isReady && certificates.isReady && records.isReady;
+  const ready = jobs.isReady && customers.isReady && certificates.isReady && records.isReady && team.isReady && identityState.isReady;
   if (!ready) return <Card>Loading electrical testing workspace…</Card>;
 
   return <div className="space-y-6">
@@ -133,7 +149,7 @@ export default function MobileTestingPage() {
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Active job</span><select required className={fieldClass} value={form.jobId} onChange={(event) => chooseJob(event.target.value)}><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}{form.jobId && !activeJobs.some((job) => job.id === form.jobId) ? <option value={form.jobId}>{selectedJob?.title ?? "Selected job"}</option> : null}</select></label>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked certificate</span><select className={fieldClass} value={form.certificateId ?? ""} onChange={(event) => setForm({ ...form, certificateId: event.target.value || undefined })}><option value="">Not linked yet</option>{certificates.items.filter((certificate) => !form.jobId || certificate.jobId === form.jobId).map((certificate) => <option key={certificate.id} value={certificate.id}>{certificate.number} · {certificate.type}</option>)}</select></label>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Status</span><select className={fieldClass} value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as TestingRecordStatus })}>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
-        <InputField label="Inspector" value={form.inspectorName} onChange={(event) => setForm({ ...form, inspectorName: event.target.value })} />
+        <InputField label="Inspector" value={operatorName || form.inspectorName} readOnly aria-readonly="true" />
         <InputField label="Test date" type="date" value={form.testDate} onChange={(event) => setForm({ ...form, testDate: event.target.value })} />
         <InputField label="Earthing arrangement" value={form.earthingArrangement} onChange={(event) => setForm({ ...form, earthingArrangement: event.target.value })} />
         <div className="md:col-span-2 xl:col-span-3"><TextareaField label="Supply details" value={form.supplyDetails} onChange={(event) => setForm({ ...form, supplyDetails: event.target.value })} /></div>
