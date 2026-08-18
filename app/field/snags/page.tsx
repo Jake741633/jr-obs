@@ -8,6 +8,7 @@ import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useJobsCollection, useJobTasksCollection, useJobTimelineCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { jobTaskTimelineEntry, transitionJobTask } from "../../../lib/jobTasks-core.mjs";
 import { prioritiseSnags, snagCategories, snagSummary } from "../../../lib/mobileSnagControl-core.mjs";
 import { makeId } from "../../../lib/storage";
@@ -21,6 +22,7 @@ export default function MobileSnagsPage() {
   const tasks = useJobTasksCollection();
   const timeline = useJobTimelineCollection();
   const team = useTeamCollection();
+  const identityState = useCloudIdentity();
   const [selectedJobId, setSelectedJobId] = useState("");
   const [form, setForm] = useState(blankForm);
   const [message, setMessage] = useState("");
@@ -29,8 +31,14 @@ export default function MobileSnagsPage() {
   const visibleJobId = selectedJobId || form.jobId || activeJobs[0]?.id || "";
   const visibleSnags = useMemo(() => prioritiseSnags(tasks.items.filter((task) => task.jobId === visibleJobId)), [tasks.items, visibleJobId]);
   const summary = useMemo(() => snagSummary(tasks.items, visibleJobId), [tasks.items, visibleJobId]);
+  const cloudFieldMode = identityState.mode !== "local";
+  const operatorMember = useMemo(() => {
+    const identityEmail = identityState.identity?.email?.trim().toLowerCase();
+    if (!identityEmail) return undefined;
+    return team.items.find((member) => member.status === "Active" && member.email?.trim().toLowerCase() === identityEmail);
+  }, [identityState.identity?.email, team.items]);
 
-  const ready = [jobs, tasks, timeline, team].every((collection) => collection.isReady);
+  const ready = [jobs, tasks, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
   if (!ready) return <Card>Loading mobile snag control…</Card>;
 
   function createSnag(event: FormEvent) {
@@ -38,6 +46,7 @@ export default function MobileSnagsPage() {
     const jobId = form.jobId || visibleJobId;
     if (!jobId) return setMessage("Choose a job before creating a snag.");
     if (!form.title.trim()) return setMessage("Enter a short snag title.");
+    if (cloudFieldMode && !operatorMember) return setMessage("Your active team identity could not be resolved. Refresh your account before creating a snag.");
     const now = new Date().toISOString();
     const snag: JobTask = {
       id: makeId("snag"),
@@ -47,7 +56,7 @@ export default function MobileSnagsPage() {
       description: form.description.trim(),
       category: form.category,
       priority: form.priority,
-      assignedTo: form.assignedTo || undefined,
+      assignedTo: cloudFieldMode ? operatorMember?.id : form.assignedTo || undefined,
       dueDate: form.dueDate,
       status: "Open",
       photos: [],
@@ -55,23 +64,29 @@ export default function MobileSnagsPage() {
       createdAt: now,
       updatedAt: now,
     };
+    const completedBy = cloudFieldMode ? operatorMember?.name || "" : "Mobile Snag Control";
     tasks.setItems((current) => [snag, ...current]);
-    timeline.setItems((current) => [{ id: makeId("timeline"), jobId, milestone: "Custom update", eventType: "Snag", sourceId: snag.id, sourceType: "JobTask", note: `Snag created · ${snag.title}.`, completedBy: "Mobile Snag Control", completedAt: now, createdAt: now }, ...current]);
+    timeline.setItems((current) => [{ id: makeId("timeline"), jobId, milestone: "Custom update", eventType: "Snag", sourceId: snag.id, sourceType: "JobTask", note: `Snag created · ${snag.title}.`, completedBy, completedAt: now, createdAt: now }, ...current]);
     setSelectedJobId(jobId);
     setForm({ ...blankForm, jobId });
     setMessage(`${snag.title} added to the job snag list.`);
   }
 
   function changeStatus(task: JobTask, nextStatus: "In progress" | "Completed" | "Open") {
+    if (cloudFieldMode && (!operatorMember || task.assignedTo !== operatorMember.id)) {
+      setMessage("Only snags assigned to your active field account can be updated here.");
+      return;
+    }
     const now = new Date().toISOString();
     const updated = transitionJobTask({ task, nextStatus, now });
+    const completedBy = cloudFieldMode ? operatorMember?.name || "" : "Mobile Snag Control";
     tasks.setItems((current) => current.map((item) => item.id === task.id ? updated : item));
-    timeline.setItems((current) => [jobTaskTimelineEntry({ task, fromStatus: task.status, toStatus: nextStatus, timelineId: makeId("timeline"), completedBy: "Mobile Snag Control", now }), ...current]);
+    timeline.setItems((current) => [jobTaskTimelineEntry({ task, fromStatus: task.status, toStatus: nextStatus, timelineId: makeId("timeline"), completedBy, now }), ...current]);
     setMessage(`${task.title} marked ${nextStatus.toLowerCase()}.`);
   }
 
   return <div className="space-y-5 pb-24 sm:space-y-6 sm:pb-0">
-    <PageHeader eyebrow="Job Management Pro" title="Mobile snag control" description="Capture site defects, assign responsibility and close snags from your phone using the existing job task workflow." />
+    <PageHeader eyebrow="Job Management Pro" title="Mobile snag control" description="Capture site defects, track responsibility and close snags assigned to your field account using the existing job task workflow." />
 
     <Card>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job snag list</span><select value={visibleJobId} onChange={(event) => { setSelectedJobId(event.target.value); setForm((current) => ({ ...current, jobId: event.target.value })); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
@@ -93,7 +108,7 @@ export default function MobileSnagsPage() {
         <InputField label="Snag title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="Loose socket, missing label…" />
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value as JobTaskCategory })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">{snagCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select></label>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Priority</span><select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as JobPriority })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">{["Low", "Normal", "High", "Urgent"].map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Assigned to</span><select value={form.assignedTo} onChange={(event) => setForm({ ...form, assignedTo: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Unassigned</option>{team.items.filter((member) => member.status === "Active").map((member) => <option key={member.id} value={member.id}>{member.name} · {member.role}</option>)}</select></label>
+        {cloudFieldMode ? <InputField label="Assigned to" value={operatorMember?.name || "Resolving active engineer…"} readOnly aria-readonly="true" /> : <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Assigned to</span><select value={form.assignedTo} onChange={(event) => setForm({ ...form, assignedTo: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Unassigned</option>{team.items.filter((member) => member.status === "Active").map((member) => <option key={member.id} value={member.id}>{member.name} · {member.role}</option>)}</select></label>}
         <InputField label="Due date" type="date" value={form.dueDate} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} />
         <div className="md:col-span-2"><TextareaField label="Description" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></div>
         <div className="md:col-span-2"><TextareaField label="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Location, trade responsible or access details…" /></div>
