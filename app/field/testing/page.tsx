@@ -111,23 +111,18 @@ export default function MobileTestingPage() {
     setMessage("Testing record marked ready for certificate preparation. Inspector review is still required.");
   }
 
-  function sendSummaryToCertificate() {
-    if (!operatorName) { setMessage("Your active team identity could not be resolved. Refresh your account before sending testing evidence."); return; }
-    if (!linkedCertificate) { setMessage("Choose an existing certificate before sending the testing summary."); return; }
+  function prepareCertificateSummary() {
+    if (!operatorName) { setMessage("Your active team identity could not be resolved. Refresh your account before preparing testing evidence."); return; }
+    if (!linkedCertificate) { setMessage("Choose an existing certificate before preparing the testing summary."); return; }
+    if (warnings.some((warning) => warning.severity === "Missing")) {
+      setMessage("Complete the missing fields before preparing testing evidence for a certificate.");
+      return;
+    }
     const now = new Date().toISOString();
-    certificates.setItems((current) => current.map((certificate) => certificate.id === linkedCertificate.id ? {
-      ...certificate,
-      customerId: form.customerId ?? certificate.customerId,
-      jobId: form.jobId,
-      installationAddress: certificate.installationAddress || selectedJob?.siteAddress || "",
-      description: [certificate.description.trim(), "Certificate-ready testing summary:", summary].filter(Boolean).join("\n\n"),
-      status: certificate.status === "Draft" ? "In progress" : certificate.status,
-      updatedAt: now,
-    } : certificate));
     const record = { ...effectiveForm, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: now };
     persistRecord(record);
     setForm(record);
-    setMessage(`Testing summary added to ${linkedCertificate.number}. Review and transfer the results into the appropriate certificate fields.`);
+    setMessage(`Testing summary prepared for ${linkedCertificate.number}. The certificate has not been changed; open Certificates to review and transfer the results.`);
   }
 
   const ready = jobs.isReady && customers.isReady && certificates.isReady && records.isReady && team.isReady && identityState.isReady;
@@ -181,7 +176,7 @@ export default function MobileTestingPage() {
       <Card><h2 className="font-bold">Outstanding actions</h2><div className="mt-4 flex gap-2"><input className={fieldClass} value={actionText} onChange={(event) => setActionText(event.target.value)} placeholder="Retest circuit, confirm device details…" /><Button type="button" onClick={addAction}>Add</Button></div><div className="mt-3 space-y-2">{form.outstandingActions.map((action, index) => <div key={`${action}-${index}`} className="flex items-center justify-between rounded-xl border border-slate-800 px-3 py-2 text-sm"><span>{action}</span><button type="button" aria-label="Remove outstanding action" onClick={() => setForm((current) => ({ ...current, outstandingActions: current.outstandingActions.filter((_, itemIndex) => itemIndex !== index) }))} className="text-slate-500 hover:text-red-300"><Trash2 className="size-4" /></button></div>)}</div><div className="mt-4"><TextareaField label="General testing notes" value={form.generalNotes} onChange={(event) => setForm({ ...form, generalNotes: event.target.value })} /></div></Card>
     </section>
 
-    <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="flex items-center gap-2 font-bold"><FileText className="size-5 text-cyan-300" />Certificate-ready testing summary</h2><p className="mt-1 text-sm text-slate-400">This summary supports certificate preparation but is not itself a certificate.</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={sendSummaryToCertificate}>Send to linked certificate</Button><Link href="/certificates" className="rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold hover:border-cyan-400/50">Open certificates</Link></div></div><pre className="mt-4 whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">{summary}</pre></Card>
+    <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="flex items-center gap-2 font-bold"><FileText className="size-5 text-cyan-300" />Certificate-ready testing summary</h2><p className="mt-1 text-sm text-slate-400">This summary supports certificate preparation but is not itself a certificate. Field testing does not directly modify certificate records.</p></div><div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={prepareCertificateSummary}>Prepare for linked certificate</Button><Link href="/certificates" className="rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold hover:border-cyan-400/50">Open certificates</Link></div></div><pre className="mt-4 whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">{summary}</pre></Card>
 
     <section className="space-y-3"><div><h2 className="text-xl font-bold">Saved testing drafts</h2><p className="text-sm text-slate-400">Resume records stored on this device.</p></div>{records.items.length ? records.items.map((record) => <Card key={record.id}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{record.status} · {testingProgress(record)}%</p><h3 className="mt-1 font-bold">{jobs.items.find((job) => job.id === record.jobId)?.title ?? "Linked job"}</h3><p className="mt-1 text-sm text-slate-400">{record.circuits.length} circuit result{record.circuits.length === 1 ? "" : "s"} · updated {new Date(record.updatedAt).toLocaleString("en-GB")}</p></div><Button type="button" variant="secondary" onClick={() => resume(record)}><ClipboardCheck className="mr-2 size-4" />Resume</Button></div></Card>) : <Card>No testing drafts saved yet.</Card>}</section>
   </div>;
