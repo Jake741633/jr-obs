@@ -5,7 +5,7 @@ import { fieldOperatorName } from "../lib/siteDiaryIdentity-core.mjs";
 
 const page = readFileSync(new URL("../app/field/testing/page.tsx", import.meta.url), "utf8");
 
-test("field operator identity resolves the signed-in active team member", () => {
+test("field operator identity resolves only one signed-in active team member", () => {
   const teamMembers = [
     { name: "Office User", email: "office@example.com", role: "Office", status: "Active" },
     { name: "Field Engineer", email: "FIELD@example.com", role: "Electrician", status: "Active" },
@@ -21,7 +21,17 @@ test("field operator identity resolves the signed-in active team member", () => 
     identity: { email: "former@example.com" },
     teamMembers,
     mode: "cloud",
-  }), "former@example.com");
+  }), "");
+  assert.equal(fieldOperatorName({
+    identity: { email: "missing@example.com" },
+    teamMembers,
+    mode: "cloud",
+  }), "");
+  assert.equal(fieldOperatorName({
+    identity: { email: "field@example.com" },
+    teamMembers: [...teamMembers, { name: "Duplicate", email: "field@example.com", role: "Electrician", status: "Active" }],
+    mode: "cloud",
+  }), "");
 });
 
 test("mobile testing binds inspector attribution to active account identity", () => {
