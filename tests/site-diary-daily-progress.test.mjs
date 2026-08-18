@@ -8,6 +8,7 @@ import {
   normaliseDailyProgress,
 } from "../lib/siteDiaryDailyProgress-core.mjs";
 import { siteDiaryAttentionItems, siteDiaryAttentionSummary } from "../lib/siteDiaryAttention-core.mjs";
+import { siteDiaryOperatorName } from "../lib/siteDiaryIdentity-core.mjs";
 
 const page = readFileSync(new URL("../app/field/site-diary/page.tsx", import.meta.url), "utf8");
 const navigation = readFileSync(new URL("../components/navigation.ts", import.meta.url), "utf8");
@@ -48,6 +49,40 @@ test("daily progress sign-off and warnings remain explicit", () => {
   assert.deepEqual(dailyProgressWarnings({ delays: "Access delayed", issuesAndRisks: "Open floor void", followUpActions: "Call builder", engineerSignatureName: "", engineerSignedAt: "" }), ["Delay recorded", "H&S or site issue recorded", "Follow-up action outstanding", "Engineer signature missing"]);
 });
 
+test("site diary attribution resolves only the signed-in active team member", () => {
+  const teamMembers = [
+    { name: "Office User", email: "office@example.com", role: "Office", status: "Active" },
+    { name: "Field Engineer", email: "FIELD@example.com", role: "Electrician", status: "Active" },
+    { name: "Former Engineer", email: "former@example.com", role: "Electrician", status: "Inactive" },
+  ];
+
+  assert.equal(siteDiaryOperatorName({
+    identity: { email: " field@example.com " },
+    teamMembers,
+    mode: "cloud",
+  }), "Field Engineer");
+  assert.equal(siteDiaryOperatorName({
+    identity: { email: "former@example.com" },
+    teamMembers,
+    mode: "cloud",
+  }), "former@example.com");
+  assert.equal(siteDiaryOperatorName({
+    identity: { email: "unknown@example.com" },
+    teamMembers,
+    mode: "cloud",
+  }), "unknown@example.com");
+});
+
+test("local site diary attribution prefers the active owner without inventing a person", () => {
+  const teamMembers = [
+    { name: "Electrician", email: "spark@example.com", role: "Electrician", status: "Active" },
+    { name: "Business Owner", email: "owner@example.com", role: "Owner", status: "Active" },
+  ];
+
+  assert.equal(siteDiaryOperatorName({ identity: null, teamMembers, mode: "local" }), "Business Owner");
+  assert.equal(siteDiaryOperatorName({ identity: null, teamMembers: [], mode: "local" }), "");
+});
+
 test("mobile site diary reuses cloud-aware collections and existing job timeline", () => {
   assert.match(page, /useSiteDiariesCollection\(\)/);
   assert.match(page, /useJobTimelineCollection\(\)/);
@@ -56,6 +91,17 @@ test("mobile site diary reuses cloud-aware collections and existing job timeline
   assert.match(page, /type="button"/);
   assert.match(page, /Save daily progress/);
   assert.match(navigation, /\["Mobile Site Diary", "\/field\/site-diary"\]/);
+});
+
+test("mobile site diary binds author attribution to the live account identity", () => {
+  assert.match(page, /useCloudIdentity\(\)/);
+  assert.match(page, /siteDiaryOperatorName\(\{/);
+  assert.match(page, /completedBy: operatorName/);
+  assert.match(page, /identityState\.isReady/);
+  assert.match(page, /label="Completed by" value=\{operatorName\} readOnly aria-readonly="true"/);
+  assert.doesNotMatch(page, /completedBy: "Jake"/);
+  assert.doesNotMatch(page, /form\.completedBy/);
+  assert.doesNotMatch(page, /useEffect/);
 });
 
 test("site diary attention items retain source links and prioritise safety and delays", () => {
