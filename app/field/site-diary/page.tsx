@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { CheckCircle2, ClipboardList, HardHat, PackageCheck, ShieldAlert, UsersRound } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -36,7 +36,6 @@ const blankForm = {
   startedAt: "",
   finishedAt: "",
   breakMinutes: "0",
-  completedBy: "",
   staffPresent: [] as string[],
   otherStaffPresent: "",
   weather: "",
@@ -73,11 +72,6 @@ export default function MobileSiteDiaryPage() {
     mode: identityState.mode,
   }), [identityState.identity, identityState.mode, team.items]);
   const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
-
-  useEffect(() => {
-    if (!operatorName) return;
-    setForm((current) => current.completedBy ? current : { ...current, completedBy: operatorName });
-  }, [operatorName]);
 
   function toggleStaff(memberId: string) {
     setForm((current) => ({
@@ -138,7 +132,7 @@ export default function MobileSiteDiaryPage() {
     timeline.setItems((current) => [timelineEntry, ...current]);
     const warningCount = dailyProgressWarnings(entry).length;
     setMessage(`Daily progress saved and added to the job timeline${warningCount ? ` with ${warningCount} action${warningCount === 1 ? "" : "s"} to review` : ""}.`);
-    setForm({ ...blankForm, jobId: form.jobId, completedBy: operatorName, workDate: today() });
+    setForm({ ...blankForm, jobId: form.jobId, workDate: today() });
   }
 
   if (!ready) return <Card>Loading mobile site diary…</Card>;
@@ -152,7 +146,7 @@ export default function MobileSiteDiaryPage() {
       <Card className="space-y-4">
         <h2 className="flex items-center gap-2 font-semibold"><ClipboardList className="size-5 text-cyan-300" />Job and working time</h2>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
-        <div className="grid gap-3 sm:grid-cols-2"><InputField label="Work date" type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.target.value })} /><InputField label="Completed by" value={form.completedBy} readOnly aria-readonly="true" /></div>
+        <div className="grid gap-3 sm:grid-cols-2"><InputField label="Work date" type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.target.value })} /><InputField label="Completed by" value={operatorName} readOnly aria-readonly="true" /></div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3"><InputField label="Started" type="time" value={form.startedAt} onChange={(event) => setForm({ ...form, startedAt: event.target.value })} /><InputField label="Finished" type="time" value={form.finishedAt} onChange={(event) => setForm({ ...form, finishedAt: event.target.value })} /><div className="col-span-2 sm:col-span-1"><InputField label="Break minutes" type="number" min="0" value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /></div></div>
         <div className="grid grid-cols-2 gap-2"><Button type="button" variant="secondary" onClick={() => setForm((current) => ({ ...current, startedAt: nowTime() }))}>Set arrival</Button><Button type="button" variant="secondary" onClick={() => setForm((current) => ({ ...current, finishedAt: nowTime() }))}>Set departure</Button></div>
       </Card>
