@@ -71,9 +71,11 @@ export default function MobileSiteDiaryPage() {
     teamMembers: team.items,
     mode: identityState.mode,
   }), [identityState.identity, identityState.mode, team.items]);
+  const serverBoundLabour = identityState.mode !== "local";
   const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
 
   function toggleStaff(memberId: string) {
+    if (serverBoundLabour) return;
     setForm((current) => ({
       ...current,
       staffPresent: current.staffPresent.includes(memberId)
@@ -97,7 +99,7 @@ export default function MobileSiteDiaryPage() {
       finishedAt: form.finishedAt,
       breakMinutes: Math.max(0, Number(form.breakMinutes || 0)),
       completedBy: operatorName,
-      staffPresent: form.staffPresent,
+      staffPresent: serverBoundLabour ? [] : form.staffPresent,
       otherStaffPresent: form.otherStaffPresent.trim(),
       workCompleted: form.workCompleted.trim(),
       delays: form.delays.trim(),
@@ -153,8 +155,8 @@ export default function MobileSiteDiaryPage() {
 
       <Card className="space-y-4">
         <h2 className="flex items-center gap-2 font-semibold"><UsersRound className="size-5 text-cyan-300" />Labour on site</h2>
-        <div className="grid gap-2">{team.items.filter((member) => member.status === "Active").map((member) => <button key={member.id} type="button" onClick={() => toggleStaff(member.id)} className="flex min-h-12 items-center justify-between rounded-xl border border-slate-700 px-4 text-left text-sm"><span>{member.name} · {member.role}</span>{form.staffPresent.includes(member.id) ? <CheckCircle2 className="size-5 text-emerald-300" /> : <span className="size-5 rounded-full border border-slate-600" />}</button>)}</div>
-        <InputField label="Other labour / subcontractors" value={form.otherStaffPresent} onChange={(event) => setForm({ ...form, otherStaffPresent: event.target.value })} />
+        {serverBoundLabour ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-100"><p className="font-semibold">Recorded engineer: {operatorName}</p><p className="mt-1 text-xs text-cyan-100/70">Cloud diaries bind internal staff presence to the authenticated engineer. Record any additional electricians, apprentices or subcontractors below.</p></div> : <div className="grid gap-2">{team.items.filter((member) => member.status === "Active").map((member) => <button key={member.id} type="button" onClick={() => toggleStaff(member.id)} className="flex min-h-12 items-center justify-between rounded-xl border border-slate-700 px-4 text-left text-sm"><span>{member.name} · {member.role}</span>{form.staffPresent.includes(member.id) ? <CheckCircle2 className="size-5 text-emerald-300" /> : <span className="size-5 rounded-full border border-slate-600" />}</button>)}</div>}
+        <InputField label="Additional labour / subcontractors" value={form.otherStaffPresent} onChange={(event) => setForm({ ...form, otherStaffPresent: event.target.value })} />
       </Card>
 
       <Card className="space-y-4">
