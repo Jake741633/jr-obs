@@ -6,7 +6,7 @@ const rolePages: Record<JrRole, string[]> = {
   owner: ["*"],
   admin: ["*"],
   office: ["/", "/menu", "/customers", "/builders", "/crm", "/leads", "/jobs", "/quotes", "/price-book", "/room-estimator", "/estimates", "/invoices", "/payments", "/expenses", "/materials", "/stock", "/purchases", "/planner", "/team", "/surveys", "/certificates", "/job-finance", "/finance-director", "/ai", "/cloud"],
-  electrician: ["/menu", "/jobs", "/planner", "/field", "/surveys", "/cloud"],
+  electrician: ["/menu", "/jobs", "/field", "/surveys", "/cloud"],
   customer: ["/customer-portal", "/cloud"],
 };
 
