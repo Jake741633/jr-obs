@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   CUSTOMER_PROJECTION_CACHE_GENERATION,
+  ELECTRICIAN_CUSTOMER_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_VARIATION_TIMELINE_NOTE,
   roleProjectionCacheGeneration,
@@ -120,8 +121,14 @@ test("role projection cache generations fail closed on the first upgraded offlin
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "electrician", mode: "migration", generation: "old" }), "purge");
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "electrician", mode: "cloud", generation: ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION }), "keep");
   assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-jobs", role: "electrician" }), ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION);
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-customers", role: "electrician", mode: "cloud" }), "purge");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-customers", role: "electrician", mode: "migration", generation: "old" }), "purge");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-customers", role: "electrician", mode: "cloud", generation: ELECTRICIAN_CUSTOMER_PROJECTION_CACHE_GENERATION }), "keep");
+  assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-customers", role: "electrician" }), ELECTRICIAN_CUSTOMER_PROJECTION_CACHE_GENERATION);
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "office", mode: "cloud" }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-customers", role: "office", mode: "cloud" }), "keep");
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "electrician", mode: "local" }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-customers", role: "electrician", mode: "local" }), "keep");
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "electrician", mode: "cloud" }), "keep");
   assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-surveys", role: "electrician" }), undefined);
 });
