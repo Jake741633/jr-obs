@@ -27,6 +27,7 @@ import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
 import { useJobVariationsCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { collectionCloudMutationRoute } from "../../../lib/cloud/fieldMutationPolicy-core.mjs";
 import { canEditFinance } from "../../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../../lib/jobManagement-core.mjs";
@@ -95,6 +96,7 @@ const blankDocument = {
 };
 
 const financeHandoffMessage = "Job completion is ready for office review. Final invoice creation is restricted to office roles.";
+const documentHandoffMessage = "Assigned job documents remain available to review. Contact the office to arrange new files, links or removals until a dedicated secure field document route is available.";
 
 function documentTotal(document: PricingDocument | Invoice) {
   const subtotal = document.items.reduce((total, item) => total + item.quantity * item.unitPrice, 0);
@@ -106,6 +108,10 @@ export default function JobDetailPage() {
   const jobId = params.id;
   const identityState = useCloudIdentity();
   const financeRestricted = identityState.mode !== "local" && !canEditFinance(identityState.identity?.role);
+  const documentMutationRestricted = identityState.mode !== "local" && (
+    !canEditFinance(identityState.identity?.role)
+    || collectionCloudMutationRoute("job_documents", identityState.identity?.role, "jr-os-job-documents").kind !== "direct"
+  );
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
@@ -189,6 +195,7 @@ export default function JobDetailPage() {
 
   async function addDocument(event: FormEvent) {
     event.preventDefault();
+    if (documentMutationRestricted) { setDocumentError(documentHandoffMessage); return; }
     const name = documentForm.name.trim();
     const externalUrl = documentForm.externalUrl.trim();
     if (!name) { setDocumentError("Enter a document name."); return; }
@@ -229,6 +236,7 @@ export default function JobDetailPage() {
   }
 
   function deleteDocument(document: JobDocument) {
+    if (documentMutationRestricted) return;
     if (window.confirm(`Delete ${document.name} from this job?`)) documents.remove((item) => item.id === document.id);
   }
 
@@ -288,7 +296,7 @@ export default function JobDetailPage() {
     </section>
 
     <section className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job folder</p><h2 className="mt-1 text-2xl font-bold">Documents and records</h2><p className="mt-1 text-sm text-slate-400">Keep certificates, photos, drawings, RAMS, handover documents and site records together.</p></div><Button onClick={() => setShowDocumentForm((current) => !current)}><Plus className="mr-2 size-4" />{showDocumentForm ? "Close document" : "Add document"}</Button></div>
+      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job folder</p><h2 className="mt-1 text-2xl font-bold">Documents and records</h2><p className="mt-1 text-sm text-slate-400">Keep certificates, photos, drawings, RAMS, handover documents and site records together.</p></div>{documentMutationRestricted ? <p className="max-w-xl text-sm text-amber-200">{documentHandoffMessage}</p> : <Button onClick={() => setShowDocumentForm((current) => !current)}><Plus className="mr-2 size-4" />{showDocumentForm ? "Close document" : "Add document"}</Button>}</div>
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Card><p className="text-sm text-slate-400">Uploaded documents</p><p className="mt-2 text-3xl font-bold">{jobDocuments.length}</p></Card>
@@ -296,7 +304,7 @@ export default function JobDetailPage() {
         <Card><p className="text-sm text-slate-400">Linked invoices</p><p className="mt-2 text-3xl font-bold">{linkedInvoices.length}</p></Card>
       </div>
 
-      {showDocumentForm ? <Card><form onSubmit={addDocument} className="grid gap-4 md:grid-cols-2">
+      {!documentMutationRestricted && showDocumentForm ? <Card><form onSubmit={addDocument} className="grid gap-4 md:grid-cols-2">
         <InputField required label="Document name" value={documentForm.name} onChange={(event) => setDocumentForm({ ...documentForm, name: event.target.value })} />
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={documentForm.category} onChange={(event) => setDocumentForm({ ...documentForm, category: event.target.value as JobDocumentCategory })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{documentCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Upload file</span><input type="file" onChange={chooseFile} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1 file:text-slate-200" /><span className="text-xs font-normal text-slate-500">Local files must be under 2 MB.</span></label>
@@ -307,7 +315,7 @@ export default function JobDetailPage() {
         <div className="md:col-span-2 flex justify-end"><Button type="submit">Save document</Button></div>
       </form></Card> : null}
 
-      {jobDocuments.length === 0 ? <Card><div className="flex items-start gap-3"><FolderOpen className="mt-0.5 size-5 text-slate-500" /><div><h3 className="font-semibold">No uploaded documents yet</h3><p className="mt-1 text-sm text-slate-400">Add certificates, site photos, drawings, RAMS or external cloud links to build this job folder.</p></div></div></Card> : <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((document) => <Card key={document.id}><div className="flex items-start gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p><h3 className="mt-1 truncate font-bold">{document.name}</h3><p className="mt-1 text-xs text-slate-500">{new Date(document.uploadedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} · {document.uploadedBy}</p></div><button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div>{document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{document.dataUrl ? <a href={document.dataUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}{document.externalUrl ? <a href={document.externalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><ExternalLink className="size-4" />Open link</a> : null}</div></div></div></Card>)}</div>}
+      {jobDocuments.length === 0 ? <Card><div className="flex items-start gap-3"><FolderOpen className="mt-0.5 size-5 text-slate-500" /><div><h3 className="font-semibold">No uploaded documents yet</h3><p className="mt-1 text-sm text-slate-400">{documentMutationRestricted ? "No assigned job documents are currently available to review." : "Add certificates, site photos, drawings, RAMS or external cloud links to build this job folder."}</p></div></div></Card> : <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((document) => <Card key={document.id}><div className="flex items-start gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p><h3 className="mt-1 truncate font-bold">{document.name}</h3><p className="mt-1 text-xs text-slate-500">{new Date(document.uploadedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} · {document.uploadedBy}</p></div>{!documentMutationRestricted ? <button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div>{document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{document.dataUrl ? <a href={document.dataUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}{document.externalUrl ? <a href={document.externalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><ExternalLink className="size-4" />Open link</a> : null}</div></div></div></Card>)}</div>}
 
       {(linkedQuotes.length > 0 || linkedInvoices.length > 0) ? <div className="grid gap-4 md:grid-cols-2">
         <Card><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Commercial documents</p><h3 className="mt-1 text-lg font-bold">Quotes and estimates</h3></div><Link href="/quotes" className="text-sm text-cyan-300 hover:text-cyan-200">Open all</Link></div><div className="mt-4 space-y-2">{linkedQuotes.map((quote) => <Link key={quote.id} href={`/quotes/${quote.id}`} className="flex items-center justify-between rounded-xl bg-slate-950/60 px-3 py-3 hover:bg-slate-950"><span><span className="block font-semibold">{quote.number}</span><span className="text-xs text-slate-500">{quote.type} · {quote.status}</span></span><span className="font-semibold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(documentTotal(quote))}</span></Link>)}</div></Card>
