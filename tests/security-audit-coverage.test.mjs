@@ -61,6 +61,7 @@ const requiredSuites = [
   "field-site-diary-read-assignment.test.mjs",
   "field-site-diary-write-fidelity.test.mjs",
   "field-command-centre-route-boundary.test.mjs",
+  "field-job-workspace-navigation.test.mjs",
   "field-jobs-crud-boundary.test.mjs",
   "field-job-status-transition-boundary.test.mjs",
   "field-cloud-collection-projection.test.mjs",
