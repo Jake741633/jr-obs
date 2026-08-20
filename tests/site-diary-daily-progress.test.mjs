@@ -47,6 +47,7 @@ test("daily progress summary includes operational and safety detail", () => {
 test("daily progress sign-off and warnings remain explicit", () => {
   assert.deepEqual(dailyProgressSignOffState({ engineerSignatureName: "Jake", engineerSignedAt: "2026-08-02T09:00:00Z", customerSignOffName: "Client", customerSignedAt: "2026-08-02T09:05:00Z" }), { engineerSigned: true, customerSigned: true });
   assert.deepEqual(dailyProgressWarnings({ delays: "Access delayed", issuesAndRisks: "Open floor void", followUpActions: "Call builder", engineerSignatureName: "", engineerSignedAt: "" }), ["Delay recorded", "H&S or site issue recorded", "Follow-up action outstanding", "Engineer signature missing"]);
+  assert.deepEqual(dailyProgressWarnings({ delays: "Access delayed", engineerSignatureName: "", engineerSignedAt: "" }, { requireEngineerSignature: false }), ["Delay recorded"]);
 });
 
 test("site diary attribution resolves only the signed-in active team member", () => {

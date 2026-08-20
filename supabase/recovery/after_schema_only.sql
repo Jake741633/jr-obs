@@ -272,4 +272,9 @@ begin;
 \ir ../migrations/20260820163000_scope_field_site_diary_reads_to_assignments.sql
 commit;
 
+\echo 'Preserving bounded field site-diary progress detail'
+begin;
+\ir ../migrations/20260820170000_preserve_field_site_diary_progress.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
