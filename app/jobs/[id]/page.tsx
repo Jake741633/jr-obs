@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -26,11 +26,12 @@ import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
-import { useJobVariationsCollection } from "../../../lib/cloud/coreBusinessCollections";
-import { collectionCloudMutationRoute } from "../../../lib/cloud/fieldMutationPolicy-core.mjs";
+import { useJobVariationsCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../../lib/cloud/fieldMutationPolicy-core.mjs";
 import { canEditFinance } from "../../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../../lib/jobManagement-core.mjs";
+import { fieldOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { createInvoiceFromCompletedJob } from "../../../lib/workflow";
 import type {
@@ -97,6 +98,8 @@ const blankDocument = {
 
 const financeHandoffMessage = "Job completion is ready for office review. Final invoice creation is restricted to office roles.";
 const documentHandoffMessage = "Assigned job documents remain available to review. Contact the office to arrange new files, links or removals until a dedicated secure field document route is available.";
+const timelineHandoffMessage = "Field job timeline changes are limited to plain site notes. Milestone completion and removals are unavailable in this field workflow.";
+const timelineReadOnlyMessage = "This job timeline is read-only for your cloud role.";
 
 function documentTotal(document: PricingDocument | Invoice) {
   const subtotal = document.items.reduce((total, item) => total + item.quantity * item.unitPrice, 0);
@@ -107,6 +110,12 @@ export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = params.id;
   const identityState = useCloudIdentity();
+  const timelineMutationRoute = collectionCloudMutationRoute("cloud_collections", identityState.identity?.role, "jr-os-job-timeline");
+  const fieldTimelineMode = identityState.mode !== "local"
+    && fieldMutationRouteAllows(timelineMutationRoute, "upsert", "create");
+  const timelineMutationRestricted = identityState.mode !== "local"
+    && !fieldTimelineMode
+    && !canEditFinance(identityState.identity?.role);
   const financeRestricted = identityState.mode !== "local" && !canEditFinance(identityState.identity?.role);
   const documentMutationRestricted = identityState.mode !== "local" && (
     !canEditFinance(identityState.identity?.role)
@@ -120,6 +129,7 @@ export default function JobDetailPage() {
   const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const variations = useJobVariationsCollection();
+  const team = useTeamCollection();
   const bankDetailsStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
   const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
   const [showTimelineForm, setShowTimelineForm] = useState(false);
@@ -143,8 +153,13 @@ export default function JobDetailPage() {
   const linkedQuotes = quotes.items.filter((item) => item.jobId === jobId);
   const linkedInvoices = invoices.items.filter((item) => item.jobId === jobId);
   const linkedVariations = variations.items.filter((item) => item.jobId === jobId);
+  const fieldTimelineOperatorName = useMemo(() => fieldOperatorName({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
 
-  const isReady = identityState.isReady && jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady && variations.isReady && bankDetailsStore.isReady && paymentTermsStore.isReady;
+  const isReady = identityState.isReady && jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady && variations.isReady && team.isReady && bankDetailsStore.isReady && paymentTermsStore.isReady;
   if (!isReady) return <Card>Loading job…</Card>;
 
   if (!job) {
@@ -161,6 +176,28 @@ export default function JobDetailPage() {
 
   function addTimelineEntry(event: FormEvent) {
     event.preventDefault();
+    if (timelineMutationRestricted) { setTimelineError(timelineReadOnlyMessage); return; }
+    if (fieldTimelineMode) {
+      if (!fieldTimelineOperatorName) { setTimelineError("Your active team identity could not be resolved. Refresh your account before saving."); return; }
+      const note = timelineForm.note.trim().slice(0, 2000);
+      if (!note) { setTimelineError("Enter a site note before saving."); return; }
+      const now = new Date().toISOString();
+      const entry: JobTimelineEntry = {
+        id: makeId("timeline"),
+        jobId,
+        milestone: "Custom update",
+        eventType: "Note",
+        note,
+        completedBy: fieldTimelineOperatorName,
+        completedAt: now,
+        createdAt: now,
+      };
+      timeline.setItems((current) => [entry, ...current]);
+      setTimelineForm(blankEntry);
+      setTimelineError("");
+      setShowTimelineForm(false);
+      return;
+    }
     if (!timelineForm.completedAt) { setTimelineError("Choose the date and time this milestone was completed."); return; }
     const now = new Date().toISOString();
     const entry: JobTimelineEntry = {
@@ -179,11 +216,15 @@ export default function JobDetailPage() {
   }
 
   function addMilestoneNow(milestone: JobMilestoneType) {
+    if (fieldTimelineMode) { setTimelineError(timelineHandoffMessage); return; }
+    if (timelineMutationRestricted) { setTimelineError(timelineReadOnlyMessage); return; }
     const now = new Date().toISOString();
     timeline.setItems((current) => [{ id: makeId("timeline"), jobId, milestone, note: "", completedBy: "Jake", completedAt: now, createdAt: now }, ...current]);
   }
 
   function deleteEntry(entry: JobTimelineEntry) {
+    if (fieldTimelineMode) { setTimelineError(timelineHandoffMessage); return; }
+    if (timelineMutationRestricted) { setTimelineError(timelineReadOnlyMessage); return; }
     if (window.confirm(`Delete ${entry.milestone} from this job timeline?`)) timeline.remove((item) => item.id === entry.id);
   }
 
@@ -327,10 +368,10 @@ export default function JobDetailPage() {
       <div className="space-y-6">
         <Card><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Contacts</p><h2 className="mt-1 text-xl font-bold">Customer and builder</h2></div><User className="size-5 text-cyan-400" /></div><div className="mt-5 space-y-4 text-sm">{customer ? <div className="rounded-xl bg-slate-950/60 p-4"><p className="font-semibold">{customer.name}</p><p className="mt-1 text-slate-400">{customer.phone || "No phone"} · {customer.email || "No email"}</p><Link href={`/customers/${customer.id}`} className="mt-3 inline-block text-cyan-300 hover:text-cyan-200">Open customer</Link></div> : <p className="text-slate-400">No customer linked.</p>}{builder ? <div className="rounded-xl bg-slate-950/60 p-4"><p className="font-semibold">{builder.companyName}</p><p className="mt-1 text-slate-400">{builder.contactName} · {builder.phone || "No phone"}</p><Link href={`/builders/${builder.id}`} className="mt-3 inline-block text-cyan-300 hover:text-cyan-200">Open builder</Link></div> : null}</div></Card>
 
-        <Card><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Next step</p><h2 className="mt-1 text-xl font-bold">Suggested milestone</h2></div><CheckCircle2 className="size-5 text-cyan-400" /></div>{nextMilestone ? <div className="mt-5"><p className="text-sm text-slate-400">The next incomplete standard milestone is:</p><p className="mt-2 font-semibold">{nextMilestone}</p><Button className="mt-4" type="button" onClick={() => addMilestoneNow(nextMilestone)}>Mark complete now</Button></div> : <p className="mt-5 text-sm text-emerald-300">All standard workflow milestones are recorded.</p>}</Card>
+        <Card><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Next step</p><h2 className="mt-1 text-xl font-bold">Suggested milestone</h2></div><CheckCircle2 className="size-5 text-cyan-400" /></div>{nextMilestone ? <div className="mt-5"><p className="text-sm text-slate-400">The next incomplete standard milestone is:</p><p className="mt-2 font-semibold">{nextMilestone}</p>{fieldTimelineMode ? <p className="mt-4 text-sm text-amber-200">{timelineHandoffMessage}</p> : timelineMutationRestricted ? <p className="mt-4 text-sm text-amber-200">{timelineReadOnlyMessage}</p> : <Button className="mt-4" type="button" onClick={() => addMilestoneNow(nextMilestone)}>Mark complete now</Button>}</div> : <p className="mt-5 text-sm text-emerald-300">All standard workflow milestones are recorded.</p>}</Card>
       </div>
 
-      <Card><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Project timeline</p><h2 className="mt-1 text-xl font-bold">Milestones and activity</h2></div><Button type="button" onClick={() => setShowTimelineForm((current) => !current)}><Plus className="mr-2 size-4" />Add milestone</Button></div>{showTimelineForm ? <form className="mt-5 space-y-4" onSubmit={addTimelineEntry}><div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm text-slate-300"><span className="mb-2 block font-semibold">Milestone</span><select className="min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3" value={timelineForm.milestone} onChange={(event) => setTimelineForm((current) => ({ ...current, milestone: event.target.value as JobMilestoneType }))}>{milestones.map((milestone) => <option key={milestone}>{milestone}</option>)}</select></label><InputField label="Completed by" value={timelineForm.completedBy} onChange={(event) => setTimelineForm((current) => ({ ...current, completedBy: event.target.value }))} /><InputField label="Completed at" type="datetime-local" value={timelineForm.completedAt} onChange={(event) => setTimelineForm((current) => ({ ...current, completedAt: event.target.value }))} required /><TextareaField label="Note" value={timelineForm.note} onChange={(event) => setTimelineForm((current) => ({ ...current, note: event.target.value }))} /></div>{timelineError ? <p className="text-sm text-red-300">{timelineError}</p> : null}<div className="flex gap-3"><Button type="submit">Save milestone</Button><Button type="button" variant="secondary" onClick={() => setShowTimelineForm(false)}>Cancel</Button></div></form> : null}<div className="mt-5 space-y-3">{entries.length ? entries.map((entry) => <div key={entry.id} className="flex items-start justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4"><div className="flex gap-3"><div className="mt-1 rounded-full bg-cyan-500/10 p-2 text-cyan-300"><Clock3 className="size-4" /></div><div><p className="font-semibold">{entry.milestone}</p><p className="mt-1 text-xs text-slate-500">{new Date(entry.completedAt).toLocaleString("en-GB")} · {entry.completedBy}</p>{entry.note ? <p className="mt-2 text-sm text-slate-400">{entry.note}</p> : null}</div></div><button type="button" onClick={() => deleteEntry(entry)} className="text-slate-500 hover:text-red-300" aria-label={`Delete ${entry.milestone}`}><Trash2 className="size-4" /></button></div>) : <p className="text-sm text-slate-400">No milestones recorded yet.</p>}</div></Card>
+      <Card><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Project timeline</p><h2 className="mt-1 text-xl font-bold">Milestones and activity</h2></div>{timelineMutationRestricted ? <p className="max-w-md text-sm text-amber-200">{timelineReadOnlyMessage}</p> : <Button type="button" onClick={() => { setTimelineError(""); setShowTimelineForm((current) => !current); }}><Plus className="mr-2 size-4" />{fieldTimelineMode ? "Add site note" : "Add milestone"}</Button>}</div>{timelineError ? <p className="mt-4 text-sm text-red-300">{timelineError}</p> : null}{showTimelineForm && !timelineMutationRestricted ? <form className="mt-5 space-y-4" onSubmit={addTimelineEntry}>{fieldTimelineMode ? <div className="space-y-4"><TextareaField required maxLength={2000} label="Site note" value={timelineForm.note} onChange={(event) => setTimelineForm((current) => ({ ...current, note: event.target.value }))} /><div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm"><p className="font-semibold text-slate-200">Recorded by {fieldTimelineOperatorName || "Active team identity unavailable"}</p><p className="mt-1 text-slate-400">Your active team identity and completion time are set securely when the note is saved.</p></div></div> : <div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm text-slate-300"><span className="mb-2 block font-semibold">Milestone</span><select className="min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3" value={timelineForm.milestone} onChange={(event) => setTimelineForm((current) => ({ ...current, milestone: event.target.value as JobMilestoneType }))}>{milestones.map((milestone) => <option key={milestone}>{milestone}</option>)}</select></label><InputField label="Completed by" value={timelineForm.completedBy} onChange={(event) => setTimelineForm((current) => ({ ...current, completedBy: event.target.value }))} /><InputField label="Completed at" type="datetime-local" value={timelineForm.completedAt} onChange={(event) => setTimelineForm((current) => ({ ...current, completedAt: event.target.value }))} required /><TextareaField label="Note" value={timelineForm.note} onChange={(event) => setTimelineForm((current) => ({ ...current, note: event.target.value }))} /></div>}<div className="flex gap-3"><Button type="submit" disabled={fieldTimelineMode && !fieldTimelineOperatorName}>{fieldTimelineMode ? "Save site note" : "Save milestone"}</Button><Button type="button" variant="secondary" onClick={() => { setTimelineError(""); setShowTimelineForm(false); }}>Cancel</Button></div></form> : null}<div className="mt-5 space-y-3">{entries.length ? entries.map((entry) => <div key={entry.id} className="flex items-start justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4"><div className="flex gap-3"><div className="mt-1 rounded-full bg-cyan-500/10 p-2 text-cyan-300"><Clock3 className="size-4" /></div><div><p className="font-semibold">{entry.milestone}</p><p className="mt-1 text-xs text-slate-500">{new Date(entry.completedAt).toLocaleString("en-GB")} · {entry.completedBy}</p>{entry.note ? <p className="mt-2 text-sm text-slate-400">{entry.note}</p> : null}</div></div>{!fieldTimelineMode && !timelineMutationRestricted ? <button type="button" onClick={() => deleteEntry(entry)} className="text-slate-500 hover:text-red-300" aria-label={`Delete ${entry.milestone}`}><Trash2 className="size-4" /></button> : null}</div>) : <p className="text-sm text-slate-400">No milestones recorded yet.</p>}</div></Card>
     </div>
 
     <Card><div className="flex items-start gap-3"><Building2 className="mt-0.5 size-5 text-cyan-400" /><div><h2 className="font-semibold">Operational record</h2><p className="mt-1 text-sm text-slate-400">This page links the commercial source, customer, builder, timeline, documents and invoice lifecycle for one job.</p></div></div></Card>
