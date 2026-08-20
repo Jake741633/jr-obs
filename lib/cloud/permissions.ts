@@ -6,7 +6,7 @@ const rolePages: Record<JrRole, string[]> = {
   owner: ["*"],
   admin: ["*"],
   office: ["/", "/menu", "/customers", "/builders", "/crm", "/leads", "/jobs", "/quotes", "/price-book", "/room-estimator", "/estimates", "/invoices", "/payments", "/expenses", "/materials", "/stock", "/purchases", "/planner", "/team", "/surveys", "/certificates", "/job-finance", "/finance-director", "/ai", "/cloud"],
-  electrician: ["/", "/menu", "/jobs", "/planner", "/field", "/surveys", "/cloud"],
+  electrician: ["/menu", "/jobs", "/planner", "/field", "/surveys", "/cloud"],
   customer: ["/customer-portal", "/cloud"],
 };
 
@@ -37,6 +37,12 @@ export function canAccessPath(role: JrRole | undefined, path: string, email?: st
   if (isOperatorOnlyPath(path) && !isJrOsOperator(role, email)) return false;
   const allowed = rolePages[role];
   return allowed.includes("*") || allowed.some((entry) => path === entry || path.startsWith(`${entry}/`));
+}
+
+export function roleLandingPath(role: JrRole | undefined) {
+  if (role === "customer") return "/customer-portal";
+  if (role === "electrician") return "/field";
+  return "/";
 }
 
 export function canManageUsers(role: JrRole | undefined) {

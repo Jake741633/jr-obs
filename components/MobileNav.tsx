@@ -18,7 +18,10 @@ export function MobileNav() {
   const pathname = usePathname();
   const { identity, mode } = useCloudIdentity();
   const unrestricted = mode === "local" || (mode === "migration" && !identity);
-  const visible = mobileNavigation.filter((item) => item.href === "/menu" || unrestricted || canAccessPath(identity?.role, item.href));
+  const roleNavigation = identity?.role === "electrician"
+    ? mobileNavigation.map((item) => item.href === "/" ? { ...item, label: "Field", href: "/field" } : item)
+    : mobileNavigation;
+  const visible = roleNavigation.filter((item) => item.href === "/menu" || unrestricted || canAccessPath(identity?.role, item.href));
   const navigation = identity?.role === "customer"
     ? [{ label: "Portal", href: "/customer-portal", icon: Users }, { label: "Account", href: "/cloud", icon: Cloud }]
     : visible;
@@ -26,7 +29,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="Primary mobile navigation"
-      className={`fixed inset-x-0 bottom-0 z-40 grid border-t border-slate-800/90 bg-slate-950/95 px-1.5 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-12px_32px_rgba(2,6,23,.55)] backdrop-blur-xl lg:hidden ${navigation.length === 2 ? "grid-cols-2" : "grid-cols-5"}`}
+      className={`fixed inset-x-0 bottom-0 z-40 grid border-t border-slate-800/90 bg-slate-950/95 px-1.5 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-12px_32px_rgba(2,6,23,.55)] backdrop-blur-xl lg:hidden ${navigation.length === 2 ? "grid-cols-2" : navigation.length === 3 ? "grid-cols-3" : "grid-cols-5"}`}
     >
       {navigation.map(({ label, href, icon: Icon }) => {
         const primaryMatch = (itemHref: string) => itemHref === "/"
@@ -35,7 +38,7 @@ export function MobileNav() {
             ? pathname.startsWith("/quotes") || pathname.startsWith("/estimates")
             : pathname === itemHref || pathname.startsWith(`${itemHref}/`);
         const active = href === "/menu"
-          ? !mobileNavigation.filter((item) => item.href !== "/menu").some((item) => primaryMatch(item.href))
+          ? !roleNavigation.filter((item) => item.href !== "/menu").some((item) => primaryMatch(item.href))
           : primaryMatch(href);
         return (
           <Link
