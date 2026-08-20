@@ -27,6 +27,8 @@ import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
 import { useJobVariationsCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { canEditFinance } from "../../../lib/cloud/permissions";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../../lib/jobManagement-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { createInvoiceFromCompletedJob } from "../../../lib/workflow";
@@ -92,6 +94,8 @@ const blankDocument = {
   uploadedBy: "Jake",
 };
 
+const financeHandoffMessage = "Job completion is ready for office review. Final invoice creation is restricted to office roles.";
+
 function documentTotal(document: PricingDocument | Invoice) {
   const subtotal = document.items.reduce((total, item) => total + item.quantity * item.unitPrice, 0);
   return subtotal + (document.vatEnabled ? subtotal * (document.vatRate / 100) : 0);
@@ -100,6 +104,8 @@ function documentTotal(document: PricingDocument | Invoice) {
 export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = params.id;
+  const identityState = useCloudIdentity();
+  const financeRestricted = identityState.mode !== "local" && !canEditFinance(identityState.identity?.role);
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
@@ -132,7 +138,7 @@ export default function JobDetailPage() {
   const linkedInvoices = invoices.items.filter((item) => item.jobId === jobId);
   const linkedVariations = variations.items.filter((item) => item.jobId === jobId);
 
-  const isReady = jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady && variations.isReady && bankDetailsStore.isReady && paymentTermsStore.isReady;
+  const isReady = identityState.isReady && jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady && variations.isReady && bankDetailsStore.isReady && paymentTermsStore.isReady;
   if (!isReady) return <Card>Loading job…</Card>;
 
   if (!job) {
@@ -228,6 +234,7 @@ export default function JobDetailPage() {
 
   function generateInvoice() {
     if (!job) return;
+    if (financeRestricted) { setInvoiceMessage(financeHandoffMessage); return; }
     if (job.status !== "Complete") { setInvoiceMessage("Mark the job as Complete before generating its final invoice."); return; }
     if (linkedInvoices.length) { setInvoiceMessage(`${linkedInvoices[0].number} is already linked to this job.`); return; }
     const now = new Date().toISOString();
@@ -273,9 +280,9 @@ export default function JobDetailPage() {
     </Card>
 
     <section className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Project workflow</p><h2 className="mt-1 text-2xl font-bold">Quote → Job → Invoice → Payment</h2><p className="mt-1 text-sm text-slate-400">A live view built from the linked records, with no duplicate data entry.</p></div>{linkedInvoices.length ? <Link href="/invoices" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ReceiptText className="mr-2 size-4" />View invoice</Link> : <Button type="button" disabled={job.status !== "Complete"} onClick={generateInvoice}><ReceiptText className="mr-2 size-4" />Generate invoice</Button>}</div>
-      {invoiceMessage ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{invoiceMessage}</div> : null}
-      {job.status !== "Complete" && !linkedInvoices.length ? <p className="text-sm text-amber-300">Invoice generation unlocks when the job status is Complete.</p> : null}
+      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Project workflow</p><h2 className="mt-1 text-2xl font-bold">Quote → Job → Invoice → Payment</h2><p className="mt-1 text-sm text-slate-400">A live view built from the linked records, with no duplicate data entry.</p></div>{financeRestricted ? <p className="max-w-md text-sm text-amber-200">{financeHandoffMessage}</p> : linkedInvoices.length ? <Link href="/invoices" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ReceiptText className="mr-2 size-4" />View invoice</Link> : <Button type="button" disabled={job.status !== "Complete"} onClick={generateInvoice}><ReceiptText className="mr-2 size-4" />Generate invoice</Button>}</div>
+      {invoiceMessage ? <div className={`rounded-xl border px-4 py-3 text-sm ${financeRestricted ? "border-amber-500/20 bg-amber-500/5 text-amber-200" : "border-emerald-500/20 bg-emerald-500/5 text-emerald-300"}`}>{invoiceMessage}</div> : null}
+      {!financeRestricted && job.status !== "Complete" && !linkedInvoices.length ? <p className="text-sm text-amber-300">Invoice generation unlocks when the job status is Complete.</p> : null}
       <ProjectTimeline job={job} quote={sourceQuote} invoices={linkedInvoices} />
       {job.quoteSnapshot ? <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Accepted pricing snapshot</p><h3 className="mt-1 text-lg font-bold">{job.quoteSnapshot.quoteNumber}</h3><p className="mt-1 text-sm text-slate-500">{job.quoteSnapshot.items.length} copied labour, material and allowance line{job.quoteSnapshot.items.length === 1 ? "" : "s"}</p></div>{sourceQuote ? <Link href={`/quotes/${sourceQuote.id}`} className="text-sm font-semibold text-cyan-300 hover:text-cyan-200">Open source quote</Link> : null}</div>{job.quoteSnapshot.profitability ? <div className="mt-4 grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-slate-950/60 p-3"><p className="text-xs text-slate-500">Cost price</p><p className="mt-1 font-bold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.costPrice)}</p></div><div className="rounded-xl bg-slate-950/60 p-3"><p className="text-xs text-slate-500">Selling price</p><p className="mt-1 font-bold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.sellingPrice)}</p></div><div className="rounded-xl bg-emerald-500/5 p-3"><p className="text-xs text-slate-500">Expected profit</p><p className="mt-1 font-bold text-emerald-300">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.expectedProfit)}</p></div></div> : null}</Card> : null}
     </section>
