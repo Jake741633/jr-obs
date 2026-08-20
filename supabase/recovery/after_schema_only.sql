@@ -267,4 +267,9 @@ begin;
 \ir ../migrations/20260820160000_scope_field_timeline_reads_to_assignments.sql
 commit;
 
+\echo 'Scoping current and legacy field site-diary reads to assigned jobs'
+begin;
+\ir ../migrations/20260820163000_scope_field_site_diary_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
