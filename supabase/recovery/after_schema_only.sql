@@ -262,4 +262,9 @@ begin;
 \ir ../migrations/20260820153000_scope_field_job_document_reads_to_assignments.sql
 commit;
 
+\echo 'Scoping field timeline reads to assigned jobs'
+begin;
+\ir ../migrations/20260820160000_scope_field_timeline_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
