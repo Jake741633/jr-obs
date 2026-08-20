@@ -7,18 +7,15 @@ test("mobile readiness reports blockers and a percentage", () => {
   const result = buildMobileJobReadiness({
     hasSchedule: true,
     hasContact: true,
-    hasAcceptedPricing: true,
     hasMaterials: false,
-    hasRams: false,
     hasTesting: true,
-    customerHref: "/customers/cus-1",
-    pricingHref: "/quotes/quote-1",
+    jobHref: "/jobs/job-1",
   });
-  assert.equal(result.readyCount, 4);
-  assert.equal(result.totalCount, 6);
-  assert.equal(result.percentage, 67);
-  assert.deepEqual(result.blockers.map((item) => item.id), ["materials", "rams"]);
-  assert.equal(result.checks.find((item) => item.id === "contact").href, "/customers/cus-1");
+  assert.equal(result.readyCount, 3);
+  assert.equal(result.totalCount, 4);
+  assert.equal(result.percentage, 75);
+  assert.deepEqual(result.blockers.map((item) => item.id), ["materials"]);
+  assert.equal(result.checks.find((item) => item.id === "contact").href, "/jobs/job-1");
 });
 
 test("today and on-site jobs sort before future work", () => {
