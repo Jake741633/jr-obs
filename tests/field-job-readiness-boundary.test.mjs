@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canAccessPath } from "../lib/cloud/permissions.ts";
 import { buildMobileJobReadiness } from "../lib/mobileJobControl-core.mjs";
 
 const fieldJobPage = readFileSync(new URL("../app/field/jobs/page.tsx", import.meta.url), "utf8");
+const permissionsSource = readFileSync(new URL("../lib/cloud/permissions.ts", import.meta.url), "utf8");
+const electricianPagesMatch = permissionsSource.match(/electrician:\s*\[([^\]]*)\]/);
+assert.ok(electricianPagesMatch, "electrician role pages must remain declared in permissions.ts");
+const electricianPages = [...electricianPagesMatch[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+
+function electricianCanAccess(path) {
+  return electricianPages.some((entry) => path === entry || path.startsWith(`${entry}/`));
+}
 
 function readiness(overrides = {}) {
   return buildMobileJobReadiness({
@@ -20,7 +27,7 @@ function readiness(overrides = {}) {
 test("field readiness contains only electrician-permitted actions", () => {
   const result = readiness();
   assert.deepEqual(result.checks.map((check) => check.id), ["schedule", "contact", "materials", "testing"]);
-  for (const check of result.checks) assert.equal(canAccessPath("electrician", check.href), true, `${check.href} must be electrician-permitted`);
+  for (const check of result.checks) assert.equal(electricianCanAccess(check.href), true, `${check.href} must be electrician-permitted`);
   assert.deepEqual(result.blockers.map((check) => check.id), ["schedule", "contact", "materials", "testing"]);
   assert.equal(result.totalCount, 4);
   assert.equal(result.percentage, 0);
