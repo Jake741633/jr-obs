@@ -27,7 +27,7 @@ test("electricians use the dedicated field landing page instead of the owner com
   assert.equal(canAccessPath("electrician", "/field"), true);
   assert.equal(canAccessPath("electrician", "/field/site-diary"), true);
   assert.equal(roleLandingPath("electrician"), "/field");
-  assert.match(accessGuard, /href=\{roleLandingPath\(identity\.role\)\}/);
+  assert.match(accessGuard, /href=\{handoff\?\.href \?\? roleLandingPath\(identity\.role\)\}/);
 });
 
 test("field mobile navigation replaces the owner home link with the field workspace", () => {
