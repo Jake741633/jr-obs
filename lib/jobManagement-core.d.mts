@@ -2,6 +2,9 @@ import type { CanonicalJobStatus, CanonicalVariationStatus, Job, JobStatus, JobT
 
 export const canonicalJobStatuses: ReadonlyArray<CanonicalJobStatus> & { includes(searchElement: string, fromIndex?: number): boolean };
 export function normaliseJobStatus(status: JobStatus | string): CanonicalJobStatus;
+export function normaliseFieldJobStatus(status: JobStatus | string): CanonicalJobStatus;
+export function fieldJobStatusTransitions(status: JobStatus | string): readonly CanonicalJobStatus[];
+export function fieldJobStatusTransitionAllowed(currentStatus: JobStatus | string, requestedStatus: JobStatus | string): boolean;
 export function isCanonicalJobStatus(status: string): status is CanonicalJobStatus;
 export function isJobClosedStatus(status: JobStatus | string): boolean;
 export function isJobInactiveStatus(status: JobStatus | string): boolean;
