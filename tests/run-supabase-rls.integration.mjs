@@ -221,6 +221,51 @@ const secureJobReadCoverage = `${secureJobReadAnchor}
     await expectAllowed(crossTenantFieldJob, "Cross-tenant field job query should execute safely");
     assert.deepEqual(crossTenantFieldJob.payload, [], "Another organisation must not read the assigned field job");
 
+    const assignedJobDocument = source("assigned-job-document-a");
+    const unassignedJobDocument = source("unassigned-job-document-a");
+    const deletedJobDocument = source("deleted-job-document-a");
+    const crossTenantJobDocument = source("cross-tenant-job-document-b");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "job_documents", typedRecord(organisationA, assignedJobDocument, null, jobA, { name: "Assigned site photo", category: "Photo" })),
+      "Office should create a production-shaped assigned job document without a customer envelope",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "job_documents", typedRecord(organisationA, unassignedJobDocument, null, otherCustomerJobA, { name: "Unassigned RAMS", category: "RAMS" })),
+      "Office should create an unassigned job document fixture",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "job_documents", typedRecord(organisationA, deletedJobDocument, null, jobA, { name: "Deleted site note", category: "Site note" })),
+      "Office should create a job document before soft-delete testing",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.B.office, "job_documents", typedRecord(organisationB, crossTenantJobDocument, null, jobB, { name: "Tenant B drawing", category: "Drawing" })),
+      "Tenant B office should create a cross-tenant job document fixture",
+    );
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "job_documents", \`source_id=eq.\${deletedJobDocument}\`, { deleted_at: new Date().toISOString() }),
+      "Owner should soft-delete the job document fixture",
+    );
+
+    const assignedFieldDocument = await listRecords(accounts.A.electrician, "job_documents", \`select=source_id,payload&source_id=eq.\${assignedJobDocument}\`);
+    await expectAllowed(assignedFieldDocument, "Assigned electrician job-document query should execute");
+    assert.equal(assignedFieldDocument.payload.length, 1, "Assigned electrician should retain the production-shaped null-customer job document");
+    assert.equal(assignedFieldDocument.payload[0].payload.name, "Assigned site photo");
+    const coworkerAssignedFieldDocument = await listRecords(accounts.A.coworker, "job_documents", \`select=source_id&source_id=eq.\${assignedJobDocument}\`);
+    await expectAllowed(coworkerAssignedFieldDocument, "Co-assigned electrician job-document query should execute");
+    assert.equal(coworkerAssignedFieldDocument.payload.length, 1, "Co-assigned electrician should retain the assigned job document");
+    const unassignedFieldDocument = await listRecords(accounts.A.electrician, "job_documents", \`select=source_id&source_id=eq.\${unassignedJobDocument}\`);
+    await expectAllowed(unassignedFieldDocument, "Unassigned same-tenant job-document query should execute safely");
+    assert.deepEqual(unassignedFieldDocument.payload, [], "Electrician must not read an unassigned same-tenant job document");
+    const deletedFieldDocument = await listRecords(accounts.A.electrician, "job_documents", \`select=source_id&source_id=eq.\${deletedJobDocument}\`);
+    await expectAllowed(deletedFieldDocument, "Deleted job-document query should execute safely");
+    assert.deepEqual(deletedFieldDocument.payload, [], "Electrician must not read a deleted job document");
+    const crossTenantFieldDocument = await listRecords(accounts.A.electrician, "job_documents", \`select=source_id&source_id=eq.\${crossTenantJobDocument}\`);
+    await expectAllowed(crossTenantFieldDocument, "Cross-tenant job-document query should execute safely");
+    assert.deepEqual(crossTenantFieldDocument.payload, [], "Assigned electrician must not read another organisation's job document");
+    const officeUnassignedDocument = await listRecords(accounts.A.office, "job_documents", \`select=source_id&source_id=eq.\${unassignedJobDocument}\`);
+    await expectAllowed(officeUnassignedDocument, "Office unassigned job-document query should execute");
+    assert.equal(officeUnassignedDocument.payload.length, 1, "Office should retain unassigned job document access");
+
     const customerCommercialJob = await listRecords(accounts.A.customer, "jobs", \`select=source_id,payload&source_id=eq.\${jobA}\`);
     await expectAllowed(customerCommercialJob, "Customer complete job query should fail closed");
     assert.deepEqual(customerCommercialJob.payload, [], "Customer must not read complete commercial job records");
@@ -558,6 +603,12 @@ try {
     "Co-assigned electrician should retain the assigned job",
     "Electrician must not read an unassigned same-tenant job",
     "Another organisation must not read the assigned field job",
+    "Assigned electrician should retain the production-shaped null-customer job document",
+    "Co-assigned electrician should retain the assigned job document",
+    "Electrician must not read an unassigned same-tenant job document",
+    "Electrician must not read a deleted job document",
+    "Assigned electrician must not read another organisation's job document",
+    "Office should retain unassigned job document access",
     "Office should retain the canonical variation financial note",
     "Field timeline projection must mask variation financial notes",
     "Field timeline projection must omit every variation price marker",

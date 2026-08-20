@@ -257,4 +257,9 @@ begin;
 \ir ../migrations/20260820150000_scope_field_customer_reads_to_assignments.sql
 commit;
 
+\echo 'Scoping field job-document and private-file reads to assigned jobs'
+begin;
+\ir ../migrations/20260820153000_scope_field_job_document_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
