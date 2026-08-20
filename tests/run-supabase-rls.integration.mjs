@@ -175,6 +175,16 @@ const secureJobReadCoverage = `${secureJobReadAnchor}
     assert.equal(electricianFieldJob.payload[0].payload.value, undefined, "Field job projection must omit contract value");
     assert.equal(electricianFieldJob.payload[0].payload.quoteSnapshot, undefined, "Field job projection must omit quote profitability snapshots");
 
+    const coworkerAssignedFieldJob = await listRecords(accounts.A.coworker, "field_jobs", \`select=source_id&source_id=eq.\${jobA}\`);
+    await expectAllowed(coworkerAssignedFieldJob, "Co-assigned electrician field job query should execute");
+    assert.equal(coworkerAssignedFieldJob.payload.length, 1, "Co-assigned electrician should retain the assigned job");
+    const unassignedFieldJob = await listRecords(accounts.A.electrician, "field_jobs", \`select=source_id&source_id=eq.\${otherCustomerJobA}\`);
+    await expectAllowed(unassignedFieldJob, "Unassigned same-tenant field job query should execute safely");
+    assert.deepEqual(unassignedFieldJob.payload, [], "Electrician must not read an unassigned same-tenant job");
+    const crossTenantFieldJob = await listRecords(accounts.B.electrician, "field_jobs", \`select=source_id&source_id=eq.\${jobA}\`);
+    await expectAllowed(crossTenantFieldJob, "Cross-tenant field job query should execute safely");
+    assert.deepEqual(crossTenantFieldJob.payload, [], "Another organisation must not read the assigned field job");
+
     const customerCommercialJob = await listRecords(accounts.A.customer, "jobs", \`select=source_id,payload&source_id=eq.\${jobA}\`);
     await expectAllowed(customerCommercialJob, "Customer complete job query should fail closed");
     assert.deepEqual(customerCommercialJob.payload, [], "Customer must not read complete commercial job records");
@@ -504,6 +514,9 @@ try {
     "Customer sessions must not use the electrician mutation RPC",
     "Oversized field payloads must be rejected before receipt persistence",
     "Field job projection must omit mixed commercial notes",
+    "Co-assigned electrician should retain the assigned job",
+    "Electrician must not read an unassigned same-tenant job",
+    "Another organisation must not read the assigned field job",
     "Office should retain the canonical variation financial note",
     "Field timeline projection must mask variation financial notes",
     "Field timeline projection must omit every variation price marker",

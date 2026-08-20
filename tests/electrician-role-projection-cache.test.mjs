@@ -3,8 +3,10 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   CUSTOMER_PROJECTION_CACHE_GENERATION,
+  ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_VARIATION_TIMELINE_NOTE,
-  customerProjectionCachePolicy,
+  roleProjectionCacheGeneration,
+  roleProjectionCachePolicy,
   sanitizeRoleProjectionCache,
 } from "../lib/cloud/roleProjectionCache-core.mjs";
 
@@ -100,21 +102,28 @@ test("office, customer projection, local-mode and unrelated caches retain their 
   }
 });
 
-test("customer projection cache generation fails closed on the first upgraded offline read", () => {
+test("role projection cache generations fail closed on the first upgraded offline read", () => {
   for (const storageKey of [
     "jr-os-certificates", "jr-os-customers", "jr-os-deposit-requirements",
     "jr-os-invoices", "jr-os-job-timeline", "jr-os-jobs", "jr-os-payments",
     "jr-os-portal-payment-links", "jr-os-pricing-documents",
   ]) {
-    assert.equal(customerProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud" }), "purge");
-    assert.equal(customerProjectionCachePolicy({ storageKey, role: "customer", mode: "migration", generation: "old" }), "purge");
-    assert.equal(customerProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud", generation: CUSTOMER_PROJECTION_CACHE_GENERATION }), "keep");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud" }), "purge");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "customer", mode: "migration", generation: "old" }), "purge");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud", generation: CUSTOMER_PROJECTION_CACHE_GENERATION }), "keep");
+    assert.equal(roleProjectionCacheGeneration({ storageKey, role: "customer" }), CUSTOMER_PROJECTION_CACHE_GENERATION);
   }
   for (const storageKey of ["jr-os-job-documents", "jr-os-planner", "jr-os-portal-access", "jr-os-portal-activity", "jr-os-portal-photo-shares"]) {
-    assert.equal(customerProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud", generation: CUSTOMER_PROJECTION_CACHE_GENERATION }), "purge");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud", generation: CUSTOMER_PROJECTION_CACHE_GENERATION }), "purge");
   }
-  assert.equal(customerProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "office", mode: "cloud" }), "keep");
-  assert.equal(customerProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "customer", mode: "local" }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "electrician", mode: "cloud" }), "purge");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "electrician", mode: "migration", generation: "old" }), "purge");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "electrician", mode: "cloud", generation: ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION }), "keep");
+  assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-jobs", role: "electrician" }), ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION);
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "office", mode: "cloud" }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-jobs", role: "electrician", mode: "local" }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "electrician", mode: "cloud" }), "keep");
+  assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-surveys", role: "electrician" }), undefined);
 });
 
 test("customer generic finance caches retain only the projection allowlists", () => {
@@ -135,12 +144,13 @@ test("customer generic finance caches retain only the projection allowlists", ()
 test("collection adapter sanitizes cached fallback and fetched role-projection records before returning", async () => {
   const adapter = await readFile(new URL("../lib/cloud/adapter.ts", import.meta.url), "utf8");
   assert.match(adapter, /: sanitizeRoleProjectionCache\(\{ storageKey, role: cacheRole, mode, records: cached \}\)/);
-  assert.match(adapter, /customerProjectionCachePolicy\(\{ storageKey, role: cacheRole, mode, generation: cachedGeneration \}\)/);
+  assert.match(adapter, /roleProjectionCachePolicy\(\{ storageKey, role: cacheRole, mode, generation: cachedGeneration \}\)/);
   assert.match(adapter, /cachePolicy === "purge"[\s\S]*\? \[\]/);
   assert.match(adapter, /if \(local !== cached\) writeLocal\(scopedStorageKey, local\)/);
   assert.match(adapter, /if \(mode === "local" \|\| !navigator\.onLine\) return local/);
   assert.match(adapter, /const roleProjectionRecords = sanitizeRoleProjectionCache\(\{ storageKey, role: cacheRole, mode, records: cloudRecords \}\)/);
   assert.match(adapter, /writeLocal\(scopedStorageKey, roleProjectionRecords\)/);
-  assert.match(adapter, /localStorage\.setItem\(projectionGenerationKey\(scopedStorageKey\), CUSTOMER_PROJECTION_CACHE_GENERATION\)/);
+  assert.match(adapter, /const projectionGeneration = roleProjectionCacheGeneration\(\{ storageKey, role: cacheRole \}\)/);
+  assert.match(adapter, /if \(projectionGeneration\) window\.localStorage\.setItem\(projectionGenerationKey\(scopedStorageKey\), projectionGeneration\)/);
   assert.match(adapter, /return roleProjectionRecords/);
 });

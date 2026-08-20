@@ -4,7 +4,7 @@ import { cloudSelect } from "./client";
 import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
 import { queueChange, type CloudEnvelope } from "./repository";
-import { CUSTOMER_PROJECTION_CACHE_GENERATION, customerProjectionCachePolicy, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
+import { roleProjectionCacheGeneration, roleProjectionCachePolicy, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
 
@@ -55,7 +55,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       const mode = effectiveCloudMode();
       const cached = readLocal<T>(scopedStorageKey);
       const cachedGeneration = window.localStorage.getItem(projectionGenerationKey(scopedStorageKey)) ?? undefined;
-      const cachePolicy = customerProjectionCachePolicy({ storageKey, role: cacheRole, mode, generation: cachedGeneration });
+      const cachePolicy = roleProjectionCachePolicy({ storageKey, role: cacheRole, mode, generation: cachedGeneration });
       const local = cachePolicy === "purge"
         ? []
         : sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cached });
@@ -74,9 +74,8 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         const roleProjectionRecords = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cloudRecords });
         writeLocal(scopedStorageKey, roleProjectionRecords);
         writeVersions(scopedStorageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));
-        if (cacheRole === "customer") {
-          window.localStorage.setItem(projectionGenerationKey(scopedStorageKey), CUSTOMER_PROJECTION_CACHE_GENERATION);
-        }
+        const projectionGeneration = roleProjectionCacheGeneration({ storageKey, role: cacheRole });
+        if (projectionGeneration) window.localStorage.setItem(projectionGenerationKey(scopedStorageKey), projectionGeneration);
         return roleProjectionRecords;
       } catch { return local; }
     },
