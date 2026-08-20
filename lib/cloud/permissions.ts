@@ -12,6 +12,52 @@ const rolePages: Record<JrRole, string[]> = {
 
 const operatorOnlyPaths = ["/release-readiness", "/cloud/cutover", "/cloud/queue"] as const;
 
+type DeniedRouteHandoff = {
+  deniedPath: string;
+  href: string;
+  title: string;
+  description: string;
+  actionLabel: string;
+};
+
+const electricianDeniedRouteHandoffs: DeniedRouteHandoff[] = [
+  {
+    deniedPath: "/planner",
+    href: "/field/day-planner",
+    title: "Use the engineer day planner",
+    description: "Office controls recurring bookings, dispatch, staff assignments and vehicles. Open your assigned visits in the field-safe day planner instead.",
+    actionLabel: "Open engineer day planner",
+  },
+  {
+    deniedPath: "/materials",
+    href: "/field/material-lookup",
+    title: "Use field material lookup",
+    description: "The Materials Library contains office-controlled catalogue and pricing changes. Search supplier stock codes from the read-only field lookup instead.",
+    actionLabel: "Open field material lookup",
+  },
+  {
+    deniedPath: "/stock",
+    href: "/field/materials",
+    title: "Use Mobile Materials",
+    description: "Canonical stock adjustments are office-controlled. Review assigned field stock and material information in Mobile Materials instead.",
+    actionLabel: "Open Mobile Materials",
+  },
+  {
+    deniedPath: "/purchases",
+    href: "/field/materials",
+    title: "Use Mobile Materials",
+    description: "Purchase-list changes are office-controlled. Review low-stock and material information in the field-safe Mobile Materials workspace instead.",
+    actionLabel: "Open Mobile Materials",
+  },
+  {
+    deniedPath: "/certificates",
+    href: "/field/testing",
+    title: "Use the electrical testing workspace",
+    description: "Certificate authoring and issue are office-controlled. Capture assigned-job testing evidence in the field testing workspace instead.",
+    actionLabel: "Open electrical testing",
+  },
+];
+
 function operatorEmails() {
   return (process.env.NEXT_PUBLIC_JR_OS_OPERATOR_EMAILS || "")
     .split(",")
@@ -37,6 +83,11 @@ export function canAccessPath(role: JrRole | undefined, path: string, email?: st
   if (isOperatorOnlyPath(path) && !isJrOsOperator(role, email)) return false;
   const allowed = rolePages[role];
   return allowed.includes("*") || allowed.some((entry) => path === entry || path.startsWith(`${entry}/`));
+}
+
+export function roleDeniedRouteHandoff(role: JrRole | undefined, path: string) {
+  if (role !== "electrician") return null;
+  return electricianDeniedRouteHandoffs.find((entry) => path === entry.deniedPath || path.startsWith(`${entry.deniedPath}/`)) ?? null;
 }
 
 export function roleLandingPath(role: JrRole | undefined) {
