@@ -16,9 +16,6 @@ import { makeId } from "../../../lib/storage";
 import type { JobTimelineEntry, SiteDiaryEntry } from "../../../lib/models";
 
 type DailyProgressEntry = SiteDiaryEntry & {
-  plantAndEquipment?: string;
-  deliveriesReceived?: string;
-  toolboxTalks?: string;
   engineerSignatureName?: string;
   engineerSignedAt?: string;
   customerSignOffName?: string;
@@ -71,7 +68,8 @@ export default function MobileSiteDiaryPage() {
     teamMembers: team.items,
     mode: identityState.mode,
   }), [identityState.identity, identityState.mode, team.items]);
-  const serverBoundLabour = identityState.mode !== "local";
+  const cloudFieldMode = identityState.mode !== "local";
+  const serverBoundLabour = cloudFieldMode;
   const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
 
   function toggleStaff(memberId: string) {
@@ -108,8 +106,6 @@ export default function MobileSiteDiaryPage() {
       customerInstructions: form.customerInstructions.trim(),
       materialsUsed: form.materialsUsed.trim(),
       materialsRequired: form.materialsRequired.trim(),
-      photos: [],
-      photoDocumentIds: [],
       voiceNotes: form.voiceNoteTranscript.trim(),
       voiceNoteTranscript: form.voiceNoteTranscript.trim(),
       weather: form.weather.trim(),
@@ -118,29 +114,36 @@ export default function MobileSiteDiaryPage() {
       plantAndEquipment: form.plantAndEquipment.trim(),
       deliveriesReceived: form.deliveriesReceived.trim(),
       toolboxTalks: form.toolboxTalks.trim(),
+      createdAt: now,
+      updatedAt: now,
+    };
+    const entry: DailyProgressEntry = cloudFieldMode ? base : {
+      ...base,
       engineerSignatureName: form.engineerSignatureName.trim(),
       engineerSignedAt: form.engineerSignatureName.trim() ? now : "",
       customerSignOffName: form.customerSignOffName.trim(),
       customerSignOffNotes: form.customerSignOffNotes.trim(),
       customerSignedAt: form.customerSignOffName.trim() ? now : "",
-      dailySummary: "",
-      createdAt: now,
-      updatedAt: now,
+      dailySummary: buildDailyProgressSummary(base),
     };
-    const entry: DailyProgressEntry = { ...base, dailySummary: buildDailyProgressSummary(base) };
     const timelineEntry = siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: entry.completedBy, now }) as JobTimelineEntry;
 
     diaries.setItems((current) => [entry, ...current]);
     timeline.setItems((current) => [timelineEntry, ...current]);
-    const warningCount = dailyProgressWarnings(entry).length;
-    setMessage(`Daily progress saved and added to the job timeline${warningCount ? ` with ${warningCount} action${warningCount === 1 ? "" : "s"} to review` : ""}.`);
+    const warningCount = dailyProgressWarnings(entry, { requireEngineerSignature: !cloudFieldMode }).length;
+    const warningSuffix = warningCount ? ` with ${warningCount} action${warningCount === 1 ? "" : "s"} to review` : "";
+    setMessage(cloudFieldMode
+      ? `Daily progress and a separate job timeline note queued for secure sync${warningSuffix}.`
+      : `Daily progress saved and added to the job timeline${warningSuffix}.`);
     setForm({ ...blankForm, jobId: form.jobId, workDate: today() });
   }
 
   if (!ready) return <Card>Loading mobile site diary…</Card>;
 
   return <div className="space-y-5 pb-24 sm:space-y-6 sm:pb-0">
-    <PageHeader eyebrow="Job Management Pro" title="Site diary & daily progress" description="Capture labour, progress, deliveries, plant, safety actions and sign-off from site using the existing cloud and offline diary record." />
+    <PageHeader eyebrow="Job Management Pro" title="Site diary & daily progress" description={cloudFieldMode
+      ? "Capture labour, progress, deliveries, plant and safety actions for secure sync. Formal acknowledgements remain an office handoff."
+      : "Capture labour, progress, deliveries, plant, safety actions and sign-off in the local diary record."} />
 
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-100">{message}</div> : null}
 
@@ -163,10 +166,10 @@ export default function MobileSiteDiaryPage() {
         <h2 className="flex items-center gap-2 font-semibold"><HardHat className="size-5 text-cyan-300" />Daily progress</h2>
         <InputField label="Weather snapshot" value={form.weather} onChange={(event) => setForm({ ...form, weather: event.target.value })} placeholder="Dry, 18°C, light wind" />
         <TextareaField label="Work completed" value={form.workCompleted} onChange={(event) => setForm({ ...form, workCompleted: event.target.value })} />
-        <TextareaField label="Plant and equipment used" value={form.plantAndEquipment} onChange={(event) => setForm({ ...form, plantAndEquipment: event.target.value })} />
+        <TextareaField label="Plant and equipment used" maxLength={4000} value={form.plantAndEquipment} onChange={(event) => setForm({ ...form, plantAndEquipment: event.target.value })} />
         <TextareaField label="Materials used" value={form.materialsUsed} onChange={(event) => setForm({ ...form, materialsUsed: event.target.value })} />
         <TextareaField label="Materials required" value={form.materialsRequired} onChange={(event) => setForm({ ...form, materialsRequired: event.target.value })} />
-        <TextareaField label="Deliveries received" value={form.deliveriesReceived} onChange={(event) => setForm({ ...form, deliveriesReceived: event.target.value })} />
+        <TextareaField label="Deliveries received" maxLength={4000} value={form.deliveriesReceived} onChange={(event) => setForm({ ...form, deliveriesReceived: event.target.value })} />
       </Card>
 
       <Card className="space-y-4">
@@ -175,20 +178,23 @@ export default function MobileSiteDiaryPage() {
         <TextareaField label="Builder instructions" value={form.builderInstructions} onChange={(event) => setForm({ ...form, builderInstructions: event.target.value })} />
         <TextareaField label="Customer instructions" value={form.customerInstructions} onChange={(event) => setForm({ ...form, customerInstructions: event.target.value })} />
         <TextareaField label="H&S observations / issues" value={form.issuesAndRisks} onChange={(event) => setForm({ ...form, issuesAndRisks: event.target.value })} />
-        <TextareaField label="Toolbox talks" value={form.toolboxTalks} onChange={(event) => setForm({ ...form, toolboxTalks: event.target.value })} />
+        <TextareaField label="Toolbox talks" maxLength={4000} value={form.toolboxTalks} onChange={(event) => setForm({ ...form, toolboxTalks: event.target.value })} />
         <TextareaField label="Follow-up actions" value={form.followUpActions} onChange={(event) => setForm({ ...form, followUpActions: event.target.value })} />
         <TextareaField label="Voice note transcript" value={form.voiceNoteTranscript} onChange={(event) => setForm({ ...form, voiceNoteTranscript: event.target.value })} />
       </Card>
 
-      <Card className="space-y-4">
+      {cloudFieldMode ? <Card className="space-y-3">
+        <h2 className="flex items-center gap-2 font-semibold"><PackageCheck className="size-5 text-emerald-300" />Acknowledgement handoff</h2>
+        <p className="text-sm text-slate-300">Formal engineer and customer acknowledgements are not recorded by this field diary. The authenticated engineer and server receipt time will identify the synced record; use the office completion workflow for sign-off evidence.</p>
+      </Card> : <Card className="space-y-4">
         <h2 className="flex items-center gap-2 font-semibold"><PackageCheck className="size-5 text-emerald-300" />Daily acknowledgement</h2>
         <InputField label="Engineer signature name" value={form.engineerSignatureName} onChange={(event) => setForm({ ...form, engineerSignatureName: event.target.value })} />
         <InputField label="Customer acknowledgement name" value={form.customerSignOffName} onChange={(event) => setForm({ ...form, customerSignOffName: event.target.value })} />
         <TextareaField label="Customer acknowledgement notes" value={form.customerSignOffNotes} onChange={(event) => setForm({ ...form, customerSignOffNotes: event.target.value })} />
-        <p className="text-xs text-slate-400">Entering a name records the current timestamp when this diary is saved. Final job completion sign-off remains in Completion Packs.</p>
-      </Card>
+        <p className="text-xs text-slate-400">Entering a name records the current timestamp when this local diary is saved. Final job completion sign-off remains in Completion Packs.</p>
+      </Card>}
 
-      <Button type="submit" className="min-h-14 w-full text-base">Save daily progress</Button>
+      <Button type="submit" className="min-h-14 w-full text-base">{cloudFieldMode ? "Queue daily progress" : "Save daily progress"}</Button>
     </form>
 
     {form.jobId ? <Link href={`/jobs/${form.jobId}`} className="inline-flex min-h-12 w-full items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link> : null}

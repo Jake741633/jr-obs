@@ -71,10 +71,12 @@ export default function FieldWorkspacePage() {
     if (!operatorName) return setMessage("Your active team identity could not be resolved. Refresh your account before saving the site record.");
     if (!form.startedAt) return setMessage("Add the time work started.");
     const now = new Date().toISOString();
-    const entry: SiteDiaryEntry = { id: makeId("site-diary"), jobId: form.jobId, workDate: form.workDate, startedAt: form.startedAt, finishedAt: form.finishedAt, breakMinutes: Math.max(0, Number(form.breakMinutes || 0)), completedBy: operatorName, staffPresent: [], workCompleted: form.workCompleted.trim(), delays: form.delays.trim(), builderInstructions: "", customerRequests: form.customerRequests.trim(), customerInstructions: form.customerRequests.trim(), materialsUsed: form.materialsUsed.trim(), materialsRequired: "", photoDocumentIds: [], voiceNotes: form.voiceNotes.trim(), voiceNoteTranscript: form.voiceNotes.trim(), weather: "", issuesAndRisks: form.delays.trim(), followUpActions: "", createdAt: now, updatedAt: now };
+    const entry: SiteDiaryEntry = { id: makeId("site-diary"), jobId: form.jobId, workDate: form.workDate, startedAt: form.startedAt, finishedAt: form.finishedAt, breakMinutes: Math.max(0, Number(form.breakMinutes || 0)), completedBy: operatorName, staffPresent: [], workCompleted: form.workCompleted.trim(), delays: form.delays.trim(), builderInstructions: "", customerRequests: form.customerRequests.trim(), customerInstructions: form.customerRequests.trim(), materialsUsed: form.materialsUsed.trim(), materialsRequired: "", voiceNotes: form.voiceNotes.trim(), voiceNoteTranscript: form.voiceNotes.trim(), weather: "", issuesAndRisks: form.delays.trim(), followUpActions: "", createdAt: now, updatedAt: now };
     diary.setItems((current) => [entry, ...current]);
     timeline.setItems((current) => [siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: operatorName, now }), ...current]);
-    setMessage("Site diary entry saved to the job record.");
+    setMessage(cloudFieldMode
+      ? "Site diary entry and a separate job timeline note queued for secure sync."
+      : "Site diary entry saved to the job record.");
     setForm({ ...blankDiary, jobId: form.jobId, workDate: today() });
   }
 

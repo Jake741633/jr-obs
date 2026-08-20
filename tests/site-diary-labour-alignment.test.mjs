@@ -13,7 +13,8 @@ test("site diary server binds internal staff presence to the authenticated field
 });
 
 test("cloud site diary UI does not offer internal staff identities the server will discard", () => {
-  assert.match(page, /const serverBoundLabour = identityState\.mode !== "local"/);
+  assert.match(page, /const cloudFieldMode = identityState\.mode !== "local"/);
+  assert.match(page, /const serverBoundLabour = cloudFieldMode/);
   assert.match(page, /staffPresent: serverBoundLabour \? \[\] : form\.staffPresent/);
   assert.match(page, /Cloud diaries bind internal staff presence to the authenticated engineer/);
   assert.match(page, /Additional labour \/ subcontractors/);
