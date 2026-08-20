@@ -90,7 +90,7 @@ Use separate test users for owner, office, electrician and customer. Verify:
 - electricians cannot query office-only finance, CRM history, settings or AI records directly
 - electricians cannot read full pricing documents, internal costs, markup or margin data through typed APIs
 - electricians receive only the field-safe team directory projection; payroll rates, emergency contacts and private team notes remain office-only
-- electricians and customers never read complete job commercial payloads; role projections remove contract value, retention and accepted quote profitability before Data API delivery, and electricians receive only jobs assigned to their active field identity
+- electricians and customers never read complete job commercial payloads; role projections remove contract value, retention and accepted quote profitability before Data API delivery, and electricians receive only jobs assigned to their active field identity, plus the contact-safe customers linked to those assigned jobs
 - electrician field updates preserve hidden office-only job pricing while changing only allowlisted operational job fields
 - electrician generic field reads use a sanitised projection; surveys and their private photos are limited to assigned jobs, while survey rates, job-pack prices, variation pricing and material unit costs stay office-only
 - sensitive generic field updates preserve existing office pricing instead of overwriting it with redacted browser payloads

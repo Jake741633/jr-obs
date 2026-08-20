@@ -30,6 +30,26 @@ const customerReadAnchor = `    await expectAllowed(\n      await insertRecord(a
 
 const customerReadCoverage = `${customerReadAnchor}\n\n    const officeCompleteCustomer = await listRecords(accounts.A.office, "customers", \`select=source_id,payload&source_id=eq.\${customerA}\`);\n    await expectAllowed(officeCompleteCustomer, "Office complete customer query should execute");\n    assert.equal(officeCompleteCustomer.payload.length, 1, "Office should retain complete customer reads");\n    assert.equal(officeCompleteCustomer.payload[0].payload.notes, "Internal CRM note", "Office should retain internal CRM notes");\n\n    const electricianCompleteCustomer = await listRecords(accounts.A.electrician, "customers", \`select=source_id,payload&source_id=eq.\${customerA}\`);\n    await expectAllowed(electricianCompleteCustomer, "Electrician complete customer query should fail closed");\n    assert.deepEqual(electricianCompleteCustomer.payload, [], "Electrician must not read complete customer CRM records");\n\n    const electricianFieldCustomer = await listRecords(accounts.A.electrician, "field_customers", \`select=source_id,payload&source_id=eq.\${customerA}\`);\n    await expectAllowed(electricianFieldCustomer, "Electrician field-safe customer query should execute");\n    assert.equal(electricianFieldCustomer.payload.length, 1, "Electrician should retain contact-safe customer reads");\n    assert.equal(electricianFieldCustomer.payload[0].payload.name, "Tenant A customer");\n    assert.equal(electricianFieldCustomer.payload[0].payload.phone, "07000000001");\n    assert.equal(electricianFieldCustomer.payload[0].payload.notes, undefined, "Field customer projection must omit internal CRM notes");\n\n    const customerCompleteCustomer = await listRecords(accounts.A.customer, "customers", \`select=source_id,payload&source_id=eq.\${customerA}\`);\n    await expectAllowed(customerCompleteCustomer, "Customer complete customer query should fail closed");\n    assert.deepEqual(customerCompleteCustomer.payload, [], "Customer must not read complete customer CRM records");\n\n    const portalCustomer = await listRecords(accounts.A.customer, "portal_customers", \`select=source_id,payload&source_id=eq.\${customerA}\`);\n    await expectAllowed(portalCustomer, "Customer portal-safe customer query should execute");\n    assert.equal(portalCustomer.payload.length, 1, "Customer should retain their contact-safe customer record");\n    assert.equal(portalCustomer.payload[0].payload.name, "Tenant A customer");\n    assert.equal(portalCustomer.payload[0].payload.email, "customer-a@example.com");\n    assert.equal(portalCustomer.payload[0].payload.notes, undefined, "Portal customer projection must omit internal CRM notes");\n\n    const otherCustomerProjection = await listRecords(accounts.A.customer, "portal_customers", \`select=source_id&source_id=eq.\${otherCustomerA}\`);\n    await expectAllowed(otherCustomerProjection, "Cross-customer portal customer query should execute safely");\n    assert.deepEqual(otherCustomerProjection.payload, [], "Another customer must not read the customer contact projection");\n\n    const crossTenantCustomerProjection = await listRecords(accounts.B.customer, "portal_customers", \`select=source_id&source_id=eq.\${customerA}\`);\n    await expectAllowed(crossTenantCustomerProjection, "Cross-tenant portal customer query should execute safely");\n    assert.deepEqual(crossTenantCustomerProjection.payload, [], "Another organisation must not read the customer contact projection");\n\n    await expectDenied(\n      await patchRecords(accounts.A.electrician, "field_customers", \`source_id=eq.\${customerA}\`, { payload: { id: customerA, name: "Forged field update" } }),\n      "Electrician must not write the field customer projection",\n    );\n    await expectDenied(\n      await patchRecords(accounts.A.customer, "portal_customers", \`source_id=eq.\${customerA}\`, { payload: { id: customerA, name: "Forged portal update" } }),\n      "Customer must not write the portal customer projection",\n    );`;
 
+const unscopedElectricianFieldCustomerRead = `    const electricianFieldCustomer = await listRecords(accounts.A.electrician, "field_customers", \`select=source_id,payload&source_id=eq.\${customerA}\`);
+    await expectAllowed(electricianFieldCustomer, "Electrician field-safe customer query should execute");
+    assert.equal(electricianFieldCustomer.payload.length, 1, "Electrician should retain contact-safe customer reads");
+    assert.equal(electricianFieldCustomer.payload[0].payload.name, "Tenant A customer");
+    assert.equal(electricianFieldCustomer.payload[0].payload.phone, "07000000001");
+    assert.equal(electricianFieldCustomer.payload[0].payload.notes, undefined, "Field customer projection must omit internal CRM notes");`;
+
+const scopedElectricianFieldCustomerRead = `    const electricianFieldCustomerBeforeIdentity = await listRecords(accounts.A.electrician, "field_customers", \`select=source_id&source_id=eq.\${customerA}\`);
+    await expectAllowed(electricianFieldCustomerBeforeIdentity, "Electrician field customer query before identity should execute safely");
+    assert.deepEqual(electricianFieldCustomerBeforeIdentity.payload, [], "Electrician must not read field customers before active identity binding");`;
+
+const unscopedFieldCustomerReadCount = customerReadCoverage.split(unscopedElectricianFieldCustomerRead).length - 1;
+if (unscopedFieldCustomerReadCount !== 1) {
+  throw new Error(`Expected the pre-identity field customer read fixture exactly once, found ${unscopedFieldCustomerReadCount}`);
+}
+const scopedCustomerReadCoverage = customerReadCoverage.replace(
+  unscopedElectricianFieldCustomerRead,
+  scopedElectricianFieldCustomerRead,
+);
+
 const teamSeedSnippet = `      ["team_members", teamA, { role: "Electrician" }],`;
 const safeTeamSeedSnippet = `      ["team_members", teamA, {\n        role: "Electrician",\n        name: "Field electrician",\n        hourlyCost: 28,\n        chargeRate: 65,\n        emergencyContact: "Private contact",\n        emergencyPhone: "07000000000",\n        notes: "Private HR note",\n        qualifications: [{\n          id: source("qualification-a"),\n          name: "ECS Gold Card",\n          certificateNumber: "PRIVATE-123",\n          issuedAt: "2025-01-01",\n          expiresAt: "2028-01-01",\n          notes: "Private qualification note",\n        }],\n      }],`;
 
@@ -157,6 +177,22 @@ const secureJobReadAnchor = `    await expectAllowed(
     );`;
 
 const secureJobReadCoverage = `${secureJobReadAnchor}
+
+    const assignedFieldCustomer = await listRecords(accounts.A.electrician, "field_customers", \`select=source_id,payload&source_id=eq.\${customerA}\`);
+    await expectAllowed(assignedFieldCustomer, "Assigned electrician field customer query should execute");
+    assert.equal(assignedFieldCustomer.payload.length, 1, "Assigned electrician should retain the assigned field customer");
+    assert.equal(assignedFieldCustomer.payload[0].payload.name, "Tenant A customer");
+    assert.equal(assignedFieldCustomer.payload[0].payload.phone, "07000000001");
+    assert.equal(assignedFieldCustomer.payload[0].payload.notes, undefined, "Field customer projection must omit internal CRM notes");
+    const coworkerAssignedFieldCustomer = await listRecords(accounts.A.coworker, "field_customers", \`select=source_id&source_id=eq.\${customerA}\`);
+    await expectAllowed(coworkerAssignedFieldCustomer, "Co-assigned electrician field customer query should execute");
+    assert.equal(coworkerAssignedFieldCustomer.payload.length, 1, "Co-assigned electrician should retain the assigned field customer");
+    const unassignedFieldCustomer = await listRecords(accounts.A.electrician, "field_customers", \`select=source_id&source_id=eq.\${otherCustomerA}\`);
+    await expectAllowed(unassignedFieldCustomer, "Unassigned same-tenant field customer query should execute safely");
+    assert.deepEqual(unassignedFieldCustomer.payload, [], "Electrician must not read a same-tenant customer with only unassigned jobs");
+    const crossTenantFieldCustomer = await listRecords(accounts.A.electrician, "field_customers", \`select=source_id&source_id=eq.\${customerB}\`);
+    await expectAllowed(crossTenantFieldCustomer, "Cross-tenant field customer query should execute safely");
+    assert.deepEqual(crossTenantFieldCustomer.payload, [], "Assigned electrician must not read another organisation's field customer");
 
     const officeCommercialJob = await listRecords(accounts.A.office, "jobs", \`select=source_id,payload,version&source_id=eq.\${jobA}\`);
     await expectAllowed(officeCommercialJob, "Office complete job query should execute");
@@ -489,7 +525,7 @@ try {
   const supportedSource = source
     .replace(obsoleteSnippet, supportedSnippet)
     .replace(customerSeedSnippet, safeCustomerSeedSnippet)
-    .replace(customerReadAnchor, customerReadCoverage)
+    .replace(customerReadAnchor, scopedCustomerReadCoverage)
     .replace(teamSeedSnippet, safeTeamSeedSnippet)
     .replace(teamReadSnippet, safeTeamReadSnippet)
     .replace(jobSeedSnippet, secureJobSeedSnippet)
@@ -514,6 +550,11 @@ try {
     "Customer sessions must not use the electrician mutation RPC",
     "Oversized field payloads must be rejected before receipt persistence",
     "Field job projection must omit mixed commercial notes",
+    "Electrician must not read field customers before active identity binding",
+    "Assigned electrician should retain the assigned field customer",
+    "Co-assigned electrician should retain the assigned field customer",
+    "Electrician must not read a same-tenant customer with only unassigned jobs",
+    "Assigned electrician must not read another organisation's field customer",
     "Co-assigned electrician should retain the assigned job",
     "Electrician must not read an unassigned same-tenant job",
     "Another organisation must not read the assigned field job",
