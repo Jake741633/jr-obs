@@ -51,6 +51,7 @@ const requiredSuites = [
   "electrician-pricing-read-boundary.test.mjs",
   "field-team-projection.test.mjs",
   "job-role-projections.test.mjs",
+  "field-job-read-assignment.test.mjs",
   "field-cloud-collection-projection.test.mjs",
   "field-survey-read-assignment.test.mjs",
   "field-job-confidentiality.test.mjs",

@@ -247,4 +247,9 @@ begin;
 \ir ../migrations/20260820130000_scope_field_survey_reads_to_assignments.sql
 commit;
 
+\echo 'Scoping field job reads to assigned jobs'
+begin;
+\ir ../migrations/20260820143000_scope_field_job_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
