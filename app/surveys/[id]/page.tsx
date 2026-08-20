@@ -7,6 +7,7 @@ import { ArrowLeft, Check, ChevronLeft, ChevronRight, Plus, Sparkles, Trash2 } f
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { useCustomersCollection, useJobsCollection, usePricingDocumentsCollection, useSurveysCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { makeId } from "../../../lib/storage";
 import type { PricingDocument, SiteSurvey, SurveyCircuit } from "../../../lib/models";
 
@@ -37,6 +38,8 @@ export default function SurveyDetailPage() {
   const customers = useCustomersCollection();
   const jobs = useJobsCollection();
   const quotes = usePricingDocumentsCollection();
+  const { identity } = useCloudIdentity();
+  const fieldMode = identity?.role === "electrician";
   const [step, setStep] = useState(0);
   const [message, setMessage] = useState("");
   const survey = surveys.items.find((item) => item.id === id);
@@ -77,6 +80,10 @@ export default function SurveyDetailPage() {
   }
 
   function createQuote() {
+    if (fieldMode) {
+      setMessage("Field survey recommendations are ready for office review. Quote creation is restricted to office roles.");
+      return;
+    }
     const now = new Date();
     const lines = activeSurvey.recommendations.map((recommendation) => ({ id: makeId("line"), description: recommendation, category: "Labour" as const, quantity: 1, unitPrice: 0 }));
     if (activeSurvey.labourHours > 0) lines.unshift({ id: makeId("line"), description: "Electrical labour from site survey", category: "Labour", quantity: activeSurvey.labourHours, unitPrice: activeSurvey.labourRate });
@@ -120,7 +127,7 @@ export default function SurveyDetailPage() {
 
     {step === 5 && <Card><div className="flex items-center gap-3"><Sparkles className="size-6 text-cyan-400" /><div><h2 className="text-xl font-bold">Recommended works</h2><p className="text-sm text-slate-400">Generated from selected defects and editable before quoting.</p></div></div><div className="mt-5 space-y-2">{activeSurvey.recommendations.map((item, index) => <div key={`${item}-${index}`} className="flex gap-2"><input className={fieldClass} value={item} onChange={(e) => update({ recommendations: activeSurvey.recommendations.map((current, i) => i === index ? e.target.value : current) })} /><button type="button" onClick={() => update({ recommendations: activeSurvey.recommendations.filter((_, i) => i !== index) })} className="p-3 text-red-300"><Trash2 className="size-4" /></button></div>)}<Button variant="secondary" onClick={() => update({ recommendations: [...activeSurvey.recommendations, ""] })}><Plus className="mr-2 size-4" />Add recommendation</Button></div><div className="mt-6 grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm">Labour hours<input type="number" min="0" step="0.5" className={fieldClass} value={activeSurvey.labourHours} onChange={(e) => update({ labourHours: Number(e.target.value) })} /></label><label className="grid gap-2 text-sm">Hourly rate (£)<input type="number" min="0" step="0.01" className={fieldClass} value={activeSurvey.labourRate} onChange={(e) => update({ labourRate: Number(e.target.value) })} /></label></div></Card>}
 
-    {step === 6 && <div className="space-y-4"><div className="grid gap-4 md:grid-cols-4"><Card><p className="text-sm text-slate-400">Health score</p><p className="mt-2 text-3xl font-bold">{activeSurvey.healthScore}%</p></Card><Card><p className="text-sm text-slate-400">Circuits</p><p className="mt-2 text-3xl font-bold">{activeSurvey.circuits.length}</p></Card><Card><p className="text-sm text-slate-400">Defects</p><p className="mt-2 text-3xl font-bold">{activeSurvey.defects.length}</p></Card><Card><p className="text-sm text-slate-400">Labour value</p><p className="mt-2 text-3xl font-bold">£{(activeSurvey.labourHours * activeSurvey.labourRate).toFixed(2)}</p></Card></div><Card><h2 className="text-xl font-bold">Voice/transcript notes</h2><textarea className={`${fieldClass} mt-4 min-h-32 py-3`} placeholder="Paste or type your spoken walkthrough here…" value={activeSurvey.voiceNotes} onChange={(e) => update({ voiceNotes: e.target.value })} /><h2 className="mt-6 text-xl font-bold">Survey notes</h2><textarea className={`${fieldClass} mt-4 min-h-32 py-3`} value={activeSurvey.surveyNotes} onChange={(e) => update({ surveyNotes: e.target.value })} /><div className="mt-6 flex flex-wrap items-center gap-3"><Button onClick={createQuote}><Sparkles className="mr-2 size-4" />Generate draft quote</Button>{message && <p className="flex items-center gap-2 text-sm text-emerald-300"><Check className="size-4" />{message}</p>}</div></Card></div>}
+    {step === 6 && <div className="space-y-4"><div className="grid gap-4 md:grid-cols-4"><Card><p className="text-sm text-slate-400">Health score</p><p className="mt-2 text-3xl font-bold">{activeSurvey.healthScore}%</p></Card><Card><p className="text-sm text-slate-400">Circuits</p><p className="mt-2 text-3xl font-bold">{activeSurvey.circuits.length}</p></Card><Card><p className="text-sm text-slate-400">Defects</p><p className="mt-2 text-3xl font-bold">{activeSurvey.defects.length}</p></Card><Card><p className="text-sm text-slate-400">Labour value</p><p className="mt-2 text-3xl font-bold">£{(activeSurvey.labourHours * activeSurvey.labourRate).toFixed(2)}</p></Card></div><Card><h2 className="text-xl font-bold">Voice/transcript notes</h2><textarea className={`${fieldClass} mt-4 min-h-32 py-3`} placeholder="Paste or type your spoken walkthrough here…" value={activeSurvey.voiceNotes} onChange={(e) => update({ voiceNotes: e.target.value })} /><h2 className="mt-6 text-xl font-bold">Survey notes</h2><textarea className={`${fieldClass} mt-4 min-h-32 py-3`} value={activeSurvey.surveyNotes} onChange={(e) => update({ surveyNotes: e.target.value })} /><div className="mt-6 flex flex-wrap items-center gap-3">{fieldMode ? <p className="text-sm text-amber-200">Survey recommendations are ready for office review. Quote creation is restricted to office roles.</p> : <Button onClick={createQuote}><Sparkles className="mr-2 size-4" />Generate draft quote</Button>}{message && <p className="flex items-center gap-2 text-sm text-emerald-300"><Check className="size-4" />{message}</p>}</div></Card></div>}
 
     <div className="flex justify-between"><Button variant="secondary" disabled={step === 0} onClick={() => setStep((current) => Math.max(0, current - 1))}><ChevronLeft className="mr-2 size-4" />Previous</Button><Button disabled={step === steps.length - 1} onClick={() => setStep((current) => Math.min(steps.length - 1, current + 1))}>Next<ChevronRight className="ml-2 size-4" /></Button></div>
   </div>;
