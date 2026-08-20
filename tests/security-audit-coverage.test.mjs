@@ -56,6 +56,7 @@ const requiredSuites = [
   "field-job-document-read-assignment.test.mjs",
   "field-job-invoice-boundary.test.mjs",
   "field-job-document-mutation-boundary.test.mjs",
+  "field-job-timeline-boundary.test.mjs",
   "field-cloud-collection-projection.test.mjs",
   "field-survey-read-assignment.test.mjs",
   "field-job-confidentiality.test.mjs",
