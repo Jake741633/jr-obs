@@ -91,6 +91,7 @@ export default function JobWorkspacePage() {
   const params = useParams<{ id: string }>();
   const jobId = params.id;
   const identityState = useCloudIdentity();
+  const fieldWorkspace = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const jobStatusMutationRoute = identityState.identity
     ? collectionCloudMutationRoute("jobs", identityState.identity.role)
     : { kind: "deny" as const };
@@ -262,13 +263,21 @@ export default function JobWorkspacePage() {
     <Card>
       <p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">On-site workspace</p><h2 className="mt-1 text-xl font-bold">Quick actions</h2>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {quickLink(`/job-tasks?job=${jobId}`, "Tasks & snagging", `${counts.outstandingTasks} tasks · ${counts.outstandingSnags} snags outstanding`, CheckSquare2)}
-        {quickLink(`/site-management?job=${jobId}`, "Site diary", `${jobDiaries.length} diary entr${jobDiaries.length === 1 ? "y" : "ies"}`, BookOpenText)}
-        {quickLink(`/site-management?job=${jobId}`, "Variations", `${jobVariations.length} recorded change${jobVariations.length === 1 ? "" : "s"}`, Wrench)}
-        {quickLink(`/jobs/${jobId}`, "Documents & photos", `${jobDocuments.length} linked files`, FileText)}
-        {quickLink(`/job-finance?job=${jobId}`, "Job financials", "Contract, costs, profit and payments", ReceiptText)}
-        {quickLink(`/field/testing?job=${jobId}`, "Testing", "Open electrical testing records", ClipboardList)}
+        {fieldWorkspace ? <>
+          {quickLink("/field/snags", "Snags", `${counts.outstandingSnags} snag${counts.outstandingSnags === 1 ? "" : "s"} outstanding`, CheckSquare2)}
+          {quickLink("/field/site-diary", "Site diary", `${jobDiaries.length} diary entr${jobDiaries.length === 1 ? "y" : "ies"}`, BookOpenText)}
+          {quickLink(`/jobs/${jobId}`, "Job record & documents", `${jobDocuments.length} linked files`, FileText)}
+          {quickLink("/field/testing", "Testing", "Open the field testing workflow", ClipboardList)}
+        </> : <>
+          {quickLink(`/job-tasks?job=${jobId}`, "Tasks & snagging", `${counts.outstandingTasks} tasks · ${counts.outstandingSnags} snags outstanding`, CheckSquare2)}
+          {quickLink(`/site-management?job=${jobId}`, "Site diary", `${jobDiaries.length} diary entr${jobDiaries.length === 1 ? "y" : "ies"}`, BookOpenText)}
+          {quickLink(`/site-management?job=${jobId}`, "Variations", `${jobVariations.length} recorded change${jobVariations.length === 1 ? "" : "s"}`, Wrench)}
+          {quickLink(`/jobs/${jobId}`, "Documents & photos", `${jobDocuments.length} linked files`, FileText)}
+          {quickLink(`/job-finance?job=${jobId}`, "Job financials", "Contract, costs, profit and payments", ReceiptText)}
+          {quickLink(`/field/testing?job=${jobId}`, "Testing", "Open electrical testing records", ClipboardList)}
+        </>}
       </div>
+      {fieldWorkspace ? <p className="mt-4 text-sm text-amber-200">Variations and job financials remain office-managed. Use the dedicated field workflows above for assigned-job work.</p> : null}
     </Card>
 
     <Card>
