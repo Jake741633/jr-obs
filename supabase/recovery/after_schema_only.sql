@@ -242,4 +242,9 @@ begin;
 \ir ../migrations/20260814114500_secure_field_job_progress_updates.sql
 commit;
 
+\echo 'Scoping field survey and photo reads to assigned jobs'
+begin;
+\ir ../migrations/20260820130000_scope_field_survey_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

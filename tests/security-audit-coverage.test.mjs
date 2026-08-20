@@ -52,6 +52,7 @@ const requiredSuites = [
   "field-team-projection.test.mjs",
   "job-role-projections.test.mjs",
   "field-cloud-collection-projection.test.mjs",
+  "field-survey-read-assignment.test.mjs",
   "field-job-confidentiality.test.mjs",
   "field-mutation-boundary.test.mjs",
   "field-mutation-boundary-live-rls.test.mjs",

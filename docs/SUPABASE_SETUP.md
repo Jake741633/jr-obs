@@ -92,7 +92,7 @@ Use separate test users for owner, office, electrician and customer. Verify:
 - electricians receive only the field-safe team directory projection; payroll rates, emergency contacts and private team notes remain office-only
 - electricians and customers never read complete job commercial payloads; role projections remove contract value, retention and accepted quote profitability before Data API delivery
 - electrician field updates preserve hidden office-only job pricing while changing only allowlisted operational job fields
-- electrician generic field reads use a sanitised projection; survey rates, job-pack prices, variation pricing and material unit costs stay office-only
+- electrician generic field reads use a sanitised projection; surveys and their private photos are limited to assigned jobs, while survey rates, job-pack prices, variation pricing and material unit costs stay office-only
 - sensitive generic field updates preserve existing office pricing instead of overwriting it with redacted browser payloads
 - electrician typed inventory reads remove material trade and sell prices, price-check metadata, stock unit costs and purchase-list item costs; inventory edits preserve hidden office pricing
 - only owner/admin accounts can enumerate organisation authentication profiles
