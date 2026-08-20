@@ -33,7 +33,10 @@ import {
   useSiteDiariesCollection,
   useTeamCollection,
 } from "../../../../lib/cloud/coreBusinessCollections";
-import { canonicalJobStatuses, transitionJobStatus } from "../../../../lib/jobManagement-core.mjs";
+import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../../../lib/cloud/fieldMutationPolicy-core.mjs";
+import { canEditFinance } from "../../../../lib/cloud/permissions";
+import { useCloudIdentity } from "../../../../lib/cloud/useCloudIdentity";
+import { canonicalJobStatuses, fieldJobStatusTransitionAllowed, fieldJobStatusTransitions, normaliseFieldJobStatus, normaliseJobStatus, transitionJobStatus } from "../../../../lib/jobManagement-core.mjs";
 import { normaliseJobProgress } from "../../../../lib/jobProgress-core.mjs";
 import { jobTaskCounts } from "../../../../lib/jobTasks-core.mjs";
 import { makeId } from "../../../../lib/storage";
@@ -87,6 +90,18 @@ function progressBar(label: string, value: number) {
 export default function JobWorkspacePage() {
   const params = useParams<{ id: string }>();
   const jobId = params.id;
+  const identityState = useCloudIdentity();
+  const jobStatusMutationRoute = identityState.identity
+    ? collectionCloudMutationRoute("jobs", identityState.identity.role)
+    : { kind: "deny" as const };
+  const directJobStatusMutation = identityState.identity
+    ? canEditFinance(identityState.identity.role) && jobStatusMutationRoute.kind === "direct"
+    : false;
+  const fieldJobStatusRestricted = identityState.mode !== "local"
+    && fieldMutationRouteAllows(jobStatusMutationRoute, "upsert", "update");
+  const jobStatusMutationDenied = identityState.mode !== "local"
+    && !directJobStatusMutation
+    && !fieldJobStatusRestricted;
   const jobs = useJobsCollection();
   const customers = useCustomersCollection();
   const builders = useBuildersCollection();
@@ -109,7 +124,7 @@ export default function JobWorkspacePage() {
   const progressDraftValue: NormalisedJobProgress = { ...progressValue, ...activeProgressDraft };
   const progressStatusMessage = progressMessage.targetKey === progressTargetKey ? progressMessage.text : "";
 
-  const ready = [jobs, customers, builders, team, tasks, diaries, variations, documents, progress, timeline].every((store) => store.isReady);
+  const ready = identityState.isReady && [jobs, customers, builders, team, tasks, diaries, variations, documents, progress, timeline].every((store) => store.isReady);
   if (!ready) return <Card>Loading job workspace…</Card>;
 
   const job = jobs.items.find((item) => item.id === jobId);
@@ -125,20 +140,37 @@ export default function JobWorkspacePage() {
   const acceptedVariationValue = jobVariations.filter((item) => ["Accepted", "Approved", "Invoiced"].includes(item.status)).reduce((sum, item) => sum + (item.fixedPrice ?? item.labourHours * item.labourRate + item.materialCharge + item.otherCharge), 0);
   const jobDocuments = documents.items.filter((item) => item.jobId === jobId);
   const recentActivity = timeline.items.filter((item) => item.jobId === jobId).toSorted((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, 5);
-  const currentStatus = canonicalJobStatuses.includes(job.status) ? job.status as CanonicalJobStatus : "Enquiry";
+  const currentStatus = fieldJobStatusRestricted ? normaliseFieldJobStatus(job.status) : normaliseJobStatus(job.status);
+  const fieldStatusTransitions = fieldJobStatusTransitions(currentStatus);
+  const statusOptions = fieldJobStatusRestricted
+    ? [currentStatus, ...fieldStatusTransitions]
+    : canonicalJobStatuses;
+  const statusControlLocked = jobStatusMutationDenied
+    || (fieldJobStatusRestricted && fieldStatusTransitions.length === 0);
 
   function updateStatus() {
     const nextStatus = selectedStatus === "Enquiry" && currentStatus !== "Enquiry" ? currentStatus : selectedStatus;
+    if (jobStatusMutationDenied) {
+      setStatusMessage("Job status changes are unavailable until an approved cloud identity is active.");
+      return;
+    }
+    if (fieldJobStatusRestricted && !fieldJobStatusTransitionAllowed(currentStatus, nextStatus)) {
+      setSelectedStatus(currentStatus);
+      setStatusMessage("That stage change is not available in the field workflow. Choose an approved next stage or ask the office to update the job.");
+      return;
+    }
     if (nextStatus === currentStatus) { setStatusMessage("Choose a different status before saving."); return; }
     const now = new Date().toISOString();
     const result = transitionJobStatus({ job: currentJob, nextStatus, now, timelineId: makeId("timeline"), completedBy: "JR OS mobile workspace" });
     jobs.setItems((current) => current.map((item) => item.id === currentJob.id ? result.job : item));
-    if (result.timelineEntry) {
+    if (!fieldJobStatusRestricted && result.timelineEntry) {
       const entry = result.timelineEntry as JobTimelineEntry;
       timeline.setItems((current) => [entry, ...current]);
     }
     setSelectedStatus(nextStatus);
-    setStatusMessage(`Job status updated to ${nextStatus}.`);
+    setStatusMessage(fieldJobStatusRestricted
+      ? `Job status change to ${nextStatus} queued for secure sync.`
+      : `Job status updated to ${nextStatus}.`);
   }
 
   function updateProgressMetric(metric: EditableProgressMetric, value: string) {
@@ -183,7 +215,7 @@ export default function JobWorkspacePage() {
     <Link href={`/jobs/${jobId}`} className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-300"><ArrowLeft className="size-4" />Back to job record</Link>
 
     <Card className="border-cyan-500/25">
-      <div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job Management Pro</p><h1 className="mt-2 break-words text-3xl font-black">{job.title}</h1><p className="mt-2 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{job.siteAddress || "No site address"}</p></div><StatusBadge status={job.status} /></div>
+      <div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job Management Pro</p><h1 className="mt-2 break-words text-3xl font-black">{job.title}</h1><p className="mt-2 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{job.siteAddress || "No site address"}</p></div><StatusBadge status={currentStatus} /></div>
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Contract value</p><p className="mt-1 font-bold">{money.format(job.value || 0)}</p></div>
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Variations</p><p className="mt-1 font-bold text-emerald-300">{money.format(acceptedVariationValue)}</p></div>
@@ -211,11 +243,12 @@ export default function JobWorkspacePage() {
       <h2 className="mt-1 text-xl font-bold">Update job stage</h2>
       <p className="mt-2 text-sm text-slate-400">Every change is written to the job timeline automatically.</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
-        <select value={selectedStatus === "Enquiry" && currentStatus !== "Enquiry" ? currentStatus : selectedStatus} onChange={(event) => setSelectedStatus(event.target.value as CanonicalJobStatus)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
-          {canonicalJobStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+        <select value={selectedStatus === "Enquiry" && currentStatus !== "Enquiry" ? currentStatus : selectedStatus} disabled={statusControlLocked} onChange={(event) => setSelectedStatus(event.target.value as CanonicalJobStatus)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base disabled:cursor-not-allowed disabled:opacity-60">
+          {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
         </select>
-        <Button type="button" onClick={updateStatus} className="w-full sm:w-auto">Save status</Button>
+        <Button type="button" onClick={updateStatus} disabled={statusControlLocked} className="w-full sm:w-auto">Save status</Button>
       </div>
+      {jobStatusMutationDenied ? <p className="mt-3 text-sm text-amber-200">Status changes remain read-only until an approved cloud identity is active.</p> : fieldJobStatusRestricted && fieldStatusTransitions.length === 0 ? <p className="mt-3 text-sm text-amber-200">Further lifecycle changes for this job require office review.</p> : null}
       {statusMessage ? <p role="status" className="mt-3 text-sm text-cyan-200">{statusMessage}</p> : null}
     </Card>
 

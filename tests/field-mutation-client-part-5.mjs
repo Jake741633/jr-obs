@@ -9,6 +9,9 @@ import {
 
 test("job status evidence is server-owned while explicit field notes remain routable", () => {
   assert.equal(normaliseFieldRequestedJobStatus("In progress"), "First fix");
+  assert.equal(normaliseFieldRequestedJobStatus(" In progress "), "First fix");
+  assert.equal(normaliseFieldRequestedJobStatus(" Testing "), "Testing");
+  assert.equal(normaliseFieldRequestedJobStatus("\tTesting\t"), "\tTesting\t", "field request normalization must match PostgreSQL btrim spaces");
   assert.equal(normaliseFieldRequestedJobStatus("Testing"), "Testing");
   assert.match(repository, /normaliseFieldRequestedJobStatus\(payload\.status\)/);
   assert.equal(isServerAuthoredFieldTimeline("cloud_collections", "electrician", "jr-os-job-timeline", {
@@ -35,6 +38,11 @@ test("RPC responses are identity-checked before safe cache reconciliation", () =
     payload: { id: "job-1", status: "Testing" },
   };
   assert.strictEqual(validateFieldMutationResponse(response, { resource: "jobs", sourceId: "job-1", requestedStatus: "Testing" }), response);
+  assert.strictEqual(validateFieldMutationResponse(response, {
+    resource: "jobs",
+    sourceId: "job-1",
+    requestedStatus: normaliseFieldRequestedJobStatus(" Testing "),
+  }), response, "padded field requests must validate against the canonical RPC response");
   assert.throws(() => validateFieldMutationResponse({ ...response, sourceId: "job-2" }, { resource: "jobs", sourceId: "job-1" }), /mismatched/i);
   assert.throws(() => validateFieldMutationResponse({ ...response, version: "8" }, { resource: "jobs", sourceId: "job-1" }), /mismatched/i);
   assert.throws(() => validateFieldMutationResponse({ ...response, status: "maybe" }, { resource: "jobs", sourceId: "job-1" }), /invalid status/i);

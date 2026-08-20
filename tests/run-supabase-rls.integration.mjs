@@ -381,6 +381,23 @@ const secureJobReadCoverage = `${secureJobReadAnchor}
       await patchRecords(accounts.A.electrician, "jobs", \`source_id=eq.\${jobA}\`, { payload: { id: jobA, status: "Second fix" } }),
       "Electrician direct job updates must fail closed",
     );
+    const rejectedJobStatusMutationId = crypto.randomUUID();
+    await expectDeniedWithCode(
+      await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", {
+        method: "POST",
+        body: { record_source_id: jobA, expected_version: electricianFieldJob.payload[0].version, requested_status: "Paid", mutation_id: rejectedJobStatusMutationId },
+      }),
+      "22023",
+      "Assigned electrician must not apply an unsupported canonical job status transition",
+    );
+    const officeJobAfterRejectedStatus = await listRecords(accounts.A.office, "jobs", \`select=version,payload&source_id=eq.\${jobA}\`);
+    await expectAllowed(officeJobAfterRejectedStatus, "Office should read the canonical job after a rejected field status");
+    assert.equal(officeJobAfterRejectedStatus.payload[0].version, electricianFieldJob.payload[0].version, "Rejected field status must not advance the canonical job version");
+    assert.equal(officeJobAfterRejectedStatus.payload[0].payload.status, "First fix", "Rejected field status must not change the canonical job");
+    const rejectedStatusTimelineSource = "field-status-" + accounts.A.electrician.id + "-" + rejectedJobStatusMutationId;
+    const rejectedStatusTimeline = await listRecords(accounts.A.office, "cloud_collections", "select=source_id&collection_key=eq.jr-os-job-timeline&source_id=eq." + rejectedStatusTimelineSource);
+    await expectAllowed(rejectedStatusTimeline, "Office should query authoritative timeline evidence after a rejected field status");
+    assert.equal(rejectedStatusTimeline.payload.length, 0, "Rejected field status must not create authoritative timeline evidence");
     const jobStatusMutationId = crypto.randomUUID();
     const statusMutation = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", {
       method: "POST",
@@ -759,6 +776,10 @@ try {
     "Electrician must not read current or legacy diaries for a soft-deleted job",
     "Office should retain canonical current and legacy site diaries after job deletion",
     "Assigned electrician should apply a valid job status transition through the RPC",
+    "Assigned electrician must not apply an unsupported canonical job status transition",
+    "Rejected field status must not advance the canonical job version",
+    "Rejected field status must not change the canonical job",
+    "Rejected field status must not create authoritative timeline evidence",
     "A response-loss retry should return the exact prior job mutation result",
     "A mutation id must not be reused with changed job arguments",
     "Electrician direct job updates must fail closed",
