@@ -68,7 +68,7 @@ export default function MobileSiteDiaryPage() {
     teamMembers: team.items,
     mode: identityState.mode,
   }), [identityState.identity, identityState.mode, team.items]);
-  const cloudFieldMode = identityState.mode !== "local";
+  const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const serverBoundLabour = cloudFieldMode;
   const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
 
