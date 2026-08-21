@@ -32,7 +32,7 @@ export default function MobileQaPage() {
   const visibleJobId = selectedJobId || form.jobId || activeJobs[0]?.id || "";
   const visibleInspections = useMemo(() => inspections.items.filter((inspection) => inspection.jobId === visibleJobId).toSorted((a, b) => b.inspectedAt.localeCompare(a.inspectedAt)), [inspections.items, visibleJobId]);
   const summary = useMemo(() => qaSummary(inspections.items, visibleJobId), [inspections.items, visibleJobId]);
-  const cloudFieldMode = identityState.mode !== "local";
+  const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const ready = [jobs, inspections, tasks, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
 
   if (!ready) return <Card>Loading mobile QA inspections…</Card>;
