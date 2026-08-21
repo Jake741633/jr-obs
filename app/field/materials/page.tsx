@@ -37,11 +37,11 @@ export default function MobileMaterialsPage() {
   const usedToday = useMemo(() => materialsUsedToday(jobUsage.items, today()), [jobUsage.items]);
   const todaySummary = useMemo(() => materialsTodaySummary(jobUsage.items, today()), [jobUsage.items]);
   const selectedItem = stock.items.find((item) => item.id === usage.stockItemId);
-  const cloudFieldMode = identityState.mode !== "local";
+  const fieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
 
   function useMaterial(event: FormEvent) {
     event.preventDefault();
-    if (cloudFieldMode) {
+    if (fieldMode) {
       setMessage("Stock deductions are read-only for field cloud sessions until a dedicated secure materials mutation route is available.");
       return;
     }
@@ -91,7 +91,7 @@ export default function MobileMaterialsPage() {
   }
 
   function createPurchaseRequest() {
-    if (cloudFieldMode) {
+    if (fieldMode) {
       setMessage("Purchase requests are read-only for field cloud sessions until a dedicated secure materials mutation route is available.");
       return;
     }
@@ -120,7 +120,7 @@ export default function MobileMaterialsPage() {
   return <main className="space-y-6 pb-24 sm:pb-0">
     <PageHeader eyebrow="Mobile workspace" title="Materials & Stock" description="Review stock, scan material codes and inspect job usage from your phone. Cloud field sessions stay read-only until materials have a dedicated secured mutation route." />
 
-    {cloudFieldMode ? <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-100"><p className="font-semibold">Materials cloud writes are currently locked.</p><p className="mt-1 text-xs text-amber-100/70">Stock and material records can be reviewed and scanned here, but deductions and purchase requests are blocked rather than stored only in optimistic browser state.</p></div> : null}
+    {fieldMode ? <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-100"><p className="font-semibold">Materials cloud writes are currently locked.</p><p className="mt-1 text-xs text-amber-100/70">Stock and material records can be reviewed and scanned here, but deductions and purchase requests are blocked rather than stored only in optimistic browser state.</p></div> : null}
 
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       <Card><Boxes className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Stock lines</p><p className="mt-2 text-3xl font-bold">{stock.items.length}</p></Card>
@@ -136,7 +136,7 @@ export default function MobileMaterialsPage() {
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]"><InputField label="Scan code" placeholder="Scan or enter code" value={scanCode} onChange={(event) => setScanCode(event.target.value)} /><div className="flex items-end"><Button type="button" onClick={findByScanCode}><Barcode className="mr-2 size-4" />Find item</Button></div></div>
     </Card>
 
-    {!cloudFieldMode ? <Card>
+    {!fieldMode ? <Card>
       <form onSubmit={useMaterial} className="grid gap-4 md:grid-cols-2">
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Stock item</span><select required value={usage.stockItemId} onChange={(event) => setUsage({ ...usage, stockItemId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose material</option>{stock.items.map((item) => <option key={item.id} value={item.id}>{item.description} · {locationMap.get(item.locationId) || "Unknown location"} · {item.quantity} {item.unit.toLowerCase()}</option>)}</select></label>
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select value={usage.jobId} onChange={(event) => setUsage({ ...usage, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">No job selected</option>{jobs.items.filter((job) => job.status !== "Complete" && job.status !== "Paid" && job.status !== "Cancelled").map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
@@ -153,7 +153,7 @@ export default function MobileMaterialsPage() {
     </Card>
 
     <Card className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">Low-stock purchase request</h2><p className="text-sm text-slate-400">{cloudFieldMode ? "Low-stock lines are visible here, but field cloud sessions cannot create purchase requests until the secure materials route is available." : "Create one purchase list for items at or below their minimum level. Open, undelivered material requests are not duplicated."}</p></div>{!cloudFieldMode ? <Button type="button" onClick={createPurchaseRequest}><ClipboardPlus className="mr-2 size-4" />Create request</Button> : null}</div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-bold">Low-stock purchase request</h2><p className="text-sm text-slate-400">{fieldMode ? "Low-stock lines are visible here, but field cloud sessions cannot create purchase requests until the secure materials route is available." : "Create one purchase list for items at or below their minimum level. Open, undelivered material requests are not duplicated."}</p></div>{!fieldMode ? <Button type="button" onClick={createPurchaseRequest}><ClipboardPlus className="mr-2 size-4" />Create request</Button> : null}</div>
       {lowStock.length === 0 ? <p className="text-sm text-slate-500">All tracked stock is above its minimum level.</p> : <div className="grid gap-2">{lowStock.map((item) => <div key={item.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3"><div><p className="font-medium">{item.description}</p><p className="text-xs text-slate-500">{locationMap.get(item.locationId) || "Unknown location"}</p></div><p className="text-sm font-semibold text-amber-300">{item.quantity} / min {item.minimumQuantity}</p></div>)}</div>}
     </Card>
 
