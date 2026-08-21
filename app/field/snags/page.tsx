@@ -31,7 +31,7 @@ export default function MobileSnagsPage() {
   const visibleJobId = selectedJobId || form.jobId || activeJobs[0]?.id || "";
   const visibleSnags = useMemo(() => prioritiseSnags(tasks.items.filter((task) => task.jobId === visibleJobId)), [tasks.items, visibleJobId]);
   const summary = useMemo(() => snagSummary(tasks.items, visibleJobId), [tasks.items, visibleJobId]);
-  const cloudFieldMode = identityState.mode !== "local";
+  const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const operatorMember = useMemo(() => {
     const identityEmail = identityState.identity?.email?.trim().toLowerCase();
     if (!identityEmail) return undefined;
