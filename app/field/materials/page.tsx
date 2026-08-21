@@ -37,7 +37,7 @@ export default function MobileMaterialsPage() {
   const usedToday = useMemo(() => materialsUsedToday(jobUsage.items, today()), [jobUsage.items]);
   const todaySummary = useMemo(() => materialsTodaySummary(jobUsage.items, today()), [jobUsage.items]);
   const selectedItem = stock.items.find((item) => item.id === usage.stockItemId);
-  const cloudFieldMode = identityState.mode !== "local";
+  const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
 
   function useMaterial(event: FormEvent) {
     event.preventDefault();
