@@ -26,6 +26,7 @@ import {
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none transition focus:border-cyan-400";
 const statuses: TestingRecordStatus[] = ["Draft", "In progress", "Ready for certificate", "Complete"];
 const polarities: PolarityResult[] = ["", "Confirmed", "Not confirmed", "Not tested"];
+const fieldTestingDraftStorageKey = "jr-os-field-electrical-testing-drafts";
 
 function blankCircuit(): CircuitTestResult {
   return { id: makeId("circuit-test"), circuitReference: "", description: "", protectiveDevice: "", r1r2: "", insulationResistance: "", polarity: "", zs: "", rcdTest: "", notes: "" };
@@ -40,9 +41,12 @@ export default function MobileTestingPage() {
   const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const customers = useCloudLocalCollection<Customer>("jr-os-customers");
   const certificates = useCloudLocalCollection<ElectricalCertificate>("jr-os-certificates");
-  const records = useElectricalTestingCollection();
+  const canonicalRecords = useElectricalTestingCollection();
+  const fieldDraftRecords = useCloudLocalCollection<ElectricalTestingRecord>(fieldTestingDraftStorageKey);
   const team = useTeamCollection();
   const identityState = useCloudIdentity();
+  const fieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
+  const records = fieldMode ? fieldDraftRecords : canonicalRecords;
   const [form, setForm] = useState<ElectricalTestingRecord>(() => blankRecord());
   const [actionText, setActionText] = useState("");
   const [message, setMessage] = useState("");
