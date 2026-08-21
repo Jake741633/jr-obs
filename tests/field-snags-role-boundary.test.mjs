@@ -11,8 +11,18 @@ test("snag field identity binding applies only to cloud electrician sessions", (
 });
 
 test("snag task and timeline routes stay field-RPC bound for electricians and direct for office roles", () => {
-  assert.deepEqual(collectionCloudMutationRoute("cloud_collections", "electrician", "jr-os-job-tasks"), { kind: "field_collection_rpc", rpc: "jr_field_save_collection", intents: ["create", "update"] });
-  assert.deepEqual(collectionCloudMutationRoute("cloud_collections", "electrician", "jr-os-job-timeline"), { kind: "field_collection_rpc", rpc: "jr_field_save_collection", intents: ["create"] });
+  assert.deepEqual(collectionCloudMutationRoute("cloud_collections", "electrician", "jr-os-job-tasks"), {
+    kind: "rpc",
+    functionName: "jr_field_save_collection",
+    resource: "cloud_collections",
+    allowedIntents: ["create", "update"],
+  });
+  assert.deepEqual(collectionCloudMutationRoute("cloud_collections", "electrician", "jr-os-job-timeline"), {
+    kind: "rpc",
+    functionName: "jr_field_save_collection",
+    resource: "cloud_collections",
+    allowedIntents: ["create"],
+  });
   assert.deepEqual(collectionCloudMutationRoute("cloud_collections", "admin", "jr-os-job-tasks"), { kind: "direct" });
   assert.deepEqual(collectionCloudMutationRoute("cloud_collections", "admin", "jr-os-job-timeline"), { kind: "direct" });
 });
