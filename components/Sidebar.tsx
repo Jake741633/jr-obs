@@ -31,7 +31,9 @@ export default function Sidebar() {
     ? primaryNavigation.map((item) => item.href === "/jobs" ? { ...item, href: "/field/jobs" } : item)
     : primaryNavigation;
   const primary = rolePrimaryNavigation.slice(0, 4).filter((item) => permitted(item.href));
-  const secondary = secondaryNavigation.filter(([, href]) => permitted(href));
+  const secondary = secondaryNavigation.filter(([, href]) => (
+    permitted(href) && !(identity?.role === "electrician" && href === "/field/jobs")
+  ));
 
   return (
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col border-r border-slate-800 bg-slate-950/95 px-5 py-6 backdrop-blur lg:flex">
