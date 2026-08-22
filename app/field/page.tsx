@@ -39,7 +39,7 @@ export default function FieldWorkspacePage() {
   const customerNames = useMemo(() => new Map(customers.items.map((customer) => [customer.id, customer.name])), [customers.items]);
   const todaysJobs = useMemo(() => jobs.items.filter((job) => job.startDate === today() || isJobOnSiteStatus(job.status)).toSorted((a, b) => a.startDate.localeCompare(b.startDate)), [jobs.items]);
   const operatorName = useMemo(() => fieldOperatorName({ identity: identityState.identity, teamMembers: team.items, mode: identityState.mode }), [identityState.identity, identityState.mode, team.items]);
-  const cloudFieldMode = identityState.mode !== "local";
+  const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const activeJob = jobs.items.find((job) => job.id === form.jobId);
   const todaysEntries = diary.items.filter((entry) => entry.workDate === today());
 
@@ -109,7 +109,7 @@ export default function FieldWorkspacePage() {
   if (!ready) return <Card>Loading field workspace…</Card>;
 
   return <div className="space-y-6">
-    <PageHeader eyebrow="Mobile workspace" title="Today on site" description="Start assigned jobs and capture secure site records from your phone. Completion uploads stay locked in cloud field mode until their dedicated server route is available." />
+    <PageHeader eyebrow="Mobile workspace" title="Today on site" description="Start assigned jobs and capture secure site records from your phone. Completion uploads stay locked for cloud electrician sessions until their dedicated server route is available." />
     {cloudFieldMode && !operatorName ? <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-100"><p className="font-semibold">Field identity could not be resolved.</p><p className="mt-1 text-xs text-amber-100/70">Site writes remain locked until this signed-in account resolves to an active team identity.</p></div> : null}
     <section className="grid gap-4 sm:grid-cols-3"><Card><p className="text-sm text-slate-400">Today&apos;s jobs</p><p className="mt-2 text-3xl font-bold">{todaysJobs.length}</p></Card><Card><p className="text-sm text-slate-400">On site</p><p className="mt-2 text-3xl font-bold">{jobs.items.filter((job) => isJobOnSiteStatus(job.status)).length}</p></Card><Card><p className="text-sm text-slate-400">Diary records today</p><p className="mt-2 text-3xl font-bold">{todaysEntries.length}</p></Card></section>
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
