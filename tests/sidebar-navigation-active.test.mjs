@@ -20,3 +20,7 @@ test("desktop electrician jobs use field control and stay active in assigned wor
   assert.match(sidebar, /fieldJobWorkspacePath\.test\(pathname\)/);
   assert.match(sidebar, /: primaryNavigation;/);
 });
+
+test("desktop field job control is not repeated in the electrician workspace list", () => {
+  assert.ok(sidebar.includes("permitted(href) && !(identity?.role === \"electrician\" && href === \"/field/jobs\")"));
+});
