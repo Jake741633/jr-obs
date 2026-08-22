@@ -19,7 +19,7 @@ function readiness(overrides = {}) {
     hasContact: false,
     hasMaterials: false,
     hasTesting: false,
-    jobHref: "/jobs/job-1",
+    jobHref: "/jobs/job-1/workspace",
     ...overrides,
   });
 }
@@ -50,6 +50,10 @@ test("mobile job control does not load or link office-only readiness surfaces", 
   assert.doesNotMatch(fieldJobPage, /"\/customers"/);
   assert.doesNotMatch(fieldJobPage, /"\/quotes"/);
   assert.doesNotMatch(fieldJobPage, /"\/rams"/);
-  assert.match(fieldJobPage, /jobHref: `\/jobs\/\$\{job\.id\}`/);
+  assert.match(fieldJobPage, /function jobWorkspaceHref\(jobId: string\)/);
+  assert.match(fieldJobPage, /jobHref: jobWorkspaceHref\(job\.id\)/);
+  assert.equal((fieldJobPage.match(/jobWorkspaceHref\(job\.id\)/g) ?? []).length, 3);
+  assert.doesNotMatch(fieldJobPage, /href=\{`\/jobs\/\$\{job\.id\}`\}/);
+  assert.match(fieldJobPage, />Open job workspace<\/Link>/);
   assert.match(fieldJobPage, /<p>Material lists<\/p>/);
 });
