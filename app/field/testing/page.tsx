@@ -46,6 +46,7 @@ export default function MobileTestingPage() {
   const team = useTeamCollection();
   const identityState = useCloudIdentity();
   const fieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
+  const localTestingMode = fieldMode || identityState.mode === "local";
   const records = fieldMode ? fieldDraftRecords : canonicalRecords;
   const [form, setForm] = useState<ElectricalTestingRecord>(() => blankRecord());
   const [actionText, setActionText] = useState("");
@@ -85,7 +86,7 @@ export default function MobileTestingPage() {
     const record = { ...effectiveForm, customerId: selectedJob?.customerId ?? form.customerId, inspectorName: operatorName, updatedAt: new Date().toISOString() };
     persistRecord(record);
     setForm(record);
-    setMessage("Testing draft saved locally. You can leave and resume it later.");
+    setMessage(localTestingMode ? "Testing draft saved locally. You can leave and resume it later." : "Testing record saved and queued for secure cloud sync.");
   }
 
   function resume(record: ElectricalTestingRecord) {
@@ -134,7 +135,7 @@ export default function MobileTestingPage() {
   if (!ready) return <Card>Loading electrical testing workspace…</Card>;
 
   return <div className="space-y-6">
-    <PageHeader eyebrow="Mobile testing" title="Electrical testing workspace" description="Capture circuit results against the active job, save testing evidence and prepare a structured summary for certificate review." />
+    <PageHeader eyebrow="Mobile testing" title="Electrical testing workspace" description={localTestingMode ? "Capture circuit results against the active job, save drafts locally and prepare a structured summary for certificate review." : "Capture circuit results against the active job, save canonical testing records with cloud sync and prepare a structured summary for certificate review."} />
 
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
@@ -173,7 +174,7 @@ export default function MobileTestingPage() {
         </div>)}
       </div>
 
-      <div className="flex flex-wrap justify-end gap-2"><Button type="submit"><Save className="mr-2 size-4" />Save testing draft</Button><Button type="button" variant="secondary" onClick={markCertificateReady}><CheckCircle2 className="mr-2 size-4" />Mark certificate-ready</Button></div>
+      <div className="flex flex-wrap justify-end gap-2"><Button type="submit"><Save className="mr-2 size-4" />{localTestingMode ? "Save testing draft" : "Save testing record"}</Button><Button type="button" variant="secondary" onClick={markCertificateReady}><CheckCircle2 className="mr-2 size-4" />Mark certificate-ready</Button></div>
     </form></Card>
 
     <section className="grid gap-4 xl:grid-cols-2">
@@ -183,6 +184,6 @@ export default function MobileTestingPage() {
 
     <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="flex items-center gap-2 font-bold"><FileText className="size-5 text-cyan-300" />Certificate-ready testing summary</h2><p className="mt-1 text-sm text-slate-400">This summary supports certificate preparation but is not itself a certificate. Field testing does not directly modify certificate records.</p></div>{fieldMode ? <p className="max-w-md text-sm text-amber-200">Save the testing draft and provide this structured summary to the office. Certificate linking, authoring and issue remain office-controlled.</p> : <div className="flex flex-wrap gap-2"><Button type="button" variant="secondary" onClick={prepareCertificateSummary}>Prepare for linked certificate</Button><Link href="/certificates" className="rounded-xl border border-slate-700 px-3 py-2 text-sm font-semibold hover:border-cyan-400/50">Open certificates</Link></div>}</div><pre className="mt-4 whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950 p-4 text-sm text-slate-300">{summary}</pre></Card>
 
-    <section className="space-y-3"><div><h2 className="text-xl font-bold">Saved testing drafts</h2><p className="text-sm text-slate-400">Resume records stored on this device.</p></div>{records.items.length ? records.items.map((record) => <Card key={record.id}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{record.status} · {testingProgress(record)}%</p><h3 className="mt-1 font-bold">{jobs.items.find((job) => job.id === record.jobId)?.title ?? "Linked job"}</h3><p className="mt-1 text-sm text-slate-400">{record.circuits.length} circuit result{record.circuits.length === 1 ? "" : "s"} · updated {new Date(record.updatedAt).toLocaleString("en-GB")}</p></div><Button type="button" variant="secondary" onClick={() => resume(record)}><ClipboardCheck className="mr-2 size-4" />Resume</Button></div></Card>) : <Card>No testing drafts saved yet.</Card>}</section>
+    <section className="space-y-3"><div><h2 className="text-xl font-bold">{localTestingMode ? "Saved testing drafts" : "Saved testing records"}</h2><p className="text-sm text-slate-400">{localTestingMode ? "Resume records stored on this device." : "Resume canonical testing records available through secure cloud sync."}</p></div>{records.items.length ? records.items.map((record) => <Card key={record.id}><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{record.status} · {testingProgress(record)}%</p><h3 className="mt-1 font-bold">{jobs.items.find((job) => job.id === record.jobId)?.title ?? "Linked job"}</h3><p className="mt-1 text-sm text-slate-400">{record.circuits.length} circuit result{record.circuits.length === 1 ? "" : "s"} · updated {new Date(record.updatedAt).toLocaleString("en-GB")}</p></div><Button type="button" variant="secondary" onClick={() => resume(record)}><ClipboardCheck className="mr-2 size-4" />Resume</Button></div></Card>) : <Card>{localTestingMode ? "No testing drafts saved yet." : "No testing records saved yet."}</Card>}</section>
   </div>;
 }
