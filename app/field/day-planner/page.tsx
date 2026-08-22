@@ -41,7 +41,7 @@ export default function EngineerDayPlannerPage() {
     teamMembers: team.items,
     mode: identityState.mode,
   }), [identityState.identity, identityState.mode, team.items]);
-  const cloudFieldMode = identityState.mode !== "local";
+  const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const summary = useMemo(() => dayPlannerSummary(planner.items, timesheets.items, date), [planner.items, timesheets.items, date]);
 
   const ready = [planner, jobs, customers, team, timesheets].every((collection) => collection.isReady) && identityState.isReady;
