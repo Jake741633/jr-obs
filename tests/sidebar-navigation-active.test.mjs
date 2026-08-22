@@ -22,5 +22,10 @@ test("desktop electrician jobs use field control and stay active in assigned wor
 });
 
 test("desktop field job control is not repeated in the electrician workspace list", () => {
-  assert.ok(sidebar.includes("permitted(href) && !(identity?.role === \"electrician\" && href === \"/field/jobs\")"));
+  assert.ok(sidebar.includes("identity?.role === \"electrician\" && href === \"/field/jobs\""));
+});
+
+test("desktop cloud account navigation stays in the identity footer only", () => {
+  assert.ok(sidebar.includes("href !== \"/cloud\""));
+  assert.equal((sidebar.match(/href="\/cloud"/g) ?? []).length, 1);
 });
