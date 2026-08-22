@@ -23,6 +23,10 @@ function mapsHref(address: string) {
   return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
 }
 
+function jobWorkspaceHref(jobId: string) {
+  return `/jobs/${jobId}/workspace`;
+}
+
 export default function MobileJobControlPage() {
   const jobs = useJobsCollection();
   const customers = useCustomersCollection();
@@ -50,7 +54,7 @@ export default function MobileJobControlPage() {
       hasContact: Boolean(customer?.phone || customer?.email),
       hasMaterials: jobPurchaseLists.length > 0,
       hasTesting: jobTesting.length > 0,
-      jobHref: `/jobs/${job.id}`,
+      jobHref: jobWorkspaceHref(job.id),
     });
     return { job, customer, readiness, jobPurchaseLists, jobTesting, jobDocuments };
   });
@@ -80,7 +84,7 @@ export default function MobileJobControlPage() {
 
       <div className="mt-4 grid grid-cols-2 gap-2">
         <a href={mapsHref(job.siteAddress)} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center rounded-xl bg-cyan-400 px-3 text-sm font-semibold text-slate-950"><Navigation className="mr-2 size-4" />Navigate</a>
-        {customer?.phone ? <a href={`tel:${customer.phone}`} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-3 text-sm font-semibold"><Phone className="mr-2 size-4" />Call</a> : <Link href={`/jobs/${job.id}`} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-3 text-sm font-semibold">Job contact</Link>}
+        {customer?.phone ? <a href={`tel:${customer.phone}`} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-3 text-sm font-semibold"><Phone className="mr-2 size-4" />Call</a> : <Link href={jobWorkspaceHref(job.id)} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-3 text-sm font-semibold">Job contact</Link>}
       </div>
 
       <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
@@ -94,7 +98,7 @@ export default function MobileJobControlPage() {
         <div className="rounded-lg border border-slate-800 p-2"><p className="font-bold text-slate-100">{jobDocuments.length}</p><p>Documents</p></div>
       </div>
 
-      <div className="mt-4 grid gap-2 sm:grid-cols-2"><Link href={`/jobs/${job.id}`} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link><Link href="/field" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold"><ShieldCheck className="mr-2 size-4" />Site workspace</Link></div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2"><Link href={jobWorkspaceHref(job.id)} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open job workspace</Link><Link href="/field" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold"><ShieldCheck className="mr-2 size-4" />Site workspace</Link></div>
     </Card>)}</section>}
 
     <div className="fixed inset-x-4 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 sm:hidden"><Link href="/field" className="inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 shadow-2xl"><ShieldCheck className="mr-2 size-4" />Open today&apos;s site workspace</Link></div>
