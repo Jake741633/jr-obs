@@ -14,12 +14,18 @@ const mobileNavigation = [
   { label: "More", href: "/menu", icon: Menu },
 ] as const;
 
+const fieldJobWorkspacePath = /^\/jobs\/[^/]+\/workspace(?:\/|$)/;
+
 export function MobileNav() {
   const pathname = usePathname();
   const { identity, mode } = useCloudIdentity();
   const unrestricted = mode === "local" || (mode === "migration" && !identity);
   const roleNavigation = identity?.role === "electrician"
-    ? mobileNavigation.map((item) => item.href === "/" ? { ...item, label: "Field", href: "/field" } : item)
+    ? mobileNavigation.map((item) => {
+      if (item.href === "/") return { ...item, label: "Field", href: "/field" };
+      if (item.href === "/jobs") return { ...item, href: "/field/jobs" };
+      return item;
+    })
     : mobileNavigation;
   const visible = roleNavigation.filter((item) => item.href === "/menu" || unrestricted || canAccessPath(identity?.role, item.href));
   const navigation = identity?.role === "customer"
@@ -34,9 +40,11 @@ export function MobileNav() {
       {navigation.map(({ label, href, icon: Icon }) => {
         const primaryMatch = (itemHref: string) => itemHref === "/"
           ? pathname === "/"
-          : itemHref === "/quotes/mobile"
-            ? pathname.startsWith("/quotes") || pathname.startsWith("/estimates")
-            : pathname === itemHref || pathname.startsWith(`${itemHref}/`);
+          : itemHref === "/field/jobs" && identity?.role === "electrician"
+            ? pathname === itemHref || pathname.startsWith(`${itemHref}/`) || fieldJobWorkspacePath.test(pathname)
+            : itemHref === "/quotes/mobile"
+              ? pathname.startsWith("/quotes") || pathname.startsWith("/estimates")
+              : pathname === itemHref || pathname.startsWith(`${itemHref}/`);
         const active = href === "/menu"
           ? !roleNavigation.filter((item) => item.href !== "/menu").some((item) => primaryMatch(item.href))
           : primaryMatch(href);
