@@ -11,3 +11,12 @@ test("desktop sidebar keeps parent workspaces active on nested routes", () => {
   assert.equal((sidebar.match(/navigationItemIsActive\(pathname, href\)/g) ?? []).length, 2);
   assert.doesNotMatch(sidebar, /const active = pathname === href;/);
 });
+
+test("desktop electrician jobs use field control and stay active in assigned workspaces", () => {
+  assert.match(sidebar, /const fieldJobWorkspacePath = \^?\/\^\\\/jobs\\\/\[\^\/\]\+\\\/workspace/);
+  assert.match(sidebar, /identity\?\.role === "electrician"/);
+  assert.match(sidebar, /item\.href === "\/jobs" \? \{ \.\.\.item, href: "\/field\/jobs" \} : item/);
+  assert.match(sidebar, /href === "\/field\/jobs"/);
+  assert.match(sidebar, /fieldJobWorkspacePath\.test\(pathname\)/);
+  assert.match(sidebar, /: primaryNavigation;/);
+});
