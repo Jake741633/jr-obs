@@ -32,7 +32,7 @@ test("electricians use the dedicated field landing page instead of the owner com
 
 test("field mobile navigation replaces the owner home link with the field workspace", () => {
   assert.match(mobileNavigation, /identity\?\.role === "electrician"/);
-  assert.match(mobileNavigation, /item\.href === "\/" \? \{ \.\.\.item, label: "Field", href: "\/field" \}/);
+  assert.match(mobileNavigation, /if \(item\.href === "\/"\) return \{ \.\.\.item, label: "Field", href: "\/field" \};/);
   assert.match(mobileNavigation, /navigation\.length === 3 \? "grid-cols-3"/);
 });
 
