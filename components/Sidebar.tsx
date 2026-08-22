@@ -7,7 +7,12 @@ import { canAccessPath, isOperatorOnlyPath } from "../lib/cloud/permissions";
 import { useCloudIdentity } from "../lib/cloud/useCloudIdentity";
 import { primaryNavigation, secondaryNavigation } from "./navigation";
 
+const fieldJobWorkspacePath = /^\/jobs\/[^/]+\/workspace(?:\/|$)/;
+
 function navigationItemIsActive(pathname: string, href: string) {
+  if (href === "/field/jobs") {
+    return pathname === href || pathname.startsWith(`${href}/`) || fieldJobWorkspacePath.test(pathname);
+  }
   return href === "/"
     ? pathname === "/"
     : pathname === href || pathname.startsWith(`${href}/`);
@@ -22,7 +27,10 @@ export default function Sidebar() {
     if (isOperatorOnlyPath(href)) return canAccessPath(identity?.role, href, identity?.email);
     return unrestricted || canAccessPath(identity?.role, href, identity?.email);
   };
-  const primary = primaryNavigation.slice(0, 4).filter((item) => permitted(item.href));
+  const rolePrimaryNavigation = identity?.role === "electrician"
+    ? primaryNavigation.map((item) => item.href === "/jobs" ? { ...item, href: "/field/jobs" } : item)
+    : primaryNavigation;
+  const primary = rolePrimaryNavigation.slice(0, 4).filter((item) => permitted(item.href));
   const secondary = secondaryNavigation.filter(([, href]) => permitted(href));
 
   return (
