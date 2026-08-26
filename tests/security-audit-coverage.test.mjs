@@ -67,6 +67,7 @@ const requiredSuites = [
   "field-cloud-collection-projection.test.mjs",
   "field-survey-read-assignment.test.mjs",
   "field-survey-assist-photo-boundary.test.mjs",
+  "field-survey-photo-read-boundary.test.mjs",
   "field-survey-pricing-boundary.test.mjs",
   "field-job-confidentiality.test.mjs",
   "field-mutation-boundary.test.mjs",

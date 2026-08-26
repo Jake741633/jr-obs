@@ -327,4 +327,9 @@ begin;
 \ir ../migrations/20260826144606_redact_field_job_progress_finance.sql
 commit;
 
+\echo 'Binding field survey-photo reads to live canonical surveys'
+begin;
+\ir ../migrations/20260826230416_bind_field_survey_photo_reads.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
