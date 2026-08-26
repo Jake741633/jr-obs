@@ -8,7 +8,7 @@ const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url)
 
 test("offline queue items are tagged with their complete authorisation context", () => {
   assert.match(repository, /export interface SyncQueueItem<[^>]*> \{[^}]*organisationId: string;[^}]*userId\?: string;[^}]*role\?: string;[^}]*customerSourceId\?: string;/s);
-  assert.match(repository, /syncQueueItemId\(item\.organisationId, item\.userId, item\.role, item\.customerSourceId, item\.table, item\.collectionKey, item\.sourceId, queuedAt, mutationId\)/);
+  assert.match(repository, /syncQueueItemId\(safeItem\.organisationId, safeItem\.userId, safeItem\.role, safeItem\.customerSourceId, safeItem\.table, safeItem\.collectionKey, safeItem\.sourceId, queuedAt, mutationId\)/);
   assert.match(repository, /coalesceQueue\(queue, next\)/);
   assert.match(adapter, /queueChange\(\{[^}]*userId, role: cacheRole, customerSourceId: cacheCustomerSourceId \}\)/);
 });
