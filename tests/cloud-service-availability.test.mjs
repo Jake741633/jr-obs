@@ -23,3 +23,13 @@ test("HTTP responses still retain Supabase's specific error message", () => {
   assert.ok(networkErrorBoundary !== -1 && networkErrorBoundary < responseParsing);
   assert.ok(responseParsing !== -1 && responseParsing < apiErrorMessage);
 });
+
+test("configuration and session checks still run before network access", () => {
+  const fetchSource = client.slice(client.indexOf("export async function supabaseFetch"));
+  const configurationCheck = fetchSource.indexOf('if (!config) throw new Error("Supabase is not configured yet.");');
+  const sessionCheck = fetchSource.indexOf("const session = readSupabaseSession();");
+  const networkRequest = fetchSource.indexOf("response = await fetch(");
+
+  assert.ok(configurationCheck !== -1 && configurationCheck < sessionCheck);
+  assert.ok(sessionCheck < networkRequest);
+});
