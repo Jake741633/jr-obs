@@ -317,4 +317,9 @@ begin;
 \ir ../migrations/20260826123514_hide_field_finance_timeline_activity.sql
 commit;
 
+\echo 'Scoping field builder contact reads to assigned jobs'
+begin;
+\ir ../migrations/20260826132500_scope_field_builder_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
