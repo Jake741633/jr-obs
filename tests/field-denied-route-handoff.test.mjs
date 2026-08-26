@@ -16,11 +16,11 @@ const expectedHandoffs = [
   ["/certificates", "/field/testing"],
 ];
 
-test("legacy field links target office routes that remain denied", () => {
+test("office shortcuts target routes that remain denied to electricians", () => {
   assert.match(dayPlanner, /href="\/planner"/);
-  assert.match(fieldMaterials, /href="\/materials"/);
-  assert.match(fieldMaterials, /href="\/stock"/);
-  assert.match(fieldMaterials, /href="\/purchases"/);
+  assert.match(fieldMaterials, /label: "Materials Library", href: "\/materials"/);
+  assert.match(fieldMaterials, /label: "Stock Control", href: "\/stock"/);
+  assert.match(fieldMaterials, /label: "Purchase Lists", href: "\/purchases"/);
   assert.match(fieldTesting, /href="\/certificates"/);
 
   for (const [deniedPath] of expectedHandoffs) {
@@ -60,3 +60,4 @@ test("the access guard renders the handoff only after access is denied", () => {
   assert.match(accessGuard, /href=\{handoff\?\.href \?\? roleLandingPath\(identity\.role\)\}/);
   assert.match(accessGuard, /handoff\?\.actionLabel \?\? "Return to permitted workspace"/);
 });
+
