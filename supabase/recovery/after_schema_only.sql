@@ -312,4 +312,9 @@ begin;
 \ir ../migrations/20260826121246_keep_field_completion_records_office_only.sql
 commit;
 
+\echo 'Keeping field invoice, payment and deposit timeline activity office-only'
+begin;
+\ir ../migrations/20260826123514_hide_field_finance_timeline_activity.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

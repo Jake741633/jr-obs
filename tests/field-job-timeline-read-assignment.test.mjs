@@ -75,13 +75,13 @@ test("the final field collection policy scopes surveys and timeline rows indepen
 });
 
 test("stale tenant-wide electrician timeline caches purge before offline fallback", () => {
-  assert.match(cache, /ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION = "20260820160000"/);
+  assert.match(cache, /ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION = "20260826123514"/);
   assert.match(
     cache,
     /role === "electrician" && storageKey === "jr-os-job-timeline"[\s\S]*return ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION/,
   );
   assert.match(cache, /expectedGeneration && generation !== expectedGeneration[\s\S]*return "purge"/);
-  assert.match(cacheTypes, /ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION: "20260820160000"/);
+  assert.match(cacheTypes, /ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION: "20260826123514"/);
   assert.match(adapter, /roleProjectionCachePolicy\(\{ storageKey, role: cacheRole, mode, generation: cachedGeneration \}\)/);
   assert.match(adapter, /if \(mode === "local" \|\| !navigator\.onLine\) return local/);
   assert.match(adapter, /roleProjectionCacheGeneration\(\{ storageKey, role: cacheRole \}\)/);
@@ -107,7 +107,7 @@ test("recovery, guidance and deployment marker retain timeline assignment scopin
   assert.match(recovery.slice(timelineScope - 100, timelineScope + migrationName.length + 50), /begin;[\s\S]*\\ir[\s\S]*commit;/i);
   assert.match(
     setup,
-    /surveys and their private photos are limited to assigned jobs; timeline activity is also assignment-scoped/i,
+    /surveys and their private photos are limited to assigned jobs; timeline activity is assignment-scoped while invoice, payment and deposit finance activity remains office-only/i,
   );
   assert.match(migration, new RegExp(`'${migrationName.replaceAll(".", "\\.")}'`));
 });
