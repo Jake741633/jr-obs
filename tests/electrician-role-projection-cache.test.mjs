@@ -172,7 +172,13 @@ test("role projection cache generations fail closed on the first upgraded offlin
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-job-timeline", role: "electrician", mode: "local" }), "keep");
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-site-diaries", role: "electrician", mode: "local" }), "keep");
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-site-diary", role: "electrician", mode: "local" }), "keep");
-  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "electrician", mode: "cloud" }), "keep");
+});
+
+test("electrician survey caches require a live assigned read", () => {
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "electrician", mode: "cloud" }), "purge");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "electrician", mode: "migration", generation: "current" }), "purge");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "electrician", mode: "local" }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "office", mode: "cloud" }), "keep");
   assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-surveys", role: "electrician" }), undefined);
 });
 
