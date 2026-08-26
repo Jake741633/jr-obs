@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   CUSTOMER_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_CUSTOMER_PROJECTION_CACHE_GENERATION,
+  ELECTRICIAN_INVENTORY_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION,
   ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION,
@@ -180,6 +181,20 @@ test("electrician survey caches require a live assigned read", () => {
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "electrician", mode: "local" }), "keep");
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-surveys", role: "office", mode: "cloud" }), "keep");
   assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-surveys", role: "electrician" }), undefined);
+});
+
+test("electrician inventory caches discard records from before the field-safe price projections", () => {
+  for (const storageKey of ["jr-os-materials", "jr-os-stock-items", "jr-os-purchase-lists"]) {
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "cloud" }), "purge");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "migration", generation: "20260809_049" }), "purge");
+    assert.equal(
+      roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "cloud", generation: ELECTRICIAN_INVENTORY_PROJECTION_CACHE_GENERATION }),
+      "keep",
+    );
+    assert.equal(roleProjectionCacheGeneration({ storageKey, role: "electrician" }), ELECTRICIAN_INVENTORY_PROJECTION_CACHE_GENERATION);
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "local" }), "keep");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "office", mode: "cloud" }), "keep");
+  }
 });
 
 test("customer generic finance caches retain only the projection allowlists", () => {
