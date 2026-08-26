@@ -134,6 +134,7 @@ test("live RLS coverage retains assigned usage and rejects wider field reads", (
     "Electrician must not read unassigned same-tenant job material usage",
     "Assigned electrician must not read another organisation's job material usage",
     "Electrician must not read material usage without a canonical job",
+    "Mismatched customer material-usage envelopes must fail canonical binding validation",
     "Wrong customer material usage envelope must fail closed",
     "Electrician without an active field identity must not read job material usage",
     "Office should retain unassigned job material usage access",

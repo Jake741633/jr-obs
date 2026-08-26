@@ -180,6 +180,7 @@ test("live RLS coverage retains assigned tasks and rejects wider field reads", (
     "Electrician must not read unassigned same-tenant job tasks",
     "Assigned electrician must not read another organisation's job tasks",
     "Electrician must not read task without a canonical job",
+    "Mismatched customer task envelopes must fail canonical binding validation",
     "Wrong customer task envelope must fail closed",
     "Electrician without an active field identity must not read job tasks",
     "Office should retain unassigned job task access",
