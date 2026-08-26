@@ -14,12 +14,14 @@ import { interpretSurveyTranscript } from "../../../../lib/surveyAssist";
 import type { SiteSurvey, SurveyPhoto } from "../../../../lib/models";
 
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none focus:border-cyan-400";
+const fieldSuggestionHandoffMessage = "Survey suggestions are read-only for field users because assigned surveys can be office-authored. Ask the office to apply the draft after review.";
 const fieldPhotoHandoffMessage = "Board photo uploads are read-only for field users until a dedicated assigned-job upload route is available. Ask the office to add new survey photos.";
 
 export default function SurveyAssistPage() {
   const { id } = useParams<{ id: string }>();
   const surveys = useSurveysCollection();
   const identityState = useCloudIdentity();
+  const fieldSuggestionRestricted = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const fieldPhotoRestricted = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const [transcript, setTranscript] = useState("");
   const [saved, setSaved] = useState("");
@@ -34,6 +36,7 @@ export default function SurveyAssistPage() {
   }
 
   function applySuggestions() {
+    if (fieldSuggestionRestricted) return;
     if (!survey) return;
     update({
       ...draft.consumerUnit,
@@ -84,9 +87,9 @@ export default function SurveyAssistPage() {
     <div className="grid gap-6 xl:grid-cols-2">
       <Card>
         <h2 className="text-xl font-bold">Voice walkthrough</h2>
-        <p className="mt-2 text-sm text-slate-400">Use your phone’s keyboard microphone to dictate, or type what you see. Nothing is applied until you approve it.</p>
+        <p className="mt-2 text-sm text-slate-400">{fieldSuggestionRestricted ? "Use your phone’s keyboard microphone to draft suggestions for office review. This field view does not change the survey." : "Use your phone’s keyboard microphone to dictate, or type what you see. Nothing is applied until you approve it."}</p>
         <textarea className={`${fieldClass} mt-4 min-h-48 py-3`} value={transcript} onChange={(event) => { setTranscript(event.target.value); setSaved(""); }} placeholder="Example: Hager 12-way metal board, RCBOs fitted, no SPD, gas bonding not visible, signs of overheating on one neutral and asbestos suspected in the cupboard…" />
-        <div className="mt-4 flex flex-wrap items-center gap-3"><Button onClick={applySuggestions} disabled={!transcript.trim()}><Sparkles className="mr-2 size-4" />Apply approved draft</Button><span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">Confidence: {draft.confidence}</span></div>
+        <div className="mt-4 flex flex-wrap items-center gap-3">{fieldSuggestionRestricted ? <p className="max-w-xl text-sm text-amber-200">{fieldSuggestionHandoffMessage}</p> : <Button onClick={applySuggestions} disabled={!transcript.trim()}><Sparkles className="mr-2 size-4" />Apply approved draft</Button>}<span className="rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-300">Confidence: {draft.confidence}</span></div>
         {saved ? <p className="mt-4 flex items-start gap-2 text-sm text-emerald-300"><Check className="mt-0.5 size-4 shrink-0" />{saved}</p> : null}
       </Card>
 
