@@ -250,6 +250,66 @@ const fieldVariationCoverage = [
   '',
 ].join("\n");
 
+const fieldProgressReadCoverage = [
+  '    const assignedProgressJob = source("field-assigned-progress-job-a");',
+  '    const unassignedProgressJob = source("field-unassigned-progress-job-a");',
+  '    const crossTenantProgressJob = source("field-cross-tenant-progress-job-b");',
+  '    const deletedProgressJob = source("field-deleted-progress-job-a");',
+  '    const assignedProgress = source("field-assigned-progress-a");',
+  '    const unassignedProgress = source("field-unassigned-progress-a");',
+  '    const crossTenantProgress = source("field-cross-tenant-progress-b");',
+  '    const unboundProgress = source("field-unbound-progress-a");',
+  '    const deletedJobProgress = source("field-deleted-job-progress-a");',
+  '    const progressPayload = { manual: { overall: 40, firstFix: 60, secondFix: 20, testing: 10, certificates: 0, materials: 50, payments: 75 }, suggestions: [{ metric: "testing", value: 25, reason: "Office plan", calculatedAt: "2026-08-26T09:00:00.000Z" }], updatedBy: "JR OS Office", createdAt: "2026-08-26T09:00:00.000Z", updatedAt: "2026-08-26T09:00:00.000Z" };',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, assignedProgressJob, customerA, null, { title: "Assigned progress job", status: "First fix", assignedTo: [fieldTeamA, fieldTeamCoworkerA] })), "Office should create an assigned job for progress read coverage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, unassignedProgressJob, customerA, null, { title: "Unassigned progress job", status: "First fix", assignedTo: [] })), "Office should create an unassigned job for progress read coverage");',
+  '    await expectAllowed(await insertRecord(accounts.B.office, "jobs", typedRecord(organisationB, crossTenantProgressJob, customerB, null, { title: "Cross-tenant progress job", status: "First fix", assignedTo: [] })), "Tenant B office should create a cross-tenant progress job");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, deletedProgressJob, customerA, null, { title: "Deleted progress job", status: "First fix", assignedTo: [fieldTeamA, fieldTeamCoworkerA] })), "Office should create an assigned job for progress deletion coverage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-progress", assignedProgress, accounts.A.office, null, assignedProgressJob, { ...progressPayload, id: assignedProgress, jobId: assignedProgressJob })), "Office should create production-shaped assigned progress without a customer envelope");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-progress", unassignedProgress, accounts.A.office, null, unassignedProgressJob, { ...progressPayload, id: unassignedProgress, jobId: unassignedProgressJob, updatedBy: "Private unassigned office plan" })), "Office should create unassigned progress without a customer envelope");',
+  '    await expectAllowed(await insertRecord(accounts.B.office, "cloud_collections", genericRecord(organisationB, "jr-os-job-progress", crossTenantProgress, accounts.B.office, null, crossTenantProgressJob, { ...progressPayload, id: crossTenantProgress, jobId: crossTenantProgressJob, updatedBy: "Other tenant office" })), "Tenant B office should create cross-tenant progress");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-progress", unboundProgress, accounts.A.office, null, undefined, { ...progressPayload, id: unboundProgress, jobId: undefined, updatedBy: "Unbound office plan" })), "Office should create wholly unbound progress");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-progress", deletedJobProgress, accounts.A.office, null, deletedProgressJob, { ...progressPayload, id: deletedJobProgress, jobId: deletedProgressJob })), "Office should create progress before job deletion");',
+  '',
+  '    const assignedFieldProgress = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-progress&source_id=eq." + assignedProgress);',
+  '    await expectAllowed(assignedFieldProgress, "Assigned electrician progress query should execute");',
+  '    assert.equal(assignedFieldProgress.payload.length, 1, "Assigned electrician should retain null-customer job progress");',
+  '    assert.equal(assignedFieldProgress.payload[0].payload.manual.payments, 75, "Assigned progress should retain the office-controlled percentage");',
+  '    const coworkerFieldProgress = await listRecords(accounts.A.coworker, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + assignedProgress);',
+  '    await expectAllowed(coworkerFieldProgress, "Co-assigned electrician progress query should execute");',
+  '    assert.equal(coworkerFieldProgress.payload.length, 1, "Co-assigned electrician should retain assigned job progress");',
+  '    const unassignedFieldProgress = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + unassignedProgress);',
+  '    await expectAllowed(unassignedFieldProgress, "Unassigned progress query should execute safely");',
+  '    assert.deepEqual(unassignedFieldProgress.payload, [], "Electrician must not read unassigned same-tenant job progress");',
+  '    const crossTenantFieldProgress = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + crossTenantProgress);',
+  '    await expectAllowed(crossTenantFieldProgress, "Cross-tenant progress query should execute safely");',
+  '    assert.deepEqual(crossTenantFieldProgress.payload, [], "Assigned electrician must not read another organisation\'s job progress");',
+  '    const unboundFieldProgress = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + unboundProgress);',
+  '    await expectAllowed(unboundFieldProgress, "Unbound progress query should execute safely");',
+  '    assert.deepEqual(unboundFieldProgress.payload, [], "Electrician must not read progress without a canonical job");',
+  '    const progressUnboundUser = await createUser("a-electrician-progress-unbound");',
+  '    context.users.push(progressUnboundUser);',
+  '    await createProfile(progressUnboundUser, organisationA, "electrician");',
+  '    const progressUnboundAccount = { ...progressUnboundUser, ...(await signIn(progressUnboundUser)), organisationId: organisationA };',
+  '    const noIdentityProgress = await listRecords(progressUnboundAccount, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + assignedProgress);',
+  '    await expectAllowed(noIdentityProgress, "Unbound field identity progress query should execute safely");',
+  '    assert.deepEqual(noIdentityProgress.payload, [], "Electrician without an active field identity must not read job progress");',
+  '    const officeUnassignedProgress = await listRecords(accounts.A.office, "cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + unassignedProgress);',
+  '    await expectAllowed(officeUnassignedProgress, "Office unassigned progress query should execute");',
+  '    assert.equal(officeUnassignedProgress.payload.length, 1, "Office should retain unassigned job progress access");',
+  '    const fieldProgressBeforeJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + deletedJobProgress);',
+  '    await expectAllowed(fieldProgressBeforeJobDelete, "Assigned progress query before job deletion should execute");',
+  '    assert.equal(fieldProgressBeforeJobDelete.payload.length, 1, "Electrician should read job progress while the job is active and assigned");',
+  '    await expectAllowed(await patchRecords(accounts.A.owner, "jobs", "source_id=eq." + deletedProgressJob, { deleted_at: new Date().toISOString() }), "Owner should soft-delete the assigned progress job");',
+  '    const fieldProgressAfterJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + deletedJobProgress);',
+  '    await expectAllowed(fieldProgressAfterJobDelete, "Deleted-job progress query should execute safely");',
+  '    assert.deepEqual(fieldProgressAfterJobDelete.payload, [], "Electrician must not read job progress for a soft-deleted job");',
+  '    const officeProgressAfterJobDelete = await listRecords(accounts.A.office, "cloud_collections", "select=source_id&collection_key=eq.jr-os-job-progress&source_id=eq." + deletedJobProgress);',
+  '    await expectAllowed(officeProgressAfterJobDelete, "Office deleted-job progress query should execute");',
+  '    assert.equal(officeProgressAfterJobDelete.payload.length, 1, "Office should retain canonical job progress after job deletion");',
+  '',
+].join("\n");
+
 const obsoleteCustomerInvoiceRead = `    assert.equal(customerInvoice.payload.length, 1, "Customer must retain own invoice reads");`;
 const safeCustomerInvoiceRead = `    assert.deepEqual(customerInvoice.payload, [], "Customer base invoice reads must fail closed in favour of the customer-safe projection");`;
 
@@ -775,7 +835,7 @@ try {
     .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
     .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
     .replace(officeJobReadAnchor, confidentialOfficeJobRead)
-    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldMutationCoverage}${genericCasesStart}`)
+    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldMutationCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   for (const requiredPhrase of [
@@ -831,6 +891,16 @@ try {
     "Electrician should read the job variation while the job is active and assigned",
     "Electrician must not read a job variation for a soft-deleted job",
     "Office should retain canonical job variation after job deletion",
+    "Assigned electrician should retain null-customer job progress",
+    "Co-assigned electrician should retain assigned job progress",
+    "Electrician must not read unassigned same-tenant job progress",
+    "Assigned electrician must not read another organisation's job progress",
+    "Electrician must not read progress without a canonical job",
+    "Electrician without an active field identity must not read job progress",
+    "Office should retain unassigned job progress access",
+    "Electrician should read job progress while the job is active and assigned",
+    "Electrician must not read job progress for a soft-deleted job",
+    "Office should retain canonical job progress after job deletion",
     "Assigned electrician should apply a valid job status transition through the RPC",
     "Assigned electrician must not apply an unsupported canonical job status transition",
     "Rejected field status must not advance the canonical job version",
