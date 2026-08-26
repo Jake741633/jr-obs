@@ -12,6 +12,7 @@ export interface SupabaseSession {
 
 const sessionKey = "jr-os-supabase-session";
 const sessionOwnershipEpochKey = "jr-os-supabase-session-epoch";
+const cloudServiceUnavailableMessage = "JR OS cloud service is unavailable. Check your connection and confirm the Supabase project is active, then try again.";
 
 export interface SupabaseSessionOwnership {
   session: SupabaseSession | null;
@@ -115,7 +116,12 @@ export async function supabaseFetch(path: string, init: RequestInit = {}, authen
     requestPath = `${path}?redirect_to=${encodeURIComponent(redirectTo)}`;
   }
 
-  const response = await fetch(`${config.url}${requestPath}`, { ...init, headers });
+  let response: Response;
+  try {
+    response = await fetch(`${config.url}${requestPath}`, { ...init, headers });
+  } catch {
+    throw new Error(cloudServiceUnavailableMessage);
+  }
   const body = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
     const message = body?.msg || body?.message || body?.error_description || body?.error || "Cloud request failed.";
