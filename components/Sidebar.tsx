@@ -30,7 +30,7 @@ export default function Sidebar() {
   const rolePrimaryNavigation = identity?.role === "electrician"
     ? primaryNavigation.map((item) => item.href === "/jobs" ? { ...item, href: "/field/jobs" } : item)
     : primaryNavigation;
-  const primary = rolePrimaryNavigation.slice(0, 4).filter((item) => permitted(item.href));
+  const primary = rolePrimaryNavigation.filter((item) => permitted(item.href));
   const secondary = secondaryNavigation.filter(([, href]) => (
     permitted(href)
     && href !== "/cloud"
