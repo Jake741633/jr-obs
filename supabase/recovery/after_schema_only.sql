@@ -277,4 +277,9 @@ begin;
 \ir ../migrations/20260820170000_preserve_field_site_diary_progress.sql
 commit;
 
+\echo 'Scoping field job-variation reads to assigned jobs'
+begin;
+\ir ../migrations/20260826101908_scope_field_variation_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
