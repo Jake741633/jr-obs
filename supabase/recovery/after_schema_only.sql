@@ -297,4 +297,9 @@ begin;
 \ir ../migrations/20260826112805_align_field_progress_update_customer_envelopes.sql
 commit;
 
+\echo 'Scoping field job-task reads to assigned jobs'
+begin;
+\ir ../migrations/20260826114300_scope_field_job_task_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
