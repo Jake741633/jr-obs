@@ -56,6 +56,11 @@ export default function EngineerDayPlannerPage() {
       setMessage("Unlinked planner entries are read-only for field cloud sessions because field time must be bound to an assigned job.");
       return;
     }
+    const job = entry.jobId ? jobsById.get(entry.jobId) : undefined;
+    if (cloudFieldMode && !job) {
+      setMessage("The assigned job could not be resolved. Refresh the planner before starting the visit.");
+      return;
+    }
     const time = nowTime();
     setActiveEntryId(entry.id);
     setStartedAt(time);
@@ -63,12 +68,9 @@ export default function EngineerDayPlannerPage() {
     setBreakMinutes("0");
     setNotes("");
     planner.setItems((current) => current.map((item) => item.id === entry.id ? { ...item, status: "Confirmed", updatedAt: new Date().toISOString() } : item));
-    if (entry.jobId) {
-      const job = jobs.items.find((item) => item.id === entry.jobId);
-      if (job && normaliseJobStatus(job.status) === "Scheduled") {
-        const result = transitionJobStatus({ job, nextStatus: "First fix", now: new Date().toISOString(), timelineId: makeId("timeline"), completedBy: "Engineer Day Planner" });
-        jobs.setItems((current) => current.map((item) => item.id === job.id ? result.job : item));
-      }
+    if (job && normaliseJobStatus(job.status) === "Scheduled") {
+      const result = transitionJobStatus({ job, nextStatus: "First fix", now: new Date().toISOString(), timelineId: makeId("timeline"), completedBy: "Engineer Day Planner" });
+      jobs.setItems((current) => current.map((item) => item.id === job.id ? result.job : item));
     }
     setMessage(`${entry.title} started at ${time}.`);
   }
@@ -84,13 +86,16 @@ export default function EngineerDayPlannerPage() {
     event.preventDefault();
     if (!operatorMemberId) return setMessage("Your active team identity could not be resolved. Refresh your account before saving time.");
     if (cloudFieldMode && !entry.jobId) return setMessage("Field cloud time must be bound to an assigned job before it can be saved.");
+    const linkedJob = entry.jobId ? jobsById.get(entry.jobId) : undefined;
+    if (cloudFieldMode && !linkedJob) return setMessage("The assigned job could not be resolved. Refresh the planner before saving time.");
     if (!startedAt) return setMessage("Start the visit before saving time.");
     if (!finishedAt) return setMessage("Stop the visit before saving time.");
     const now = new Date().toISOString();
     const record = {
       id: makeId("timesheet"),
       teamMemberId: operatorMemberId,
-      jobId: entry.jobId || undefined,
+      customerId: linkedJob?.customerId,
+      jobId: linkedJob?.id || entry.jobId || undefined,
       workDate: date,
       startedAt,
       finishedAt,
@@ -132,12 +137,12 @@ export default function EngineerDayPlannerPage() {
       const job = entry.jobId ? jobsById.get(entry.jobId) : undefined;
       const customer = customersById.get(entry.customerId || job?.customerId || "");
       const isActive = activeEntryId === entry.id;
-      const cloudWriteLocked = cloudFieldMode && (!entry.jobId || !operatorMemberId);
+      const cloudWriteLocked = cloudFieldMode && (!entry.jobId || !job || !operatorMemberId);
       return <Card key={entry.id} className={isActive ? "border-cyan-400/40" : undefined}>
         <div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Stop {index + 1}</p><h2 className="mt-1 break-words text-xl font-bold">{entry.title}</h2><div className="mt-2"><span className="inline-flex rounded-full border border-slate-700 bg-slate-950/60 px-2.5 py-1 text-xs font-semibold text-slate-300">{entry.status}</span></div></div><div className="rounded-full border border-slate-700 px-3 py-1 text-sm font-semibold text-slate-300">{entry.startTime}</div></div>
         <div className="mt-4 space-y-2 text-sm text-slate-400">{customer ? <p className="flex items-center gap-2"><UserRound className="size-4 text-cyan-400" />{customer.name}</p> : null}<p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{entry.location || job?.siteAddress || "No address saved"}</p><p className="flex items-center gap-2"><Clock3 className="size-4 text-cyan-400" />{entry.startTime}–{entry.endTime}</p></div>
         <div className="mt-4 grid grid-cols-2 gap-2"><a href={mapsHref(entry.location || job?.siteAddress || "")} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center justify-center rounded-xl bg-cyan-400 px-3 text-sm font-semibold text-slate-950"><Navigation className="mr-2 size-4" />Navigate</a>{job ? <Link href={`/jobs/${job.id}`} className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-3 text-sm font-semibold">Open job</Link> : <Link href="/planner" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-3 text-sm font-semibold">Open booking</Link>}</div>
-        {cloudWriteLocked ? <p className="mt-4 text-sm text-amber-200">{!entry.jobId ? "This booking is not linked to an assigned job, so field time is read-only." : "Your active team identity must be resolved before field time can be recorded."}</p> : <div className="mt-4 grid grid-cols-2 gap-2"><Button type="button" disabled={entry.status === "Complete"} onClick={() => startEntry(entry)}><Play className="mr-2 size-4" />Arrived</Button><Button type="button" variant="secondary" disabled={!isActive || !startedAt} onClick={() => stopEntry(entry)}><Square className="mr-2 size-4" />Departed</Button></div>}
+        {cloudWriteLocked ? <p className="mt-4 text-sm text-amber-200">{!entry.jobId ? "This booking is not linked to an assigned job, so field time is read-only." : !job ? "The assigned job could not be resolved. Refresh the planner before recording time." : "Your active team identity must be resolved before field time can be recorded."}</p> : <div className="mt-4 grid grid-cols-2 gap-2"><Button type="button" disabled={entry.status === "Complete"} onClick={() => startEntry(entry)}><Play className="mr-2 size-4" />Arrived</Button><Button type="button" variant="secondary" disabled={!isActive || !startedAt} onClick={() => stopEntry(entry)}><Square className="mr-2 size-4" />Departed</Button></div>}
         {isActive ? <form onSubmit={(event) => saveTime(event, entry)} className="mt-5 grid gap-3 rounded-xl border border-slate-800 bg-slate-950/50 p-4 sm:grid-cols-2"><label className="grid gap-2 text-sm"><span>Arrived</span><input type="time" value={startedAt} onChange={(event) => setStartedAt(event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" /></label><label className="grid gap-2 text-sm"><span>Departed</span><input type="time" value={finishedAt} onChange={(event) => setFinishedAt(event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" /></label><label className="grid gap-2 text-sm"><span>Break minutes</span><input type="number" min="0" value={breakMinutes} onChange={(event) => setBreakMinutes(event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" /></label><label className="grid gap-2 text-sm"><span>Time to save</span><div className="flex min-h-12 items-center rounded-xl border border-slate-800 bg-slate-900 px-3 font-semibold">{formatMinutes(paidMinutes({ startedAt, finishedAt, breakMinutes: Number(breakMinutes || 0) }))}</div></label><label className="grid gap-2 text-sm sm:col-span-2"><span>Work notes</span><textarea rows={3} value={notes} onChange={(event) => setNotes(event.target.value)} className="rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-base" /></label><div className="sm:col-span-2"><Button className="w-full" type="submit" disabled={!finishedAt}><TimerReset className="mr-2 size-4" />Save time and complete visit</Button></div></form> : null}
         {entry.status === "Complete" ? <p className="mt-4 flex items-center gap-2 text-sm text-emerald-300"><CheckCircle2 className="size-4" />Visit complete</p> : null}
       </Card>;
