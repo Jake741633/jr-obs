@@ -40,11 +40,13 @@ export function MobileNav() {
       {navigation.map(({ label, href, icon: Icon }) => {
         const primaryMatch = (itemHref: string) => itemHref === "/"
           ? pathname === "/"
-          : itemHref === "/field/jobs" && identity?.role === "electrician"
-            ? pathname === itemHref || pathname.startsWith(`${itemHref}/`) || fieldJobWorkspacePath.test(pathname)
-            : itemHref === "/quotes/mobile"
-              ? pathname.startsWith("/quotes") || pathname.startsWith("/estimates")
-              : pathname === itemHref || pathname.startsWith(`${itemHref}/`);
+          : itemHref === "/field"
+            ? pathname === itemHref
+            : itemHref === "/field/jobs" && identity?.role === "electrician"
+              ? pathname === itemHref || pathname.startsWith(`${itemHref}/`) || fieldJobWorkspacePath.test(pathname)
+              : itemHref === "/quotes/mobile"
+                ? pathname.startsWith("/quotes") || pathname.startsWith("/estimates")
+                : pathname === itemHref || pathname.startsWith(`${itemHref}/`);
         const active = href === "/menu"
           ? !roleNavigation.filter((item) => item.href !== "/menu").some((item) => primaryMatch(item.href))
           : primaryMatch(href);
