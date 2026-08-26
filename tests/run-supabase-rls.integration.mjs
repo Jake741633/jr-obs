@@ -971,11 +971,31 @@ const secureFieldCasesSnippet = `    // Direct field writes are closed; only exi
     }
     for (const [table, sourceId, payload] of [
       ["planner_entries", source("planner-a"), { teamMemberIds: [fieldTeamA], startDate: "2026-08-01" }],
-      ["timesheets", source("timesheet-a"), { teamMemberId: fieldTeamA, hours: 8 }],
+      ["timesheets", source("timesheet-a"), { teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, hours: 8 }],
     ]) {
       await expectAllowed(await insertRecord(accounts.A.electrician, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Electrician should retain own-team \${table} writes\`);
       await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);
     }
+    const fieldTimesheetEnvelope = await listRecords(
+      accounts.A.office,
+      "timesheets",
+      "select=customer_source_id,job_source_id,payload&source_id=eq." + source("timesheet-a"),
+    );
+    await expectAllowed(fieldTimesheetEnvelope, "Office should inspect the field timesheet envelope");
+    assert.equal(fieldTimesheetEnvelope.payload.length, 1, "Field timesheet should persist exactly once");
+    assert.equal(fieldTimesheetEnvelope.payload[0].customer_source_id, customerA, "Field timesheet should retain its canonical customer and job envelope");
+    assert.equal(fieldTimesheetEnvelope.payload[0].job_source_id, jobA, "Field timesheet should retain its assigned job envelope");
+    assert.equal(fieldTimesheetEnvelope.payload[0].payload.customerId, customerA, "Field timesheet payload should retain its canonical customer");
+    assert.equal(fieldTimesheetEnvelope.payload[0].payload.jobId, jobA, "Field timesheet payload should retain its assigned job");
+    const nullCustomerTimesheetJob = source("timesheet-null-customer-job");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, nullCustomerTimesheetJob, null, null, { title: "Assigned job without a customer", status: "First fix", assignedTo: [fieldTeamA] })),
+      "Office should create an assigned job without a customer for timesheet coverage",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, source("timesheet-null-customer"), null, nullCustomerTimesheetJob, { teamMemberId: fieldTeamA, jobId: nullCustomerTimesheetJob, hours: 1 })),
+      "Electrician should retain an assigned null-customer timesheet",
+    );
     await expectDenied(
       await insertRecord(accounts.A.electrician, "planner_entries", typedRecord(organisationA, source("planner-unassigned-job"), otherCustomerA, otherCustomerJobA, { teamMemberIds: [fieldTeamA], startDate: "2026-08-02" })),
       "Electrician must not create a planner entry for an unassigned same-tenant job",
@@ -983,6 +1003,14 @@ const secureFieldCasesSnippet = `    // Direct field writes are closed; only exi
     await expectDenied(
       await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, source("timesheet-unassigned-job"), otherCustomerA, otherCustomerJobA, { teamMemberId: fieldTeamA, hours: 1 })),
       "Electrician must not create a timesheet for an unassigned same-tenant job",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, source("timesheet-missing-customer"), null, jobA, { teamMemberId: fieldTeamA, hours: 1 })),
+      "Electrician timesheet must include the canonical linked customer",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, source("timesheet-wrong-customer"), otherCustomerA, jobA, { teamMemberId: fieldTeamA, hours: 1 })),
+      "Electrician timesheet must not claim another customer for its assigned job",
     );
     // Secure field identity fixtures are complete.`;
 
@@ -1395,6 +1423,10 @@ try {
     "Electrician direct write must fail closed for",
     "Electrician must not create a planner entry for an unassigned same-tenant job",
     "Electrician must not create a timesheet for an unassigned same-tenant job",
+    "Field timesheet should retain its canonical customer and job envelope",
+    "Electrician should retain an assigned null-customer timesheet",
+    "Electrician timesheet must include the canonical linked customer",
+    "Electrician timesheet must not claim another customer for its assigned job",
     "Assigned electrician should create a survey through the field RPC",
     "Assigned electrician should read the assigned survey projection",
     "Electrician must not read an unassigned same-tenant survey",

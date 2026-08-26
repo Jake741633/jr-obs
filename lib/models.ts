@@ -74,7 +74,7 @@ export type TeamMemberStatus = "Active" | "On leave" | "Inactive";
 export interface TeamQualification { id: EntityId; name: string; certificateNumber: string; issuedAt: string; expiresAt: string; notes: string; }
 export interface TeamMember { id: EntityId; name: string; role: TeamRole; status: TeamMemberStatus; email: string; phone: string; emergencyContact: string; emergencyPhone: string; hourlyCost: number; chargeRate: number; vanRegistration: string; qualifications: TeamQualification[]; notes: string; createdAt: string; updatedAt: string; }
 export type TimesheetStatus = "Draft" | "Submitted" | "Approved";
-export interface TimesheetEntry { id: EntityId; teamMemberId: EntityId; jobId?: EntityId; workDate: string; startedAt: string; finishedAt: string; breakMinutes: number; notes: string; status: TimesheetStatus; createdAt: string; updatedAt: string; }
+export interface TimesheetEntry { id: EntityId; teamMemberId: EntityId; customerId?: EntityId; jobId?: EntityId; workDate: string; startedAt: string; finishedAt: string; breakMinutes: number; notes: string; status: TimesheetStatus; createdAt: string; updatedAt: string; }
 export type LabourRateUnit = "Hour" | "Half day" | "Day" | "Call-out" | "Minimum charge";
 export interface LabourRate { id: EntityId; name: string; description: string; costRate: number; chargeRate: number; unit: LabourRateUnit; active: boolean; createdAt: string; updatedAt: string; }
 export type OverheadFrequency = "Weekly" | "Monthly" | "Annual";
