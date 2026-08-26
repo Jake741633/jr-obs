@@ -3,21 +3,30 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const migrationName = "20260813235633_secure_field_mutation_boundary.sql";
+const replayMigrationName = "20260826233120_revalidate_field_mutation_replays.sql";
 const migration = readFileSync(
   new URL(`../supabase/migrations/${migrationName}`, import.meta.url),
+  "utf8",
+);
+const replayMigration = readFileSync(
+  new URL(`../supabase/migrations/${replayMigrationName}`, import.meta.url),
   "utf8",
 );
 const recovery = readFileSync(
   new URL("../supabase/recovery/after_schema_only.sql", import.meta.url),
   "utf8",
 );
+const setup = readFileSync(
+  new URL("../docs/SUPABASE_SETUP.md", import.meta.url),
+  "utf8",
+);
 
-function functionBody(name, next = "revoke execute on function") {
-  const start = migration.indexOf(`create or replace function ${name}`);
+function functionBody(name, next = "revoke execute on function", source = migration) {
+  const start = source.indexOf(`create or replace function ${name}`);
   assert.notEqual(start, -1, `missing ${name}`);
-  const end = migration.indexOf(next, start);
+  const end = source.indexOf(next, start);
   assert.notEqual(end, -1, `missing end of ${name}`);
-  return migration.slice(start, end);
+  return source.slice(start, end);
 }
 
 const identity = functionBody("private.jr_active_field_identity");
@@ -27,8 +36,8 @@ const writer = functionBody("private.jr_field_collection_write_payload");
 const readProjection = functionBody("private.jr_field_cloud_payload");
 const claim = functionBody("private.jr_claim_field_mutation");
 const complete = functionBody("private.jr_complete_field_mutation");
-const jobRpc = functionBody("public.jr_field_update_job_status");
-const collectionRpc = functionBody("public.jr_field_save_collection");
+const jobRpc = functionBody("public.jr_field_update_job_status", undefined, replayMigration);
+const collectionRpc = functionBody("public.jr_field_save_collection", undefined, replayMigration);
 
 test("field identity is derived from one active same-tenant team member", () => {
   assert.match(identity, /profile\.id = \(select auth\.uid\(\)\)/i);
@@ -137,6 +146,43 @@ test("mutation receipts provide exact response-loss replay and reject UUID reuse
     assert.match(body, /if mutation_result is not null then\s*return mutation_result/i);
     assert.match(body, /private\.jr_complete_field_mutation/i);
   }
+});
+
+test("completed receipt replays revalidate the current canonical job assignment", () => {
+  const jobClaim = jobRpc.indexOf("private.jr_claim_field_mutation(");
+  const jobLock = jobRpc.indexOf("from public.jobs job");
+  const jobAvailability = jobRpc.indexOf("canonical_job.id is null");
+  const jobAssignment = jobRpc.indexOf("if not private.jr_job_is_assigned_to_team_member(");
+  const jobReplay = jobRpc.indexOf("if mutation_result is not null then");
+  const jobWrite = jobRpc.indexOf("update public.jobs");
+  assert.ok(
+    jobClaim >= 0
+      && jobLock > jobClaim
+      && jobAvailability > jobLock
+      && jobAssignment > jobAvailability
+      && jobReplay > jobAssignment
+      && jobWrite > jobReplay,
+    "job receipt replay must follow claim, canonical lock, availability and assignment checks",
+  );
+  assert.match(jobRpc.slice(jobLock, jobAvailability), /for update/i);
+  assert.match(jobRpc.slice(jobAvailability, jobAssignment), /mutation_result is null[\s\S]*canonical_job\.version <> expected_version/i);
+
+  const collectionClaim = collectionRpc.indexOf("private.jr_claim_field_mutation(");
+  const collectionJobParse = collectionRpc.indexOf("requested_job_source_id := case");
+  const collectionJobLock = collectionRpc.indexOf("from public.jobs job");
+  const collectionAssignment = collectionRpc.indexOf("The field record is not bound to an assigned active job");
+  const collectionReplay = collectionRpc.indexOf("if mutation_result is not null then");
+  const collectionRecordLock = collectionRpc.indexOf("from public.cloud_collections cloud_record");
+  assert.ok(
+    collectionClaim >= 0
+      && collectionJobParse > collectionClaim
+      && collectionJobLock > collectionJobParse
+      && collectionAssignment > collectionJobLock
+      && collectionReplay > collectionAssignment
+      && collectionRecordLock > collectionReplay,
+    "collection receipt replay must follow claim, request job parsing, canonical lock and assignment checks",
+  );
+  assert.match(collectionRpc.slice(collectionJobLock, collectionAssignment), /for share/i);
 });
 
 test("job status mutation locks the assigned canonical job and enforces the field graph", () => {
@@ -300,10 +346,12 @@ test("field file metadata and Storage writes fail closed until assigned upload i
   }
 });
 
-test("recovery and deployed marker include the final field boundary", () => {
+test("recovery, guidance and deployed marker include assignment-bound receipt replay", () => {
   const confidentiality = recovery.indexOf("20260813230319_protect_field_job_confidentiality.sql");
   const boundary = recovery.indexOf(migrationName);
-  assert.ok(confidentiality >= 0 && boundary > confidentiality);
-  assert.match(recovery.slice(boundary - 100, boundary + migrationName.length + 50), /begin;[\s\S]*\\ir[\s\S]*commit;/i);
-  assert.ok(migration.includes(`'migration',\n    '${migrationName}'`));
+  const replayBoundary = recovery.indexOf(replayMigrationName);
+  assert.ok(confidentiality >= 0 && boundary > confidentiality && replayBoundary > boundary);
+  assert.match(recovery.slice(replayBoundary - 120, replayBoundary + replayMigrationName.length + 50), /begin;[\s\S]*\\ir[\s\S]*commit;/i);
+  assert.match(setup, /job-status, generic field-collection and progress receipt replays revalidate the current active job assignment/i);
+  assert.ok(replayMigration.includes(`'migration',\n    '${replayMigrationName}'`));
 });
