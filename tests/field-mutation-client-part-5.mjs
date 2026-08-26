@@ -23,7 +23,7 @@ test("job status evidence is server-owned while explicit field notes remain rout
   assert.equal(isServerAuthoredFieldTimeline("cloud_collections", "electrician", "jr-os-job-timeline", {
     id: "timeline-3", eventType: "Snag", sourceType: "JobTask", sourceId: "task-1", note: "Socket faceplate damaged",
   }), false, "structured field activity may contribute note text for server canonicalization");
-  assert.match(repository, /if \(isServerAuthoredFieldTimeline\(item\.table, item\.role, item\.collectionKey, item\.payload\)\) return/);
+  assert.match(repository, /const safeItem = sanitizeQueuedFieldMutationProjection\(item\)[\s\S]*if \(isServerAuthoredFieldTimeline\(safeItem\.table, safeItem\.role, safeItem\.collectionKey, safeItem\.payload\)\) return/);
   assert.match(repository, /if \(isServerAuthoredFieldTimeline\(item\.table, item\.role, item\.collectionKey, item\.payload\)\) \{[\s\S]*cleared \+= 1/);
 });
 

@@ -189,15 +189,20 @@ export default function JobWorkspacePage() {
 
   function saveProgress() {
     const now = new Date().toISOString();
-    const normalised = normaliseJobProgress({
-      ...progressDraftValue,
-      payments: progressValue.payments,
-    }) as NormalisedJobProgress;
+    const normalised = normaliseJobProgress(progressDraftValue) as NormalisedJobProgress;
+    const fieldManual = {
+      overall: normalised.overall,
+      firstFix: normalised.firstFix,
+      secondFix: normalised.secondFix,
+      testing: normalised.testing,
+      certificates: normalised.certificates,
+      materials: normalised.materials,
+    };
     const nextRecord = {
       id: progressRecord?.id ?? `job-progress-${jobId}`,
       jobId,
-      manual: normalised,
-      suggestions: progressRecord?.suggestions ?? [],
+      manual: fieldWorkspace ? fieldManual : normalised,
+      ...(fieldWorkspace ? {} : { suggestions: progressRecord?.suggestions ?? [] }),
       updatedBy: "JR OS mobile workspace",
       createdAt: progressRecord?.createdAt ?? now,
       updatedAt: now,
@@ -226,13 +231,13 @@ export default function JobWorkspacePage() {
     </Card>
 
     <Card>
-      <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-300"><Gauge className="size-5" /></span><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Live progress</p><h2 className="mt-1 text-xl font-bold">Operational completion</h2><p className="mt-2 text-sm text-slate-400">Update assigned-job progress on site. Payment progress stays read-only and office controlled.</p></div></div>
+      <div className="flex items-start gap-3"><span className="grid size-11 shrink-0 place-items-center rounded-xl bg-cyan-500/10 text-cyan-300"><Gauge className="size-5" /></span><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Live progress</p><h2 className="mt-1 text-xl font-bold">Operational completion</h2><p className="mt-2 text-sm text-slate-400">Update assigned-job operational progress on site. Office payment progress remains private.</p></div></div>
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         {editableProgressMetrics.map(({ key, label }) => <label key={key} htmlFor={`progress-${key}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
           <span className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-300">{label}</span><span className="font-semibold text-cyan-200">{progressDraftValue[key]}%</span></span>
           <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraftValue[key]} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-11 w-full accent-cyan-400" />
         </label>)}
-        <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">{progressBar("Payments (office controlled)", progressValue.payments)}</div>
+        {!fieldWorkspace ? <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">{progressBar("Payments (office controlled)", progressValue.payments)}</div> : null}
       </div>
       <div className="mt-5 flex flex-wrap items-center gap-3"><Button type="button" onClick={saveProgress}>Save field progress</Button><p className="text-xs text-slate-500">Only operational percentages are sent by the field app.</p></div>
       {progressStatusMessage ? <p role="status" className="mt-3 text-sm text-cyan-200">{progressStatusMessage}</p> : null}

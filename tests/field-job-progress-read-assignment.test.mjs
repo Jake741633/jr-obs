@@ -84,7 +84,7 @@ test("the final field collection policy scopes progress without weakening prior 
 });
 
 test("stale tenant-wide electrician progress caches purge before offline fallback", () => {
-  assert.equal(ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION, "20260826104958");
+  assert.equal(ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION, "20260826144606");
   assert.equal(
     roleProjectionCacheGeneration({ storageKey: "jr-os-job-progress", role: "electrician" }),
     ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION,
@@ -107,13 +107,13 @@ test("stale tenant-wide electrician progress caches purge before offline fallbac
     }),
     "keep",
   );
-  assert.match(cache, /ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION = "20260826104958"/);
+  assert.match(cache, /ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION = "20260826144606"/);
   assert.match(
     cache,
     /role === "electrician" && storageKey === "jr-os-job-progress"[\s\S]*return ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION/,
   );
   assert.match(cache, /expectedGeneration && generation !== expectedGeneration[\s\S]*return "purge"/);
-  assert.match(cacheTypes, /ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION: "20260826104958"/);
+  assert.match(cacheTypes, /ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION: "20260826144606"/);
   assert.match(adapter, /roleProjectionCachePolicy\(\{ storageKey, role: cacheRole, mode, generation: cachedGeneration \}\)/);
   assert.match(adapter, /if \(mode === "local" \|\| !navigator\.onLine\) return local/);
   assert.match(adapter, /roleProjectionCacheGeneration\(\{ storageKey, role: cacheRole \}\)/);

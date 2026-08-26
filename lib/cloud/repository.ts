@@ -3,7 +3,7 @@
 import { cloudPatch, cloudRpc, cloudSelect, cloudUpsert, isCloudConflictError } from "./client";
 import { collectionCloudMutationRoute, collectionCloudReadTable, fieldMutationRouteAllows, isServerAuthoredFieldTimeline, normaliseFieldRequestedJobStatus } from "./collections";
 import { effectiveCloudMode } from "./config";
-import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, fieldMutationReplayExpired, hasVersionConflict, makeTombstone, mergeProcessedQueue, pendingImports, rebaseQueuedFieldMutation, reconcileVersionedRecordCache, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, sameQueueTarget, serialSingleFlightByKey, shouldReconcileFieldMutationPayload, tenantRecordQuery, tenantRecordVersionQuery, validateFieldMutationResponse, withExclusiveBrowserLock } from "./repository-core.mjs";
+import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, fieldMutationReplayExpired, hasVersionConflict, makeTombstone, mergeProcessedQueue, pendingImports, projectFieldMutationPayload, rebaseQueuedFieldMutation, reconcileVersionedRecordCache, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, sameQueueTarget, sanitizeQueuedFieldMutationProjection, serialSingleFlightByKey, shouldReconcileFieldMutationPayload, tenantRecordQuery, tenantRecordVersionQuery, validateFieldMutationResponse, withExclusiveBrowserLock } from "./repository-core.mjs";
 import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { assertCloudPageOperationCurrent } from "./cloudPageIdentity-core.mjs";
 
@@ -25,7 +25,12 @@ const ACTIVE_CUSTOMER_SOURCE_KEY = "jr-os-active-customer-source";
 
 function read<T>(key: string, fallback: T): T { try { return JSON.parse(window.localStorage.getItem(key) || "") as T; } catch { return fallback; } }
 function write(key: string, value: unknown) { window.localStorage.setItem(key, JSON.stringify(value)); }
-function readAllSyncQueue() { return read<SyncQueueItem[]>(QUEUE_KEY, []); }
+function readAllSyncQueue() {
+  const queue = read<SyncQueueItem[]>(QUEUE_KEY, []);
+  const sanitized = queue.map((item) => sanitizeQueuedFieldMutationProjection(item) as SyncQueueItem);
+  if (sanitized.some((item, index) => item !== queue[index])) write(QUEUE_KEY, sanitized);
+  return sanitized;
+}
 function activeOrganisationId() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ORGANISATION_KEY); }
 function activeUserId() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_USER_KEY); }
 function activeRole() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ROLE_KEY); }
@@ -175,10 +180,11 @@ export function discardSyncQueueItem(itemId: string) {
 
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "mutationId" | "sentAt" | "queuedAt" | "attempts" | "state">) {
   const queue = readAllSyncQueue();
-  if (isServerAuthoredFieldTimeline(item.table, item.role, item.collectionKey, item.payload)) return;
+  const safeItem = sanitizeQueuedFieldMutationProjection(item) as typeof item;
+  if (isServerAuthoredFieldTimeline(safeItem.table, safeItem.role, safeItem.collectionKey, safeItem.payload)) return;
   const queuedAt = Date.now();
   const mutationId = crypto.randomUUID();
-  const next: SyncQueueItem<T> = { ...item, id: syncQueueItemId(item.organisationId, item.userId, item.role, item.customerSourceId, item.table, item.collectionKey, item.sourceId, queuedAt, mutationId), mutationId, queuedAt: new Date(queuedAt).toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
+  const next: SyncQueueItem<T> = { ...safeItem, id: syncQueueItemId(safeItem.organisationId, safeItem.userId, safeItem.role, safeItem.customerSourceId, safeItem.table, safeItem.collectionKey, safeItem.sourceId, queuedAt, mutationId), mutationId, queuedAt: new Date(queuedAt).toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
   const coalesced = coalesceQueue(queue, next);
   write(QUEUE_KEY, coalesced);
   const authorization = currentSyncAuthorization();
@@ -453,7 +459,11 @@ async function flushSyncQueueOnce(): Promise<SyncQueueFlushResult> {
     // added during this request or was processed later in the same snapshot
     // and failed. Only an unshadowed receipt may replace the cached payload.
     const payload = shouldReconcileFieldMutationPayload(nextQueue, success.item)
-      ? success.response.payload
+      ? projectFieldMutationPayload({
+          collectionKey: success.item.collectionKey,
+          role: success.item.role,
+          payload: success.response.payload,
+        })
       : undefined;
     reconcileCachedFieldMutation(success.item.storageKey, success.item.sourceId, success.response.version, payload);
   }
