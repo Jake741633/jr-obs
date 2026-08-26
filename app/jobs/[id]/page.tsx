@@ -28,7 +28,7 @@ import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
 import { useJobVariationsCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../../lib/cloud/fieldMutationPolicy-core.mjs";
-import { canEditFinance } from "../../../lib/cloud/permissions";
+import { canAccessPath, canEditFinance } from "../../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../../lib/jobManagement-core.mjs";
 import { fieldOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
@@ -144,6 +144,16 @@ export default function JobDetailPage() {
   const job = jobs.items.find((item) => item.id === jobId);
   const customer = customers.items.find((item) => item.id === job?.customerId);
   const builder = builders.items.find((item) => item.id === job?.builderId);
+  const customerHref = customer ? `/customers/${customer.id}` : "";
+  const builderHref = builder ? `/builders/${builder.id}` : "";
+  const canOpenCustomer = Boolean(customerHref) && (
+    identityState.mode === "local"
+    || canAccessPath(identityState.identity?.role, customerHref, identityState.identity?.email)
+  );
+  const canOpenBuilder = Boolean(builderHref) && (
+    identityState.mode === "local"
+    || canAccessPath(identityState.identity?.role, builderHref, identityState.identity?.email)
+  );
   const entries = timeline.items
     .filter((item) => item.jobId === jobId)
     .toSorted((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
@@ -366,7 +376,7 @@ export default function JobDetailPage() {
 
     <div className="grid gap-6 xl:grid-cols-[0.9fr,1.1fr]">
       <div className="space-y-6">
-        <Card><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Contacts</p><h2 className="mt-1 text-xl font-bold">Customer and builder</h2></div><User className="size-5 text-cyan-400" /></div><div className="mt-5 space-y-4 text-sm">{customer ? <div className="rounded-xl bg-slate-950/60 p-4"><p className="font-semibold">{customer.name}</p><p className="mt-1 text-slate-400">{customer.phone || "No phone"} · {customer.email || "No email"}</p><Link href={`/customers/${customer.id}`} className="mt-3 inline-block text-cyan-300 hover:text-cyan-200">Open customer</Link></div> : <p className="text-slate-400">No customer linked.</p>}{builder ? <div className="rounded-xl bg-slate-950/60 p-4"><p className="font-semibold">{builder.companyName}</p><p className="mt-1 text-slate-400">{builder.contactName} · {builder.phone || "No phone"}</p><Link href={`/builders/${builder.id}`} className="mt-3 inline-block text-cyan-300 hover:text-cyan-200">Open builder</Link></div> : null}</div></Card>
+        <Card><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Contacts</p><h2 className="mt-1 text-xl font-bold">Customer and builder</h2></div><User className="size-5 text-cyan-400" /></div><div className="mt-5 space-y-4 text-sm">{customer ? <div className="rounded-xl bg-slate-950/60 p-4"><p className="font-semibold">{customer.name}</p><p className="mt-1 text-slate-400">{customer.phone || "No phone"} · {customer.email || "No email"}</p>{canOpenCustomer ? <Link href={customerHref} className="mt-3 inline-block text-cyan-300 hover:text-cyan-200">Open customer</Link> : null}</div> : <p className="text-slate-400">No customer linked.</p>}{builder ? <div className="rounded-xl bg-slate-950/60 p-4"><p className="font-semibold">{builder.companyName}</p><p className="mt-1 text-slate-400">{builder.contactName} · {builder.phone || "No phone"}</p>{canOpenBuilder ? <Link href={builderHref} className="mt-3 inline-block text-cyan-300 hover:text-cyan-200">Open builder</Link> : null}</div> : null}</div></Card>
 
         <Card><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Next step</p><h2 className="mt-1 text-xl font-bold">Suggested milestone</h2></div><CheckCircle2 className="size-5 text-cyan-400" /></div>{nextMilestone ? <div className="mt-5"><p className="text-sm text-slate-400">The next incomplete standard milestone is:</p><p className="mt-2 font-semibold">{nextMilestone}</p>{fieldTimelineMode ? <p className="mt-4 text-sm text-amber-200">{timelineHandoffMessage}</p> : timelineMutationRestricted ? <p className="mt-4 text-sm text-amber-200">{timelineReadOnlyMessage}</p> : <Button className="mt-4" type="button" onClick={() => addMilestoneNow(nextMilestone)}>Mark complete now</Button>}</div> : <p className="mt-5 text-sm text-emerald-300">All standard workflow milestones are recorded.</p>}</Card>
       </div>
