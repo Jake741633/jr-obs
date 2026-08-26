@@ -322,4 +322,9 @@ begin;
 \ir ../migrations/20260826132500_scope_field_builder_reads_to_assignments.sql
 commit;
 
+\echo 'Keeping field job payment progress and office suggestions private'
+begin;
+\ir ../migrations/20260826144606_redact_field_job_progress_finance.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

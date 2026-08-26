@@ -20,12 +20,13 @@ test("mobile job workspace edits only operational progress metrics", () => {
   }
   assert.match(workspace, /id=\{`progress-\$\{key\}`\}/);
   assert.doesNotMatch(workspace, /id=\{?`progress-payments`/);
-  assert.match(workspace, /Payments \(office controlled\)/);
-  assert.match(workspace, /payments: progressValue\.payments/);
+  assert.match(workspace, /!fieldWorkspace \? <div[^>]*>\{progressBar\("Payments \(office controlled\)", progressValue\.payments\)\}<\/div> : null/);
+  assert.match(workspace, /manual: fieldWorkspace \? fieldManual : normalised/);
+  assert.doesNotMatch(workspace, /payments: progressValue\.payments/);
 });
 
 test("mobile job workspace creates one canonical progress record shape when none exists", () => {
   assert.match(workspace, /`job-progress-\$\{jobId\}`/);
-  assert.match(workspace, /suggestions: progressRecord\?\.suggestions \?\? \[\]/);
+  assert.match(workspace, /fieldWorkspace \? \{\} : \{ suggestions: progressRecord\?\.suggestions \?\? \[\] \}/);
   assert.match(workspace, /No saved progress record yet\. Saving will create one for this assigned job\./);
 });
