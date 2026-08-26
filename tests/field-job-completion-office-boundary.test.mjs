@@ -139,6 +139,7 @@ test("live RLS coverage denies completion evidence across every field relationsh
     "Wrong customer completion envelope must remain field-inaccessible",
     "Electrician without an active field identity must not read job completion evidence",
     "Office should retain assigned job completion evidence",
+    "Office completion fixture must retain its production-shaped null customer envelope",
     "Office should retain unassigned job completion evidence",
     "Field completion projection must not expose customer sign-off or invoice linkage",
     "Electrician must not read completion evidence before or after job deletion",
@@ -155,6 +156,6 @@ test("recovery, guidance and deployment marker keep completion evidence office-o
     recovery.slice(completionBoundary - 120, completionBoundary + migrationName.length + 50),
     /begin;[\s\S]*\\ir[\s\S]*commit;/i,
   );
-  assert.match(setup, /canonical completion records, customer sign-offs and final-invoice links remain office-only/i);
+  assert.match(setup, /canonical job-completion records[^;]*customer-sign-off evidence and final-invoice links[^;]*remain office-only/i);
   assert.match(migration, new RegExp(`'${migrationName.replaceAll(".", "\\.")}'`));
 });
