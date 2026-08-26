@@ -4,6 +4,8 @@ import test from "node:test";
 
 const page = readFileSync(new URL("../app/field/materials/page.tsx", import.meta.url), "utf8");
 const policy = readFileSync(new URL("../lib/cloud/fieldMutationPolicy-core.mjs", import.meta.url), "utf8");
+const permissions = readFileSync(new URL("../lib/cloud/permissions.ts", import.meta.url), "utf8");
+const fieldLookup = readFileSync(new URL("../app/field/material-lookup/page.tsx", import.meta.url), "utf8");
 
 test("electrician materials mutations remain default deny", () => {
   for (const collectionKey of [
@@ -43,3 +45,23 @@ test("materials scanning remains available while local mode retains mutation wor
   assert.match(page, /jobUsage\.setItems/);
   assert.match(page, /purchases\.setItems/);
 });
+
+test("cloud field material shortcuts stay on permitted field routes", () => {
+  const fieldLinks = page.match(/const cloudFieldMaterialLinks = \[([\s\S]*?)\] as const;/);
+  const officeLinks = page.match(/const officeMaterialLinks = \[([\s\S]*?)\] as const;/);
+  const electricianPages = permissions.match(/electrician:\s*\[([^\]]+)\]/);
+
+  assert.ok(fieldLinks, "cloud field material links should be declared");
+  assert.match(fieldLinks[1], /href: "\/field\/material-lookup"/);
+  assert.doesNotMatch(fieldLinks[1], /href: "\/(?:materials|stock|purchases)"/);
+  assert.ok(officeLinks, "office material links should be declared");
+  for (const href of ["/materials", "/stock", "/purchases"]) {
+    assert.match(officeLinks[1], new RegExp(`href: "${href}"`));
+  }
+  assert.match(page, /cloudFieldMode \? cloudFieldMaterialLinks : officeMaterialLinks/);
+  assert.ok(electricianPages, "electrician route allowlist should exist");
+  assert.match(electricianPages[1], /"\/field"/);
+  assert.doesNotMatch(electricianPages[1], /"\/(?:materials|stock|purchases)"/);
+  assert.match(fieldLookup, /export default function/);
+});
+

@@ -17,6 +17,16 @@ const blankUsage = { stockItemId: "", quantity: "1", jobId: "", note: "" };
 const today = () => new Date().toISOString().slice(0, 10);
 const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 
+const cloudFieldMaterialLinks = [
+  { label: "Supplier Material Lookup", href: "/field/material-lookup" },
+] as const;
+
+const officeMaterialLinks = [
+  { label: "Materials Library", href: "/materials" },
+  { label: "Stock Control", href: "/stock" },
+  { label: "Purchase Lists", href: "/purchases" },
+] as const;
+
 export default function MobileMaterialsPage() {
   const jobs = useJobsCollection();
   const materials = useMaterialsCollection();
@@ -157,6 +167,9 @@ export default function MobileMaterialsPage() {
       {lowStock.length === 0 ? <p className="text-sm text-slate-500">All tracked stock is above its minimum level.</p> : <div className="grid gap-2">{lowStock.map((item) => <div key={item.id} className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3"><div><p className="font-medium">{item.description}</p><p className="text-xs text-slate-500">{locationMap.get(item.locationId) || "Unknown location"}</p></div><p className="text-sm font-semibold text-amber-300">{item.quantity} / min {item.minimumQuantity}</p></div>)}</div>}
     </Card>
 
-    <div className="grid gap-3 sm:grid-cols-3"><Link href="/materials" className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-center text-sm font-semibold hover:border-cyan-400/40">Materials Library</Link><Link href="/stock" className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-center text-sm font-semibold hover:border-cyan-400/40">Stock Control</Link><Link href="/purchases" className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-center text-sm font-semibold hover:border-cyan-400/40">Purchase Lists</Link></div>
+    <div className={`grid gap-3 ${cloudFieldMode ? "" : "sm:grid-cols-3"}`}>
+      {(cloudFieldMode ? cloudFieldMaterialLinks : officeMaterialLinks).map(({ label, href }) => <Link key={href} href={href} className="rounded-xl border border-slate-800 bg-slate-900 px-4 py-3 text-center text-sm font-semibold hover:border-cyan-400/40">{label}</Link>)}
+    </div>
   </main>;
 }
+
