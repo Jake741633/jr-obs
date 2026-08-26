@@ -148,7 +148,7 @@ test("role projection cache generations fail closed on the first upgraded offlin
   assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-customers", role: "electrician" }), ELECTRICIAN_CUSTOMER_PROJECTION_CACHE_GENERATION);
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-job-documents", role: "electrician", mode: "cloud" }), "purge");
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-job-documents", role: "electrician", mode: "migration", generation: "old" }), "purge");
-  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-job-documents", role: "electrician", mode: "cloud", generation: ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-job-documents", role: "electrician", mode: "cloud", generation: ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION }), "purge");
   assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-job-documents", role: "electrician" }), ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION);
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-job-timeline", role: "electrician", mode: "cloud" }), "purge");
   assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-job-timeline", role: "electrician", mode: "migration", generation: "old" }), "purge");
