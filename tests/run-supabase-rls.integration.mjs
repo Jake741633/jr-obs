@@ -132,6 +132,36 @@ const fieldTimelineCoverage = [
   '',
 ].join("\n");
 
+const fieldTimelineFinanceCoverage = [
+  '    const fieldFinanceTimelineCases = [',
+  '      [source("field-finance-deposit-timeline-a"), { milestone: "Deposit received", note: "Deposit of £610 received.", completedBy: "JR OS Office" }, "Electrician must not read milestone-only deposit finance timeline activity"],',
+  '      [source("field-finance-invoice-created-timeline-a"), { milestone: "Invoice created", note: "Invoice INV-SEC-104 created for £1210.", completedBy: "JR OS Office" }, "Electrician must not read milestone-only invoice-created timeline activity"],',
+  '      [source("field-finance-invoice-sent-timeline-a"), { milestone: "Invoice sent", note: "Invoice INV-SEC-104 sent.", completedBy: "JR OS Office" }, "Electrician must not read milestone-only invoice-sent timeline activity"],',
+  '      [source("field-finance-payment-timeline-a"), { milestone: "Payment received", note: "Payment of £1210 received.", completedBy: "JR OS Office" }, "Electrician must not read milestone-only payment timeline activity"],',
+  '      [source("field-finance-event-type-timeline-a"), { milestone: "Custom update", eventType: "  FiNaNcIaL  ", note: "PRIVATE-FINANCIAL-EVENT-91", completedBy: "JR OS Office" }, "Electrician must not read normalized Financial timeline activity"],',
+  '      [source("field-finance-source-type-timeline-a"), { milestone: "Custom update", eventType: "Note", sourceType: "  InVoIcE  ", note: "PRIVATE-INVOICE-SOURCE-92", completedBy: "JR OS Office" }, "Electrician must not read normalized Invoice-source timeline activity"],',
+  '    ];',
+  '    for (const [sourceId, financePayload, denialLabel] of fieldFinanceTimelineCases) {',
+  '      await expectAllowed(',
+  '        await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-timeline", sourceId, accounts.A.office, null, jobA, { ...financePayload, completedAt: "2026-08-26T12:35:14.000Z", createdAt: "2026-08-26T12:35:14.000Z" })),',
+  '        "Office should create canonical financial timeline activity",',
+  '      );',
+  '      const electricianFinanceTimeline = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-timeline&source_id=eq." + sourceId);',
+  '      await expectAllowed(electricianFinanceTimeline, denialLabel + " query should execute safely");',
+  '      assert.deepEqual(electricianFinanceTimeline.payload, [], denialLabel);',
+  '    }',
+  '    const coworkerFinanceTimeline = await listRecords(accounts.A.coworker, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-timeline&source_id=eq." + fieldFinanceTimelineCases[0][0]);',
+  '    await expectAllowed(coworkerFinanceTimeline, "Co-assigned electrician finance timeline query should execute safely");',
+  '    assert.deepEqual(coworkerFinanceTimeline.payload, [], "Co-assigned electrician must not read financial timeline activity");',
+  '    const officeFinancialTimeline = await listRecords(accounts.A.office, "cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-timeline&job_source_id=eq." + jobA);',
+  '    await expectAllowed(officeFinancialTimeline, "Office financial timeline query should execute");',
+  '    const fieldFinanceTimelineIds = new Set(fieldFinanceTimelineCases.map(([sourceId]) => sourceId));',
+  '    const retainedOfficeFinanceTimeline = officeFinancialTimeline.payload.filter((record) => fieldFinanceTimelineIds.has(record.source_id));',
+  '    assert.equal(retainedOfficeFinanceTimeline.length, fieldFinanceTimelineCases.length, "Office should retain canonical financial timeline activity");',
+  '    assert.match(JSON.stringify(retainedOfficeFinanceTimeline), /PRIVATE-FINANCIAL-EVENT-91|PRIVATE-INVOICE-SOURCE-92/, "Office should retain canonical financial timeline notes");',
+  '',
+].join("\n");
+
 const fieldSiteDiaryCoverage = [
   '    const deletedDiaryJob = source("field-deleted-diary-job-a");',
   '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, deletedDiaryJob, customerA, null, { title: "Deleted diary job", status: "First fix", assignedTo: [fieldTeamA, fieldTeamCoworkerA] })), "Office should create an assigned job for site-diary deletion coverage");',
@@ -1115,7 +1145,7 @@ try {
     .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
     .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
     .replace(officeJobReadAnchor, confidentialOfficeJobRead)
-    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldProgressUpdateEnvelopeCoverage}${fieldMaterialUsageReadCoverage}${fieldJobTaskReadCoverage}${fieldJobQaReadCoverage}${fieldJobCompletionOfficeCoverage}${fieldMutationCoverage}${genericCasesStart}`)
+    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldTimelineFinanceCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldProgressUpdateEnvelopeCoverage}${fieldMaterialUsageReadCoverage}${fieldJobTaskReadCoverage}${fieldJobQaReadCoverage}${fieldJobCompletionOfficeCoverage}${fieldMutationCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   for (const requiredPhrase of [
@@ -1149,6 +1179,15 @@ try {
     "Electrician should read timeline activity while the job is active and assigned",
     "Electrician must not read timeline activity for a soft-deleted job",
     "Office should retain canonical timeline activity after job deletion",
+    "Electrician must not read milestone-only deposit finance timeline activity",
+    "Electrician must not read milestone-only invoice-created timeline activity",
+    "Electrician must not read milestone-only invoice-sent timeline activity",
+    "Electrician must not read milestone-only payment timeline activity",
+    "Electrician must not read normalized Financial timeline activity",
+    "Electrician must not read normalized Invoice-source timeline activity",
+    "Co-assigned electrician must not read financial timeline activity",
+    "Office should retain canonical financial timeline activity",
+    "Office should retain canonical financial timeline notes",
     "Assigned electrician should retain a null-customer current site diary",
     "Co-assigned electrician should retain a null-customer current site diary",
     "Electrician must not read an unassigned current site diary",
