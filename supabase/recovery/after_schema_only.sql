@@ -307,4 +307,9 @@ begin;
 \ir ../migrations/20260826120037_scope_field_job_qa_reads_to_assignments.sql
 commit;
 
+\echo 'Keeping canonical job-completion evidence office-only'
+begin;
+\ir ../migrations/20260826121246_keep_field_completion_records_office_only.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
