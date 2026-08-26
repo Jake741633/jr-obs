@@ -105,9 +105,10 @@ test("recovery, guidance and deployment marker retain timeline assignment scopin
   const timelineScope = recovery.indexOf(migrationName);
   assert.ok(documentScope >= 0 && timelineScope > documentScope);
   assert.match(recovery.slice(timelineScope - 100, timelineScope + migrationName.length + 50), /begin;[\s\S]*\\ir[\s\S]*commit;/i);
+  assert.match(setup, /surveys and their private photos are limited to assigned jobs/i);
   assert.match(
     setup,
-    /surveys and their private photos are limited to assigned jobs; timeline activity is assignment-scoped while invoice, payment and deposit finance activity remains office-only/i,
+    /timeline activity is assignment-scoped while invoice, payment and deposit finance activity remains office-only/i,
   );
   assert.match(migration, new RegExp(`'${migrationName.replaceAll(".", "\\.")}'`));
 });
