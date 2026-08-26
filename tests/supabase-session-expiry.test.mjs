@@ -40,10 +40,10 @@ test("authenticated cloud requests reject missing or expired sessions before fet
     source,
     /const session = readSupabaseSession\(\);[\s\S]*?if \(authenticated\) \{\s*if \(!session\) throw new Error\("Your cloud session has expired\. Sign in again to continue\."\);/,
   );
-  assert.ok(
-    source.indexOf("const session = readSupabaseSession();") < source.indexOf("const response = await fetch("),
-    "session validation must happen before the network request",
-  );
+  const sessionValidation = source.indexOf("const session = readSupabaseSession();");
+  const networkRequest = source.indexOf("response = await fetch(");
+  assert.ok(networkRequest !== -1, "the Supabase network request must remain present");
+  assert.ok(sessionValidation < networkRequest, "session validation must happen before the network request");
 });
 
 test("valid authenticated sessions send the bearer token only inside the validated branch", () => {
