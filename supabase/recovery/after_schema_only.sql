@@ -332,4 +332,9 @@ begin;
 \ir ../migrations/20260826230416_bind_field_survey_photo_reads.sql
 commit;
 
+\echo 'Binding field mutation receipt replays to live job assignments'
+begin;
+\ir ../migrations/20260826233120_revalidate_field_mutation_replays.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
