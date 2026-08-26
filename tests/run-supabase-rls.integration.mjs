@@ -203,6 +203,53 @@ const fieldSiteDiaryCoverage = [
   '',
 ].join("\n");
 
+const fieldVariationCoverage = [
+  '    const assignedVariation = source("field-assigned-variation-a");',
+  '    const unassignedVariation = source("field-unassigned-variation-a");',
+  '    const crossTenantVariation = source("field-cross-tenant-variation-b");',
+  '    const unboundVariation = source("field-unbound-variation-a");',
+  '    const deletedVariationJob = source("field-deleted-variation-job-a");',
+  '    const deletedJobVariation = source("field-deleted-job-variation-a");',
+  '    const variationPayload = { number: "V-SEC-001", title: "Assigned variation", description: "Assigned operational change", status: "Sent", approvalMethod: "Email", requestedBy: "Site manager", customerNotes: "Private job variation note" };',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, deletedVariationJob, customerA, null, { title: "Deleted variation job", status: "First fix", assignedTo: [fieldTeamA, fieldTeamCoworkerA] })), "Office should create an assigned job for variation deletion coverage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-variations", assignedVariation, accounts.A.office, null, jobA, { ...variationPayload, id: assignedVariation, jobId: jobA })), "Office should create a production-shaped assigned variation without a customer envelope");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-variations", unassignedVariation, accounts.A.office, null, otherCustomerJobA, { ...variationPayload, id: unassignedVariation, jobId: otherCustomerJobA, title: "Unassigned private variation" })), "Office should create an unassigned variation without a customer envelope");',
+  '    await expectAllowed(await insertRecord(accounts.B.office, "cloud_collections", genericRecord(organisationB, "jr-os-job-variations", crossTenantVariation, accounts.B.office, null, jobB, { ...variationPayload, id: crossTenantVariation, jobId: jobB, title: "Other tenant variation" })), "Tenant B office should create a cross-tenant variation fixture");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-variations", unboundVariation, accounts.A.office, null, undefined, { ...variationPayload, id: unboundVariation, jobId: undefined, title: "Unbound private variation" })), "Office should create a wholly unbound variation fixture");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-variations", deletedJobVariation, accounts.A.office, null, deletedVariationJob, { ...variationPayload, id: deletedJobVariation, jobId: deletedVariationJob, title: "Variation for deleted job" })), "Office should create a variation before job deletion");',
+  '',
+  '    const assignedFieldVariation = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-variations&source_id=eq." + assignedVariation);',
+  '    await expectAllowed(assignedFieldVariation, "Assigned electrician variation query should execute");',
+  '    assert.equal(assignedFieldVariation.payload.length, 1, "Assigned electrician should retain a null-customer job variation");',
+  '    assert.equal(assignedFieldVariation.payload[0].payload.title, "Assigned variation");',
+  '    const coworkerFieldVariation = await listRecords(accounts.A.coworker, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-variations&source_id=eq." + assignedVariation);',
+  '    await expectAllowed(coworkerFieldVariation, "Co-assigned electrician variation query should execute");',
+  '    assert.equal(coworkerFieldVariation.payload.length, 1, "Co-assigned electrician should retain an assigned job variation");',
+  '    const unassignedFieldVariation = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-variations&source_id=eq." + unassignedVariation);',
+  '    await expectAllowed(unassignedFieldVariation, "Unassigned variation query should execute safely");',
+  '    assert.deepEqual(unassignedFieldVariation.payload, [], "Electrician must not read an unassigned same-tenant job variation");',
+  '    const crossTenantFieldVariation = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-variations&source_id=eq." + crossTenantVariation);',
+  '    await expectAllowed(crossTenantFieldVariation, "Cross-tenant variation query should execute safely");',
+  '    assert.deepEqual(crossTenantFieldVariation.payload, [], "Assigned electrician must not read another organisation\'s job variation");',
+  '    const unboundFieldVariation = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-variations&source_id=eq." + unboundVariation);',
+  '    await expectAllowed(unboundFieldVariation, "Unbound variation query should execute safely");',
+  '    assert.deepEqual(unboundFieldVariation.payload, [], "Electrician must not read a variation without a canonical job");',
+  '    const officeUnassignedVariation = await listRecords(accounts.A.office, "cloud_collections", "select=source_id&collection_key=eq.jr-os-job-variations&source_id=eq." + unassignedVariation);',
+  '    await expectAllowed(officeUnassignedVariation, "Office unassigned variation query should execute");',
+  '    assert.equal(officeUnassignedVariation.payload.length, 1, "Office should retain unassigned job variation access");',
+  '    const fieldVariationBeforeJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-variations&source_id=eq." + deletedJobVariation);',
+  '    await expectAllowed(fieldVariationBeforeJobDelete, "Assigned variation query before job deletion should execute");',
+  '    assert.equal(fieldVariationBeforeJobDelete.payload.length, 1, "Electrician should read the job variation while the job is active and assigned");',
+  '    await expectAllowed(await patchRecords(accounts.A.owner, "jobs", "source_id=eq." + deletedVariationJob, { deleted_at: new Date().toISOString() }), "Owner should soft-delete the assigned variation job");',
+  '    const fieldVariationAfterJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-variations&source_id=eq." + deletedJobVariation);',
+  '    await expectAllowed(fieldVariationAfterJobDelete, "Deleted-job variation query should execute safely");',
+  '    assert.deepEqual(fieldVariationAfterJobDelete.payload, [], "Electrician must not read a job variation for a soft-deleted job");',
+  '    const officeVariationAfterJobDelete = await listRecords(accounts.A.office, "cloud_collections", "select=source_id&collection_key=eq.jr-os-job-variations&source_id=eq." + deletedJobVariation);',
+  '    await expectAllowed(officeVariationAfterJobDelete, "Office deleted-job variation query should execute");',
+  '    assert.equal(officeVariationAfterJobDelete.payload.length, 1, "Office should retain canonical job variation after job deletion");',
+  '',
+].join("\n");
+
 const obsoleteCustomerInvoiceRead = `    assert.equal(customerInvoice.payload.length, 1, "Customer must retain own invoice reads");`;
 const safeCustomerInvoiceRead = `    assert.deepEqual(customerInvoice.payload, [], "Customer base invoice reads must fail closed in favour of the customer-safe projection");`;
 
@@ -728,7 +775,7 @@ try {
     .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
     .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
     .replace(officeJobReadAnchor, confidentialOfficeJobRead)
-    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldMutationCoverage}${genericCasesStart}`)
+    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldMutationCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   for (const requiredPhrase of [
@@ -775,6 +822,15 @@ try {
     "Electrician should read current and legacy diaries while the job is active and assigned",
     "Electrician must not read current or legacy diaries for a soft-deleted job",
     "Office should retain canonical current and legacy site diaries after job deletion",
+    "Assigned electrician should retain a null-customer job variation",
+    "Co-assigned electrician should retain an assigned job variation",
+    "Electrician must not read an unassigned same-tenant job variation",
+    "Assigned electrician must not read another organisation's job variation",
+    "Electrician must not read a variation without a canonical job",
+    "Office should retain unassigned job variation access",
+    "Electrician should read the job variation while the job is active and assigned",
+    "Electrician must not read a job variation for a soft-deleted job",
+    "Office should retain canonical job variation after job deletion",
     "Assigned electrician should apply a valid job status transition through the RPC",
     "Assigned electrician must not apply an unsupported canonical job status transition",
     "Rejected field status must not advance the canonical job version",
