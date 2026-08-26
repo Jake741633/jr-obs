@@ -46,16 +46,65 @@ test("field survey photo writes remain outside the approved server boundaries", 
   assert.doesNotMatch(objectInsert, /electrician|can_manage_field_data/i);
 });
 
-test("survey assist detects the cloud electrician photo boundary", () => {
+test("survey assist detects the cloud electrician read-only boundaries", () => {
   assert.match(assistPage, /useCloudIdentity\(\)/);
+  assert.match(
+    assistPage,
+    /const fieldSuggestionRestricted = identityState\.mode !== "local" && identityState\.identity\?\.role === "electrician"/,
+  );
   assert.match(
     assistPage,
     /const fieldPhotoRestricted = identityState\.mode !== "local" && identityState\.identity\?\.role === "electrician"/,
   );
   assert.match(
     assistPage,
+    /Survey suggestions are read-only for field users because assigned surveys can be office-authored\. Ask the office to apply the draft after review\./,
+  );
+  assert.match(
+    assistPage,
     /Board photo uploads are read-only for field users until a dedicated assigned-job upload route is available\. Ask the office to add new survey photos\./,
   );
+});
+
+test("restricted suggestion handling returns before every optimistic side effect", () => {
+  const handler = section(assistPage, "function applySuggestions", "\n\n  function addBoardPhoto");
+  const guard = handler.indexOf("if (fieldSuggestionRestricted) return;");
+  assert.ok(guard >= 0, "field suggestion restriction must return from the handler");
+
+  for (const sideEffect of ["update({", 'setSaved("Suggestions applied']) {
+    assert.ok(handler.indexOf(sideEffect) > guard, `${sideEffect} must remain behind the restriction guard`);
+  }
+});
+
+test("the survey RPC retains its creator-bound update contract", () => {
+  const writer = section(
+    fieldBoundary,
+    "create or replace function public.jr_field_save_collection(",
+    "revoke execute on function public.jr_field_save_collection",
+  );
+  assert.match(writer, /canonical_record\.created_by is distinct from field_identity\.actor_user_id/i);
+  assert.match(writer, /Only the electrician who created this survey may update it/i);
+  assert.match(writer, /using errcode = '42501'/i);
+});
+
+test("field users retain read-only suggestions and existing assigned photo reads", () => {
+  assert.match(assistPage, /function applySuggestions\(\)/);
+  assert.match(assistPage, /This field view does not change the survey\./);
+  assert.match(assistPage, /fieldSuggestionRestricted \? <p[^>]*>\{fieldSuggestionHandoffMessage\}<\/p> : <Button[^>]*onClick=\{applySuggestions\}[^>]*>[\s\S]*Apply approved draft/);
+  assert.match(assistPage, /Existing assigned survey photos remain available to review\./);
+  assert.match(assistPage, /survey\.photos\.filter\(\(photo\) => photo\.category === "Consumer unit"\)\.map/);
+  assert.match(
+    assistPage,
+    /fieldPhotoRestricted \? <p[^>]*>\{fieldPhotoHandoffMessage\}<\/p> : <label[^>]*>[\s\S]*Add board photo/,
+  );
+});
+
+test("office and local survey mutations remain available", () => {
+  assert.match(assistPage, /identityState\.mode !== "local"/);
+  assert.match(assistPage, /<Button onClick=\{applySuggestions\} disabled=\{!transcript\.trim\(\)\}>/);
+  assert.match(assistPage, /<input className="hidden" type="file" accept="image\/\*" capture="environment" onChange=\{addBoardPhoto\} \/>/);
+  assert.match(assistPage, /update\(\{ photos: \[\.\.\.survey\.photos, photo\] \}\)/);
+  assert.match(assistPage, /reader\.readAsDataURL\(file\)/);
 });
 
 test("restricted board photo handling returns before every optimistic side effect", () => {
@@ -74,22 +123,4 @@ test("restricted board photo handling returns before every optimistic side effec
   ]) {
     assert.ok(handler.indexOf(sideEffect) > guardReturn, `${sideEffect} must remain behind the restriction guard`);
   }
-});
-
-test("field users retain survey suggestions and existing assigned photo reads", () => {
-  assert.match(assistPage, /function applySuggestions\(\)/);
-  assert.match(assistPage, /Apply approved draft/);
-  assert.match(assistPage, /Existing assigned survey photos remain available to review\./);
-  assert.match(assistPage, /survey\.photos\.filter\(\(photo\) => photo\.category === "Consumer unit"\)\.map/);
-  assert.match(
-    assistPage,
-    /fieldPhotoRestricted \? <p[^>]*>\{fieldPhotoHandoffMessage\}<\/p> : <label[^>]*>[\s\S]*Add board photo/,
-  );
-});
-
-test("office and local survey photo capture remains available", () => {
-  assert.match(assistPage, /identityState\.mode !== "local"/);
-  assert.match(assistPage, /<input className="hidden" type="file" accept="image\/\*" capture="environment" onChange=\{addBoardPhoto\} \/>/);
-  assert.match(assistPage, /update\(\{ photos: \[\.\.\.survey\.photos, photo\] \}\)/);
-  assert.match(assistPage, /reader\.readAsDataURL\(file\)/);
 });
