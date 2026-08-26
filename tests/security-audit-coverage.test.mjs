@@ -75,6 +75,7 @@ const requiredSuites = [
   "field-inventory-ui-privacy.test.mjs",
   "customer-role-projections.test.mjs",
   "field-builder-projection.test.mjs",
+  "field-builder-read-assignment.test.mjs",
   "field-builder-live-rls.test.mjs",
   "timesheet-actor-scope.test.mjs",
   "timesheet-actor-live-rls.test.mjs",

@@ -76,6 +76,7 @@ The suite verifies:
 - Purchase lists
 - Planner entries
 - Team members
+- Builders
 - Timesheets
 - Certificates
 - Electrical testing records
@@ -83,6 +84,10 @@ The suite verifies:
 - Portal approvals
 - Portal requests
 - AI recommendation evidence
+
+Field builder projections expose only contact-safe data for builders referenced
+by a live canonical job assigned to the electrician's unique active field
+identity. Same-tenant unassigned and orphan builder contacts remain hidden.
 
 ### Generic collections covered
 
