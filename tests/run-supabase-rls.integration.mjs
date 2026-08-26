@@ -310,6 +310,32 @@ const fieldProgressReadCoverage = [
   '',
 ].join("\n");
 
+const fieldProgressUpdateEnvelopeCoverage = [
+  '    const mismatchedProgressJob = source("field-mismatched-progress-job-a");',
+  '    const mismatchedCustomerProgress = source("field-mismatched-customer-progress-a");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, mismatchedProgressJob, customerA, null, { title: "Mismatched progress envelope job", status: "First fix", assignedTo: [fieldTeamA] })), "Office should create an assigned job for progress envelope coverage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-progress", mismatchedCustomerProgress, accounts.A.office, otherCustomerA, mismatchedProgressJob, { ...progressPayload, id: mismatchedCustomerProgress, jobId: mismatchedProgressJob })), "Office should create a wrong non-null progress customer fixture");',
+  '',
+  '    const assignedProgressBeforeUpdate = await listRecords(accounts.A.office, "cloud_collections", "select=version,customer_source_id,payload&collection_key=eq.jr-os-job-progress&source_id=eq." + assignedProgress);',
+  '    await expectAllowed(assignedProgressBeforeUpdate, "Office should read assigned progress before the field update");',
+  '    assert.equal(assignedProgressBeforeUpdate.payload[0].customer_source_id, null, "Office-created progress fixture must retain its production null customer envelope");',
+  '    const nullCustomerProgressUpdate = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_job_progress", { method: "POST", body: { collection_key_value: "jr-os-job-progress", record_source_id: assignedProgress, expected_version: assignedProgressBeforeUpdate.payload[0].version, record_payload: { ...assignedProgressBeforeUpdate.payload[0].payload, manual: { ...assignedProgressBeforeUpdate.payload[0].payload.manual, overall: 55, payments: 0 } }, mutation_id: crypto.randomUUID() } });',
+  '    await expectAllowed(nullCustomerProgressUpdate, "Assigned electrician should update office-created null-customer job progress");',
+  '    assert.equal(nullCustomerProgressUpdate.payload.version, assignedProgressBeforeUpdate.payload[0].version + 1);',
+  '    assert.equal(nullCustomerProgressUpdate.payload.payload.manual.overall, 55);',
+  '    assert.equal(nullCustomerProgressUpdate.payload.payload.manual.payments, 75, "Progress RPC must preserve the canonical payment percentage");',
+  '    assert.equal(nullCustomerProgressUpdate.payload.payload.suggestions.length, 1, "Progress RPC must preserve office suggestions");',
+  '    assert.equal(nullCustomerProgressUpdate.payload.payload.updatedBy, "Field write electrician");',
+  '    const assignedProgressAfterUpdate = await listRecords(accounts.A.office, "cloud_collections", "select=customer_source_id,payload&collection_key=eq.jr-os-job-progress&source_id=eq." + assignedProgress);',
+  '    await expectAllowed(assignedProgressAfterUpdate, "Office should read assigned progress after the field update");',
+  '    assert.equal(assignedProgressAfterUpdate.payload[0].customer_source_id, null, "Progress RPC must preserve a legitimate null customer envelope");',
+  '    assert.equal(assignedProgressAfterUpdate.payload[0].payload.manual.payments, 75);',
+  '',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_job_progress", { method: "POST", body: { collection_key_value: "jr-os-job-progress", record_source_id: mismatchedCustomerProgress, expected_version: 1, record_payload: { ...progressPayload, id: mismatchedCustomerProgress, jobId: mismatchedProgressJob }, mutation_id: crypto.randomUUID() } }), "PT409", "Wrong non-null progress customer envelope must fail closed");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_job_progress", { method: "POST", body: { collection_key_value: "jr-os-job-progress", record_source_id: unassignedProgress, expected_version: 1, record_payload: { ...progressPayload, id: unassignedProgress, jobId: unassignedProgressJob }, mutation_id: crypto.randomUUID() } }), "42501", "Electrician must not update unassigned job progress");',
+  '',
+].join("\n");
+
 const fieldMaterialUsageReadCoverage = [
   '    const deletedMaterialUsageJob = source("field-deleted-material-usage-job-a");',
   '    const assignedMaterialUsage = source("field-assigned-material-usage-a");',
@@ -896,7 +922,7 @@ try {
     .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
     .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
     .replace(officeJobReadAnchor, confidentialOfficeJobRead)
-    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldMaterialUsageReadCoverage}${fieldMutationCoverage}${genericCasesStart}`)
+    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldProgressUpdateEnvelopeCoverage}${fieldMaterialUsageReadCoverage}${fieldMutationCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   for (const requiredPhrase of [
@@ -962,6 +988,12 @@ try {
     "Electrician should read job progress while the job is active and assigned",
     "Electrician must not read job progress for a soft-deleted job",
     "Office should retain canonical job progress after job deletion",
+    "Assigned electrician should update office-created null-customer job progress",
+    "Progress RPC must preserve a legitimate null customer envelope",
+    "Progress RPC must preserve the canonical payment percentage",
+    "Progress RPC must preserve office suggestions",
+    "Wrong non-null progress customer envelope must fail closed",
+    "Electrician must not update unassigned job progress",
     "Assigned electrician should retain null-customer job material usage",
     "Co-assigned electrician should retain assigned job material usage",
     "Electrician must not read unassigned same-tenant job material usage",
@@ -1026,4 +1058,3 @@ try {
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }
-

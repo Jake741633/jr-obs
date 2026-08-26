@@ -292,4 +292,9 @@ begin;
 \ir ../migrations/20260826110301_scope_field_material_usage_reads_to_assignments.sql
 commit;
 
+\echo 'Aligning assigned field progress updates with null-customer envelopes'
+begin;
+\ir ../migrations/20260826112805_align_field_progress_update_customer_envelopes.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
