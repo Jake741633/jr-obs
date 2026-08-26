@@ -13,6 +13,7 @@ function navigationItemIsActive(pathname: string, href: string) {
   if (href === "/field/jobs") {
     return pathname === href || pathname.startsWith(`${href}/`) || fieldJobWorkspacePath.test(pathname);
   }
+  if (href === "/field") return pathname === href;
   return href === "/"
     ? pathname === "/"
     : pathname === href || pathname.startsWith(`${href}/`);
