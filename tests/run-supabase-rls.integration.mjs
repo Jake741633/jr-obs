@@ -1012,6 +1012,106 @@ const secureFieldCasesSnippet = `    // Direct field writes are closed; only exi
       await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, source("timesheet-wrong-customer"), otherCustomerA, jobA, { teamMemberId: fieldTeamA, hours: 1 })),
       "Electrician timesheet must not claim another customer for its assigned job",
     );
+    const actorTimesheetA = source("timesheet-actor-a");
+    const officeTimesheetA = source("timesheet-office-a");
+    await expectAllowed(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, actorTimesheetA, customerA, jobA, {
+        teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, workDate: "2026-08-09", startedAt: "08:00", finishedAt: "16:00", breakMinutes: 30, notes: "Own field timesheet", status: "Draft",
+      })),
+      "Electrician should create their own assigned-job timesheet row",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "timesheets", typedRecord(organisationA, officeTimesheetA, customerA, jobA, {
+        teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, workDate: "2026-08-09", startedAt: "09:00", finishedAt: "17:00", breakMinutes: 30, notes: "Office-created payroll row", status: "Draft",
+      })),
+      "Office should create the actor-scope comparison timesheet row",
+    );
+
+    const officeOwnTimesheetRead = await listRecords(accounts.A.office, "timesheets", "select=source_id&source_id=eq." + officeTimesheetA);
+    await expectAllowed(officeOwnTimesheetRead, "Office own timesheet query should execute");
+    assert.equal(officeOwnTimesheetRead.payload.length, 1, "Office should read office-created timesheets");
+    const officeFieldTimesheetRead = await listRecords(accounts.A.office, "timesheets", "select=source_id&source_id=eq." + actorTimesheetA);
+    await expectAllowed(officeFieldTimesheetRead, "Office field timesheet query should execute");
+    assert.equal(officeFieldTimesheetRead.payload.length, 1, "Office should read electrician-created timesheets");
+
+    const electricianOwnTimesheetRead = await listRecords(accounts.A.electrician, "timesheets", "select=source_id,payload&source_id=eq." + actorTimesheetA);
+    await expectAllowed(electricianOwnTimesheetRead, "Electrician own timesheet query should execute");
+    assert.equal(electricianOwnTimesheetRead.payload.length, 1, "Electrician should read their own timesheet row");
+    const electricianForeignTimesheetRead = await listRecords(accounts.A.electrician, "timesheets", "select=source_id&source_id=eq." + officeTimesheetA);
+    await expectAllowed(electricianForeignTimesheetRead, "Electrician foreign timesheet query should fail closed");
+    assert.deepEqual(electricianForeignTimesheetRead.payload, [], "Electrician must not read another actor timesheet row");
+
+    const electricianOwnTimesheetUpdate = await patchRecords(accounts.A.electrician, "timesheets", "source_id=eq." + actorTimesheetA, { payload: {
+      id: actorTimesheetA, teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, workDate: "2026-08-09", startedAt: "08:00", finishedAt: "16:30", breakMinutes: 30, notes: "Own field timesheet updated", status: "Submitted",
+    } });
+    await expectAllowed(electricianOwnTimesheetUpdate, "Electrician should update their own assigned-job timesheet row");
+    assert.equal(electricianOwnTimesheetUpdate.payload.length, 1, "Electrician own timesheet update should affect exactly one row");
+    const electricianForeignTimesheetUpdate = await patchRecords(accounts.A.electrician, "timesheets", "source_id=eq." + officeTimesheetA, { payload: {
+      id: officeTimesheetA, teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, workDate: "2026-08-09", startedAt: "09:00", finishedAt: "18:00", breakMinutes: 30, notes: "Forged update", status: "Submitted",
+    } });
+    await expectAllowed(electricianForeignTimesheetUpdate, "Electrician foreign timesheet update should fail closed");
+    assert.deepEqual(electricianForeignTimesheetUpdate.payload, [], "Electrician must not update another actor timesheet row");
+    const officeForeignTimesheetReadback = await listRecords(accounts.A.office, "timesheets", "select=payload&source_id=eq." + officeTimesheetA);
+    await expectAllowed(officeForeignTimesheetReadback, "Office comparison timesheet readback should execute");
+    assert.equal(officeForeignTimesheetReadback.payload[0].payload.notes, "Office-created payroll row", "Filtered electrician updates must leave another actor timesheet unchanged");
+    const officeFieldTimesheetUpdate = await patchRecords(accounts.A.office, "timesheets", "source_id=eq." + actorTimesheetA, { payload: {
+      id: actorTimesheetA, teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, workDate: "2026-08-09", startedAt: "08:00", finishedAt: "16:30", breakMinutes: 30, notes: "Office approved", status: "Approved",
+    } });
+    await expectAllowed(officeFieldTimesheetUpdate, "Office should retain payroll update authority over field timesheets");
+    assert.equal(officeFieldTimesheetUpdate.payload.length, 1, "Office field timesheet update should affect exactly one row");
+
+    const customerTimesheetRead = await listRecords(accounts.A.customer, "timesheets", "select=source_id&source_id=eq." + actorTimesheetA);
+    await expectAllowed(customerTimesheetRead, "Customer timesheet query should fail closed");
+    assert.deepEqual(customerTimesheetRead.payload, [], "Customers must not read timesheets");
+    const crossTenantTimesheetRead = await listRecords(accounts.B.electrician, "timesheets", "select=source_id&source_id=eq." + actorTimesheetA);
+    await expectAllowed(crossTenantTimesheetRead, "Cross-tenant timesheet query should execute safely");
+    assert.deepEqual(crossTenantTimesheetRead.payload, [], "Another organisation must not read the timesheet row");
+
+    const missingTeamUser = await createUser("a-timesheet-missing-team");
+    context.users.push(missingTeamUser);
+    await createProfile(missingTeamUser, organisationA, "electrician");
+    const missingTeamAccount = { ...missingTeamUser, ...(await signIn(missingTeamUser)), organisationId: organisationA };
+    const missingTeamTimesheetA = source("timesheet-missing-team-a");
+    const teamBoundTimesheetA = source("timesheet-team-bound-a");
+    const wrongTeamTimesheetA = source("timesheet-wrong-team-a");
+    const duplicateTeamMemberA = source("timesheet-duplicate-team-a");
+    const duplicateTimesheetA = source("timesheet-duplicate-match-a");
+    await expectDenied(
+      await insertRecord(missingTeamAccount, "timesheets", typedRecord(organisationA, missingTeamTimesheetA, customerA, jobA, { teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, hours: 1 })),
+      "Electrician timesheet creation must fail without a matching team identity",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, teamBoundTimesheetA, customerA, jobA, { teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, hours: 1 })),
+      "Electrician should create a timesheet for their uniquely linked team identity",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, wrongTeamTimesheetA, customerA, jobA, { teamMemberId: fieldTeamCoworkerA, customerId: customerA, jobId: jobA, hours: 1 })),
+      "Electrician must not create a timesheet for another team identity",
+    );
+    await expectAllowed(
+      await patchRecords(accounts.A.electrician, "timesheets", "source_id=eq." + teamBoundTimesheetA, { payload: { id: teamBoundTimesheetA, teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, hours: 2 } }),
+      "Electrician should update a timesheet while retaining their linked team identity",
+    );
+    await expectDenied(
+      await patchRecords(accounts.A.electrician, "timesheets", "source_id=eq." + teamBoundTimesheetA, { payload: { id: teamBoundTimesheetA, teamMemberId: fieldTeamCoworkerA, customerId: customerA, jobId: jobA, hours: 2 } }),
+      "Electrician must not reattribute a timesheet to another team identity",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "team_members", typedRecord(organisationA, duplicateTeamMemberA, null, null, { name: "Duplicate linked electrician", email: accounts.A.electrician.email, role: "Electrician", status: "Active" })),
+      "Office should create a duplicate timesheet team identity for fail-closed testing",
+    );
+    await expectDenied(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, duplicateTimesheetA, customerA, jobA, { teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, hours: 1 })),
+      "Electrician timesheet creation must fail when team identity matches are ambiguous",
+    );
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "team_members", "source_id=eq." + duplicateTeamMemberA, { deleted_at: new Date().toISOString() }),
+      "Owner should remove the duplicate timesheet team identity fixture",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.electrician, "timesheets", typedRecord(organisationA, source("timesheet-restored-team-a"), customerA, jobA, { teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, hours: 1 })),
+      "Unique team identity should restore electrician timesheet creation",
+    );
     // Secure field identity fixtures are complete.`;
 
 const genericInsertSnippet = `      await expectAllowed(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.electrician, customerA, jobA, payload)), \`Field staff should write \${collectionKey}\`);
@@ -1273,6 +1373,23 @@ try {
     "Co-assigned electrician should retain the assigned field customer",
     "Electrician must not read a same-tenant customer with only unassigned jobs",
     "Assigned electrician must not read another organisation's field customer",
+    "Electrician should create their own assigned-job timesheet row",
+    "Electrician should read their own timesheet row",
+    "Electrician must not read another actor timesheet row",
+    "Electrician should update their own assigned-job timesheet row",
+    "Electrician must not update another actor timesheet row",
+    "Filtered electrician updates must leave another actor timesheet unchanged",
+    "Office should retain payroll update authority over field timesheets",
+    "Customers must not read timesheets",
+    "Another organisation must not read the timesheet row",
+    "Electrician timesheet creation must fail without a matching team identity",
+    "Electrician should create a timesheet for their uniquely linked team identity",
+    "Electrician must not create a timesheet for another team identity",
+    "Electrician should update a timesheet while retaining their linked team identity",
+    "Electrician must not reattribute a timesheet to another team identity",
+    "Electrician timesheet creation must fail when team identity matches are ambiguous",
+    "Owner should remove the duplicate timesheet team identity fixture",
+    "Unique team identity should restore electrician timesheet creation",
     "Co-assigned electrician should retain the assigned job",
     "Electrician must not read an unassigned same-tenant job",
     "Another organisation must not read the assigned field job",
