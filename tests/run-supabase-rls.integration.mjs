@@ -310,6 +310,67 @@ const fieldProgressReadCoverage = [
   '',
 ].join("\n");
 
+const fieldMaterialUsageReadCoverage = [
+  '    const deletedMaterialUsageJob = source("field-deleted-material-usage-job-a");',
+  '    const assignedMaterialUsage = source("field-assigned-material-usage-a");',
+  '    const unassignedMaterialUsage = source("field-unassigned-material-usage-a");',
+  '    const crossTenantMaterialUsage = source("field-cross-tenant-material-usage-b");',
+  '    const unboundMaterialUsage = source("field-unbound-material-usage-a");',
+  '    const wrongCustomerMaterialUsage = source("field-wrong-customer-material-usage-a");',
+  '    const deletedJobMaterialUsage = source("field-deleted-job-material-usage-a");',
+  '    const materialUsagePayload = { materialId: source("material-usage-stock-a"), description: "Twin and earth cable", quantity: 12, unit: "Metre", unitCost: 2.5, supplier: "CEF", usedAt: "2026-08-26T10:00:00.000Z", recordedBy: "JR OS Office", notes: "Stored beside the private riser", createdAt: "2026-08-26T10:00:00.000Z", updatedAt: "2026-08-26T10:00:00.000Z" };',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, deletedMaterialUsageJob, customerA, null, { title: "Deleted material usage job", status: "First fix", assignedTo: [fieldTeamA, fieldTeamCoworkerA] })), "Office should create an assigned job for material-usage deletion coverage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-material-usage", assignedMaterialUsage, accounts.A.office, null, jobA, { ...materialUsagePayload, id: assignedMaterialUsage, jobId: jobA })), "Office should create production-shaped assigned material usage without a customer envelope");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-material-usage", unassignedMaterialUsage, accounts.A.office, null, otherCustomerJobA, { ...materialUsagePayload, id: unassignedMaterialUsage, jobId: otherCustomerJobA, description: "Private unassigned materials" })), "Office should create unassigned material usage without a customer envelope");',
+  '    await expectAllowed(await insertRecord(accounts.B.office, "cloud_collections", genericRecord(organisationB, "jr-os-job-material-usage", crossTenantMaterialUsage, accounts.B.office, null, jobB, { ...materialUsagePayload, id: crossTenantMaterialUsage, jobId: jobB, description: "Other tenant materials" })), "Tenant B office should create cross-tenant material usage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-material-usage", unboundMaterialUsage, accounts.A.office, null, undefined, { ...materialUsagePayload, id: unboundMaterialUsage, jobId: undefined, description: "Unbound private materials" })), "Office should create wholly unbound material usage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-material-usage", wrongCustomerMaterialUsage, accounts.A.office, otherCustomerA, jobA, { ...materialUsagePayload, id: wrongCustomerMaterialUsage, jobId: jobA, description: "Mismatched customer materials" })), "Office should create a mismatched-customer material usage fixture");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-material-usage", deletedJobMaterialUsage, accounts.A.office, null, deletedMaterialUsageJob, { ...materialUsagePayload, id: deletedJobMaterialUsage, jobId: deletedMaterialUsageJob })), "Office should create material usage before job deletion");',
+  '',
+  '    const assignedFieldMaterialUsage = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-material-usage&source_id=eq." + assignedMaterialUsage);',
+  '    await expectAllowed(assignedFieldMaterialUsage, "Assigned electrician material-usage query should execute");',
+  '    assert.equal(assignedFieldMaterialUsage.payload.length, 1, "Assigned electrician should retain null-customer job material usage");',
+  '    assert.equal(assignedFieldMaterialUsage.payload[0].payload.notes, "Stored beside the private riser", "Assigned usage should retain operational site notes");',
+  '    assert.equal(assignedFieldMaterialUsage.payload[0].payload.unitCost, undefined, "Field material usage projection must omit unit costs");',
+  '    const coworkerFieldMaterialUsage = await listRecords(accounts.A.coworker, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + assignedMaterialUsage);',
+  '    await expectAllowed(coworkerFieldMaterialUsage, "Co-assigned electrician material-usage query should execute");',
+  '    assert.equal(coworkerFieldMaterialUsage.payload.length, 1, "Co-assigned electrician should retain assigned job material usage");',
+  '    const unassignedFieldMaterialUsage = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + unassignedMaterialUsage);',
+  '    await expectAllowed(unassignedFieldMaterialUsage, "Unassigned material-usage query should execute safely");',
+  '    assert.deepEqual(unassignedFieldMaterialUsage.payload, [], "Electrician must not read unassigned same-tenant job material usage");',
+  '    const crossTenantFieldMaterialUsage = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + crossTenantMaterialUsage);',
+  '    await expectAllowed(crossTenantFieldMaterialUsage, "Cross-tenant material-usage query should execute safely");',
+  '    assert.deepEqual(crossTenantFieldMaterialUsage.payload, [], "Assigned electrician must not read another organisation\'s job material usage");',
+  '    const unboundFieldMaterialUsage = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + unboundMaterialUsage);',
+  '    await expectAllowed(unboundFieldMaterialUsage, "Unbound material-usage query should execute safely");',
+  '    assert.deepEqual(unboundFieldMaterialUsage.payload, [], "Electrician must not read material usage without a canonical job");',
+  '    const wrongCustomerFieldMaterialUsage = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + wrongCustomerMaterialUsage);',
+  '    await expectAllowed(wrongCustomerFieldMaterialUsage, "Wrong-customer material-usage query should execute safely");',
+  '    assert.deepEqual(wrongCustomerFieldMaterialUsage.payload, [], "Wrong customer material usage envelope must fail closed");',
+  '    const materialUsageUnboundUser = await createUser("a-electrician-material-usage-unbound");',
+  '    context.users.push(materialUsageUnboundUser);',
+  '    await createProfile(materialUsageUnboundUser, organisationA, "electrician");',
+  '    const materialUsageUnboundAccount = { ...materialUsageUnboundUser, ...(await signIn(materialUsageUnboundUser)), organisationId: organisationA };',
+  '    const noIdentityMaterialUsage = await listRecords(materialUsageUnboundAccount, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + assignedMaterialUsage);',
+  '    await expectAllowed(noIdentityMaterialUsage, "Unbound field identity material-usage query should execute safely");',
+  '    assert.deepEqual(noIdentityMaterialUsage.payload, [], "Electrician without an active field identity must not read job material usage");',
+  '    const officeUnassignedMaterialUsage = await listRecords(accounts.A.office, "cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-material-usage&source_id=eq." + unassignedMaterialUsage);',
+  '    await expectAllowed(officeUnassignedMaterialUsage, "Office unassigned material-usage query should execute");',
+  '    assert.equal(officeUnassignedMaterialUsage.payload.length, 1, "Office should retain unassigned job material usage access");',
+  '    assert.equal(officeUnassignedMaterialUsage.payload[0].payload.unitCost, 2.5, "Office should retain canonical material unit costs");',
+  '    const fieldMaterialUsageBeforeJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + deletedJobMaterialUsage);',
+  '    await expectAllowed(fieldMaterialUsageBeforeJobDelete, "Assigned material-usage query before job deletion should execute");',
+  '    assert.equal(fieldMaterialUsageBeforeJobDelete.payload.length, 1, "Electrician should read job material usage while the job is active and assigned");',
+  '    await expectAllowed(await patchRecords(accounts.A.owner, "jobs", "source_id=eq." + deletedMaterialUsageJob, { deleted_at: new Date().toISOString() }), "Owner should soft-delete the assigned material-usage job");',
+  '    const fieldMaterialUsageAfterJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + deletedJobMaterialUsage);',
+  '    await expectAllowed(fieldMaterialUsageAfterJobDelete, "Deleted-job material-usage query should execute safely");',
+  '    assert.deepEqual(fieldMaterialUsageAfterJobDelete.payload, [], "Electrician must not read job material usage for a soft-deleted job");',
+  '    const officeMaterialUsageAfterJobDelete = await listRecords(accounts.A.office, "cloud_collections", "select=source_id&collection_key=eq.jr-os-job-material-usage&source_id=eq." + deletedJobMaterialUsage);',
+  '    await expectAllowed(officeMaterialUsageAfterJobDelete, "Office deleted-job material-usage query should execute");',
+  '    assert.equal(officeMaterialUsageAfterJobDelete.payload.length, 1, "Office should retain canonical job material usage after job deletion");',
+  '',
+].join("\n");
+
 const obsoleteCustomerInvoiceRead = `    assert.equal(customerInvoice.payload.length, 1, "Customer must retain own invoice reads");`;
 const safeCustomerInvoiceRead = `    assert.deepEqual(customerInvoice.payload, [], "Customer base invoice reads must fail closed in favour of the customer-safe projection");`;
 
@@ -835,7 +896,7 @@ try {
     .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
     .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
     .replace(officeJobReadAnchor, confidentialOfficeJobRead)
-    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldMutationCoverage}${genericCasesStart}`)
+    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldMaterialUsageReadCoverage}${fieldMutationCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   for (const requiredPhrase of [
@@ -901,6 +962,17 @@ try {
     "Electrician should read job progress while the job is active and assigned",
     "Electrician must not read job progress for a soft-deleted job",
     "Office should retain canonical job progress after job deletion",
+    "Assigned electrician should retain null-customer job material usage",
+    "Co-assigned electrician should retain assigned job material usage",
+    "Electrician must not read unassigned same-tenant job material usage",
+    "Assigned electrician must not read another organisation's job material usage",
+    "Electrician must not read material usage without a canonical job",
+    "Wrong customer material usage envelope must fail closed",
+    "Electrician without an active field identity must not read job material usage",
+    "Office should retain unassigned job material usage access",
+    "Electrician should read job material usage while the job is active and assigned",
+    "Electrician must not read job material usage for a soft-deleted job",
+    "Office should retain canonical job material usage after job deletion",
     "Assigned electrician should apply a valid job status transition through the RPC",
     "Assigned electrician must not apply an unsupported canonical job status transition",
     "Rejected field status must not advance the canonical job version",
@@ -954,3 +1026,4 @@ try {
 } finally {
   rmSync(temporaryDirectory, { recursive: true, force: true });
 }
+

@@ -287,4 +287,9 @@ begin;
 \ir ../migrations/20260826104958_scope_field_job_progress_reads_to_assignments.sql
 commit;
 
+\echo 'Scoping field material-usage reads to assigned jobs'
+begin;
+\ir ../migrations/20260826110301_scope_field_material_usage_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
