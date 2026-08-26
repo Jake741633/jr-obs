@@ -88,7 +88,7 @@ test("day planner fails closed for unlinked cloud visits and unresolved identity
 });
 
 test("arrival only advances a scheduled job to first fix", () => {
-  assert.match(page, /if \(cloudFieldMode && !linkedJob\)[\s\S]*return;/);
-  assert.match(page, /normaliseJobStatus\(linkedJob\.status\) === "Scheduled"/);
+  assert.match(page, /if \(cloudFieldMode && !job\)[\s\S]*return;/);
+  assert.match(page, /normaliseJobStatus\(job\.status\) === "Scheduled"/);
   assert.match(page, /nextStatus: "First fix"/);
 });

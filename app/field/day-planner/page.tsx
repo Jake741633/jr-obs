@@ -56,8 +56,8 @@ export default function EngineerDayPlannerPage() {
       setMessage("Unlinked planner entries are read-only for field cloud sessions because field time must be bound to an assigned job.");
       return;
     }
-    const linkedJob = entry.jobId ? jobsById.get(entry.jobId) : undefined;
-    if (cloudFieldMode && !linkedJob) {
+    const job = entry.jobId ? jobsById.get(entry.jobId) : undefined;
+    if (cloudFieldMode && !job) {
       setMessage("The assigned job could not be resolved. Refresh the planner before starting the visit.");
       return;
     }
@@ -68,9 +68,9 @@ export default function EngineerDayPlannerPage() {
     setBreakMinutes("0");
     setNotes("");
     planner.setItems((current) => current.map((item) => item.id === entry.id ? { ...item, status: "Confirmed", updatedAt: new Date().toISOString() } : item));
-    if (linkedJob && normaliseJobStatus(linkedJob.status) === "Scheduled") {
-      const result = transitionJobStatus({ job: linkedJob, nextStatus: "First fix", now: new Date().toISOString(), timelineId: makeId("timeline"), completedBy: "Engineer Day Planner" });
-      jobs.setItems((current) => current.map((item) => item.id === linkedJob.id ? result.job : item));
+    if (job && normaliseJobStatus(job.status) === "Scheduled") {
+      const result = transitionJobStatus({ job, nextStatus: "First fix", now: new Date().toISOString(), timelineId: makeId("timeline"), completedBy: "Engineer Day Planner" });
+      jobs.setItems((current) => current.map((item) => item.id === job.id ? result.job : item));
     }
     setMessage(`${entry.title} started at ${time}.`);
   }
