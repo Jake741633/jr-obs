@@ -302,4 +302,9 @@ begin;
 \ir ../migrations/20260826114300_scope_field_job_task_reads_to_assignments.sql
 commit;
 
+\echo 'Scoping field job-QA inspection reads to assigned jobs'
+begin;
+\ir ../migrations/20260826120037_scope_field_job_qa_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

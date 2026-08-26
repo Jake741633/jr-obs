@@ -464,6 +464,66 @@ const fieldJobTaskReadCoverage = [
   '',
 ].join("\n");
 
+const fieldJobQaReadCoverage = [
+  '    const deletedQaReadJob = source("field-deleted-qa-read-job-a");',
+  '    const assignedQaReadId = source("field-assigned-qa-read-a");',
+  '    const unassignedQaReadId = source("field-unassigned-qa-read-a");',
+  '    const crossTenantQaReadId = source("field-cross-tenant-qa-read-b");',
+  '    const unboundQaReadId = source("field-unbound-qa-read-a");',
+  '    const wrongCustomerQaReadId = source("field-wrong-customer-qa-read-a");',
+  '    const deletedJobQaReadId = source("field-deleted-job-qa-read-a");',
+  '    const qaReadPayload = { type: "Testing", result: "Pending", checks: [{ id: "qa-check-private", label: "Private board inspection", completed: false, note: "Supervisor-only defect note" }], inspectorId: fieldTeamA, inspectorName: "JR OS Office", notes: "Private QA inspection note", inspectedAt: "2026-08-26T12:00:00.000Z", createdAt: "2026-08-26T12:00:00.000Z", updatedAt: "2026-08-26T12:00:00.000Z" };',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, deletedQaReadJob, customerA, null, { title: "Deleted QA read job", status: "First fix", assignedTo: [fieldTeamA, fieldTeamCoworkerA] })), "Office should create an assigned job for QA deletion coverage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-qa-inspections", assignedQaReadId, accounts.A.office, null, jobA, { ...qaReadPayload, id: assignedQaReadId, jobId: jobA })), "Office should create a production-shaped assigned QA inspection without a customer envelope");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-qa-inspections", unassignedQaReadId, accounts.A.office, null, otherCustomerJobA, { ...qaReadPayload, id: unassignedQaReadId, jobId: otherCustomerJobA, notes: "Unassigned private QA note" })), "Office should create an unassigned QA inspection without a customer envelope");',
+  '    await expectAllowed(await insertRecord(accounts.B.office, "cloud_collections", genericRecord(organisationB, "jr-os-job-qa-inspections", crossTenantQaReadId, accounts.B.office, null, jobB, { ...qaReadPayload, id: crossTenantQaReadId, jobId: jobB, notes: "Other tenant private QA note" })), "Tenant B office should create a cross-tenant QA inspection fixture");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-qa-inspections", unboundQaReadId, accounts.A.office, null, undefined, { ...qaReadPayload, id: unboundQaReadId, jobId: undefined, notes: "Unbound private QA note" })), "Office should create a wholly unbound QA inspection fixture");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-qa-inspections", wrongCustomerQaReadId, accounts.A.office, otherCustomerA, jobA, { ...qaReadPayload, id: wrongCustomerQaReadId, jobId: jobA, notes: "Wrong customer private QA note" })), "Office should create a mismatched-customer QA inspection fixture");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-qa-inspections", deletedJobQaReadId, accounts.A.office, null, deletedQaReadJob, { ...qaReadPayload, id: deletedJobQaReadId, jobId: deletedQaReadJob })), "Office should create a QA inspection before job deletion");',
+  '',
+  '    const assignedFieldQa = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + assignedQaReadId);',
+  '    await expectAllowed(assignedFieldQa, "Assigned electrician QA inspection query should execute");',
+  '    assert.equal(assignedFieldQa.payload.length, 1, "Assigned electrician should retain null-customer job QA inspections");',
+  '    assert.equal(assignedFieldQa.payload[0].payload.notes, "Private QA inspection note", "Assigned QA projection should retain checklist results and defect notes");',
+  '    assert.equal(assignedFieldQa.payload[0].payload.checks[0].note, "Supervisor-only defect note");',
+  '    const coworkerFieldQa = await listRecords(accounts.A.coworker, "field_cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + assignedQaReadId);',
+  '    await expectAllowed(coworkerFieldQa, "Co-assigned electrician QA inspection query should execute");',
+  '    assert.equal(coworkerFieldQa.payload.length, 1, "Co-assigned electrician should retain assigned job QA inspection details");',
+  '    const unassignedFieldQa = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + unassignedQaReadId);',
+  '    await expectAllowed(unassignedFieldQa, "Unassigned QA inspection query should execute safely");',
+  '    assert.deepEqual(unassignedFieldQa.payload, [], "Electrician must not read unassigned same-tenant job QA inspections");',
+  '    const crossTenantFieldQa = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + crossTenantQaReadId);',
+  '    await expectAllowed(crossTenantFieldQa, "Cross-tenant QA inspection query should execute safely");',
+  '    assert.deepEqual(crossTenantFieldQa.payload, [], "Assigned electrician must not read another organisation\'s job QA inspections");',
+  '    const unboundFieldQa = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + unboundQaReadId);',
+  '    await expectAllowed(unboundFieldQa, "Unbound QA inspection query should execute safely");',
+  '    assert.deepEqual(unboundFieldQa.payload, [], "Electrician must not read QA inspection without a canonical job");',
+  '    const wrongCustomerFieldQa = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + wrongCustomerQaReadId);',
+  '    await expectAllowed(wrongCustomerFieldQa, "Wrong-customer QA inspection query should execute safely");',
+  '    assert.deepEqual(wrongCustomerFieldQa.payload, [], "Wrong customer QA inspection envelope must fail closed");',
+  '    const qaReadUnboundUser = await createUser("a-electrician-qa-read-unbound");',
+  '    context.users.push(qaReadUnboundUser);',
+  '    await createProfile(qaReadUnboundUser, organisationA, "electrician");',
+  '    const qaReadUnboundAccount = { ...qaReadUnboundUser, ...(await signIn(qaReadUnboundUser)), organisationId: organisationA };',
+  '    const noIdentityQaRead = await listRecords(qaReadUnboundAccount, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + assignedQaReadId);',
+  '    await expectAllowed(noIdentityQaRead, "Unbound field identity QA inspection query should execute safely");',
+  '    assert.deepEqual(noIdentityQaRead.payload, [], "Electrician without an active field identity must not read job QA inspections");',
+  '    const officeUnassignedQa = await listRecords(accounts.A.office, "cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + unassignedQaReadId);',
+  '    await expectAllowed(officeUnassignedQa, "Office unassigned QA inspection query should execute");',
+  '    assert.equal(officeUnassignedQa.payload.length, 1, "Office should retain unassigned job QA inspection access");',
+  '    const fieldQaBeforeJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + deletedJobQaReadId);',
+  '    await expectAllowed(fieldQaBeforeJobDelete, "Assigned QA inspection query before job deletion should execute");',
+  '    assert.equal(fieldQaBeforeJobDelete.payload.length, 1, "Electrician should read job QA inspections while the job is active and assigned");',
+  '    await expectAllowed(await patchRecords(accounts.A.owner, "jobs", "source_id=eq." + deletedQaReadJob, { deleted_at: new Date().toISOString() }), "Owner should soft-delete the assigned QA job");',
+  '    const fieldQaAfterJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + deletedJobQaReadId);',
+  '    await expectAllowed(fieldQaAfterJobDelete, "Deleted-job QA inspection query should execute safely");',
+  '    assert.deepEqual(fieldQaAfterJobDelete.payload, [], "Electrician must not read job QA inspections for a soft-deleted job");',
+  '    const officeQaAfterJobDelete = await listRecords(accounts.A.office, "cloud_collections", "select=source_id&collection_key=eq.jr-os-job-qa-inspections&source_id=eq." + deletedJobQaReadId);',
+  '    await expectAllowed(officeQaAfterJobDelete, "Office deleted-job QA inspection query should execute");',
+  '    assert.equal(officeQaAfterJobDelete.payload.length, 1, "Office should retain canonical job QA inspections after job deletion");',
+  '',
+].join("\n");
+
 const obsoleteCustomerInvoiceRead = `    assert.equal(customerInvoice.payload.length, 1, "Customer must retain own invoice reads");`;
 const safeCustomerInvoiceRead = `    assert.deepEqual(customerInvoice.payload, [], "Customer base invoice reads must fail closed in favour of the customer-safe projection");`;
 
@@ -989,7 +1049,7 @@ try {
     .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
     .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
     .replace(officeJobReadAnchor, confidentialOfficeJobRead)
-    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldProgressUpdateEnvelopeCoverage}${fieldMaterialUsageReadCoverage}${fieldJobTaskReadCoverage}${fieldMutationCoverage}${genericCasesStart}`)
+    .replace(genericCasesStart, `${fieldTimelineCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldProgressUpdateEnvelopeCoverage}${fieldMaterialUsageReadCoverage}${fieldJobTaskReadCoverage}${fieldJobQaReadCoverage}${fieldMutationCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   for (const requiredPhrase of [
@@ -1086,6 +1146,18 @@ try {
     "Electrician should read job tasks while the job is active and assigned",
     "Electrician must not read job tasks for a soft-deleted job",
     "Office should retain canonical job tasks after job deletion",
+    "Assigned electrician should retain null-customer job QA inspections",
+    "Co-assigned electrician should retain assigned job QA inspection details",
+    "Electrician must not read unassigned same-tenant job QA inspections",
+    "Assigned electrician must not read another organisation's job QA inspections",
+    "Electrician must not read QA inspection without a canonical job",
+    "Wrong customer QA inspection envelope must fail closed",
+    "Electrician without an active field identity must not read job QA inspections",
+    "Office should retain unassigned job QA inspection access",
+    "Assigned QA projection should retain checklist results and defect notes",
+    "Electrician should read job QA inspections while the job is active and assigned",
+    "Electrician must not read job QA inspections for a soft-deleted job",
+    "Office should retain canonical job QA inspections after job deletion",
     "Assigned electrician should apply a valid job status transition through the RPC",
     "Assigned electrician must not apply an unsupported canonical job status transition",
     "Rejected field status must not advance the canonical job version",
