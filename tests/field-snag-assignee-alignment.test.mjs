@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fieldJobTaskStatusTransitionAllowed, transitionJobTask } from "../lib/jobTasks-core.mjs";
 
 const page = readFileSync(new URL("../app/field/snags/page.tsx", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../supabase/migrations/20260813235633_secure_field_mutation_boundary.sql", import.meta.url), "utf8");
@@ -22,6 +23,40 @@ test("cloud snag creation mirrors the server-bound assignee", () => {
 test("cloud snag status controls fail closed for another assignee", () => {
   assert.match(page, /task\.assignedTo !== operatorMember\.id/);
   assert.match(page, /Only snags assigned to your active field account can be updated here/);
+});
+
+test("cloud snag status controls mirror the exact field RPC transition graph", () => {
+  for (const [currentStatus, nextStatus] of [
+    ["Open", "In progress"],
+    ["Open", "Completed"],
+    ["In progress", "Open"],
+    ["In progress", "Completed"],
+  ]) assert.equal(fieldJobTaskStatusTransitionAllowed(currentStatus, nextStatus), true);
+
+  for (const [currentStatus, nextStatus] of [
+    ["Completed", "Open"],
+    ["Customer confirmed", "Open"],
+    ["Open", "Customer confirmed"],
+    ["Unknown", "Open"],
+  ]) assert.equal(fieldJobTaskStatusTransitionAllowed(currentStatus, nextStatus), false);
+
+  assert.match(migration, /canonical_task_status = 'Open' and requested_task_status in \('In progress', 'Completed'\)/);
+  assert.match(migration, /canonical_task_status = 'In progress' and requested_task_status in \('Open', 'Completed'\)/);
+});
+
+test("cloud terminal reopen fails before optimistic task or timeline updates", () => {
+  const guard = page.indexOf("if (cloudFieldMode && !fieldJobTaskStatusTransitionAllowed(task.status, nextStatus))");
+  const taskMutation = page.indexOf("tasks.setItems", guard);
+  const timelineMutation = page.indexOf("timeline.setItems", guard);
+  assert.ok(guard >= 0 && taskMutation > guard && timelineMutation > guard);
+  assert.match(page, /disabled=\{cloudFieldMode && !fieldJobTaskStatusTransitionAllowed\(snag\.status, "Open"\)\}/);
+});
+
+test("office and local task workflows retain terminal reopen transitions", () => {
+  for (const status of ["Completed", "Customer confirmed"]) {
+    const reopened = transitionJobTask({ task: { type: "Snag", status }, nextStatus: "Open", now: "2026-08-26T11:20:00.000Z" });
+    assert.equal(reopened.status, "Open");
+  }
 });
 
 test("local snag mode retains manual assignment controls", () => {
