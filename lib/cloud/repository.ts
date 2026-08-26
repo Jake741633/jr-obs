@@ -540,4 +540,3 @@ if (typeof window !== "undefined") {
   window.addEventListener("online", () => void flushSyncQueue());
   window.addEventListener("offline", () => syncStatus.set("Offline"));
 }
-

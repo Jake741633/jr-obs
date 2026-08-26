@@ -102,4 +102,3 @@ export function retainVersionConflict<T extends QueueIdentity & { expectedVersio
 export function retainPatchConflict<T extends QueueIdentity>(queue: T[], change: T, currentVersion: number, affectedRowCount: number): T[];
 export function retainProjectionMutationConflict<T extends QueueIdentity>(queue: T[], change: T, error?: string): T[];
 export function retainDeletedRecordConflict<T extends QueueIdentity>(queue: T[], change: T): T[];
-
