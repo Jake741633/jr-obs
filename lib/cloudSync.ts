@@ -19,6 +19,7 @@ import {
   readSupabaseSessionOwnershipEpoch,
   saveSupabaseSession,
   supabaseFetch,
+  supabaseRequestInvalidatesSession,
   type SupabaseSession,
   type SupabaseSessionOwnership,
 } from "./supabase/client";
@@ -194,8 +195,8 @@ export async function getCurrentCloudUser() {
       saveSupabaseSession({ ...activeSession, user: { id: user.id, email: user.email } });
     }
     return user;
-  } catch {
-    if (activeSessionMatches(startingOwnership)) {
+  } catch (error) {
+    if (supabaseRequestInvalidatesSession(error) && activeSessionMatches(startingOwnership)) {
       saveSupabaseSession(null);
       identityChanged();
     }
