@@ -9,7 +9,7 @@ import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useJobsCollection, useJobTasksCollection, useJobTimelineCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
-import { jobTaskTimelineEntry, transitionJobTask } from "../../../lib/jobTasks-core.mjs";
+import { fieldJobTaskStatusTransitionAllowed, jobTaskTimelineEntry, transitionJobTask } from "../../../lib/jobTasks-core.mjs";
 import { prioritiseSnags, snagCategories, snagSummary } from "../../../lib/mobileSnagControl-core.mjs";
 import { makeId } from "../../../lib/storage";
 import type { JobPriority, JobTask, JobTaskCategory } from "../../../lib/models";
@@ -77,6 +77,10 @@ export default function MobileSnagsPage() {
       setMessage("Only snags assigned to your active field account can be updated here.");
       return;
     }
+    if (cloudFieldMode && !fieldJobTaskStatusTransitionAllowed(task.status, nextStatus)) {
+      setMessage("That snag status change is unavailable in the field workflow. Ask the office to reopen a completed snag.");
+      return;
+    }
     const now = new Date().toISOString();
     const updated = transitionJobTask({ task, nextStatus, now });
     const completedBy = cloudFieldMode ? operatorMember?.name || "" : "Mobile Snag Control";
@@ -125,7 +129,7 @@ export default function MobileSnagsPage() {
           {snag.description ? <p className="mt-3 text-sm text-slate-300">{snag.description}</p> : null}
           <div className="mt-3 space-y-1 text-xs text-slate-400"><p>Status: {snag.status}</p><p>Due: {snag.dueDate || "No due date"}</p><p>Assigned: {assignee?.name || "Unassigned"}</p></div>
           {overdue ? <p className="mt-3 flex items-center gap-2 text-sm text-rose-300"><AlertTriangle className="size-4" />Overdue snag</p> : null}
-          <div className="mt-4 grid grid-cols-2 gap-2">{snag.status === "Open" ? <Button type="button" variant="secondary" onClick={() => changeStatus(snag, "In progress")}><Wrench className="mr-2 size-4" />Start</Button> : <Button type="button" variant="secondary" onClick={() => changeStatus(snag, "Open")}>Reopen</Button>}<Button type="button" disabled={snag.status === "Completed" || snag.status === "Customer confirmed"} onClick={() => changeStatus(snag, "Completed")}><CheckCircle2 className="mr-2 size-4" />Complete</Button></div>
+          <div className="mt-4 grid grid-cols-2 gap-2">{snag.status === "Open" ? <Button type="button" variant="secondary" onClick={() => changeStatus(snag, "In progress")}><Wrench className="mr-2 size-4" />Start</Button> : <Button type="button" variant="secondary" disabled={cloudFieldMode && !fieldJobTaskStatusTransitionAllowed(snag.status, "Open")} onClick={() => changeStatus(snag, "Open")}>Reopen</Button>}<Button type="button" disabled={snag.status === "Completed" || snag.status === "Customer confirmed"} onClick={() => changeStatus(snag, "Completed")}><CheckCircle2 className="mr-2 size-4" />Complete</Button></div>
           <Link href={`/jobs/${snag.jobId}`} className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link>
         </Card>;
       })}

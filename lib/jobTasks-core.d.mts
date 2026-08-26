@@ -11,6 +11,7 @@ export const jobTaskTypes: JobTaskType[];
 
 export function isJobTaskStatus(status: unknown): status is JobTaskStatus;
 export function normaliseJobTaskStatus(status: unknown): JobTaskStatus;
+export function fieldJobTaskStatusTransitionAllowed(currentStatus: JobTaskStatus, nextStatus: JobTaskStatus): boolean;
 export function isOutstandingJobTask(task: JobTask): boolean;
 
 export function transitionJobTask(input: {
