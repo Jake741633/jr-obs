@@ -158,6 +158,7 @@ test("live RLS coverage retains assigned QA and rejects wider field reads", () =
     "Electrician must not read unassigned same-tenant job QA inspections",
     "Assigned electrician must not read another organisation's job QA inspections",
     "Electrician must not read QA inspection without a canonical job",
+    "Mismatched customer QA inspection envelopes must fail canonical binding validation",
     "Wrong customer QA inspection envelope must fail closed",
     "Electrician without an active field identity must not read job QA inspections",
     "Office should retain unassigned job QA inspection access",
