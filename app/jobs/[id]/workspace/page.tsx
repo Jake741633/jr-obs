@@ -439,7 +439,7 @@ export default function JobWorkspacePage() {
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         {editableProgressMetrics.map(({ key, label }) => <label key={key} htmlFor={`progress-${key}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
           <span className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-300">{label}</span><span className="font-semibold text-cyan-200">{progressDraftValue[key]}%</span></span>
-          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraftValue[key]} disabled={progressSyncBlocked} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-11 w-full accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-60" />
+          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraftValue[key]} disabled={progressSyncBlocked} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-12 w-full accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-60" />
         </label>)}
         {!fieldWorkspace ? <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">{progressBar("Payments (office controlled)", progressValue.payments)}</div> : null}
       </div>
