@@ -22,6 +22,8 @@ import { WhyRecommendation } from "../../../components/ai/WhyRecommendation";
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { buildAiMentor } from "../../../lib/aiLearning";
+import { canAccessPath } from "../../../lib/cloud/permissions";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { defaultQuotePricingSettings } from "../../../lib/quoteEngine";
 import { useLocalStorageCollection } from "../../../lib/storage";
 import { useAiLearningMemory } from "../../../lib/useAiLearningMemory";
@@ -56,6 +58,9 @@ const mentorTone = {
 } as const;
 
 export default function AiLearningPage() {
+  const { identity, mode } = useCloudIdentity();
+  const unrestricted = mode === "local" || (mode === "migration" && !identity);
+  const canOpenSettings = unrestricted || canAccessPath(identity?.role, "/settings", identity?.email);
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
@@ -127,7 +132,7 @@ export default function AiLearningPage() {
               <p className="mt-2 text-xs text-slate-500">Last refreshed {new Date(memory.learnedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} · memory schema v{memory.schemaVersion}</p>
             </div>
           </div>
-          <Link href="/settings" className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 text-sm font-semibold hover:bg-slate-800">AI settings <ArrowRight className="size-4" /></Link>
+          {canOpenSettings ? <Link href="/settings" className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 text-sm font-semibold hover:bg-slate-800">AI settings <ArrowRight className="size-4" /></Link> : null}
         </div>
       </Card>
 
