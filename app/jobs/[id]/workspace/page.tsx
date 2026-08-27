@@ -197,9 +197,11 @@ export default function JobWorkspacePage() {
   const progressDraftValue: NormalisedJobProgress = { ...progressValue, ...activeProgressDraft };
   const activeProgressSyncState = progressCloudTracking && progressSync.targetKey === progressSyncTargetKey ? progressSync.state : null;
   const progressStatusMessage = hasActiveProgressDraft
-    ? activeProgressSyncState === "Pending" || activeProgressSyncState === "Offline"
-      ? `Unsaved progress changes. An earlier update is still ${activeProgressSyncState.toLowerCase()}.`
-      : "Unsaved progress changes."
+    ? activeProgressSyncState === "Failed" || activeProgressSyncState === "Conflict"
+      ? `${progressSyncMessages[activeProgressSyncState]} Unsaved progress changes remain preserved on this device.`
+      : activeProgressSyncState === "Pending" || activeProgressSyncState === "Offline"
+        ? `Unsaved progress changes. An earlier update is still ${activeProgressSyncState.toLowerCase()}.`
+        : "Unsaved progress changes."
     : activeProgressSyncState
       ? progressSyncMessages[activeProgressSyncState]
       : progressMessage.targetKey === progressTargetKey ? progressMessage.text : "";
@@ -232,11 +234,6 @@ export default function JobWorkspacePage() {
         collectionKey: "jr-os-job-progress",
         sourceId: progressRecordId,
       }, navigator.onLine) as SyncState;
-      if (nextState === "Failed" || nextState === "Conflict") {
-        setProgressDraft((current) => current.targetKey === progressTargetKey
-          ? { targetKey: progressTargetKey, values: {} }
-          : current);
-      }
       setProgressSync((current) => {
         if (nextState === "Synced") {
           return current.targetKey === progressSyncTargetKey && current.state === "Synced"
