@@ -55,6 +55,57 @@ test("job detail never substitutes a redacted contract value with zero", () => {
   assert.doesNotMatch(jobPage, /const formattedValue\s*=/);
 });
 
+test("job detail never treats restricted commercial projections as authoritative absence", () => {
+  const workflowGate = section(
+    jobPage,
+    "      {!financeRestricted ? <>\n        <ProjectTimeline",
+    "\n      </> : null}\n    </section>",
+  );
+  assert.match(workflowGate, /<ProjectTimeline job=\{job\} quote=\{sourceQuote\} invoices=\{linkedInvoices\} \/>/);
+  assert.match(workflowGate, /job\.quoteSnapshot \? <Card>[\s\S]*Accepted pricing snapshot/);
+
+  const documentMetrics = section(
+    jobPage,
+    '      <div className={financeRestricted ? "grid gap-4" : "grid gap-4 sm:grid-cols-3"}>',
+    "\n      </div>\n\n      {!documentMutationRestricted",
+  );
+  const countGateStart = documentMetrics.indexOf("{!financeRestricted ? <>");
+  assert.ok(countGateStart > documentMetrics.indexOf("Uploaded documents"));
+  const countGate = documentMetrics.slice(countGateStart, documentMetrics.indexOf("</> : null}", countGateStart));
+  assert.match(countGate, /Linked quotes[\s\S]*\{linkedQuotes\.length\}/);
+  assert.match(countGate, /Linked invoices[\s\S]*\{linkedInvoices\.length\}/);
+
+  const commercialLists = section(
+    jobPage,
+    "      {!financeRestricted && (linkedQuotes.length > 0 || linkedInvoices.length > 0)",
+    "\n    </section>",
+  );
+  assert.match(commercialLists, /Commercial documents[\s\S]*Quotes and estimates/);
+  assert.match(commercialLists, /Billing[\s\S]*No invoice created yet\./);
+});
+
+test("finance gates leave assigned documents and operational timeline available", () => {
+  const assignedDocuments = section(
+    jobPage,
+    "      {jobDocuments.length === 0",
+    "\n\n      {!financeRestricted && (linkedQuotes.length > 0 || linkedInvoices.length > 0)",
+  );
+  assert.match(assignedDocuments, /jobDocuments\.map/);
+  assert.match(assignedDocuments, /document\.dataUrl[\s\S]*Download/);
+  assert.match(assignedDocuments, /document\.externalUrl[\s\S]*Open link/);
+  assert.doesNotMatch(assignedDocuments, /financeRestricted/);
+
+  const operationalTimeline = section(
+    jobPage,
+    '    <div className="grid gap-6 xl:grid-cols-[0.9fr,1.1fr]">',
+    "\n\n    <Card><div className=\"flex items-start gap-3\"><Building2",
+  );
+  assert.match(operationalTimeline, /fieldTimelineMode \? "Add site note" : "Add milestone"/);
+  assert.match(operationalTimeline, /entries\.map/);
+  assert.match(operationalTimeline, /entry\.note/);
+  assert.doesNotMatch(operationalTimeline, /financeRestricted/);
+});
+
 test("workspace computes and renders commercial totals only with positive finance authority", () => {
   assert.match(
     workspace,
