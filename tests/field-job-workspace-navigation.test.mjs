@@ -66,3 +66,18 @@ test("owner, admin and local quick actions retain the full workspace", () => {
   assert.match(nonFieldBranch, /"Variations"/);
   assert.match(nonFieldBranch, /"Job financials"/);
 });
+
+test("field workspace back actions return electricians to field job control", () => {
+  assert.equal(canAccessPath("electrician", "/field/jobs"), true);
+  const missingJobBack = section(workspace, "if (!job) return <main", "const currentJob = job;");
+  const workspaceBack = section(workspace, 'return <main className="space-y-6 pb-28">', '<Card className="border-cyan-500/25">');
+
+  assert.match(missingJobBack, /href=\{fieldWorkspace \? "\/field\/jobs" : "\/jobs"\}/);
+  assert.match(missingJobBack, /className="inline-flex min-h-12/);
+  assert.match(missingJobBack, /\{fieldWorkspace \? "Back to field jobs" : "Back to jobs"\}/);
+
+  assert.match(workspaceBack, /href=\{fieldWorkspace \? "\/field\/jobs" : `\/jobs\/\$\{jobId\}`\}/);
+  assert.match(workspaceBack, /className="inline-flex min-h-12/);
+  assert.match(workspaceBack, /\{fieldWorkspace \? "Back to field jobs" : "Back to job record"\}/);
+  assert.doesNotMatch(workspaceBack, /min-h-11/);
+});

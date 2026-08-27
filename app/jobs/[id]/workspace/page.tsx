@@ -303,7 +303,7 @@ export default function JobWorkspacePage() {
   if (!ready) return <Card>Loading job workspace…</Card>;
 
   const job = jobs.items.find((item) => item.id === jobId);
-  if (!job) return <main className="space-y-6"><Link href="/jobs" className="inline-flex items-center gap-2 text-sm text-cyan-300"><ArrowLeft className="size-4" />Back to jobs</Link><Card><h1 className="text-xl font-bold">Job not found</h1><p className="mt-2 text-sm text-slate-400">This job may have been removed or the link is no longer available.</p></Card></main>;
+  if (!job) return <main className="space-y-6"><Link href={fieldWorkspace ? "/field/jobs" : "/jobs"} className="inline-flex min-h-12 items-center gap-2 text-sm font-semibold text-cyan-300"><ArrowLeft className="size-4" />{fieldWorkspace ? "Back to field jobs" : "Back to jobs"}</Link><Card><h1 className="text-xl font-bold">Job not found</h1><p className="mt-2 text-sm text-slate-400">This job may have been removed or the link is no longer available.</p></Card></main>;
   const currentJob = job;
 
   const customer = customers.items.find((item) => item.id === job.customerId);
@@ -423,7 +423,7 @@ export default function JobWorkspacePage() {
   }
 
   return <main className="space-y-6 pb-28">
-    <Link href={`/jobs/${jobId}`} className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-cyan-300"><ArrowLeft className="size-4" />Back to job record</Link>
+    <Link href={fieldWorkspace ? "/field/jobs" : `/jobs/${jobId}`} className="inline-flex min-h-12 items-center gap-2 text-sm font-semibold text-cyan-300"><ArrowLeft className="size-4" />{fieldWorkspace ? "Back to field jobs" : "Back to job record"}</Link>
 
     <Card className="border-cyan-500/25">
       <div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job Management Pro</p><h1 className="mt-2 break-words text-3xl font-black">{job.title}</h1><p className="mt-2 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{job.siteAddress || "No site address"}</p></div><StatusBadge status={currentStatus} /></div>
