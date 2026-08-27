@@ -49,7 +49,7 @@ test("cloud terminal reopen fails before optimistic task or timeline updates", (
   const taskMutation = page.indexOf("tasks.setItems", guard);
   const timelineMutation = page.indexOf("timeline.setItems", guard);
   assert.ok(guard >= 0 && taskMutation > guard && timelineMutation > guard);
-  assert.match(page, /disabled=\{cloudFieldMode && !fieldJobTaskStatusTransitionAllowed\(snag\.status, "Open"\)\}/);
+  assert.match(page, /disabled=\{syncBlocked \|\| \(cloudFieldMode && !fieldJobTaskStatusTransitionAllowed\(snag\.status, "Open"\)\)\}/);
 });
 
 test("office and local task workflows retain terminal reopen transitions", () => {
