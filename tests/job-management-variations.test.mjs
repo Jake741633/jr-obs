@@ -132,6 +132,29 @@ test("contract roll-ups, numbering and outward documents are deterministic and h
   assert.equal(internalView.internalNotes, "Allow half a day.");
 });
 
+test("accepted variation totals normalise incomplete legacy numeric fields", () => {
+  const legacyAccepted = {
+    ...variation,
+    status: "Approved",
+    pricingMode: "Itemised",
+    fixedPrice: undefined,
+    labourHours: "2",
+    labourRate: "65",
+    materialCharge: "110.50",
+    otherCharge: undefined,
+  };
+  const excludedDraft = {
+    ...legacyAccepted,
+    id: "variation-draft",
+    status: "Draft",
+    fixedPrice: "9999",
+  };
+
+  const total = acceptedVariationValue([legacyAccepted, excludedDraft]);
+  assert.equal(total, 240.5);
+  assert.equal(Number.isFinite(total), true);
+});
+
 test("variation activity and invoice lines retain stable source links", () => {
   const timeline = variationTimelineEntry({ variation, fromStatus: "Sent", toStatus: "Accepted", timelineId: "timeline-1", completedBy: "Jake", now: "2026-08-04T11:00:00.000Z" });
   assert.equal(timeline.jobId, "job-1");
