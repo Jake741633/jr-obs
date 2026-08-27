@@ -13,6 +13,39 @@ export interface SupabaseSession {
 const sessionKey = "jr-os-supabase-session";
 const sessionOwnershipEpochKey = "jr-os-supabase-session-epoch";
 const cloudServiceUnavailableMessage = "JR OS cloud service is unavailable. Check your connection and confirm the Supabase project is active, then try again.";
+const sessionInvalidatingAuthCodes = new Set([
+  "bad_jwt",
+  "invalid_credentials",
+  "no_authorization",
+  "session_expired",
+  "session_not_found",
+  "unexpected_audience",
+  "user_banned",
+  "user_not_found",
+]);
+
+export type SupabaseRequestErrorKind = "network" | "http";
+
+export class SupabaseRequestError extends Error {
+  readonly kind: SupabaseRequestErrorKind;
+  readonly status?: number;
+  readonly code?: string;
+
+  constructor(kind: SupabaseRequestErrorKind, message: string, details: { status?: number; code?: string } = {}) {
+    super(message);
+    this.name = "SupabaseRequestError";
+    this.kind = kind;
+    this.status = details.status;
+    this.code = details.code;
+  }
+}
+
+export function supabaseRequestInvalidatesSession(error: unknown) {
+  if (!(error instanceof SupabaseRequestError) || error.kind !== "http") return false;
+  const code = error.code?.trim().toLowerCase();
+  if (code) return sessionInvalidatingAuthCodes.has(code);
+  return error.status === 401;
+}
 
 export interface SupabaseSessionOwnership {
   session: SupabaseSession | null;
@@ -120,12 +153,17 @@ export async function supabaseFetch(path: string, init: RequestInit = {}, authen
   try {
     response = await fetch(`${config.url}${requestPath}`, { ...init, headers });
   } catch {
-    throw new Error(cloudServiceUnavailableMessage);
+    throw new SupabaseRequestError("network", cloudServiceUnavailableMessage);
   }
   const body = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
     const message = body?.msg || body?.message || body?.error_description || body?.error || "Cloud request failed.";
-    throw new Error(message);
+    const code = typeof body?.code === "string"
+      ? body.code
+      : typeof body?.error_code === "string"
+        ? body.error_code
+        : undefined;
+    throw new SupabaseRequestError("http", message, { status: response.status, code });
   }
   return body;
 }

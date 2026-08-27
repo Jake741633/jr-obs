@@ -81,6 +81,22 @@ test("late authentication responses cannot overwrite a replacement session", () 
   assert.match(recoveryGate, /completeEmailVerificationFromUrl\(\(\) => active && sessionBoundaryVersionRef\.current === startingBoundaryVersion\)/);
 });
 
+test("transient auth revalidation fails closed without destroying the recoverable session", () => {
+  const getCurrentUser = cloudSync.slice(
+    cloudSync.indexOf("export async function getCurrentCloudUser"),
+    cloudSync.indexOf("export async function completeEmailVerificationFromUrl"),
+  );
+
+  assert.match(cloudSync, /supabaseRequestInvalidatesSession,/);
+  assert.match(
+    getCurrentUser,
+    /catch \(error\) \{\s*if \(supabaseRequestInvalidatesSession\(error\) && activeSessionMatches\(startingOwnership\)\) \{\s*saveSupabaseSession\(null\);\s*identityChanged\(\);\s*\}\s*return null;/,
+  );
+  assert.match(identityHook, /const user = await getCurrentCloudUser\(\);\s*if \(!user \|\| !ownershipIsCurrent\(\)\) return null;/);
+  assert.match(identityHook, /if \(requestVersion === identityRequestVersion\) emit\(\{ identity, isReady: true \}\)/);
+  assert.match(identityHook, /function emit\(next: IdentitySnapshot\) \{[\s\S]*setActiveSyncIdentity\(\s*next\.identity\?\.organisationId \?\? null,[\s\S]*next\.identity\?\.role \?\? null/);
+});
+
 test("every full authorisation component and normalized email owns a different page state", () => {
   const base = cloudPageIdentityKey(identity);
   for (const changed of [
