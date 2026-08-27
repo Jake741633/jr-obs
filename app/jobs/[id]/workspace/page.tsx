@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   BookOpenText,
@@ -33,8 +33,11 @@ import {
   useSiteDiariesCollection,
   useTeamCollection,
 } from "../../../../lib/cloud/coreBusinessCollections";
+import { accountStorageKey } from "../../../../lib/cloud/adapter";
 import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../../../lib/cloud/fieldMutationPolicy-core.mjs";
 import { canEditFinance } from "../../../../lib/cloud/permissions";
+import { queueTargetSyncState } from "../../../../lib/cloud/repository-core.mjs";
+import { getSyncQueue, type SyncState } from "../../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../../lib/cloud/useCloudIdentity";
 import { acceptedVariationValue as calculateAcceptedVariationValue, canonicalJobStatuses, fieldJobStatusTransitionAllowed, fieldJobStatusTransitions, normaliseFieldJobStatus, normaliseJobStatus, transitionJobStatus } from "../../../../lib/jobManagement-core.mjs";
 import { normaliseJobProgress } from "../../../../lib/jobProgress-core.mjs";
@@ -64,6 +67,11 @@ type ProgressMessageState = {
   text: string;
 };
 
+type ProgressSyncState = {
+  targetKey: string;
+  state: SyncState | null;
+};
+
 const editableProgressMetrics: { key: EditableProgressMetric; label: string }[] = [
   { key: "overall", label: "Overall" },
   { key: "firstFix", label: "First fix" },
@@ -72,6 +80,14 @@ const editableProgressMetrics: { key: EditableProgressMetric; label: string }[] 
   { key: "certificates", label: "Certificates" },
   { key: "materials", label: "Materials" },
 ];
+
+const progressSyncMessages: Record<SyncState, string> = {
+  Synced: "Operational progress synced securely.",
+  Pending: "Queued for secure sync; not cloud-confirmed yet.",
+  Offline: "Saved on this device and waiting for a secure connection.",
+  Failed: "Failed: progress sync did not complete. Displayed values may be local; reconnect and retry sync or contact the office.",
+  Conflict: "Conflict: progress sync could not be confirmed against the current cloud record. Refresh from cloud before trying again.",
+};
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 
@@ -118,13 +134,99 @@ export default function JobWorkspacePage() {
   const [statusMessage, setStatusMessage] = useState("");
   const [progressDraft, setProgressDraft] = useState<ProgressDraftState>({ targetKey: "", values: {} });
   const [progressMessage, setProgressMessage] = useState<ProgressMessageState>({ targetKey: "", text: "" });
+  const [progressSync, setProgressSync] = useState<ProgressSyncState>({ targetKey: "", state: null });
 
   const progressRecord = progress.items.find((item) => item.jobId === jobId);
   const progressValue = normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress;
-  const progressTargetKey = `${jobId}:${progressRecord?.id ?? `job-progress-${jobId}`}`;
+  const progressRecordId = progressRecord?.id ?? `job-progress-${jobId}`;
+  const progressCloudTracking = identityState.mode !== "local" && Boolean(identityState.identity);
+  const progressSyncIdentityKey = JSON.stringify([
+    identityState.identity?.organisationId ?? null,
+    identityState.identity?.userId ?? null,
+    identityState.identity?.role ?? null,
+    identityState.identity?.customerSourceId ?? null,
+  ]);
+  const progressTargetKey = `${jobId}:${progressRecordId}`;
+  const progressSyncTargetKey = `${progressSyncIdentityKey}:${progressTargetKey}`;
+  const progressStorageKey = identityState.identity
+    ? accountStorageKey(
+        "jr-os-job-progress",
+        identityState.identity.organisationId,
+        identityState.identity.userId,
+        identityState.identity.role,
+        identityState.identity.customerSourceId,
+      )
+    : "jr-os-job-progress";
   const activeProgressDraft = progressDraft.targetKey === progressTargetKey ? progressDraft.values : {};
+  const hasActiveProgressDraft = Object.keys(activeProgressDraft).length > 0;
   const progressDraftValue: NormalisedJobProgress = { ...progressValue, ...activeProgressDraft };
-  const progressStatusMessage = progressMessage.targetKey === progressTargetKey ? progressMessage.text : "";
+  const activeProgressSyncState = progressCloudTracking && progressSync.targetKey === progressSyncTargetKey ? progressSync.state : null;
+  const progressStatusMessage = hasActiveProgressDraft
+    ? activeProgressSyncState === "Pending" || activeProgressSyncState === "Offline"
+      ? `Unsaved progress changes. An earlier update is still ${activeProgressSyncState.toLowerCase()}.`
+      : "Unsaved progress changes."
+    : activeProgressSyncState
+      ? progressSyncMessages[activeProgressSyncState]
+      : progressMessage.targetKey === progressTargetKey ? progressMessage.text : "";
+  const progressSyncBlocked = activeProgressSyncState === "Failed" || activeProgressSyncState === "Conflict";
+  const progressStatusTone = progressSyncBlocked
+    ? "text-rose-200"
+    : activeProgressSyncState === "Synced"
+      ? "text-emerald-200"
+      : activeProgressSyncState
+        ? "text-amber-200"
+        : "text-cyan-200";
+  const unsyncedProgressRecordMessage = hasActiveProgressDraft
+    ? "Displayed percentages include unsaved changes and are not cloud-confirmed."
+    : activeProgressSyncState === "Pending"
+    ? "Displayed percentages are this device's queued attempt until cloud confirmation."
+    : activeProgressSyncState === "Offline"
+      ? "Displayed percentages are saved on this device and are not cloud-confirmed yet."
+      : progressSyncBlocked
+        ? "Displayed percentages may be local and are not confirmed by cloud."
+        : "";
+
+  useEffect(() => {
+    if (!progressCloudTracking) return;
+    let active = true;
+
+    function refreshProgressSyncState() {
+      if (!active) return;
+      const nextState = queueTargetSyncState(getSyncQueue(), {
+        table: "cloud_collections",
+        collectionKey: "jr-os-job-progress",
+        sourceId: progressRecordId,
+      }, navigator.onLine) as SyncState;
+      if (nextState === "Failed" || nextState === "Conflict") {
+        setProgressDraft((current) => current.targetKey === progressTargetKey
+          ? { targetKey: progressTargetKey, values: {} }
+          : current);
+      }
+      setProgressSync((current) => {
+        if (nextState === "Synced") {
+          return current.targetKey === progressSyncTargetKey && current.state === "Synced"
+            ? current
+            : { targetKey: progressSyncTargetKey, state: null };
+        }
+        return { targetKey: progressSyncTargetKey, state: nextState };
+      });
+    }
+
+    function confirmProgressReconciliation(event: Event) {
+      const detail = (event as CustomEvent<{ storageKey?: string; sourceId?: string }>).detail;
+      if (detail?.storageKey !== progressStorageKey || detail.sourceId !== progressRecordId) return;
+      setProgressSync({ targetKey: progressSyncTargetKey, state: "Synced" });
+    }
+
+    window.addEventListener("jr-os-sync-status", refreshProgressSyncState);
+    window.addEventListener("jr-os-cloud-cache-reconciled", confirmProgressReconciliation);
+    queueMicrotask(refreshProgressSyncState);
+    return () => {
+      active = false;
+      window.removeEventListener("jr-os-sync-status", refreshProgressSyncState);
+      window.removeEventListener("jr-os-cloud-cache-reconciled", confirmProgressReconciliation);
+    };
+  }, [progressCloudTracking, progressRecordId, progressStorageKey, progressSyncTargetKey, progressTargetKey]);
 
   const ready = identityState.isReady && [jobs, customers, builders, team, tasks, diaries, variations, documents, progress, timeline].every((store) => store.isReady);
   if (!ready) return <Card>Loading job workspace…</Card>;
@@ -178,6 +280,7 @@ export default function JobWorkspacePage() {
   }
 
   function updateProgressMetric(metric: EditableProgressMetric, value: string) {
+    if (progressSyncBlocked) return;
     const numericValue = Number(value);
     const boundedValue = Number.isFinite(numericValue) ? Math.min(100, Math.max(0, Math.round(numericValue))) : 0;
     setProgressDraft((current) => ({
@@ -187,10 +290,14 @@ export default function JobWorkspacePage() {
         [metric]: boundedValue,
       },
     }));
+    setProgressSync((current) => current.targetKey === progressSyncTargetKey && current.state === "Synced"
+      ? { targetKey: progressSyncTargetKey, state: null }
+      : current);
     setProgressMessage({ targetKey: progressTargetKey, text: "" });
   }
 
   function saveProgress() {
+    if (progressSyncBlocked) return;
     const now = new Date().toISOString();
     const normalised = normaliseJobProgress(progressDraftValue) as NormalisedJobProgress;
     const fieldManual = {
@@ -202,7 +309,7 @@ export default function JobWorkspacePage() {
       materials: normalised.materials,
     };
     const nextRecord = {
-      id: progressRecord?.id ?? `job-progress-${jobId}`,
+      id: progressRecordId,
       jobId,
       manual: fieldWorkspace ? fieldManual : normalised,
       ...(fieldWorkspace ? {} : { suggestions: progressRecord?.suggestions ?? [] }),
@@ -217,7 +324,13 @@ export default function JobWorkspacePage() {
       return current.map((item, index) => index === existingIndex ? nextRecord : item);
     });
     setProgressDraft({ targetKey: progressTargetKey, values: {} });
-    setProgressMessage({ targetKey: progressTargetKey, text: "Operational progress saved and queued for secure sync." });
+    if (progressCloudTracking) {
+      setProgressSync({ targetKey: progressSyncTargetKey, state: navigator.onLine ? "Pending" : "Offline" });
+      setProgressMessage({ targetKey: progressTargetKey, text: "" });
+    } else {
+      setProgressSync({ targetKey: progressTargetKey, state: null });
+      setProgressMessage({ targetKey: progressTargetKey, text: "Operational progress saved on this device." });
+    }
   }
 
   return <main className="space-y-6 pb-28">
@@ -240,13 +353,13 @@ export default function JobWorkspacePage() {
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         {editableProgressMetrics.map(({ key, label }) => <label key={key} htmlFor={`progress-${key}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
           <span className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-300">{label}</span><span className="font-semibold text-cyan-200">{progressDraftValue[key]}%</span></span>
-          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraftValue[key]} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-11 w-full accent-cyan-400" />
+          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraftValue[key]} disabled={progressSyncBlocked} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-11 w-full accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-60" />
         </label>)}
         {!fieldWorkspace ? <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">{progressBar("Payments (office controlled)", progressValue.payments)}</div> : null}
       </div>
-      <div className="mt-5 flex flex-wrap items-center gap-3"><Button type="button" onClick={saveProgress}>Save field progress</Button><p className="text-xs text-slate-500">Only operational percentages are sent by the field app.</p></div>
-      {progressStatusMessage ? <p role="status" className="mt-3 text-sm text-cyan-200">{progressStatusMessage}</p> : null}
-      {!progressRecord ? <p className="mt-4 text-sm text-amber-300">No saved progress record yet. Saving will create one for this assigned job.</p> : <p className="mt-4 text-xs text-slate-500">Last updated {new Date(progressRecord.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} by {progressRecord.updatedBy || "JR OS"}.</p>}
+      <div className="mt-5 flex flex-wrap items-center gap-3"><Button type="button" onClick={saveProgress} disabled={progressSyncBlocked}>Save field progress</Button><p className="text-xs text-slate-500">Only operational percentages are sent by the field app.</p></div>
+      {progressStatusMessage ? <p role="status" className={`mt-3 text-sm ${progressStatusTone}`}>{progressStatusMessage}</p> : null}
+      {!progressRecord ? <p className="mt-4 text-sm text-amber-300">No saved progress record yet. Saving will create one for this assigned job.</p> : unsyncedProgressRecordMessage ? <p className="mt-4 text-xs text-amber-200">{unsyncedProgressRecordMessage}</p> : <p className="mt-4 text-xs text-slate-500">Last updated {new Date(progressRecord.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} by {progressRecord.updatedBy || "JR OS"}.</p>}
     </Card>
 
     <Card>
