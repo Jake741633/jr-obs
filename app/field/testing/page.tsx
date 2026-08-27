@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, FileText, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -48,9 +48,16 @@ export default function MobileTestingPage() {
   const fieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const localTestingMode = fieldMode || identityState.mode === "local";
   const records = fieldMode ? fieldDraftRecords : canonicalRecords;
+  const testingIdentityScopeKey = JSON.stringify([
+    identityState.identity?.organisationId ?? null,
+    identityState.identity?.userId ?? null,
+    identityState.identity?.role ?? null,
+    identityState.identity?.customerSourceId ?? null,
+  ]);
   const [form, setForm] = useState<ElectricalTestingRecord>(() => blankRecord());
   const [actionText, setActionText] = useState("");
   const [message, setMessage] = useState("");
+  const [interactionScopeKey, setInteractionScopeKey] = useState("");
 
   const activeJobs = useMemo(() => jobs.items.filter((job) => normaliseJobStatus(job.status) === "Scheduled" || isJobOnSiteStatus(job.status)), [jobs.items]);
   const operatorName = useMemo(() => fieldOperatorName({
@@ -58,16 +65,30 @@ export default function MobileTestingPage() {
     teamMembers: team.items,
     mode: identityState.mode,
   }), [identityState.identity, identityState.mode, team.items]);
-  const selectedJob = jobs.items.find((job) => job.id === form.jobId);
-  const selectedCustomer = customers.items.find((customer) => customer.id === form.customerId);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setForm(blankRecord());
+      setActionText("");
+      setMessage("");
+      setInteractionScopeKey(testingIdentityScopeKey);
+    });
+    return () => { active = false; };
+  }, [testingIdentityScopeKey]);
+
+  const selectedJob = activeJobs.find((job) => job.id === form.jobId);
+  const selectedCustomer = customers.items.find((customer) => customer.id === selectedJob?.customerId);
   const linkedCertificate = certificates.items.find((certificate) => certificate.id === form.certificateId);
   const effectiveForm = useMemo(() => ({ ...form, inspectorName: operatorName || form.inspectorName }), [form, operatorName]);
   const warnings = validateTestingRecord(effectiveForm);
   const progress = testingProgress(effectiveForm);
   const summary = certificateReadySummary(effectiveForm, selectedJob?.title ?? "", selectedCustomer?.name ?? "");
+  const interactionScopeReady = interactionScopeKey === testingIdentityScopeKey;
 
   function chooseJob(jobId: string) {
-    const job = jobs.items.find((item) => item.id === jobId);
+    const job = activeJobs.find((item) => item.id === jobId);
     setForm((current) => ({ ...current, jobId, customerId: job?.customerId, certificateId: undefined, updatedAt: new Date().toISOString() }));
   }
 
@@ -79,11 +100,22 @@ export default function MobileTestingPage() {
     records.setItems((current) => current.some((item) => item.id === record.id) ? current.map((item) => item.id === record.id ? record : item) : [record, ...current]);
   }
 
+  function activeJobForWrite() {
+    const activeJob = activeJobs.find((job) => job.id === form.jobId);
+    if (!activeJob) {
+      setMessage("The selected active job is no longer available for this account. Choose a current active job before saving testing evidence.");
+      return null;
+    }
+    return activeJob;
+  }
+
   function saveRecord(event?: FormEvent) {
     event?.preventDefault();
     if (!form.jobId) { setMessage("Choose the active job before saving the testing record."); return; }
     if (!operatorName) { setMessage("Your active team identity could not be resolved. Refresh your account before saving."); return; }
-    const record = { ...effectiveForm, customerId: selectedJob?.customerId ?? form.customerId, inspectorName: operatorName, updatedAt: new Date().toISOString() };
+    const activeJob = activeJobForWrite();
+    if (!activeJob) return;
+    const record = { ...effectiveForm, jobId: activeJob.id, customerId: activeJob.customerId, inspectorName: operatorName, updatedAt: new Date().toISOString() };
     persistRecord(record);
     setForm(record);
     setMessage(localTestingMode ? "Testing draft saved locally. You can leave and resume it later." : "Testing record saved and queued for secure cloud sync.");
@@ -106,11 +138,13 @@ export default function MobileTestingPage() {
       setMessage("Your active team identity could not be resolved. Refresh your account before changing testing status.");
       return;
     }
+    const activeJob = activeJobForWrite();
+    if (!activeJob) return;
     if (warnings.some((warning) => warning.severity === "Missing")) {
       setMessage("Complete the missing fields before marking this testing record ready for certificate preparation.");
       return;
     }
-    const record = { ...effectiveForm, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: new Date().toISOString() };
+    const record = { ...effectiveForm, jobId: activeJob.id, customerId: activeJob.customerId, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: new Date().toISOString() };
     persistRecord(record);
     setForm(record);
     setMessage("Testing record marked ready for certificate preparation. Inspector review is still required.");
@@ -119,19 +153,21 @@ export default function MobileTestingPage() {
   function prepareCertificateSummary() {
     if (fieldMode) { setMessage("Certificate linking and authoring are office-controlled. Save the testing draft and hand the structured summary to the office for certificate preparation."); return; }
     if (!operatorName) { setMessage("Your active team identity could not be resolved. Refresh your account before preparing testing evidence."); return; }
+    const activeJob = activeJobForWrite();
+    if (!activeJob) return;
     if (!linkedCertificate) { setMessage("Choose an existing certificate before preparing the testing summary."); return; }
     if (warnings.some((warning) => warning.severity === "Missing")) {
       setMessage("Complete the missing fields before preparing testing evidence for a certificate.");
       return;
     }
     const now = new Date().toISOString();
-    const record = { ...effectiveForm, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: now };
+    const record = { ...effectiveForm, jobId: activeJob.id, customerId: activeJob.customerId, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: now };
     persistRecord(record);
     setForm(record);
     setMessage(`Testing summary prepared for ${linkedCertificate.number}. The certificate has not been changed; open Certificates to review and transfer the results.`);
   }
 
-  const ready = jobs.isReady && customers.isReady && certificates.isReady && records.isReady && team.isReady && identityState.isReady;
+  const ready = jobs.isReady && customers.isReady && certificates.isReady && records.isReady && team.isReady && identityState.isReady && interactionScopeReady;
   if (!ready) return <Card>Loading electrical testing workspace…</Card>;
 
   return <div className="space-y-6">
