@@ -25,6 +25,7 @@ export default function JobReviewPage() {
   const { identity, mode } = useCloudIdentity();
   const unrestricted = mode === "local" || (mode === "migration" && !identity);
   const ramsHref = unrestricted || canAccessPath(identity?.role, "/rams", identity?.email) ? "/rams" : undefined;
+  const canOpenSiteManagement = unrestricted || canAccessPath(identity?.role, "/site-management", identity?.email);
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const pricing = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
@@ -80,7 +81,7 @@ export default function JobReviewPage() {
 
     if (!selected.notes.trim()) findings.push({ level: "Check", title: "No job notes", detail: "Add access details, agreed exclusions, customer requests and anything the engineer must know.", href: `/jobs/${selected.id}` });
 
-    if (!linkedDocuments.length) findings.push({ level: "Check", title: "No job documents", detail: "Upload useful drawings, photos, instructions or handover information where applicable.", href: "/site-management" });
+    if (!linkedDocuments.length) findings.push({ level: "Check", title: "No job documents", detail: "Upload useful drawings, photos, instructions or handover information where applicable.", href: canOpenSiteManagement ? "/site-management" : `/jobs/${selected.id}` });
     else findings.push({ level: "Ready", title: "Documents available", detail: `${linkedDocuments.length} document${linkedDocuments.length === 1 ? "" : "s"} linked to the job.` });
 
     if (linkedCertificates.length) findings.push({ level: "Ready", title: "Certificate records linked", detail: `${linkedCertificates.length} certificate record${linkedCertificates.length === 1 ? "" : "s"} found.` });
