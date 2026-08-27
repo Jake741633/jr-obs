@@ -72,6 +72,11 @@ type ProgressSyncState = {
   state: SyncState | null;
 };
 
+type JobStatusSyncState = {
+  targetKey: string;
+  state: SyncState | null;
+};
+
 const editableProgressMetrics: { key: EditableProgressMetric; label: string }[] = [
   { key: "overall", label: "Overall" },
   { key: "firstFix", label: "First fix" },
@@ -87,6 +92,14 @@ const progressSyncMessages: Record<SyncState, string> = {
   Offline: "Saved on this device and waiting for a secure connection.",
   Failed: "Failed: progress sync did not complete. Displayed values may be local; reconnect and retry sync or contact the office.",
   Conflict: "Conflict: progress sync could not be confirmed against the current cloud record. Refresh from cloud before trying again.",
+};
+
+const jobStatusSyncMessages: Record<SyncState, string> = {
+  Synced: "Job stage synced securely.",
+  Pending: "Job stage change queued; the displayed stage is not cloud-confirmed yet.",
+  Offline: "Job stage change saved on this device and waiting for a secure connection; the displayed stage is not cloud-confirmed.",
+  Failed: "Job stage sync failed. The displayed stage may be local and is not cloud-confirmed. Reconnect and retry sync or contact the office.",
+  Conflict: "Job stage could not be confirmed against the current cloud record. Refresh the job before trying again.",
 };
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -132,6 +145,7 @@ export default function JobWorkspacePage() {
   const timeline = useJobTimelineCollection();
   const [selectedStatus, setSelectedStatus] = useState<CanonicalJobStatus>("Enquiry");
   const [statusMessage, setStatusMessage] = useState("");
+  const [jobStatusSync, setJobStatusSync] = useState<JobStatusSyncState>({ targetKey: "", state: null });
   const [progressDraft, setProgressDraft] = useState<ProgressDraftState>({ targetKey: "", values: {} });
   const [progressMessage, setProgressMessage] = useState<ProgressMessageState>({ targetKey: "", text: "" });
   const [progressSync, setProgressSync] = useState<ProgressSyncState>({ targetKey: "", state: null });
@@ -140,6 +154,27 @@ export default function JobWorkspacePage() {
   const progressValue = normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress;
   const progressRecordId = progressRecord?.id ?? `job-progress-${jobId}`;
   const progressCloudTracking = identityState.mode !== "local" && Boolean(identityState.identity);
+  const jobStatusCloudTracking = fieldJobStatusRestricted && Boolean(identityState.identity);
+  const jobStatusSyncIdentityKey = JSON.stringify([
+    identityState.identity?.organisationId ?? null,
+    identityState.identity?.userId ?? null,
+    identityState.identity?.role ?? null,
+    identityState.identity?.customerSourceId ?? null,
+  ]);
+  const jobStatusSyncTargetKey = `${jobStatusSyncIdentityKey}:${jobId}`;
+  const jobsStorageKey = identityState.identity
+    ? accountStorageKey(
+        "jr-os-jobs",
+        identityState.identity.organisationId,
+        identityState.identity.userId,
+        identityState.identity.role,
+        identityState.identity.customerSourceId,
+      )
+    : "jr-os-jobs";
+  const activeJobStatusSyncState = jobStatusCloudTracking && jobStatusSync.targetKey === jobStatusSyncTargetKey
+    ? jobStatusSync.state
+    : null;
+  const jobStatusSyncBlocked = activeJobStatusSyncState === "Failed" || activeJobStatusSyncState === "Conflict";
   const progressSyncIdentityKey = JSON.stringify([
     identityState.identity?.organisationId ?? null,
     identityState.identity?.userId ?? null,
@@ -228,6 +263,42 @@ export default function JobWorkspacePage() {
     };
   }, [progressCloudTracking, progressRecordId, progressStorageKey, progressSyncTargetKey, progressTargetKey]);
 
+  useEffect(() => {
+    if (!jobStatusCloudTracking) return;
+    let active = true;
+
+    function refreshJobStatusSyncState() {
+      if (!active) return;
+      const nextState = queueTargetSyncState(getSyncQueue(), {
+        table: "jobs",
+        sourceId: jobId,
+      }, navigator.onLine) as SyncState;
+      setJobStatusSync((current) => {
+        if (nextState === "Synced") {
+          return current.targetKey === jobStatusSyncTargetKey && current.state === "Synced"
+            ? current
+            : { targetKey: jobStatusSyncTargetKey, state: null };
+        }
+        return { targetKey: jobStatusSyncTargetKey, state: nextState };
+      });
+    }
+
+    function confirmJobStatusReconciliation(event: Event) {
+      const detail = (event as CustomEvent<{ storageKey?: string; sourceId?: string }>).detail;
+      if (detail?.storageKey !== jobsStorageKey || detail.sourceId !== jobId) return;
+      setJobStatusSync({ targetKey: jobStatusSyncTargetKey, state: "Synced" });
+    }
+
+    window.addEventListener("jr-os-sync-status", refreshJobStatusSyncState);
+    window.addEventListener("jr-os-cloud-cache-reconciled", confirmJobStatusReconciliation);
+    queueMicrotask(refreshJobStatusSyncState);
+    return () => {
+      active = false;
+      window.removeEventListener("jr-os-sync-status", refreshJobStatusSyncState);
+      window.removeEventListener("jr-os-cloud-cache-reconciled", confirmJobStatusReconciliation);
+    };
+  }, [jobId, jobsStorageKey, jobStatusCloudTracking, jobStatusSyncTargetKey]);
+
   const ready = identityState.isReady && [jobs, customers, builders, team, tasks, diaries, variations, documents, progress, timeline].every((store) => store.isReady);
   if (!ready) return <Card>Loading job workspace…</Card>;
 
@@ -252,10 +323,25 @@ export default function JobWorkspacePage() {
     ? [currentStatus, ...fieldStatusTransitions]
     : canonicalJobStatuses;
   const statusControlLocked = jobStatusMutationDenied
-    || (fieldJobStatusRestricted && fieldStatusTransitions.length === 0);
+    || (fieldJobStatusRestricted && fieldStatusTransitions.length === 0)
+    || jobStatusSyncBlocked;
+  const displayedStatusMessage = activeJobStatusSyncState
+    ? jobStatusSyncMessages[activeJobStatusSyncState]
+    : statusMessage;
+  const statusMessageTone = jobStatusSyncBlocked
+    ? "text-rose-200"
+    : activeJobStatusSyncState === "Synced"
+      ? "text-emerald-200"
+      : activeJobStatusSyncState
+        ? "text-amber-200"
+        : "text-cyan-200";
 
   function updateStatus() {
     const nextStatus = selectedStatus === "Enquiry" && currentStatus !== "Enquiry" ? currentStatus : selectedStatus;
+    if (jobStatusSyncBlocked) {
+      setStatusMessage(jobStatusSyncMessages[activeJobStatusSyncState!]);
+      return;
+    }
     if (jobStatusMutationDenied) {
       setStatusMessage("Job status changes are unavailable until an approved cloud identity is active.");
       return;
@@ -274,6 +360,9 @@ export default function JobWorkspacePage() {
       timeline.setItems((current) => [entry, ...current]);
     }
     setSelectedStatus(nextStatus);
+    if (jobStatusCloudTracking) {
+      setJobStatusSync({ targetKey: jobStatusSyncTargetKey, state: navigator.onLine ? "Pending" : "Offline" });
+    }
     setStatusMessage(fieldJobStatusRestricted
       ? `Job status change to ${nextStatus} queued for secure sync.`
       : `Job status updated to ${nextStatus}.`);
@@ -365,7 +454,9 @@ export default function JobWorkspacePage() {
     <Card>
       <p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Mobile status control</p>
       <h2 className="mt-1 text-xl font-bold">Update job stage</h2>
-      <p className="mt-2 text-sm text-slate-400">Every change is written to the job timeline automatically.</p>
+      <p className="mt-2 text-sm text-slate-400">{fieldJobStatusRestricted
+        ? "Cloud-confirmed stage changes add a job timeline entry automatically."
+        : "Every change is written to the job timeline automatically."}</p>
       <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
         <select value={selectedStatus === "Enquiry" && currentStatus !== "Enquiry" ? currentStatus : selectedStatus} disabled={statusControlLocked} onChange={(event) => setSelectedStatus(event.target.value as CanonicalJobStatus)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base disabled:cursor-not-allowed disabled:opacity-60">
           {statusOptions.map((status) => <option key={status} value={status}>{status}</option>)}
@@ -373,7 +464,7 @@ export default function JobWorkspacePage() {
         <Button type="button" onClick={updateStatus} disabled={statusControlLocked} className="w-full sm:w-auto">Save status</Button>
       </div>
       {jobStatusMutationDenied ? <p className="mt-3 text-sm text-amber-200">Status changes remain read-only until an approved cloud identity is active.</p> : fieldJobStatusRestricted && fieldStatusTransitions.length === 0 ? <p className="mt-3 text-sm text-amber-200">Further lifecycle changes for this job require office review.</p> : null}
-      {statusMessage ? <p role="status" className="mt-3 text-sm text-cyan-200">{statusMessage}</p> : null}
+      {displayedStatusMessage ? <p role="status" className={`mt-3 text-sm ${statusMessageTone}`}>{displayedStatusMessage}</p> : null}
     </Card>
 
     <section className="grid gap-4 md:grid-cols-2">
