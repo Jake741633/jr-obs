@@ -26,6 +26,17 @@ test("mobile job workspace edits only operational progress metrics", () => {
   assert.doesNotMatch(workspace, /payments: progressValue\.payments/);
 });
 
+test("mobile progress sliders provide 48px touch targets", () => {
+  assert.match(
+    workspace,
+    /<input id=\{`progress-\$\{key\}`\} type="range"[^>]*className="mt-3 min-h-12 w-full/,
+  );
+  assert.doesNotMatch(
+    workspace,
+    /<input id=\{`progress-\$\{key\}`\} type="range"[^>]*min-h-11/,
+  );
+});
+
 test("progress sync state selects only the exact queue target with terminal precedence", () => {
   const target = { table: "cloud_collections", collectionKey: "jr-os-job-progress", sourceId: "progress-1" };
   const change = (state, overrides = {}) => ({ ...target, state, ...overrides });
