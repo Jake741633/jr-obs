@@ -49,3 +49,33 @@ test("testing actions fail closed when the active operator cannot be resolved", 
   const guardMatches = page.match(/if \(!operatorName\)/g) ?? [];
   assert.ok(guardMatches.length >= 3, "save, readiness and certificate evidence actions should require the active operator");
 });
+
+test("testing resets transient state across the full identity scope and revalidates active jobs", () => {
+  assert.match(page, /import \{ FormEvent, useEffect, useMemo, useState \} from "react";/);
+  assert.match(page, /const testingIdentityScopeKey = JSON\.stringify\(\[\s*identityState\.identity\?\.organisationId \?\? null,\s*identityState\.identity\?\.userId \?\? null,\s*identityState\.identity\?\.role \?\? null,\s*identityState\.identity\?\.customerSourceId \?\? null,\s*\]\);/);
+
+  const resetEffect = page.slice(page.indexOf("useEffect(() => {"), page.indexOf("\n\n  const selectedJob"));
+  assert.match(resetEffect, /queueMicrotask\(\(\) => \{/);
+  assert.match(resetEffect, /setForm\(blankRecord\(\)\);/);
+  assert.match(resetEffect, /setActionText\(""\);/);
+  assert.match(resetEffect, /setMessage\(""\);/);
+  assert.match(resetEffect, /setInteractionScopeKey\(testingIdentityScopeKey\);/);
+  assert.match(page, /const interactionScopeReady = interactionScopeKey === testingIdentityScopeKey;/);
+  assert.match(page, /identityState\.isReady && interactionScopeReady;/);
+
+  const activeJobGuard = page.slice(page.indexOf("function activeJobForWrite"), page.indexOf("\n\n  function saveRecord"));
+  assert.match(activeJobGuard, /activeJobs\.find\(\(job\) => job\.id === form\.jobId\)/);
+  assert.match(activeJobGuard, /if \(!activeJob\)[\s\S]*return null;/);
+
+  const writeActions = [
+    page.slice(page.indexOf("function saveRecord"), page.indexOf("\n\n  function resume")),
+    page.slice(page.indexOf("function markCertificateReady"), page.indexOf("\n\n  function prepareCertificateSummary")),
+    page.slice(page.indexOf("function prepareCertificateSummary"), page.indexOf("\n\n  const ready")),
+  ];
+  for (const action of writeActions) {
+    const guardIndex = action.indexOf("const activeJob = activeJobForWrite();");
+    const persistIndex = action.indexOf("persistRecord(record);");
+    assert.ok(guardIndex >= 0 && guardIndex < persistIndex, "each testing write must revalidate the current active job before persistence");
+    assert.match(action, /jobId: activeJob\.id, customerId: activeJob\.customerId/);
+  }
+});
