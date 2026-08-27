@@ -78,6 +78,7 @@ const requiredSuites = [
   "field-builder-projection.test.mjs",
   "field-builder-read-assignment.test.mjs",
   "field-builder-live-rls.test.mjs",
+  "field-rams-office-boundary.test.mjs",
   "timesheet-actor-scope.test.mjs",
   "timesheet-actor-live-rls.test.mjs",
   "timesheet-team-binding.test.mjs",

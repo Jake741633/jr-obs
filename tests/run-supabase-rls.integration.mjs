@@ -67,7 +67,7 @@ const jobReadCoverage = `${jobReadAnchor}\n\n    const officeCommercialJob = awa
 
 const genericCasesSnippet = `    const genericCases = [\n      ["jr-os-surveys", source("survey-a"), { circuits: [{ id: "c1" }] }],\n      ["jr-os-rams", source("rams-a"), { risks: [{ id: "r1" }] }],\n      ["jr-os-job-packs", source("pack-a"), { materials: [{ id: "m1" }] }],\n    ];`;
 
-const safeGenericCasesSnippet = `    const genericCases = [\n      ["jr-os-surveys", source("survey-a"), { circuits: [{ id: "c1" }], labourHours: 8, labourRate: 65 }],\n      ["jr-os-rams", source("rams-a"), { risks: [{ id: "r1" }] }],\n      ["jr-os-job-packs", source("pack-a"), { labourHours: 8, labourRate: 65, materials: [{ id: "m1", description: "Cable", quantity: 10, unitPrice: 4.5 }] }],\n      ["jr-os-job-variations", source("variation-a"), { number: "V001", title: "Extra socket", description: "Add socket", status: "Draft", approvalMethod: "Not approved", requestedBy: "Site", labourHours: 4, labourRate: 70, labourCostRate: 30, materialCost: 100, materialCharge: 200, otherCost: 10, otherCharge: 20, fixedPrice: 600, internalNotes: "Private variation note" }],\n      ["jr-os-job-material-usage", source("material-usage-a"), { description: "Cable", quantity: 5, unit: "Metre", unitCost: 2.5, supplier: "CEF", recordedBy: "Electrician" }],\n    ];`;
+const safeGenericCasesSnippet = `    const genericCases = [\n      ["jr-os-surveys", source("survey-a"), { circuits: [{ id: "c1" }], labourHours: 8, labourRate: 65 }],\n      ["jr-os-job-packs", source("pack-a"), { labourHours: 8, labourRate: 65, materials: [{ id: "m1", description: "Cable", quantity: 10, unitPrice: 4.5 }] }],\n      ["jr-os-job-variations", source("variation-a"), { number: "V001", title: "Extra socket", description: "Add socket", status: "Draft", approvalMethod: "Not approved", requestedBy: "Site", labourHours: 4, labourRate: 70, labourCostRate: 30, materialCost: 100, materialCharge: 200, otherCost: 10, otherCharge: 20, fixedPrice: 600, internalNotes: "Private variation note" }],\n      ["jr-os-job-material-usage", source("material-usage-a"), { description: "Cable", quantity: 5, unit: "Metre", unitCost: 2.5, supplier: "CEF", recordedBy: "Electrician" }],\n    ];`;
 
 const genericReadSnippet = `      const electricianFieldRead = await listRecords(accounts.A.electrician, "cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);\n      await expectAllowed(electricianFieldRead, \`Electrician field \${collectionKey} query should execute\`);\n      assert.equal(electricianFieldRead.payload.length, 1, \`Electrician should retain field collection reads: \${collectionKey}\`);`;
 
@@ -81,6 +81,47 @@ const officeJobReadAnchor = '    assert.equal(officeCommercialJob.payload[0].pay
 const confidentialOfficeJobRead = `${officeJobReadAnchor}\n    assert.match(officeCommercialJob.payload[0].payload.notes, /PRIVATE-JOB-MARGIN-8742/, "Office should retain canonical accepted-quote notes");`;
 
 const genericCasesStart = "    const genericCases = [";
+const fieldRamsOfficeCoverage = [
+  '    const assignedRamsId = source("field-rams-assigned");',
+  '    const unassignedRamsId = source("field-rams-unassigned");',
+  '    const unboundRamsId = source("field-rams-unbound");',
+  '    const crossTenantRamsId = source("field-rams-cross-tenant");',
+  '    const deletedRamsId = source("field-rams-deleted-job");',
+  '    const deletedRamsJob = source("field-rams-deleted-job-record");',
+  '    const ramsPayload = { title: "Private RAMS", methodStatement: "Private method sequence", risks: [{ id: "risk-private", hazard: "Private site hazard", controls: ["Private control"] }], approvals: [{ name: "Private approver" }], notes: "Private RAMS note" };',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-rams", assignedRamsId, accounts.A.office, customerA, jobA, ramsPayload)), "Office should create assigned RAMS evidence");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-rams", unassignedRamsId, accounts.A.office, otherCustomerA, otherCustomerJobA, { ...ramsPayload, title: "Unassigned private RAMS" })), "Office should create unassigned RAMS evidence");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-rams", unboundRamsId, accounts.A.office, null, null, { ...ramsPayload, title: "Unbound private RAMS" })), "Office should create unbound RAMS evidence");',
+  '    await expectAllowed(await insertRecord(accounts.B.office, "cloud_collections", genericRecord(organisationB, "jr-os-rams", crossTenantRamsId, accounts.B.office, customerB, jobB, { ...ramsPayload, title: "Cross-tenant private RAMS" })), "Another organisation should create its RAMS evidence");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, deletedRamsJob, customerA, null, { title: "Deleted RAMS job", status: "First fix", assignedTo: [fieldTeamA, fieldTeamCoworkerA] })), "Office should create an assigned job for RAMS deletion coverage");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-rams", deletedRamsId, accounts.A.office, customerA, deletedRamsJob, { ...ramsPayload, title: "Deleted-job private RAMS" })), "Office should create RAMS for the deletion-coverage job");',
+  '    const officeRams = await listRecords(accounts.A.office, "cloud_collections", "select=source_id,payload&collection_key=eq.jr-os-rams&source_id=eq." + assignedRamsId);',
+  '    await expectAllowed(officeRams, "Office complete RAMS query should execute");',
+  '    assert.equal(officeRams.payload.length, 1, "Office should retain complete RAMS evidence");',
+  '    assert.equal(officeRams.payload[0].payload.risks[0].hazard, "Private site hazard", "Office should retain canonical RAMS hazards");',
+  '    const electricianCanonicalRams = await listRecords(accounts.A.electrician, "cloud_collections", "select=source_id&collection_key=eq.jr-os-rams&source_id=eq." + assignedRamsId);',
+  '    await expectAllowed(electricianCanonicalRams, "Electrician canonical RAMS query should fail closed");',
+  '    assert.deepEqual(electricianCanonicalRams.payload, [], "Electrician must not read canonical RAMS records");',
+  '    const assignedFieldRams = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-rams&source_id=eq." + assignedRamsId);',
+  '    await expectAllowed(assignedFieldRams, "Assigned electrician RAMS query should execute safely");',
+  '    assert.deepEqual(assignedFieldRams.payload, [], "Assigned electrician must not read RAMS from the field projection");',
+  '    const coworkerFieldRams = await listRecords(accounts.A.coworker, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-rams&source_id=eq." + assignedRamsId);',
+  '    await expectAllowed(coworkerFieldRams, "Co-assigned electrician RAMS query should execute safely");',
+  '    assert.deepEqual(coworkerFieldRams.payload, [], "Co-assigned electrician must not read RAMS from the field projection");',
+  '    for (const [account, sourceId, label] of [[accounts.A.electrician, unassignedRamsId, "Electrician must not read unassigned RAMS"], [accounts.A.electrician, unboundRamsId, "Electrician must not read unbound RAMS"], [accounts.A.electrician, crossTenantRamsId, "Electrician must not read another organisation\'s RAMS"]]) {',
+  '      const fieldRams = await listRecords(account, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-rams&source_id=eq." + sourceId);',
+  '      await expectAllowed(fieldRams, label + " query should execute safely");',
+  '      assert.deepEqual(fieldRams.payload, [], label);',
+  '    }',
+  '    const fieldRamsBeforeJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-rams&source_id=eq." + deletedRamsId);',
+  '    await expectAllowed(fieldRamsBeforeJobDelete, "RAMS query before canonical job deletion should execute safely");',
+  '    assert.deepEqual(fieldRamsBeforeJobDelete.payload, [], "Electrician must not read RAMS before its canonical job is deleted");',
+  '    await expectAllowed(await patchRecords(accounts.A.owner, "jobs", "source_id=eq." + deletedRamsJob, { deleted_at: new Date().toISOString() }), "Owner should delete the RAMS coverage job");',
+  '    const fieldRamsAfterJobDelete = await listRecords(accounts.A.electrician, "field_cloud_collections", "select=source_id&collection_key=eq.jr-os-rams&source_id=eq." + deletedRamsId);',
+  '    await expectAllowed(fieldRamsAfterJobDelete, "RAMS query after canonical job deletion should execute safely");',
+  '    assert.deepEqual(fieldRamsAfterJobDelete.payload, [], "Electrician must not read RAMS after its canonical job is deleted");',
+  '    await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationA, "jr-os-rams", source("field-rams-denied-write"), accounts.A.electrician, customerA, jobA, ramsPayload)), "Electrician direct RAMS writes must fail closed");',
+].join("\n") + "\n\n";
 const fieldBuilderReadCoverage = [
   '    const unassignedBuilderA = source("field-unassigned-builder-a");',
   '    const orphanBuilderA = source("field-orphan-builder-a");',
@@ -1389,7 +1430,7 @@ try {
     .replace(fieldJobSeedNote, confidentialFieldJobSeedNote)
     .replace(fieldJobReadExpectation, confidentialFieldJobReadExpectation)
     .replace(officeJobReadAnchor, confidentialOfficeJobRead)
-    .replace(genericCasesStart, `${fieldBuilderReadCoverage}${fieldTimelineCoverage}${fieldTimelineFinanceCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldProgressUpdateEnvelopeCoverage}${fieldMaterialUsageReadCoverage}${fieldJobTaskReadCoverage}${fieldJobQaReadCoverage}${fieldJobCompletionOfficeCoverage}${fieldMutationCoverage}${genericCasesStart}`)
+    .replace(genericCasesStart, `${fieldRamsOfficeCoverage}${fieldBuilderReadCoverage}${fieldTimelineCoverage}${fieldTimelineFinanceCoverage}${fieldSiteDiaryCoverage}${fieldVariationCoverage}${fieldProgressReadCoverage}${fieldProgressUpdateEnvelopeCoverage}${fieldMaterialUsageReadCoverage}${fieldJobTaskReadCoverage}${fieldJobQaReadCoverage}${fieldJobCompletionOfficeCoverage}${fieldMutationCoverage}${genericCasesStart}`)
     .replace(obsoleteCustomerInvoiceRead, safeCustomerInvoiceRead)
     .replace(obsoleteCustomerPaymentRead, safeCustomerPaymentRead);
   for (const requiredPhrase of [
@@ -1403,6 +1444,14 @@ try {
     "Co-assigned electrician should retain the assigned field customer",
     "Electrician must not read a same-tenant customer with only unassigned jobs",
     "Assigned electrician must not read another organisation's field customer",
+    "Office should retain complete RAMS evidence",
+    "Assigned electrician must not read RAMS from the field projection",
+    "Co-assigned electrician must not read RAMS from the field projection",
+    "Electrician must not read unassigned RAMS",
+    "Electrician must not read unbound RAMS",
+    "Electrician must not read another organisation's RAMS",
+    "Electrician must not read RAMS after its canonical job is deleted",
+    "Electrician direct RAMS writes must fail closed",
     "Electrician should create their own assigned-job timesheet row",
     "Electrician should read their own timesheet row",
     "Electrician must not read another actor timesheet row",

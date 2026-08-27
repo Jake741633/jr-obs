@@ -117,7 +117,8 @@ test("office, customer projection, local-mode and unrelated caches retain their 
     { storageKey: "jr-os-job-timeline", role: "office", mode: "cloud" },
     { storageKey: "jr-os-job-timeline", role: "customer", mode: "cloud" },
     { storageKey: "jr-os-job-timeline", role: "electrician", mode: "local" },
-    { storageKey: "jr-os-rams", role: "electrician", mode: "cloud" },
+    { storageKey: "jr-os-rams", role: "electrician", mode: "local" },
+    { storageKey: "jr-os-rams", role: "office", mode: "cloud" },
   ];
 
   for (const context of contexts) {
