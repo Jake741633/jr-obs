@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { buildMobileJobReadiness, mobileJobPriority } from "../lib/mobileJobControl-core.mjs";
+import { buildMobileJobReadiness, mobileJobPriority, mobileJobView } from "../lib/mobileJobControl-core.mjs";
 
 test("mobile readiness reports blockers and a percentage", () => {
   const result = buildMobileJobReadiness({
@@ -24,6 +24,15 @@ test("today and on-site jobs sort before future work", () => {
   assert.equal(mobileJobPriority({ startDate: "2026-08-09", status: "Scheduled" }, "2026-08-02"), 2);
 });
 
+test("mobile job views separate working-day, attention and future work", () => {
+  const date = "2026-08-02";
+  assert.equal(mobileJobView({ startDate: date, status: "Scheduled" }, date), "today");
+  assert.equal(mobileJobView({ startDate: "", status: "First fix" }, date), "today");
+  assert.equal(mobileJobView({ startDate: "2026-08-09", status: "Scheduled" }, date), "upcoming");
+  assert.equal(mobileJobView({ startDate: "2026-08-01", status: "Scheduled" }, date), "attention");
+  assert.equal(mobileJobView({ startDate: "", status: "Scheduled" }, date), "attention");
+});
+
 test("mobile job control route and navigation exist", () => {
   const page = readFileSync(new URL("../app/field/jobs/page.tsx", import.meta.url), "utf8");
   const navigation = readFileSync(new URL("../components/navigation.ts", import.meta.url), "utf8");
@@ -32,4 +41,16 @@ test("mobile job control route and navigation exist", () => {
   assert.match(page, /Navigate/);
   assert.match(page, /type="button"|href="\/field"/);
   assert.match(navigation, /\["Mobile Job Control", "\/field\/jobs"\]/);
+});
+
+test("mobile job control keeps the permission-filtered job collection but focuses the visible working set", () => {
+  const page = readFileSync(new URL("../app/field/jobs/page.tsx", import.meta.url), "utf8");
+  assert.match(page, /const summaries = work\.map/);
+  assert.match(page, /aria-label="Choose active job view"/);
+  assert.match(page, /aria-pressed=\{selectedView === view\.id\}/);
+  assert.match(page, /Today & on site/);
+  assert.match(page, /Needs attention/);
+  assert.match(page, /Upcoming visits/);
+  assert.match(page, /visibleSummaries/);
+  assert.match(page, /min-h-12/);
 });
