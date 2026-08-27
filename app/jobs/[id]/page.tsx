@@ -333,7 +333,7 @@ export default function JobDetailPage() {
         <p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{job.siteAddress}</p>
         <p className="flex items-center gap-2"><CalendarDays className="size-4 text-cyan-400" />{formattedDate}</p>
         {!financeRestricted ? <p className="flex items-center gap-2"><WalletCards className="size-4 text-cyan-400" />{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.value || 0)}</p> : null}
-        <p className="md:col-span-2 whitespace-pre-wrap"><span className="font-semibold text-slate-200">Notes:</span> {job.notes || "No notes"}</p>
+        {!financeRestricted ? <p className="md:col-span-2 whitespace-pre-wrap"><span className="font-semibold text-slate-200">Notes:</span> {job.notes || "No notes"}</p> : null}
       </div>
     </Card>
 
