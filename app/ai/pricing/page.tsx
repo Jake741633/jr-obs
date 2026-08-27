@@ -11,6 +11,8 @@ import { Card } from "../../../components/ui/Card";
 import { TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { recommendPricing, type AiPricingRecommendation } from "../../../lib/aiCommandCentre";
+import { canAccessPath } from "../../../lib/cloud/permissions";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../../lib/quoteEngine";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import type {
@@ -40,6 +42,9 @@ const defaultLabourSettings: LabourCostSettings = {
 };
 
 export default function AiPricingAssistantPage() {
+  const { identity, mode } = useCloudIdentity();
+  const unrestricted = mode === "local" || (mode === "migration" && !identity);
+  const canOpenLabourCosts = unrestricted || canAccessPath(identity?.role, "/labour-costs", identity?.email);
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
@@ -217,7 +222,7 @@ export default function AiPricingAssistantPage() {
             <TextareaField className="min-h-52" label="Scope and risk notes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Describe work, likely duration, access, unknowns, travel, out-of-hours work and site risks." />
           </div>
           <Button className="mt-5 w-full" onClick={generate}><Sparkles className="mr-2 size-4" />Recommend pricing</Button>
-          <Link href="/labour-costs" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold hover:bg-slate-800">Edit Labour & Costs</Link>
+          {canOpenLabourCosts ? <Link href="/labour-costs" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold hover:bg-slate-800">Edit Labour & Costs</Link> : null}
         </Card>
 
         {!recommendation ? (
