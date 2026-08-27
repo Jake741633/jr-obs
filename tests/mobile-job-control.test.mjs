@@ -54,3 +54,11 @@ test("mobile job control keeps the permission-filtered job collection but focuse
   assert.match(page, /visibleSummaries/);
   assert.match(page, /min-h-12/);
 });
+
+test("field readiness links provide 48px touch targets", () => {
+  const page = readFileSync(new URL("../app/field/jobs/page.tsx", import.meta.url), "utf8");
+  const readinessLinks = page.match(/readiness\.checks\.map\(\(check\) => <Link[\s\S]*?<\/Link>\)\}/)?.[0];
+  assert.ok(readinessLinks, "field readiness links should remain rendered");
+  assert.match(readinessLinks, /min-h-12/);
+  assert.doesNotMatch(readinessLinks, /min-h-11/);
+});

@@ -125,7 +125,7 @@ export default function MobileJobControlPage() {
 
       <div className="mt-5 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
         <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2">{readiness.blockers.length ? <CircleAlert className="size-5 text-amber-300" /> : <CheckCircle2 className="size-5 text-emerald-300" />}<h3 className="font-semibold">Field readiness</h3></div><span className="text-xs text-slate-500">{readiness.readyCount}/{readiness.totalCount}</span></div>
-        <div className="mt-3 space-y-2">{readiness.checks.map((check) => <Link key={check.id} href={check.href} className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-slate-800 px-3 text-sm hover:border-cyan-400/40"><span className="flex items-center gap-2">{check.ready ? <CheckCircle2 className="size-4 text-emerald-300" /> : <CircleAlert className="size-4 text-amber-300" />}{check.label}</span><ChevronRight className="size-4 text-slate-600" /></Link>)}</div>
+        <div className="mt-3 space-y-2">{readiness.checks.map((check) => <Link key={check.id} href={check.href} className="flex min-h-12 items-center justify-between gap-3 rounded-lg border border-slate-800 px-3 text-sm hover:border-cyan-400/40"><span className="flex items-center gap-2">{check.ready ? <CheckCircle2 className="size-4 text-emerald-300" /> : <CircleAlert className="size-4 text-amber-300" />}{check.label}</span><ChevronRight className="size-4 text-slate-600" /></Link>)}</div>
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs text-slate-400">
