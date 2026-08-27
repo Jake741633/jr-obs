@@ -182,16 +182,23 @@ function assertListStatusHelpers() {
   assert.ok(ts.isReturnStatement(locked.body.statements[0]) && locked.body.statements[0].expression);
   assert.equal(
     compact(locked.body.statements[0].expression.getText(jobsSource)),
-    "jobStatusMutationDenied||(fieldJobStatusRestricted&&fieldJobStatusTransitions(job.status).length===0)",
+    "jobStatusMutationDenied||(fieldJobStatusRestricted&&fieldJobStatusTransitions(job.status).length===0)||jobStatusSyncBlocked(job)",
   );
 
   const notice = functionNode(jobsSource, jobsPath, "jobStatusNotice");
-  assert.equal(notice.body.statements.length, 3, "jobStatusNotice must handle deny, terminal field, then unlocked cases");
-  const unavailable = notice.body.statements[0];
+  assert.equal(notice.body.statements.length, 5, "jobStatusNotice must handle target sync truth, deny, terminal field, then unlocked cases");
+  const syncDeclaration = notice.body.statements[0];
+  assert.ok(ts.isVariableStatement(syncDeclaration));
+  assert.equal(compact(syncDeclaration.getText(jobsSource)), "constsyncState=jobStatusSyncState(job);");
+  const syncNotice = notice.body.statements[1];
+  assert.ok(ts.isIfStatement(syncNotice));
+  assert.equal(compact(syncNotice.expression.getText(jobsSource)), "syncState");
+  assert.equal(returnedExpression(syncNotice.thenStatement, jobsSource, "sync notice").getText(jobsSource), "jobStatusSyncMessages[syncState]");
+  const unavailable = notice.body.statements[2];
   assert.ok(ts.isIfStatement(unavailable));
   assert.equal(compact(unavailable.expression.getText(jobsSource)), "jobStatusMutationDenied");
   assert.equal(returnedExpression(unavailable.thenStatement, jobsSource, "unavailable notice").getText(jobsSource), "unavailableStatusMessage");
-  const terminal = notice.body.statements[1];
+  const terminal = notice.body.statements[3];
   assert.ok(ts.isIfStatement(terminal));
   assert.equal(
     compact(terminal.expression.getText(jobsSource)),
@@ -200,7 +207,7 @@ function assertListStatusHelpers() {
   const terminalMessage = returnedExpression(terminal.thenStatement, jobsSource, "terminal field notice");
   assert.ok(ts.isStringLiteral(terminalMessage));
   assert.equal(terminalMessage.text, "Further lifecycle changes for this job require office review.");
-  const unlocked = notice.body.statements[2];
+  const unlocked = notice.body.statements[4];
   assert.ok(ts.isReturnStatement(unlocked) && unlocked.expression && ts.isStringLiteral(unlocked.expression));
   assert.equal(unlocked.expression.text, "");
 }
@@ -230,7 +237,7 @@ function assertListStatusMessage(handler) {
   assert.equal(message.whenTrue.templateSpans[1].literal.text, " queued for secure sync.");
   assert.ok(ts.isStringLiteral(message.whenFalse));
   assert.equal(message.whenFalse.text, "");
-  assert.match(jobsPage, /role="status"[^>]*>\{statusMessage\}<\/p>/);
+  assert.match(jobsPage, /role="status"[^>]*>\{displayedStatusMessage\}<\/p>/);
 }
 
 function assertWorkspaceStatusMessage(handler) {
@@ -396,7 +403,7 @@ test("field controls expose only current and server-approved next stages while o
 
   assert.equal(initializer(workspaceSource, workspacePath, "statusOptions"), "fieldJobStatusRestricted?[currentStatus,...fieldStatusTransitions]:canonicalJobStatuses");
   assert.equal(initializer(workspaceSource, workspacePath, "currentStatus"), "fieldJobStatusRestricted?normaliseFieldJobStatus(job.status):normaliseJobStatus(job.status)");
-  assert.equal(initializer(workspaceSource, workspacePath, "statusControlLocked"), "jobStatusMutationDenied||(fieldJobStatusRestricted&&fieldStatusTransitions.length===0)");
+  assert.equal(initializer(workspaceSource, workspacePath, "statusControlLocked"), "jobStatusMutationDenied||(fieldJobStatusRestricted&&fieldStatusTransitions.length===0)||jobStatusSyncBlocked");
   const workspaceSelects = collectNodes(workspaceSource, (node) => ts.isJsxElement(node)
     && node.openingElement.tagName.getText(workspaceSource) === "select"
     && node.openingElement.getText(workspaceSource).includes("disabled={statusControlLocked}"));
