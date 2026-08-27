@@ -4,6 +4,8 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 
+const cloudAccessGuard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
+
 function loadPermissions(operatorEmails = "operator@example.com") {
   const source = readFileSync(new URL("../lib/cloud/permissions.ts", import.meta.url), "utf8");
   const output = ts.transpileModule(source, {
@@ -53,6 +55,30 @@ test("ordinary role routes retain their existing access without email context", 
   assert.equal(canAccessPath("office", "/cloud"), true);
   assert.equal(canAccessPath("electrician", "/jobs/job-1"), true);
   assert.equal(canAccessPath("customer", "/customer-portal"), true);
+});
+
+test("settled local and migration workspaces remain usable without weakening operator routes", () => {
+  const { canUseLocalWorkspaceWithoutIdentity } = loadPermissions();
+
+  assert.equal(canUseLocalWorkspaceWithoutIdentity("local", "/customers"), true);
+  assert.equal(canUseLocalWorkspaceWithoutIdentity("migration", "/jobs/job-1"), true);
+  assert.equal(canUseLocalWorkspaceWithoutIdentity("cloud", "/customers"), false);
+
+  for (const path of ["/release-readiness", "/cloud/cutover", "/cloud/queue/details"]) {
+    assert.equal(canUseLocalWorkspaceWithoutIdentity("local", path), false);
+    assert.equal(canUseLocalWorkspaceWithoutIdentity("migration", path), false);
+  }
+});
+
+test("workspace guard waits for identity resolution before allowing an unrestricted mode", () => {
+  const readinessCheck = cloudAccessGuard.indexOf("if (!isReady)");
+  const missingIdentityCheck = cloudAccessGuard.indexOf("if (!identity)");
+  const unrestrictedCheck = cloudAccessGuard.indexOf("canUseLocalWorkspaceWithoutIdentity(mode, pathname)");
+
+  assert.match(cloudAccessGuard, /const \{ identity, isReady, mode \} = useCloudIdentity\(\)/);
+  assert.ok(readinessCheck >= 0);
+  assert.ok(missingIdentityCheck > readinessCheck);
+  assert.ok(unrestrictedCheck > missingIdentityCheck);
 });
 
 test("malformed and unknown roles fail closed across every permission helper", () => {

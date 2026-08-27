@@ -73,6 +73,13 @@ export function isOperatorOnlyPath(path: string) {
   return operatorOnlyPaths.some((entry) => path === entry || path.startsWith(`${entry}/`));
 }
 
+export function canUseLocalWorkspaceWithoutIdentity(
+  mode: "local" | "cloud" | "migration",
+  path: string,
+) {
+  return (mode === "local" || mode === "migration") && !isOperatorOnlyPath(path);
+}
+
 export function isJrOsOperator(role: JrRole | undefined, email?: string) {
   if (!isJrRole(role) || role !== "owner" || !email) return false;
   return operatorEmails().includes(email.trim().toLowerCase());
