@@ -33,7 +33,7 @@ test("field projections omit every amount used by the assigned-job finance tiles
     "when 'jr-os-job-timeline' then",
   );
 
-  assert.doesNotMatch(fieldJobPayload, /'value'|originalContractValue|quoteSnapshot/i);
+  assert.doesNotMatch(fieldJobPayload, /'value'|'notes'|originalContractValue|quoteSnapshot/i);
   for (const key of ["fixedPrice", "labourHours", "labourRate", "materialCharge", "otherCharge"]) {
     assert.doesNotMatch(fieldVariationPayload, new RegExp(`'${key}'`, "i"));
   }
@@ -53,6 +53,16 @@ test("job detail never substitutes a redacted contract value with zero", () => {
   assert.match(valueBranch, /Intl\.NumberFormat[\s\S]*\.format\(job\.value \|\| 0\)/);
   assert.equal((jobPage.match(/job\.value \|\| 0/g) ?? []).length, 1);
   assert.doesNotMatch(jobPage, /const formattedValue\s*=/);
+});
+
+test("job detail never substitutes withheld office notes with no notes", () => {
+  const notesBranch = section(
+    jobPage,
+    '{!financeRestricted ? <p className="md:col-span-2 whitespace-pre-wrap">',
+    "</p> : null}",
+  );
+  assert.match(notesBranch, /Notes:<\/span> \{job\.notes \|\| "No notes"\}/);
+  assert.equal((jobPage.match(/job\.notes \|\| "No notes"/g) ?? []).length, 1);
 });
 
 test("job detail never treats restricted commercial projections as authoritative absence", () => {
