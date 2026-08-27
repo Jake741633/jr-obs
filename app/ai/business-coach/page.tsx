@@ -19,6 +19,8 @@ import { SmartRecommendations } from "../../../components/ai/SmartRecommendation
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { buildBusinessCoach } from "../../../lib/aiCommandCentre";
+import { canAccessPath } from "../../../lib/cloud/permissions";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { useLocalStorageCollection } from "../../../lib/storage";
 import { pricingDocumentTotal } from "../../../lib/workflow";
 import type {
@@ -48,6 +50,9 @@ function trendLabel(value: number | null) {
 }
 
 export default function AiBusinessCoachPage() {
+  const { identity, mode } = useCloudIdentity();
+  const unrestricted = mode === "local" || (mode === "migration" && !identity);
+  const canOpenBusiness = unrestricted || canAccessPath(identity?.role, "/business", identity?.email);
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
@@ -144,7 +149,7 @@ export default function AiBusinessCoachPage() {
 
       <section className="grid gap-6 xl:grid-cols-[1.35fr_0.65fr]">
         <Card>
-          <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Six-month trend</p><h2 className="mt-1 text-xl font-bold">Revenue and expected profit</h2></div><Link href="/business" className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-300">Business health <ArrowRight className="size-4" /></Link></div>
+          <div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Six-month trend</p><h2 className="mt-1 text-xl font-bold">Revenue and expected profit</h2></div>{canOpenBusiness ? <Link href="/business" className="inline-flex items-center gap-2 text-sm font-semibold text-cyan-300">Business health <ArrowRight className="size-4" /></Link> : null}</div>
           <div className="mt-5 overflow-x-auto">
             <table className="w-full min-w-[620px] text-left text-sm">
               <thead className="text-xs uppercase tracking-wider text-slate-500"><tr><th className="border-b border-slate-800 px-3 py-3">Month</th><th className="border-b border-slate-800 px-3 py-3">Revenue</th><th className="border-b border-slate-800 px-3 py-3">Expected profit</th><th className="border-b border-slate-800 px-3 py-3">Invoices</th><th className="border-b border-slate-800 px-3 py-3">Quote conversion</th></tr></thead>

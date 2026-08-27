@@ -17,6 +17,8 @@ import {
   ReceiptText,
   UserRound,
 } from "lucide-react";
+import { canAccessPath } from "../../lib/cloud/permissions";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { invoiceTotal } from "../../lib/workflow";
 import type { AiRecommendation } from "../../lib/aiCommandCentre";
 import type { AiReminder, AiReminderPriority, Customer, CustomerProfile, Invoice, Job, PlannerEntry, PricingDocument, PurchaseList } from "../../lib/models";
@@ -54,6 +56,9 @@ export function TodaysAssistant({
   onAddReminder: (input: { title: string; dueDate: string; dueTime: string; priority: AiReminderPriority; customerId?: string; notes: string }) => void;
   onToggleReminder: (id: string) => void;
 }) {
+  const { identity, mode } = useCloudIdentity();
+  const unrestricted = mode === "local" || (mode === "migration" && !identity);
+  const canOpenBusiness = unrestricted || canAccessPath(identity?.role, "/business", identity?.email);
   const [showReminder, setShowReminder] = useState(false);
   const [form, setForm] = useState({
     title: "",
@@ -67,6 +72,14 @@ export function TodaysAssistant({
   const overdueValue = snapshot.overdueInvoices.reduce((sum, invoice) => sum + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
   const materialItemsNeeded = snapshot.materialsToOrder?.reduce((sum, list) => sum + list.items.filter((item) => item.status === "Needed").length, 0) ?? 0;
   const extendedOperations = snapshot.todaysSurveys !== undefined || snapshot.materialsToOrder !== undefined || snapshot.certificatesOutstanding !== undefined || snapshot.businessHealthScore !== undefined;
+  const businessHealthCard = (
+    <Card className="h-full border-cyan-400/20">
+      <div className="flex items-center justify-between"><CircleGauge className="size-5 text-cyan-300" /><span className={`text-3xl font-black ${(snapshot.businessHealthScore ?? 100) >= 80 ? "text-emerald-300" : (snapshot.businessHealthScore ?? 100) >= 60 ? "text-amber-300" : "text-rose-300"}`}>{snapshot.businessHealthScore ?? 100}</span></div>
+      <h3 className="mt-3 font-semibold">Business health score</h3>
+      <p className="mt-2 text-sm text-slate-500">{snapshot.businessHealthLabel || "Operational health"}</p>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-400" style={{ width: `${snapshot.businessHealthScore ?? 100}%` }} /></div>
+    </Card>
+  );
 
   function submitReminder(event: FormEvent) {
     event.preventDefault();
@@ -202,14 +215,7 @@ export function TodaysAssistant({
           <h3 className="mt-3 font-semibold">Certificates outstanding</h3>
           <div className="mt-3 space-y-2">{snapshot.certificatesOutstanding?.slice(0, 4).map((job) => <Link key={job.id} href={`/jobs/${job.id}`} className="block rounded-lg bg-slate-950 px-3 py-2 text-sm"><span className="block font-medium">{job.title}</span><span className="mt-1 block truncate text-xs text-slate-500">Completed job · check certification</span></Link>)}{!snapshot.certificatesOutstanding?.length ? <p className="text-sm text-emerald-300">No completed jobs waiting.</p> : null}</div>
         </Card>
-        <Link href="/business" className="block">
-          <Card className="h-full border-cyan-400/20">
-            <div className="flex items-center justify-between"><CircleGauge className="size-5 text-cyan-300" /><span className={`text-3xl font-black ${(snapshot.businessHealthScore ?? 100) >= 80 ? "text-emerald-300" : (snapshot.businessHealthScore ?? 100) >= 60 ? "text-amber-300" : "text-rose-300"}`}>{snapshot.businessHealthScore ?? 100}</span></div>
-            <h3 className="mt-3 font-semibold">Business health score</h3>
-            <p className="mt-2 text-sm text-slate-500">{snapshot.businessHealthLabel || "Operational health"}</p>
-            <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-800"><div className="h-full rounded-full bg-cyan-400" style={{ width: `${snapshot.businessHealthScore ?? 100}%` }} /></div>
-          </Card>
-        </Link>
+        {canOpenBusiness ? <Link href="/business" className="block">{businessHealthCard}</Link> : businessHealthCard}
       </div> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
