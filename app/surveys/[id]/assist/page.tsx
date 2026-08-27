@@ -29,9 +29,7 @@ export default function SurveyAssistPage() {
     identityState.identity?.customerSourceId ?? null,
   ]);
   const activeIdentityScopeKeyRef = useRef(surveyAssistIdentityScopeKey);
-  activeIdentityScopeKeyRef.current = surveyAssistIdentityScopeKey;
   const surveyItemsRef = useRef(surveys.items);
-  surveyItemsRef.current = surveys.items;
   const fieldSuggestionRestricted = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const fieldPhotoRestricted = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const [transcript, setTranscript] = useState("");
@@ -39,6 +37,11 @@ export default function SurveyAssistPage() {
   const [interactionScopeKey, setInteractionScopeKey] = useState("");
   const survey = surveys.items.find((item) => item.id === id);
   const draft = useMemo(() => interpretSurveyTranscript(transcript), [transcript]);
+
+  useEffect(() => {
+    activeIdentityScopeKeyRef.current = surveyAssistIdentityScopeKey;
+    surveyItemsRef.current = surveys.items;
+  }, [surveyAssistIdentityScopeKey, surveys.items]);
 
   useEffect(() => {
     let active = true;
