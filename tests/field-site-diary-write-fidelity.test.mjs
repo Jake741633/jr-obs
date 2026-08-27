@@ -98,8 +98,11 @@ test("field diary messaging distinguishes unconfirmed cloud capture from local p
   assert.match(advancedPage, /Daily progress saved and added to the job timeline/i);
   assert.match(advancedPage, /cloudFieldMode \? "Capture daily progress" : "Save daily progress"/i);
   assert.doesNotMatch(advancedPage, /Daily progress and a separate job timeline note queued for secure sync/i);
-  assert.match(basicPage, /Site diary entry and a separate job timeline note queued for secure sync/i);
+  assert.match(basicPage, /Site diary captured on this device; its diary record and separate job timeline note are awaiting cloud confirmation/i);
+  assert.match(basicPage, /The combined site diary save is not fully cloud-confirmed/i);
   assert.match(basicPage, /Site diary entry saved to the job record/i);
+  assert.match(basicPage, /cloudFieldMode \? "Capture site record" : "Save site record"/i);
+  assert.doesNotMatch(basicPage, /Site diary entry and a separate job timeline note queued for secure sync/i);
   assert.doesNotMatch(advancedPage, /setMessage\(`Daily progress saved and added to the job timeline/i);
 });
 

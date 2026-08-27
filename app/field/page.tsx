@@ -12,10 +12,11 @@ import { StatusBadge } from "../../components/ui/StatusBadge";
 import { accountStorageKey } from "../../lib/cloud/adapter";
 import { useSiteDiariesCollection } from "../../lib/cloud/coreBusinessCollections";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
-import { getSyncQueue, type SyncState } from "../../lib/cloud/repository";
+import { activeSyncAuthorizationMatches, getSyncQueue, type SyncState } from "../../lib/cloud/repository";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { isJobInactiveStatus, isJobOnSiteStatus, normaliseJobStatus, siteDiaryTimelineEntry, transitionJobStatus } from "../../lib/jobManagement-core.mjs";
 import { fieldOperatorName } from "../../lib/siteDiaryIdentity-core.mjs";
+import { emptySiteDiarySyncProjection, refreshSiteDiarySyncProjection, registerSiteDiarySyncAttempt, siteDiaryAttemptStates, unpairedSiteDiaryTargetStates } from "../../lib/siteDiarySync-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import type { CanonicalJobStatus, Customer, Job, JobDocument, JobTimelineEntry, SiteDiaryEntry, TeamMember } from "../../lib/models";
 
@@ -29,12 +30,30 @@ type JobStatusSyncProjection = {
   states: Partial<Record<string, SyncState>>;
 };
 
+type SiteDiaryTargetState = SyncState | "AwaitingQueue";
+type SiteDiarySyncProjection = {
+  scopeKey: string;
+  initialized: boolean;
+  attempts: Record<string, { timelineId: string; jobId?: string; workDate?: string }>;
+  diaryTargets: Record<string, { seen: boolean; state: SiteDiaryTargetState }>;
+  timelineTargets: Record<string, { seen: boolean; state: SiteDiaryTargetState }>;
+};
+
 const jobStatusSyncMessages: Record<SyncState, string> = {
   Synced: "Job stage synced securely.",
   Pending: "Job stage change queued; the displayed badge is not cloud-confirmed yet.",
   Offline: "Job stage change saved on this device; the displayed badge is not cloud-confirmed.",
   Failed: "Job stage sync failed. The displayed badge may be local and is not cloud-confirmed. Refresh or resolve sync before starting this job again.",
   Conflict: "Job stage could not be confirmed against the current cloud record. The displayed badge may be local; refresh the job before starting it again.",
+};
+
+const siteDiaryTargetMessages: Record<SiteDiaryTargetState, string> = {
+  AwaitingQueue: "waiting to enter the device sync queue",
+  Pending: "queued for cloud confirmation",
+  Offline: "saved on this device while offline",
+  Failed: "failed to sync",
+  Conflict: "conflicted with the current cloud record",
+  Synced: "cloud-confirmed",
 };
 
 export default function FieldWorkspacePage() {
@@ -51,18 +70,22 @@ export default function FieldWorkspacePage() {
   const [customerName, setCustomerName] = useState("");
   const [signOffNotes, setSignOffNotes] = useState("");
   const [selectedPhoto, setSelectedPhoto] = useState<File | null>(null);
+  const [interactionScopeKey, setInteractionScopeKey] = useState("");
   const [jobStatusSyncProjection, setJobStatusSyncProjection] = useState<JobStatusSyncProjection>({ scopeKey: "", states: {} });
+  const [siteDiarySyncProjection, setSiteDiarySyncProjection] = useState<SiteDiarySyncProjection>(() => emptySiteDiarySyncProjection());
 
   const customerNames = useMemo(() => new Map(customers.items.map((customer) => [customer.id, customer.name])), [customers.items]);
   const todaysJobs = useMemo(() => jobs.items.filter((job) => job.startDate === today() || isJobOnSiteStatus(job.status)).toSorted((a, b) => a.startDate.localeCompare(b.startDate)), [jobs.items]);
   const operatorName = useMemo(() => fieldOperatorName({ identity: identityState.identity, teamMembers: team.items, mode: identityState.mode }), [identityState.identity, identityState.mode, team.items]);
   const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
-  const jobStatusSyncScopeKey = JSON.stringify([
+  const fieldWorkspaceScopeKey = JSON.stringify([
     identityState.identity?.organisationId ?? null,
     identityState.identity?.userId ?? null,
     identityState.identity?.role ?? null,
     identityState.identity?.customerSourceId ?? null,
   ]);
+  const jobStatusSyncScopeKey = fieldWorkspaceScopeKey;
+  const siteDiarySyncScopeKey = fieldWorkspaceScopeKey;
   const jobsStorageKey = identityState.identity
     ? accountStorageKey(
         "jr-os-jobs",
@@ -75,8 +98,30 @@ export default function FieldWorkspacePage() {
   const activeJobStatusSyncStates = cloudFieldMode && jobStatusSyncProjection.scopeKey === jobStatusSyncScopeKey
     ? jobStatusSyncProjection.states
     : {};
+  const activeSiteDiarySyncProjection = cloudFieldMode && siteDiarySyncProjection.scopeKey === siteDiarySyncScopeKey
+    ? siteDiarySyncProjection
+    : emptySiteDiarySyncProjection(siteDiarySyncScopeKey) as SiteDiarySyncProjection;
+  const unpairedSiteDiaryTargets = cloudFieldMode ? unpairedSiteDiaryTargetStates(activeSiteDiarySyncProjection) as { kind: "diary" | "timeline"; sourceId: string; state: SiteDiaryTargetState }[] : [];
+  const unpairedSiteDiaryTerminal = unpairedSiteDiaryTargets.some(({ state }) => state === "Failed" || state === "Conflict");
   const activeJob = jobs.items.find((job) => job.id === form.jobId);
   const todaysEntries = diary.items.filter((entry) => entry.workDate === today());
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setForm({ ...blankDiary, workDate: today() });
+      setMessage("");
+      setChecklist([]);
+      setCustomerName("");
+      setSignOffNotes("");
+      setSelectedPhoto(null);
+      setJobStatusSyncProjection({ scopeKey: fieldWorkspaceScopeKey, states: {} });
+      setSiteDiarySyncProjection(emptySiteDiarySyncProjection(siteDiarySyncScopeKey));
+      setInteractionScopeKey(fieldWorkspaceScopeKey);
+    });
+    return () => { active = false; };
+  }, [fieldWorkspaceScopeKey, siteDiarySyncScopeKey]);
 
   useEffect(() => {
     if (!cloudFieldMode || !identityState.identity) return;
@@ -122,6 +167,36 @@ export default function FieldWorkspacePage() {
     };
   }, [cloudFieldMode, identityState.identity, jobStatusSyncScopeKey, jobs.items, jobsStorageKey]);
 
+  useEffect(() => {
+    const identity = identityState.identity;
+    if (!cloudFieldMode || !identity) return;
+    let active = true;
+    const authorization = {
+      organisationId: identity.organisationId,
+      userId: identity.userId,
+      role: identity.role,
+      customerSourceId: identity.customerSourceId,
+    };
+
+    function refreshSiteDiarySyncStates() {
+      if (!active || !activeSyncAuthorizationMatches(authorization)) return;
+      const queue = getSyncQueue();
+      setSiteDiarySyncProjection((current) => refreshSiteDiarySyncProjection({
+        current,
+        scopeKey: siteDiarySyncScopeKey,
+        queue,
+        online: navigator.onLine,
+      }));
+    }
+
+    window.addEventListener("jr-os-sync-status", refreshSiteDiarySyncStates);
+    queueMicrotask(refreshSiteDiarySyncStates);
+    return () => {
+      active = false;
+      window.removeEventListener("jr-os-sync-status", refreshSiteDiarySyncStates);
+    };
+  }, [cloudFieldMode, identityState.identity, siteDiarySyncScopeKey]);
+
   function jobStatusSyncState(jobId: string) {
     return activeJobStatusSyncStates[jobId] ?? null;
   }
@@ -140,6 +215,26 @@ export default function FieldWorkspacePage() {
         ? "text-emerald-200"
         : "text-amber-200";
     return <p role="status" className={`mt-3 text-xs ${tone}`}>{jobStatusSyncMessages[syncState]}</p>;
+  }
+
+  function siteDiarySyncNotice(diaryId: string) {
+    const attempt = siteDiaryAttemptStates(activeSiteDiarySyncProjection, diaryId) as {
+      diary: SiteDiaryTargetState;
+      timeline: SiteDiaryTargetState;
+      timelineId: string;
+      jobId?: string;
+      workDate?: string;
+    } | null;
+    if (!attempt) return null;
+    const terminal = [attempt.diary, attempt.timeline].some((state) => state === "Failed" || state === "Conflict");
+    const synced = attempt.diary === "Synced" && attempt.timeline === "Synced";
+    const jobTitle = attempt.jobId ? jobs.items.find((job) => job.id === attempt.jobId)?.title : undefined;
+    return <div key={diaryId} role="status" className={`rounded-xl border px-4 py-3 text-sm ${terminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : synced ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-100" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
+      <p className="font-semibold">{jobTitle || "Site diary"}{attempt.workDate ? ` · ${attempt.workDate}` : ""}</p>
+      <p className="mt-1 text-xs">Diary record is {siteDiaryTargetMessages[attempt.diary]}. Job timeline note is {siteDiaryTargetMessages[attempt.timeline]}.</p>
+      <p className="mt-1 text-xs">{synced ? "The combined site diary save is confirmed." : "The combined site diary save is not fully cloud-confirmed."}</p>
+      {terminal ? <Link href="/cloud" className="mt-2 inline-flex text-xs font-semibold underline underline-offset-2">Open Cloud &amp; account to retry pending changes</Link> : null}
+    </div>;
   }
 
   function updateJobStatus(jobId: string, status: CanonicalJobStatus) {
@@ -188,14 +283,25 @@ export default function FieldWorkspacePage() {
   function saveDiary(event: FormEvent) {
     event.preventDefault();
     if (!form.jobId) return setMessage("Choose a job before saving the site record.");
+    if (!jobs.items.some((job) => job.id === form.jobId && !isJobInactiveStatus(job.status))) return setMessage("The selected active job is no longer available. Refresh the field workspace before saving the site record.");
     if (!operatorName) return setMessage("Your active team identity could not be resolved. Refresh your account before saving the site record.");
     if (!form.startedAt) return setMessage("Add the time work started.");
     const now = new Date().toISOString();
     const entry: SiteDiaryEntry = { id: makeId("site-diary"), jobId: form.jobId, workDate: form.workDate, startedAt: form.startedAt, finishedAt: form.finishedAt, breakMinutes: Math.max(0, Number(form.breakMinutes || 0)), completedBy: operatorName, staffPresent: [], workCompleted: form.workCompleted.trim(), delays: form.delays.trim(), builderInstructions: "", customerRequests: form.customerRequests.trim(), customerInstructions: form.customerRequests.trim(), materialsUsed: form.materialsUsed.trim(), materialsRequired: "", voiceNotes: form.voiceNotes.trim(), voiceNoteTranscript: form.voiceNotes.trim(), weather: "", issuesAndRisks: form.delays.trim(), followUpActions: "", createdAt: now, updatedAt: now };
+    const timelineEntry = siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: operatorName, now }) as JobTimelineEntry;
+    if (cloudFieldMode) {
+      setSiteDiarySyncProjection((current) => registerSiteDiarySyncAttempt(current, {
+        scopeKey: siteDiarySyncScopeKey,
+        diaryId: entry.id,
+        timelineId: timelineEntry.id,
+        jobId: entry.jobId,
+        workDate: entry.workDate,
+      }));
+    }
     diary.setItems((current) => [entry, ...current]);
-    timeline.setItems((current) => [siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: operatorName, now }), ...current]);
+    timeline.setItems((current) => [timelineEntry, ...current]);
     setMessage(cloudFieldMode
-      ? "Site diary entry and a separate job timeline note queued for secure sync."
+      ? "Site diary captured on this device; its diary record and separate job timeline note are awaiting cloud confirmation."
       : "Site diary entry saved to the job record.");
     setForm({ ...blankDiary, jobId: form.jobId, workDate: today() });
   }
@@ -225,7 +331,9 @@ export default function FieldWorkspacePage() {
     setMessage("Completion checklist, customer sign-off and site photo saved. Job marked complete.");
   }
 
-  const ready = jobs.isReady && customers.isReady && diary.isReady && documents.isReady && timeline.isReady && team.isReady && identityState.isReady;
+  const siteDiarySyncReady = !cloudFieldMode || (activeSiteDiarySyncProjection.initialized && siteDiarySyncProjection.scopeKey === siteDiarySyncScopeKey);
+  const interactionScopeReady = interactionScopeKey === fieldWorkspaceScopeKey;
+  const ready = jobs.isReady && customers.isReady && diary.isReady && documents.isReady && timeline.isReady && team.isReady && identityState.isReady && siteDiarySyncReady && interactionScopeReady;
   if (!ready) return <Card>Loading field workspace…</Card>;
 
   return <div className="space-y-6">
@@ -233,11 +341,17 @@ export default function FieldWorkspacePage() {
     {cloudFieldMode && !operatorName ? <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-100"><p className="font-semibold">Field identity could not be resolved.</p><p className="mt-1 text-xs text-amber-100/70">Site writes remain locked until this signed-in account resolves to an active team identity.</p></div> : null}
     <section className="grid gap-4 sm:grid-cols-3"><Card><p className="text-sm text-slate-400">Today&apos;s jobs</p><p className="mt-2 text-3xl font-bold">{todaysJobs.length}</p></Card><Card><p className="text-sm text-slate-400">On site</p><p className="mt-2 text-3xl font-bold">{jobs.items.filter((job) => isJobOnSiteStatus(job.status)).length}</p></Card><Card><p className="text-sm text-slate-400">Diary records today</p><p className="mt-2 text-3xl font-bold">{todaysEntries.length}</p></Card></section>
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    {cloudFieldMode ? Object.keys(activeSiteDiarySyncProjection.attempts).reverse().map(siteDiarySyncNotice) : null}
+    {cloudFieldMode && unpairedSiteDiaryTargets.length ? <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${unpairedSiteDiaryTerminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
+      <p className="font-semibold">One or more retained site diary sync targets are not cloud-confirmed.</p>
+      <p className="mt-1 text-xs opacity-80">An exact diary record or site-diary timeline note remains pending, offline, failed or conflicted. Treat the combined save as unconfirmed until the queue clears.</p>
+      <Link href="/cloud" className="mt-2 inline-flex text-xs font-semibold underline underline-offset-2">Open Cloud &amp; account to review pending changes</Link>
+    </div> : null}
     <MobileTestingProgress activeJobId={form.jobId || todaysJobs.find((job) => isJobOnSiteStatus(job.status))?.id} />
 
     <section className="space-y-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Schedule</p><h2 className="mt-1 text-2xl font-bold">Today&apos;s jobs</h2></div>{todaysJobs.length === 0 ? <Card><div className="flex items-start gap-3"><CalendarDays className="mt-0.5 size-5 text-slate-500" /><div><h3 className="font-semibold">No jobs scheduled for today</h3><p className="mt-1 text-sm text-slate-400">Jobs in an active site stage will also appear here.</p></div></div></Card> : <div className="grid gap-4 xl:grid-cols-2">{todaysJobs.map((job) => <Card key={job.id} className={form.jobId === job.id ? "border-cyan-400/40" : undefined}><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{customerNames.get(job.customerId ?? "") || "Direct job"}</p><h3 className="mt-1 text-xl font-bold">{job.title}</h3><div className="mt-2"><StatusBadge status={job.status} /></div>{jobStatusSyncNotice(job.id)}</div><Link href={`/jobs/${job.id}`} className="rounded-lg border border-slate-700 px-3 py-2 text-sm font-semibold text-slate-200 hover:border-cyan-400/50">Open job</Link></div><p className="mt-4 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{job.siteAddress}</p><div className="mt-5 flex flex-wrap gap-2"><Button type="button" disabled={cloudFieldMode && (!operatorName || jobStatusSyncBlocked(job.id))} onClick={() => startJob(job)}><Play className="mr-2 size-4" />Start job</Button><Button type="button" variant="secondary" onClick={() => stopJob(job)}><Square className="mr-2 size-4" />Stop timer</Button><Link href="/field/testing" className="rounded-xl border border-slate-700 px-4 py-2 text-sm font-semibold hover:border-cyan-400/50">Testing</Link></div></Card>)}</div>}</section>
 
-    <section className="space-y-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Site record</p><h2 className="mt-1 text-2xl font-bold">Daily job diary</h2><p className="mt-1 text-sm text-slate-400">Record working time, progress, materials and customer requests before leaving site.</p></div><Card><form onSubmit={saveDiary} className="grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose job</option>{jobs.items.filter((job) => !isJobInactiveStatus(job.status)).map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label><InputField label="Work date" type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.target.value })} /><InputField label="Started" type="time" value={form.startedAt} onChange={(event) => setForm({ ...form, startedAt: event.target.value })} /><InputField label="Finished" type="time" value={form.finishedAt} onChange={(event) => setForm({ ...form, finishedAt: event.target.value })} /><InputField label="Break (minutes)" type="number" min="0" value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /><InputField label="Completed by" value={operatorName} readOnly aria-readonly="true" /><div className="md:col-span-2"><TextareaField label="Work completed" value={form.workCompleted} onChange={(event) => setForm({ ...form, workCompleted: event.target.value })} /></div><div className="md:col-span-2"><TextareaField label="Materials used" value={form.materialsUsed} onChange={(event) => setForm({ ...form, materialsUsed: event.target.value })} /></div><TextareaField label="Delays or issues" value={form.delays} onChange={(event) => setForm({ ...form, delays: event.target.value })} /><TextareaField label="Customer requests" value={form.customerRequests} onChange={(event) => setForm({ ...form, customerRequests: event.target.value })} /><div className="md:col-span-2"><label className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300"><Mic className="size-4 text-cyan-400" />Voice-note transcript</label><TextareaField label="" value={form.voiceNotes} onChange={(event) => setForm({ ...form, voiceNotes: event.target.value })} /></div><div className="md:col-span-2 flex justify-end"><Button type="submit" disabled={cloudFieldMode && !operatorName}><Wrench className="mr-2 size-4" />Save site record</Button></div></form></Card>{activeJob ? <p className="flex items-center gap-2 text-sm text-slate-400"><Clock3 className="size-4 text-cyan-400" />Recording for {activeJob.title}</p> : null}</section>
+    <section className="space-y-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Site record</p><h2 className="mt-1 text-2xl font-bold">Daily job diary</h2><p className="mt-1 text-sm text-slate-400">Record working time, progress, materials and customer requests before leaving site.</p></div><Card><form onSubmit={saveDiary} className="grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose job</option>{jobs.items.filter((job) => !isJobInactiveStatus(job.status)).map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label><InputField label="Work date" type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.target.value })} /><InputField label="Started" type="time" value={form.startedAt} onChange={(event) => setForm({ ...form, startedAt: event.target.value })} /><InputField label="Finished" type="time" value={form.finishedAt} onChange={(event) => setForm({ ...form, finishedAt: event.target.value })} /><InputField label="Break (minutes)" type="number" min="0" value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /><InputField label="Completed by" value={operatorName} readOnly aria-readonly="true" /><div className="md:col-span-2"><TextareaField label="Work completed" value={form.workCompleted} onChange={(event) => setForm({ ...form, workCompleted: event.target.value })} /></div><div className="md:col-span-2"><TextareaField label="Materials used" value={form.materialsUsed} onChange={(event) => setForm({ ...form, materialsUsed: event.target.value })} /></div><TextareaField label="Delays or issues" value={form.delays} onChange={(event) => setForm({ ...form, delays: event.target.value })} /><TextareaField label="Customer requests" value={form.customerRequests} onChange={(event) => setForm({ ...form, customerRequests: event.target.value })} /><div className="md:col-span-2"><label className="mb-2 flex items-center gap-2 text-sm font-medium text-slate-300"><Mic className="size-4 text-cyan-400" />Voice-note transcript</label><TextareaField label="" value={form.voiceNotes} onChange={(event) => setForm({ ...form, voiceNotes: event.target.value })} /></div><div className="md:col-span-2 flex justify-end"><Button type="submit" disabled={cloudFieldMode && !operatorName}><Wrench className="mr-2 size-4" />{cloudFieldMode ? "Capture site record" : "Save site record"}</Button></div></form></Card>{activeJob ? <p className="flex items-center gap-2 text-sm text-slate-400"><Clock3 className="size-4 text-cyan-400" />Recording for {activeJob.title}</p> : null}</section>
 
     <section className="space-y-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-emerald-400">Completion</p><h2 className="mt-1 text-2xl font-bold">Site handover and sign-off</h2><p className="mt-1 text-sm text-slate-400">{cloudFieldMode ? "Completion packs and photo uploads are read-only in field cloud mode until their dedicated secure server route is available." : "Finish the checklist, save a completion photo and record the customer handover."}</p></div>{cloudFieldMode ? <Card><p className="text-sm text-amber-100">Use the job record for review and continue testing or snagging as needed. JR OS will not claim a customer sign-off or completion photo was saved when the field document boundary would reject it.</p><div className="mt-4 grid gap-2 sm:grid-cols-2">{form.jobId ? <Link href={`/jobs/${form.jobId}`} className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link> : <Link href="/field/jobs" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open job control</Link>}<Link href="/field/testing" className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open testing</Link></div></Card> : <Card className="space-y-5"><div className="space-y-3">{checklistItems.map((item) => <label key={item} className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm"><input type="checkbox" checked={checklist.includes(item)} onChange={(event) => setChecklist((current) => event.target.checked ? [...current, item] : current.filter((value) => value !== item))} className="size-5 accent-cyan-400" /><span>{item}</span></label>)}</div><div className="grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm font-medium text-slate-300"><span className="flex items-center gap-2"><Camera className="size-4 text-cyan-400" />Completion photo</span><input type="file" accept="image/*" capture="environment" onChange={choosePhoto} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1 file:text-slate-200" />{selectedPhoto ? <span className="text-xs font-normal text-emerald-300">{selectedPhoto.name} ready to save</span> : null}</label><InputField label="Customer / site contact name" value={customerName} onChange={(event) => setCustomerName(event.target.value)} /><div className="md:col-span-2"><TextareaField label="Handover or sign-off notes" value={signOffNotes} onChange={(event) => setSignOffNotes(event.target.value)} /></div></div><div className="flex flex-col gap-3 border-t border-slate-800 pt-5 sm:flex-row sm:items-center sm:justify-between"><p className="flex items-center gap-2 text-sm text-slate-400"><ClipboardCheck className="size-4 text-emerald-400" />{checklist.length} of {checklistItems.length} checks complete</p><Button type="button" onClick={saveCompletionPack}><PenLine className="mr-2 size-4" />Save sign-off and complete job</Button></div></Card>}</section>
   </div>;
