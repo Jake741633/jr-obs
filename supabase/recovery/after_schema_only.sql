@@ -337,4 +337,9 @@ begin;
 \ir ../migrations/20260826233120_revalidate_field_mutation_replays.sql
 commit;
 
+\echo 'Keeping canonical RAMS records office-only'
+begin;
+\ir ../migrations/20260827001445_keep_field_rams_office_only.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
