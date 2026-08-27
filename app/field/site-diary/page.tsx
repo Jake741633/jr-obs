@@ -1,17 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CheckCircle2, ClipboardList, HardHat, PackageCheck, ShieldAlert, UsersRound } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useJobsCollection, useJobTimelineCollection, useSiteDiariesCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { activeSyncAuthorizationMatches, getSyncQueue, type SyncState } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isJobInactiveStatus, siteDiaryTimelineEntry } from "../../../lib/jobManagement-core.mjs";
 import { buildDailyProgressSummary, dailyProgressWarnings } from "../../../lib/siteDiaryDailyProgress-core.mjs";
 import { siteDiaryOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
+import { emptySiteDiarySyncProjection, refreshSiteDiarySyncProjection, registerSiteDiarySyncAttempt, siteDiaryAttemptStates, unpairedSiteDiaryTargetStates } from "../../../lib/siteDiarySync-core.mjs";
 import { makeId } from "../../../lib/storage";
 import type { JobTimelineEntry, SiteDiaryEntry } from "../../../lib/models";
 
@@ -22,6 +24,24 @@ type DailyProgressEntry = SiteDiaryEntry & {
   customerSignOffNotes?: string;
   customerSignedAt?: string;
   dailySummary?: string;
+};
+
+type SiteDiaryTargetState = SyncState | "AwaitingQueue";
+type SiteDiarySyncProjection = {
+  scopeKey: string;
+  initialized: boolean;
+  attempts: Record<string, { timelineId: string; jobId?: string; workDate?: string }>;
+  diaryTargets: Record<string, { seen: boolean; state: SiteDiaryTargetState }>;
+  timelineTargets: Record<string, { seen: boolean; state: SiteDiaryTargetState }>;
+};
+
+const siteDiaryTargetMessages: Record<SiteDiaryTargetState, string> = {
+  AwaitingQueue: "waiting to enter the device sync queue",
+  Pending: "queued for cloud confirmation",
+  Offline: "saved on this device while offline",
+  Failed: "failed to sync",
+  Conflict: "conflicted with the current cloud record",
+  Synced: "cloud-confirmed",
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -61,8 +81,11 @@ export default function MobileSiteDiaryPage() {
   const identityState = useCloudIdentity();
   const [form, setForm] = useState(blankForm);
   const [message, setMessage] = useState("");
+  const [interactionScopeKey, setInteractionScopeKey] = useState("");
+  const [siteDiarySyncProjection, setSiteDiarySyncProjection] = useState<SiteDiarySyncProjection>(() => emptySiteDiarySyncProjection());
 
   const activeJobs = useMemo(() => jobs.items.filter((job) => !isJobInactiveStatus(job.status)), [jobs.items]);
+  const jobsById = useMemo(() => new Map(jobs.items.map((job) => [job.id, job])), [jobs.items]);
   const operatorName = useMemo(() => siteDiaryOperatorName({
     identity: identityState.identity,
     teamMembers: team.items,
@@ -70,7 +93,63 @@ export default function MobileSiteDiaryPage() {
   }), [identityState.identity, identityState.mode, team.items]);
   const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const serverBoundLabour = cloudFieldMode;
-  const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
+  const siteDiarySyncScopeKey = JSON.stringify([
+    identityState.identity?.organisationId ?? null,
+    identityState.identity?.userId ?? null,
+    identityState.identity?.role ?? null,
+    identityState.identity?.customerSourceId ?? null,
+  ]);
+  const activeSiteDiarySyncProjection = cloudFieldMode && siteDiarySyncProjection.scopeKey === siteDiarySyncScopeKey
+    ? siteDiarySyncProjection
+    : emptySiteDiarySyncProjection(siteDiarySyncScopeKey) as SiteDiarySyncProjection;
+  const unpairedSiteDiaryTargets = cloudFieldMode ? unpairedSiteDiaryTargetStates(activeSiteDiarySyncProjection) as { kind: "diary" | "timeline"; sourceId: string; state: SiteDiaryTargetState }[] : [];
+  const unpairedSiteDiaryTerminal = unpairedSiteDiaryTargets.some(({ state }) => state === "Failed" || state === "Conflict");
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setSiteDiarySyncProjection(emptySiteDiarySyncProjection(siteDiarySyncScopeKey));
+      setForm({ ...blankForm, workDate: today() });
+      setMessage("");
+      setInteractionScopeKey(siteDiarySyncScopeKey);
+    });
+    return () => { active = false; };
+  }, [siteDiarySyncScopeKey]);
+
+  useEffect(() => {
+    const identity = identityState.identity;
+    if (!cloudFieldMode || !identity) return;
+    let active = true;
+    const authorization = {
+      organisationId: identity.organisationId,
+      userId: identity.userId,
+      role: identity.role,
+      customerSourceId: identity.customerSourceId,
+    };
+
+    function refreshSiteDiarySyncStates() {
+      if (!active || !activeSyncAuthorizationMatches(authorization)) return;
+      const queue = getSyncQueue();
+      setSiteDiarySyncProjection((current) => refreshSiteDiarySyncProjection({
+        current,
+        scopeKey: siteDiarySyncScopeKey,
+        queue,
+        online: navigator.onLine,
+      }));
+    }
+
+    window.addEventListener("jr-os-sync-status", refreshSiteDiarySyncStates);
+    queueMicrotask(refreshSiteDiarySyncStates);
+    return () => {
+      active = false;
+      window.removeEventListener("jr-os-sync-status", refreshSiteDiarySyncStates);
+    };
+  }, [cloudFieldMode, identityState.identity, siteDiarySyncScopeKey]);
+
+  const siteDiarySyncReady = !cloudFieldMode || (activeSiteDiarySyncProjection.initialized && siteDiarySyncProjection.scopeKey === siteDiarySyncScopeKey);
+  const interactionScopeReady = interactionScopeKey === siteDiarySyncScopeKey;
+  const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady) && identityState.isReady && siteDiarySyncReady && interactionScopeReady;
 
   function toggleStaff(memberId: string) {
     if (serverBoundLabour) return;
@@ -82,9 +161,30 @@ export default function MobileSiteDiaryPage() {
     }));
   }
 
+  function siteDiarySyncNotice(diaryId: string) {
+    const attempt = siteDiaryAttemptStates(activeSiteDiarySyncProjection, diaryId) as {
+      diary: SiteDiaryTargetState;
+      timeline: SiteDiaryTargetState;
+      timelineId: string;
+      jobId?: string;
+      workDate?: string;
+    } | null;
+    if (!attempt) return null;
+    const terminal = [attempt.diary, attempt.timeline].some((state) => state === "Failed" || state === "Conflict");
+    const synced = attempt.diary === "Synced" && attempt.timeline === "Synced";
+    const jobTitle = attempt.jobId ? jobsById.get(attempt.jobId)?.title : undefined;
+    return <div key={diaryId} role="status" className={`rounded-xl border px-4 py-3 text-sm ${terminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : synced ? "border-emerald-400/20 bg-emerald-400/5 text-emerald-100" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
+      <p className="font-semibold">{jobTitle || "Daily progress"}{attempt.workDate ? ` · ${attempt.workDate}` : ""}</p>
+      <p className="mt-1 text-xs">Diary record is {siteDiaryTargetMessages[attempt.diary]}. Job timeline note is {siteDiaryTargetMessages[attempt.timeline]}.</p>
+      <p className="mt-1 text-xs">{synced ? "The combined daily progress save is confirmed." : "The combined daily progress save is not fully cloud-confirmed."}</p>
+      {terminal ? <Link href="/cloud" className="mt-2 inline-flex text-xs font-semibold underline underline-offset-2">Open Cloud &amp; account to retry pending changes</Link> : null}
+    </div>;
+  }
+
   function saveDiary(event: FormEvent) {
     event.preventDefault();
     if (!form.jobId) return setMessage("Choose a job before saving the daily progress record.");
+    if (!activeJobs.some((job) => job.id === form.jobId)) return setMessage("The selected active job is no longer available. Refresh the diary before saving.");
     if (!operatorName) return setMessage("Your active team identity could not be resolved. Refresh your account before saving.");
     if (!form.workCompleted.trim()) return setMessage("Record the work completed before saving.");
 
@@ -128,12 +228,21 @@ export default function MobileSiteDiaryPage() {
     };
     const timelineEntry = siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: entry.completedBy, now }) as JobTimelineEntry;
 
+    if (cloudFieldMode) {
+      setSiteDiarySyncProjection((current) => registerSiteDiarySyncAttempt(current, {
+        scopeKey: siteDiarySyncScopeKey,
+        diaryId: entry.id,
+        timelineId: timelineEntry.id,
+        jobId: entry.jobId,
+        workDate: entry.workDate,
+      }));
+    }
     diaries.setItems((current) => [entry, ...current]);
     timeline.setItems((current) => [timelineEntry, ...current]);
     const warningCount = dailyProgressWarnings(entry, { requireEngineerSignature: !cloudFieldMode }).length;
     const warningSuffix = warningCount ? ` with ${warningCount} action${warningCount === 1 ? "" : "s"} to review` : "";
     setMessage(cloudFieldMode
-      ? `Daily progress and a separate job timeline note queued for secure sync${warningSuffix}.`
+      ? `Daily progress captured on this device; its diary record and separate job timeline note are awaiting cloud confirmation${warningSuffix}.`
       : `Daily progress saved and added to the job timeline${warningSuffix}.`);
     setForm({ ...blankForm, jobId: form.jobId, workDate: today() });
   }
@@ -142,10 +251,16 @@ export default function MobileSiteDiaryPage() {
 
   return <div className="space-y-5 pb-24 sm:space-y-6 sm:pb-0">
     <PageHeader eyebrow="Job Management Pro" title="Site diary & daily progress" description={cloudFieldMode
-      ? "Capture labour, progress, deliveries, plant and safety actions for secure sync. Formal acknowledgements remain an office handoff."
+      ? "Capture labour, progress, deliveries, plant and safety actions on this device for secure sync. Formal acknowledgements remain an office handoff."
       : "Capture labour, progress, deliveries, plant, safety actions and sign-off in the local diary record."} />
 
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-100">{message}</div> : null}
+    {cloudFieldMode ? Object.keys(activeSiteDiarySyncProjection.attempts).reverse().map(siteDiarySyncNotice) : null}
+    {cloudFieldMode && unpairedSiteDiaryTargets.length ? <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${unpairedSiteDiaryTerminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
+      <p className="font-semibold">One or more retained site diary sync targets are not cloud-confirmed.</p>
+      <p className="mt-1 text-xs opacity-80">An exact diary record or site-diary timeline note remains pending, offline, failed or conflicted. Treat the combined save as unconfirmed until the queue clears.</p>
+      <Link href="/cloud" className="mt-2 inline-flex text-xs font-semibold underline underline-offset-2">Open Cloud &amp; account to review pending changes</Link>
+    </div> : null}
 
     <form onSubmit={saveDiary} className="space-y-4">
       <Card className="space-y-4">
@@ -194,7 +309,7 @@ export default function MobileSiteDiaryPage() {
         <p className="text-xs text-slate-400">Entering a name records the current timestamp when this local diary is saved. Final job completion sign-off remains in Completion Packs.</p>
       </Card>}
 
-      <Button type="submit" className="min-h-14 w-full text-base">{cloudFieldMode ? "Queue daily progress" : "Save daily progress"}</Button>
+      <Button type="submit" className="min-h-14 w-full text-base">{cloudFieldMode ? "Capture daily progress" : "Save daily progress"}</Button>
     </form>
 
     {form.jobId ? <Link href={`/jobs/${form.jobId}`} className="inline-flex min-h-12 w-full items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link> : null}
