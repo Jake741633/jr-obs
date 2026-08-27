@@ -121,7 +121,7 @@ export default function MobileQaPage() {
         };
         tasks.setItems((current) => [typedTask, ...current]);
       }
-      setMessage(result === "Pass" ? `${inspection.type} QA passed.` : `${inspection.type} QA failed and a linked snag was created.`);
+      setMessage(result === "Pass" ? `${inspection.type} QA pass recorded on this device. The inspection and timeline entry sync independently.` : `${inspection.type} QA fail recorded on this device. The inspection, timeline entry and linked snag sync independently.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to complete QA inspection.");
     }
