@@ -184,6 +184,20 @@ test("electrician survey caches require a live assigned read", () => {
   assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-surveys", role: "electrician" }), undefined);
 });
 
+test("electrician office-finance caches never survive outside local mode", () => {
+  for (const storageKey of [
+    "jr-os-pricing-documents",
+    "jr-os-invoices",
+    "jr-os-bank-details",
+    "jr-os-payment-terms-templates",
+  ]) {
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "cloud" }), "purge");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "migration", generation: "pre-hardening" }), "purge");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "local" }), "keep");
+    assert.equal(roleProjectionCachePolicy({ storageKey, role: "office", mode: "cloud" }), "keep");
+  }
+});
+
 test("electrician inventory caches discard records from before the field-safe price projections", () => {
   for (const storageKey of ["jr-os-materials", "jr-os-stock-items", "jr-os-purchase-lists"]) {
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "cloud" }), "purge");
