@@ -85,7 +85,7 @@ test("failed or conflicted job stage attempts stay visibly local and block anoth
 test("field start cards keep failed stages visibly local and block another start", () => {
   assert.match(fieldPage, /The displayed badge may be local and is not cloud-confirmed/);
   assert.match(fieldPage, /jobStatusSyncNotice\(job\.id\)/);
-  assert.match(fieldPage, /disabled=\{cloudFieldMode && \(!operatorName \|\| jobStatusSyncBlocked\(job\.id\)\)\}/);
+  assert.match(fieldPage, /disabled=\{timerLocked \|\| \(cloudFieldMode && \(!operatorName \|\| jobStatusSyncBlocked\(job\.id\)\)\)\}/);
 
   const statusHandler = functionBody(fieldPage, "updateJobStatus", "startJob");
   assert.ok(statusHandler.indexOf('syncState === "Failed" || syncState === "Conflict"') < statusHandler.indexOf("jobs.setItems"));
