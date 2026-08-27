@@ -2,12 +2,17 @@
 
 import Link from "next/link";
 import { BellRing, CalendarClock, MessageSquare, UserRoundCheck } from "lucide-react";
+import { canAccessPath } from "../lib/cloud/permissions";
+import { useCloudIdentity } from "../lib/cloud/useCloudIdentity";
 import { Card } from "./ui/Card";
 import { useLocalStorageCollection } from "../lib/storage";
 import type { PortalActivity, PortalApprovalRecord, PortalRequest } from "../lib/customerPortal";
 import type { Customer } from "../lib/models";
 
 export function PortalActivityDashboard() {
+  const { identity, mode } = useCloudIdentity();
+  const unrestricted = mode === "local" || (mode === "migration" && !identity);
+  const canOpenPortal = unrestricted || canAccessPath(identity?.role, "/customer-portal", identity?.email);
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const approvals = useLocalStorageCollection<PortalApprovalRecord>("jr-os-portal-approvals");
   const requests = useLocalStorageCollection<PortalRequest>("jr-os-portal-requests");
@@ -19,7 +24,7 @@ export function PortalActivityDashboard() {
   const recent = [...activity.items].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,5);
   const customerName = (id: string) => customers.items.find((item) => item.id === id)?.name || "Customer";
   return <section className="space-y-4">
-    <div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Customer portal</p><h2 className="mt-1 text-2xl font-bold">Portal activity and customer actions</h2></div><Link href="/customer-portal" className="text-sm font-semibold text-cyan-300">Open portal</Link></div>
+    <div className="flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Customer portal</p><h2 className="mt-1 text-2xl font-bold">Portal activity and customer actions</h2></div>{canOpenPortal ? <Link href="/customer-portal" className="text-sm font-semibold text-cyan-300">Open portal</Link> : null}</div>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Card><UserRoundCheck className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Approval history</p><p className="mt-2 text-3xl font-bold">{approvals.items.length}</p></Card>
       <Card><BellRing className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Open customer actions</p><p className="mt-2 text-3xl font-bold">{openRequests.length}</p></Card>
