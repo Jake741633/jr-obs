@@ -62,6 +62,19 @@ test("job progress reports exact replay failure state without claiming rollback 
   assert.doesNotMatch(workspace, /progressSync.*error|item\.error/s);
 });
 
+test("terminal progress sync preserves newer unsaved field edits", () => {
+  assert.match(
+    workspace,
+    /activeProgressSyncState === "Failed" \|\| activeProgressSyncState === "Conflict"[\s\S]*Unsaved progress changes remain preserved on this device\./,
+  );
+  assert.doesNotMatch(
+    workspace,
+    /nextState === "Failed" \|\| nextState === "Conflict"[\s\S]{0,260}setProgressDraft/,
+  );
+  assert.match(workspace, /const progressSyncBlocked = activeProgressSyncState === "Failed" \|\| activeProgressSyncState === "Conflict"/);
+  assert.match(workspace, /disabled=\{progressSyncBlocked\}/);
+});
+
 test("mobile job workspace creates one canonical progress record shape when none exists", () => {
   assert.match(workspace, /`job-progress-\$\{jobId\}`/);
   assert.match(workspace, /fieldWorkspace \? \{\} : \{ suggestions: progressRecord\?\.suggestions \?\? \[\] \}/);
