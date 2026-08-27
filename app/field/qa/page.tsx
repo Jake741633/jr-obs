@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Plus, ShieldCheck, XCircle } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -24,16 +24,37 @@ export default function MobileQaPage() {
   const timeline = useJobTimelineCollection();
   const team = useTeamCollection();
   const identityState = useCloudIdentity();
+  const qaIdentityScopeKey = JSON.stringify([
+    identityState.identity?.organisationId ?? null,
+    identityState.identity?.userId ?? null,
+    identityState.identity?.role ?? null,
+    identityState.identity?.customerSourceId ?? null,
+  ]);
   const [form, setForm] = useState(blankForm);
   const [selectedJobId, setSelectedJobId] = useState("");
   const [message, setMessage] = useState("");
+  const [interactionScopeKey, setInteractionScopeKey] = useState("");
 
   const activeJobs = useMemo(() => jobs.items.filter((job) => !["Complete", "Invoiced", "Paid", "Cancelled"].includes(job.status)), [jobs.items]);
+
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setForm(blankForm);
+      setSelectedJobId("");
+      setMessage("");
+      setInteractionScopeKey(qaIdentityScopeKey);
+    });
+    return () => { active = false; };
+  }, [qaIdentityScopeKey]);
+
   const visibleJobId = selectedJobId || form.jobId || activeJobs[0]?.id || "";
   const visibleInspections = useMemo(() => inspections.items.filter((inspection) => inspection.jobId === visibleJobId).toSorted((a, b) => b.inspectedAt.localeCompare(a.inspectedAt)), [inspections.items, visibleJobId]);
   const summary = useMemo(() => qaSummary(inspections.items, visibleJobId), [inspections.items, visibleJobId]);
   const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
-  const ready = [jobs, inspections, tasks, timeline, team].every((collection) => collection.isReady) && identityState.isReady;
+  const interactionScopeReady = interactionScopeKey === qaIdentityScopeKey;
+  const ready = [jobs, inspections, tasks, timeline, team].every((collection) => collection.isReady) && identityState.isReady && interactionScopeReady;
 
   if (!ready) return <Card>Loading mobile QA inspections…</Card>;
 
@@ -43,13 +64,18 @@ export default function MobileQaPage() {
       setMessage("QA inspections are read-only for field cloud sessions until the dedicated secure QA mutation route is available.");
       return;
     }
-    const jobId = form.jobId || visibleJobId;
+    const requestedJobId = form.jobId || visibleJobId;
+    const activeJob = activeJobs.find((job) => job.id === requestedJobId);
+    if (!activeJob) {
+      setMessage("The selected active job is no longer available for this account. Choose a current active job before creating a QA inspection.");
+      return;
+    }
     const inspector = team.items.find((member) => member.id === form.inspectorId);
     try {
-      const record = buildQaInspection({ id: makeId("qa"), jobId, type: form.type, inspectorId: inspector?.id, inspectorName: inspector?.name || "JR OS engineer", notes: form.notes.trim(), now: new Date().toISOString() }) as JobQaInspection;
+      const record = buildQaInspection({ id: makeId("qa"), jobId: activeJob.id, type: form.type, inspectorId: inspector?.id, inspectorName: inspector?.name || "JR OS engineer", notes: form.notes.trim(), now: new Date().toISOString() }) as JobQaInspection;
       inspections.setItems((current) => [record, ...current]);
-      setSelectedJobId(jobId);
-      setForm({ ...blankForm, jobId, inspectorId: form.inspectorId });
+      setSelectedJobId(activeJob.id);
+      setForm({ ...blankForm, jobId: activeJob.id, inspectorId: form.inspectorId });
       setMessage(`${record.type} QA inspection created.`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to create QA inspection.");
