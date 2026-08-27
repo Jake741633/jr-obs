@@ -92,10 +92,12 @@ test("cloud diary UI submits supported detail and keeps acknowledgement evidence
   assert.match(handler, /dailyProgressWarnings\(entry, \{ requireEngineerSignature: !cloudFieldMode \}\)/i);
 });
 
-test("field diary messaging distinguishes optimistic cloud queueing from local persistence", () => {
-  assert.match(advancedPage, /Daily progress and a separate job timeline note queued for secure sync/i);
+test("field diary messaging distinguishes unconfirmed cloud capture from local persistence", () => {
+  assert.match(advancedPage, /Daily progress captured on this device; its diary record and separate job timeline note are awaiting cloud confirmation/i);
+  assert.match(advancedPage, /The combined daily progress save is not fully cloud-confirmed/i);
   assert.match(advancedPage, /Daily progress saved and added to the job timeline/i);
-  assert.match(advancedPage, /cloudFieldMode \? "Queue daily progress" : "Save daily progress"/i);
+  assert.match(advancedPage, /cloudFieldMode \? "Capture daily progress" : "Save daily progress"/i);
+  assert.doesNotMatch(advancedPage, /Daily progress and a separate job timeline note queued for secure sync/i);
   assert.match(basicPage, /Site diary entry and a separate job timeline note queued for secure sync/i);
   assert.match(basicPage, /Site diary entry saved to the job record/i);
   assert.doesNotMatch(advancedPage, /setMessage\(`Daily progress saved and added to the job timeline/i);
