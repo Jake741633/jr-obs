@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { AlertTriangle, ClipboardList, PackageOpen, ShieldAlert, UsersRound } from "lucide-react";
 import { useSiteDiariesCollection } from "../../lib/cloud/coreBusinessCollections";
+import { canAccessPath } from "../../lib/cloud/permissions";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { siteDiaryAttentionSummary } from "../../lib/siteDiaryAttention-core.mjs";
 import { Card } from "../ui/Card";
 
@@ -32,6 +34,9 @@ const kindIcon = {
 } as const;
 
 export function SiteDiaryAttentionPanel() {
+  const { identity, mode } = useCloudIdentity();
+  const unrestricted = mode === "local" || (mode === "migration" && !identity);
+  const canOpenRams = unrestricted || canAccessPath(identity?.role, "/rams", identity?.email);
   const diaries = useSiteDiariesCollection();
   const summary = siteDiaryAttentionSummary(diaries.items) as {
     total: number;
@@ -60,8 +65,8 @@ export function SiteDiaryAttentionPanel() {
         {summary.items.slice(0, 8).map((item: SiteDiaryAttentionItem) => {
           const Icon = kindIcon[item.kind as keyof typeof kindIcon] ?? ClipboardList;
           const tone = priorityTone[item.priority] ?? priorityTone.Normal;
-          return (
-            <Link key={item.id} href={item.href} className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition hover:border-cyan-400/30 ${tone}`}>
+          const className = `flex items-start gap-3 rounded-xl border px-4 py-3 ${tone}`;
+          const content = <>
               <Icon className="mt-0.5 size-5 shrink-0" />
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center justify-between gap-2">
@@ -71,8 +76,9 @@ export function SiteDiaryAttentionPanel() {
                 <span className="mt-1 block text-sm opacity-80">{item.detail}</span>
                 <span className="mt-1 block text-xs opacity-60">{item.dueDate || "No date recorded"}</span>
               </span>
-            </Link>
-          );
+            </>;
+          if (item.href === "/rams" && !canOpenRams) return <div key={item.id} className={className}>{content}</div>;
+          return <Link key={item.id} href={item.href} className={`${className} transition hover:border-cyan-400/30`}>{content}</Link>;
         })}
         {!summary.items.length ? <p className="text-sm text-emerald-300">No site diary actions need attention.</p> : null}
       </Card>

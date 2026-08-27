@@ -5,6 +5,8 @@ import { useState } from "react";
 import { AlertTriangle, ArrowLeft, BriefcaseBusiness, CalendarCheck2, CheckCircle2, ClipboardCheck, ShieldCheck } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
+import { canAccessPath } from "../../../lib/cloud/permissions";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { useLocalStorageCollection } from "../../../lib/storage";
 import type { ElectricalCertificate, Job, JobDocument, PlannerEntry, PricingDocument, RamsDocument, SiteSurvey } from "../../../lib/models";
 
@@ -20,6 +22,9 @@ type Finding = {
 const today = new Date().toISOString().slice(0, 10);
 
 export default function JobReviewPage() {
+  const { identity, mode } = useCloudIdentity();
+  const unrestricted = mode === "local" || (mode === "migration" && !identity);
+  const ramsHref = unrestricted || canAccessPath(identity?.role, "/rams", identity?.email) ? "/rams" : undefined;
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const pricing = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
@@ -63,8 +68,8 @@ export default function JobReviewPage() {
     else if (linkedSurvey.status !== "Complete") findings.push({ level: "Check", title: "Survey is incomplete", detail: `${linkedSurvey.number} is currently ${linkedSurvey.status.toLowerCase()}.`, href: "/surveys" });
     else findings.push({ level: "Ready", title: "Survey complete", detail: `${linkedSurvey.number} is ready for use.` });
 
-    if (!linkedRams) findings.push({ level: "Check", title: "No RAMS linked", detail: "Decide whether this job needs a risk assessment and method statement before attendance.", href: "/rams" });
-    else if (linkedRams.status !== "Approved") findings.push({ level: "Check", title: "RAMS not approved", detail: `${linkedRams.number} is ${linkedRams.status.toLowerCase()}.`, href: "/rams" });
+    if (!linkedRams) findings.push({ level: "Check", title: "No RAMS linked", detail: "Decide whether this job needs a risk assessment and method statement before attendance.", href: ramsHref });
+    else if (linkedRams.status !== "Approved") findings.push({ level: "Check", title: "RAMS not approved", detail: `${linkedRams.number} is ${linkedRams.status.toLowerCase()}.`, href: ramsHref });
     else findings.push({ level: "Ready", title: "RAMS approved", detail: `${linkedRams.number} is approved.` });
 
     if (!plannerEntries.length && selected.startDate) findings.push({ level: "Check", title: "No planner booking", detail: "Add the job to the resource planner and assign the required team members.", href: "/planner" });
