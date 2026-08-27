@@ -5,6 +5,7 @@ import { queueTargetSyncState } from "../lib/cloud/repository-core.mjs";
 
 const jobsPage = readFileSync(new URL("../app/jobs/page.tsx", import.meta.url), "utf8");
 const workspace = readFileSync(new URL("../app/jobs/[id]/workspace/page.tsx", import.meta.url), "utf8");
+const fieldPage = readFileSync(new URL("../app/field/page.tsx", import.meta.url), "utf8");
 
 function functionBody(source, name, nextName) {
   const start = source.indexOf(`function ${name}`);
@@ -44,10 +45,24 @@ test("both electrician job stage surfaces track exact account and job reconcilia
   assert.match(workspace, /setJobStatusSync\(\{ targetKey: jobStatusSyncTargetKey, state: "Synced" \}\)/);
 });
 
+test("field start cards track exact account and job reconciliation", () => {
+  assert.match(fieldPage, /const queue = getSyncQueue\(\)/);
+  assert.match(fieldPage, /queueTargetSyncState\(queue, \{\s*table: "jobs",\s*sourceId: job\.id/s);
+  assert.match(fieldPage, /accountStorageKey\(\s*"jr-os-jobs",\s*identityState\.identity\.organisationId,\s*identityState\.identity\.userId,\s*identityState\.identity\.role,\s*identityState\.identity\.customerSourceId/s);
+  assert.match(fieldPage, /window\.addEventListener\("jr-os-sync-status", refreshJobStatusSyncStates\)/);
+  assert.match(fieldPage, /window\.removeEventListener\("jr-os-sync-status", refreshJobStatusSyncStates\)/);
+  assert.match(fieldPage, /window\.addEventListener\("jr-os-cloud-cache-reconciled", confirmJobStatusReconciliation\)/);
+  assert.match(fieldPage, /window\.removeEventListener\("jr-os-cloud-cache-reconciled", confirmJobStatusReconciliation\)/);
+  assert.match(fieldPage, /detail\?\.storageKey !== jobsStorageKey \|\| !detail\.sourceId/);
+  assert.match(fieldPage, /\[sourceId\]: "Synced"/);
+});
+
 test("an empty queue cannot independently claim cloud-confirmed job stage state", () => {
   assert.match(jobsPage, /nextState !== "Synced" \|\| currentStates\[job\.id\] === "Synced"/);
+  assert.match(fieldPage, /nextState !== "Synced" \|\| currentStates\[job\.id\] === "Synced"/);
   assert.match(workspace, /if \(nextState === "Synced"\) \{[\s\S]*current\.state === "Synced"[\s\S]*state: null/);
   assert.doesNotMatch(jobsPage, /nextState === "Synced"[^\n]*nextStates\[job\.id\] = nextState/);
+  assert.doesNotMatch(fieldPage, /nextState === "Synced"[^\n]*nextStates\[job\.id\] = nextState/);
 });
 
 test("failed or conflicted job stage attempts stay visibly local and block another transition", () => {
@@ -67,6 +82,22 @@ test("failed or conflicted job stage attempts stay visibly local and block anoth
   assert.match(jobsPage, /displayedStatusMessage \? <p role="status"/);
 });
 
+test("field start cards keep failed stages visibly local and block another start", () => {
+  assert.match(fieldPage, /The displayed badge may be local and is not cloud-confirmed/);
+  assert.match(fieldPage, /jobStatusSyncNotice\(job\.id\)/);
+  assert.match(fieldPage, /disabled=\{cloudFieldMode && \(!operatorName \|\| jobStatusSyncBlocked\(job\.id\)\)\}/);
+
+  const statusHandler = functionBody(fieldPage, "updateJobStatus", "startJob");
+  assert.ok(statusHandler.indexOf('syncState === "Failed" || syncState === "Conflict"') < statusHandler.indexOf("jobs.setItems"));
+  assert.match(statusHandler, /\[jobId\]: navigator\.onLine \? "Pending" : "Offline"/);
+
+  const startHandler = functionBody(fieldPage, "startJob", "stopJob");
+  assert.ok(startHandler.indexOf("jobStatusSyncBlocked(job.id)") < startHandler.indexOf("setForm"));
+  assert.match(startHandler, /const transitionApplied = updateJobStatus\(job\.id, "First fix"\);\s*if \(!transitionApplied\) return/);
+  assert.match(startHandler, /Work timer for \$\{job\.title\} started on this device at \$\{startedAt\}\./);
+  assert.match(fieldPage, /variant="secondary" onClick=\{\(\) => stopJob\(job\)\}/);
+});
+
 test("field mutations report pending or offline immediately while office evidence stays unchanged", () => {
   assert.match(jobsPage, /\[id\]: navigator\.onLine \? "Pending" : "Offline"/);
   assert.match(workspace, /setJobStatusSync\(\{ targetKey: jobStatusSyncTargetKey, state: navigator\.onLine \? "Pending" : "Offline" \}\)/);
@@ -76,7 +107,7 @@ test("field mutations report pending or offline immediately while office evidenc
 });
 
 test("job status queue reads are effect-only and identity scoped", () => {
-  for (const source of [jobsPage, workspace]) {
+  for (const source of [jobsPage, workspace, fieldPage]) {
     assert.doesNotMatch(source, /useState[^\n]*getSyncQueue/);
     assert.match(source, /identityState\.identity\?\.organisationId \?\? null,[\s\S]*identityState\.identity\?\.customerSourceId \?\? null/);
   }
