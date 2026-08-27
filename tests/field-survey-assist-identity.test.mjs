@@ -45,7 +45,7 @@ test("asynchronous survey photos remain bound to the initiating identity and cur
   const onload = handler.slice(handler.indexOf("reader.onload"));
   assert.ok(requestedScope >= 0 && requestedScope < reader, "the initiating identity scope must be captured before FileReader starts");
   assert.match(onload, /activeIdentityScopeKeyRef\.current !== requestedScopeKey/);
-  assert.match(onload, /!surveyItemsRef\.current\.some\((item\) => item\.id === id\)/);
+  assert.ok(onload.includes("!surveyItemsRef.current.some((item) => item.id === id)"));
   assert.match(onload, /update\(\(currentSurvey\) => \(\{ photos: \[\.\.\.currentSurvey\.photos, photo\] \}\), requestedScopeKey\);/);
   const scopeGuard = onload.indexOf("activeIdentityScopeKeyRef.current !== requestedScopeKey");
   const mutation = onload.indexOf("update((currentSurvey)");
