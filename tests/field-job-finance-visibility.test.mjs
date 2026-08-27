@@ -117,8 +117,9 @@ test("workspace computes and renders commercial totals only with positive financ
     "const acceptedVariationValue = showOfficeFinance",
     "const jobDocuments",
   );
-  assert.match(variationTotal, /\? jobVariations[\s\S]*\.reduce\(/);
+  assert.match(variationTotal, /\? calculateAcceptedVariationValue\(jobVariations\)/);
   assert.match(variationTotal, /:\s*0;/);
+  assert.doesNotMatch(variationTotal, /\.reduce\(|fixedPrice \?\?|labourHours \* item\.labourRate/);
 
   assert.match(
     workspace,

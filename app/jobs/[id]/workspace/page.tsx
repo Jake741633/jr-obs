@@ -36,7 +36,7 @@ import {
 import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../../../lib/cloud/fieldMutationPolicy-core.mjs";
 import { canEditFinance } from "../../../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../../../lib/cloud/useCloudIdentity";
-import { canonicalJobStatuses, fieldJobStatusTransitionAllowed, fieldJobStatusTransitions, normaliseFieldJobStatus, normaliseJobStatus, transitionJobStatus } from "../../../../lib/jobManagement-core.mjs";
+import { acceptedVariationValue as calculateAcceptedVariationValue, canonicalJobStatuses, fieldJobStatusTransitionAllowed, fieldJobStatusTransitions, normaliseFieldJobStatus, normaliseJobStatus, transitionJobStatus } from "../../../../lib/jobManagement-core.mjs";
 import { normaliseJobProgress } from "../../../../lib/jobProgress-core.mjs";
 import { jobTaskCounts } from "../../../../lib/jobTasks-core.mjs";
 import { makeId } from "../../../../lib/storage";
@@ -140,7 +140,7 @@ export default function JobWorkspacePage() {
   const jobDiaries = diaries.items.filter((item) => item.jobId === jobId);
   const jobVariations = variations.items.filter((item) => item.jobId === jobId);
   const acceptedVariationValue = showOfficeFinance
-    ? jobVariations.filter((item) => ["Accepted", "Approved", "Invoiced"].includes(item.status)).reduce((sum, item) => sum + (item.fixedPrice ?? item.labourHours * item.labourRate + item.materialCharge + item.otherCharge), 0)
+    ? calculateAcceptedVariationValue(jobVariations)
     : 0;
   const jobDocuments = documents.items.filter((item) => item.jobId === jobId);
   const recentActivity = timeline.items.filter((item) => item.jobId === jobId).toSorted((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, 5);
