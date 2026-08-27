@@ -92,6 +92,7 @@ export default function JobWorkspacePage() {
   const jobId = params.id;
   const identityState = useCloudIdentity();
   const fieldWorkspace = identityState.mode !== "local" && identityState.identity?.role === "electrician";
+  const showOfficeFinance = identityState.mode === "local" || canEditFinance(identityState.identity?.role);
   const jobStatusMutationRoute = identityState.identity
     ? collectionCloudMutationRoute("jobs", identityState.identity.role)
     : { kind: "deny" as const };
@@ -138,7 +139,9 @@ export default function JobWorkspacePage() {
   const counts = jobTaskCounts(tasks.items, jobId);
   const jobDiaries = diaries.items.filter((item) => item.jobId === jobId);
   const jobVariations = variations.items.filter((item) => item.jobId === jobId);
-  const acceptedVariationValue = jobVariations.filter((item) => ["Accepted", "Approved", "Invoiced"].includes(item.status)).reduce((sum, item) => sum + (item.fixedPrice ?? item.labourHours * item.labourRate + item.materialCharge + item.otherCharge), 0);
+  const acceptedVariationValue = showOfficeFinance
+    ? jobVariations.filter((item) => ["Accepted", "Approved", "Invoiced"].includes(item.status)).reduce((sum, item) => sum + (item.fixedPrice ?? item.labourHours * item.labourRate + item.materialCharge + item.otherCharge), 0)
+    : 0;
   const jobDocuments = documents.items.filter((item) => item.jobId === jobId);
   const recentActivity = timeline.items.filter((item) => item.jobId === jobId).toSorted((a, b) => b.completedAt.localeCompare(a.completedAt)).slice(0, 5);
   const currentStatus = fieldJobStatusRestricted ? normaliseFieldJobStatus(job.status) : normaliseJobStatus(job.status);
@@ -222,9 +225,11 @@ export default function JobWorkspacePage() {
 
     <Card className="border-cyan-500/25">
       <div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job Management Pro</p><h1 className="mt-2 break-words text-3xl font-black">{job.title}</h1><p className="mt-2 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{job.siteAddress || "No site address"}</p></div><StatusBadge status={currentStatus} /></div>
-      <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Contract value</p><p className="mt-1 font-bold">{money.format(job.value || 0)}</p></div>
-        <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Variations</p><p className="mt-1 font-bold text-emerald-300">{money.format(acceptedVariationValue)}</p></div>
+      <div className={`mt-5 grid grid-cols-2 gap-3 ${showOfficeFinance ? "sm:grid-cols-4" : "sm:grid-cols-2"}`}>
+        {showOfficeFinance ? <>
+          <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Contract value</p><p className="mt-1 font-bold">{money.format(job.value || 0)}</p></div>
+          <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Variations</p><p className="mt-1 font-bold text-emerald-300">{money.format(acceptedVariationValue)}</p></div>
+        </> : null}
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Outstanding</p><p className="mt-1 font-bold text-amber-300">{counts.outstanding}</p></div>
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Progress</p><p className="mt-1 font-bold text-cyan-200">{progressValue.overall}%</p></div>
       </div>

@@ -176,7 +176,6 @@ export default function JobDetailPage() {
     return <div className="space-y-6"><Link href="/jobs" className="inline-flex items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200"><ArrowLeft className="size-4" />Back to jobs</Link><Card><h1 className="text-xl font-bold">Job not found</h1><p className="mt-2 text-sm text-slate-400">This job may have been deleted or the link is no longer valid.</p></Card></div>;
   }
 
-  const formattedValue = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.value || 0);
   const formattedDate = job.startDate ? new Date(`${job.startDate}T12:00:00`).toLocaleDateString("en-GB") : "Not scheduled";
   const completedMilestones = new Set(entries.map((entry) => entry.milestone));
   const nextMilestone = milestones.find((milestone) => milestone !== "Custom update" && !completedMilestones.has(milestone));
@@ -333,7 +332,7 @@ export default function JobDetailPage() {
       <div className="mt-6 grid gap-4 text-sm text-slate-300 md:grid-cols-2">
         <p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{job.siteAddress}</p>
         <p className="flex items-center gap-2"><CalendarDays className="size-4 text-cyan-400" />{formattedDate}</p>
-        <p className="flex items-center gap-2"><WalletCards className="size-4 text-cyan-400" />{formattedValue}</p>
+        {!financeRestricted ? <p className="flex items-center gap-2"><WalletCards className="size-4 text-cyan-400" />{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.value || 0)}</p> : null}
         <p className="md:col-span-2 whitespace-pre-wrap"><span className="font-semibold text-slate-200">Notes:</span> {job.notes || "No notes"}</p>
       </div>
     </Card>
