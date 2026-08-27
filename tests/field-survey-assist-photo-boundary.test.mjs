@@ -103,7 +103,7 @@ test("office and local survey mutations remain available", () => {
   assert.match(assistPage, /identityState\.mode !== "local"/);
   assert.match(assistPage, /<Button onClick=\{applySuggestions\} disabled=\{!transcript\.trim\(\)\}>/);
   assert.match(assistPage, /<input className="hidden" type="file" accept="image\/\*" capture="environment" onChange=\{addBoardPhoto\} \/>/);
-  assert.match(assistPage, /update\(\{ photos: \[\.\.\.survey\.photos, photo\] \}\)/);
+  assert.match(assistPage, /update\(\(currentSurvey\) => \(\{ photos: \[\.\.\.currentSurvey\.photos, photo\] \}\), requestedScopeKey\)/);
   assert.match(assistPage, /reader\.readAsDataURL\(file\)/);
 });
 
@@ -115,10 +115,10 @@ test("restricted board photo handling returns before every optimistic side effec
   assert.match(handler.slice(guard, guardReturn), /event\.target\.value = ""/);
 
   for (const sideEffect of [
-    "event.target.files",
+    "input.files",
     "new FileReader",
     "reader.readAsDataURL",
-    "update({ photos:",
+    "update((currentSurvey)",
     'setSaved("Board photo added.',
   ]) {
     assert.ok(handler.indexOf(sideEffect) > guardReturn, `${sideEffect} must remain behind the restriction guard`);

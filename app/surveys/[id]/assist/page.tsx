@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Camera, Check, ImagePlus, Sparkles } from "lucide-react";
 import { Button } from "../../../../components/ui/Button";
 import { Card } from "../../../../components/ui/Card";
@@ -16,36 +16,70 @@ import type { SiteSurvey, SurveyPhoto } from "../../../../lib/models";
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none focus:border-cyan-400";
 const fieldSuggestionHandoffMessage = "Survey suggestions are read-only for field users because assigned surveys can be office-authored. Ask the office to apply the draft after review.";
 const fieldPhotoHandoffMessage = "Board photo uploads are read-only for field users until a dedicated assigned-job upload route is available. Ask the office to add new survey photos.";
+type SurveyAssistPatch = Partial<SiteSurvey> | ((currentSurvey: SiteSurvey) => Partial<SiteSurvey>);
 
 export default function SurveyAssistPage() {
   const { id } = useParams<{ id: string }>();
   const surveys = useSurveysCollection();
   const identityState = useCloudIdentity();
+  const surveyAssistIdentityScopeKey = JSON.stringify([
+    identityState.identity?.organisationId ?? null,
+    identityState.identity?.userId ?? null,
+    identityState.identity?.role ?? null,
+    identityState.identity?.customerSourceId ?? null,
+  ]);
+  const activeIdentityScopeKeyRef = useRef(surveyAssistIdentityScopeKey);
+  activeIdentityScopeKeyRef.current = surveyAssistIdentityScopeKey;
+  const surveyItemsRef = useRef(surveys.items);
+  surveyItemsRef.current = surveys.items;
   const fieldSuggestionRestricted = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const fieldPhotoRestricted = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const [transcript, setTranscript] = useState("");
   const [saved, setSaved] = useState("");
+  const [interactionScopeKey, setInteractionScopeKey] = useState("");
   const survey = surveys.items.find((item) => item.id === id);
   const draft = useMemo(() => interpretSurveyTranscript(transcript), [transcript]);
 
-  if (!surveys.isReady) return <Card>Loading JR Assist…</Card>;
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setTranscript("");
+      setSaved("");
+      setInteractionScopeKey(surveyAssistIdentityScopeKey);
+    });
+    return () => { active = false; };
+  }, [surveyAssistIdentityScopeKey]);
+
+  const interactionScopeReady = interactionScopeKey === surveyAssistIdentityScopeKey;
+
+  if (!surveys.isReady || !identityState.isReady || !interactionScopeReady) return <Card>Loading JR Assist…</Card>;
   if (!survey) return <Card>Survey not found.</Card>;
 
-  function update(patch: Partial<SiteSurvey>) {
-    surveys.setItems((current) => current.map((item) => item.id === id ? { ...item, ...patch, updatedAt: new Date().toISOString() } : item));
+  function update(patch: SurveyAssistPatch, expectedScopeKey = surveyAssistIdentityScopeKey) {
+    surveys.setItems((current) => {
+      if (activeIdentityScopeKeyRef.current !== expectedScopeKey) return current;
+      const currentSurvey = current.find((item) => item.id === id);
+      if (!currentSurvey) return current;
+      const resolvedPatch = typeof patch === "function" ? patch(currentSurvey) : patch;
+      return current.map((item) => item.id === id ? { ...item, ...resolvedPatch, updatedAt: new Date().toISOString() } : item);
+    });
   }
 
   function applySuggestions() {
     if (fieldSuggestionRestricted) return;
-    if (!survey) return;
+    if (!interactionScopeReady) return;
+    const currentSurvey = surveys.items.find((item) => item.id === id);
+    if (!currentSurvey) return;
+    const requestedScopeKey = surveyAssistIdentityScopeKey;
     update({
       ...draft.consumerUnit,
-      voiceNotes: [survey.voiceNotes, transcript].filter(Boolean).join("\n\n"),
-      defects: Array.from(new Set([...survey.defects, ...draft.defects])),
-      risks: Array.from(new Set([...survey.risks, ...draft.risks])),
-      recommendations: Array.from(new Set([...survey.recommendations, ...draft.recommendations])),
-      status: survey.status === "Draft" ? "In progress" : survey.status,
-    });
+      voiceNotes: [currentSurvey.voiceNotes, transcript].filter(Boolean).join("\n\n"),
+      defects: Array.from(new Set([...currentSurvey.defects, ...draft.defects])),
+      risks: Array.from(new Set([...currentSurvey.risks, ...draft.risks])),
+      recommendations: Array.from(new Set([...currentSurvey.recommendations, ...draft.recommendations])),
+      status: currentSurvey.status === "Draft" ? "In progress" : currentSurvey.status,
+    }, requestedScopeKey);
     setSaved("Suggestions applied to the survey. Review every field before completion.");
   }
 
@@ -54,14 +88,25 @@ export default function SurveyAssistPage() {
       event.target.value = "";
       return;
     }
-    const file = event.target.files?.[0];
-    if (!file || !survey) return;
+    const input = event.currentTarget;
+    const requestedScopeKey = surveyAssistIdentityScopeKey;
+    if (!interactionScopeReady || !surveys.items.some((item) => item.id === id)) {
+      input.value = "";
+      return;
+    }
+    const file = input.files?.[0];
+    if (!file) return;
     if (!file.type.startsWith("image/")) {
       setSaved("Please select an image file.");
       return;
     }
     const reader = new FileReader();
     reader.onload = () => {
+      if (activeIdentityScopeKeyRef.current !== requestedScopeKey
+        || !surveyItemsRef.current.some((item) => item.id === id)) {
+        input.value = "";
+        return;
+      }
       const photo: SurveyPhoto = {
         id: makeId("survey-photo"),
         name: file.name,
@@ -70,9 +115,9 @@ export default function SurveyAssistPage() {
         note: "Board photo captured for inspector review and future AI vision extraction.",
         severity: "Low",
       };
-      update({ photos: [...survey.photos, photo] });
+      update((currentSurvey) => ({ photos: [...currentSurvey.photos, photo] }), requestedScopeKey);
       setSaved("Board photo added. The current build stores it for review; cloud AI extraction will be connected in a later phase.");
-      event.target.value = "";
+      input.value = "";
     };
     reader.readAsDataURL(file);
   }
