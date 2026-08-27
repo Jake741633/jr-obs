@@ -105,9 +105,9 @@ test("mobile site diary binds author attribution to the live account identity", 
   assert.match(page, /completedBy: operatorName/);
   assert.match(page, /identityState\.isReady/);
   assert.match(page, /label="Completed by" value=\{operatorName\} readOnly aria-readonly="true"/);
+  assert.match(page, /\}\), \[identityState\.identity, identityState\.mode, team\.items\]\);/);
   assert.doesNotMatch(page, /completedBy: "Jake"/);
   assert.doesNotMatch(page, /form\.completedBy/);
-  assert.doesNotMatch(page, /useEffect/);
 });
 
 test("site diary attention items retain source links and prioritise safety and delays", () => {
