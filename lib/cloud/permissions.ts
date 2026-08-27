@@ -11,6 +11,7 @@ const rolePages: Record<JrRole, string[]> = {
 };
 
 const operatorOnlyPaths = ["/release-readiness", "/cloud/cutover", "/cloud/queue"] as const;
+const internalNavigationOrigin = "https://jr-os.invalid";
 
 type DeniedRouteHandoff = {
   deniedPath: string;
@@ -78,6 +79,16 @@ export function canUseLocalWorkspaceWithoutIdentity(
   path: string,
 ) {
   return (mode === "local" || mode === "migration") && !isOperatorOnlyPath(path);
+}
+
+export function internalPathForAccess(href: string) {
+  if (!href.startsWith("/") || href.startsWith("//") || href.includes("\\") || /[\t\n\r]/.test(href)) return null;
+  try {
+    const parsed = new URL(href, internalNavigationOrigin);
+    return parsed.origin === internalNavigationOrigin ? parsed.pathname : null;
+  } catch {
+    return null;
+  }
 }
 
 export function isJrOsOperator(role: JrRole | undefined, email?: string) {
