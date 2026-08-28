@@ -49,7 +49,7 @@ test("every browser collection and private-file cache changes across authorisati
 test("collections clear previous tenant data while identity is unresolved", () => {
   assert.match(
     storage,
-    /useEffect\(\(\) => \{\s*if \(identityReady\) return;\s*suppressSyncRef\.current = true;\s*previousRef\.current = initialValueRef\.current;\s*setItems\(initialValueRef\.current\);\s*setIsReady\(false\);\s*\}, \[identityReady\]\);/,
+    /useEffect\(\(\) => \{\s*if \(identityReady\) return;\s*suppressSyncRef\.current = true;\s*previousRef\.current = initialValueRef\.current;\s*setItems\(initialValueRef\.current\);\s*setCreatedBySourceId\(\{\}\);\s*setIsReady\(false\);\s*\}, \[identityReady\]\);/,
   );
   const clearIndex = storage.indexOf("if (identityReady) return;");
   const loadIndex = storage.indexOf("async function loadCollection()");
