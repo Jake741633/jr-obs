@@ -5,8 +5,10 @@ import vm from "node:vm";
 import ts from "typescript";
 
 const client = await readFile(new URL("../lib/supabase/client.ts", import.meta.url), "utf8");
+const cloudClient = await readFile(new URL("../lib/cloud/client.ts", import.meta.url), "utf8");
+const unavailableMessage = "JR OS cloud service is unavailable. Check your connection and confirm the Supabase project is active, then try again.";
 
-function loadRequestClassifier() {
+function loadRequestClassifier(fetchImpl = () => { throw new Error("Unexpected fetch"); }) {
   const output = ts.transpileModule(client, {
     compilerOptions: {
       module: ts.ModuleKind.CommonJS,
@@ -18,6 +20,7 @@ function loadRequestClassifier() {
   vm.runInNewContext(output, {
     exports: commonJsModule.exports,
     module: commonJsModule,
+    fetch: fetchImpl,
     process: { env: {} },
     require(specifier) {
       assert.equal(specifier, "./sessionOwnership-core.mjs");
@@ -26,6 +29,54 @@ function loadRequestClassifier() {
   });
 
   return commonJsModule.exports;
+}
+
+function loadCloudClient(fetchImpl) {
+  const supabase = loadRequestClassifier(fetchImpl);
+  const session = {
+    access_token: "access-token",
+    refresh_token: "refresh-token",
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+    user: { id: "user-a", email: "engineer@example.com" },
+  };
+  const sessionSaves = [];
+  const output = ts.transpileModule(cloudClient, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+  const commonJsModule = { exports: {} };
+
+  vm.runInNewContext(output, {
+    exports: commonJsModule.exports,
+    module: commonJsModule,
+    fetch: fetchImpl,
+    Headers,
+    require(specifier) {
+      if (specifier === "./config") {
+        return {
+          cloudConfig: { url: "https://project.supabase.co", anonKey: "anon-key", isConfigured: true, mode: "cloud" },
+          cloudStorageBucket: "jr-os-private",
+        };
+      }
+      if (specifier === "../supabase/client") {
+        return {
+          ...supabase,
+          captureSupabaseSessionOwnership: () => ({ session, epoch: "epoch-a" }),
+          readSupabaseSession: () => session,
+          readSupabaseSessionOwnershipEpoch: () => "epoch-a",
+          saveSupabaseSession: (value) => sessionSaves.push(value),
+        };
+      }
+      if (specifier === "../supabase/sessionOwnership-core.mjs") {
+        return { sameSupabaseSessionOwnership: () => true };
+      }
+      throw new Error(`Unexpected module: ${specifier}`);
+    },
+  });
+
+  return { cloud: commonJsModule.exports, supabase, sessionSaves };
 }
 
 test("unreachable Supabase requests produce an actionable cloud-service error", () => {
@@ -37,6 +88,54 @@ test("unreachable Supabase requests produce an actionable cloud-service error", 
     client,
     /let response: Response;\s*try \{\s*response = await fetch\([\s\S]*?\);\s*\} catch \{\s*throw new SupabaseRequestError\("network", cloudServiceUnavailableMessage\);\s*\}/,
   );
+});
+
+test("collection and private download fetch failures share the actionable network error", async () => {
+  const { cloud, supabase, sessionSaves } = loadCloudClient(async () => {
+    throw new TypeError("Load failed");
+  });
+
+  for (const operation of [
+    () => cloud.cloudSelect("jobs"),
+    () => cloud.downloadPrivateObject("organisation-a/job-a/file.pdf"),
+  ]) {
+    await assert.rejects(operation, (error) => {
+      assert.ok(error instanceof supabase.SupabaseRequestError);
+      assert.equal(error.kind, "network");
+      assert.equal(error.message, unavailableMessage);
+      assert.notEqual(error.message, "Load failed");
+      return true;
+    });
+  }
+  assert.deepEqual(sessionSaves, []);
+});
+
+test("cloud HTTP conflicts retain their status code and PostgREST detail", async () => {
+  const { cloud } = loadCloudClient(async () => new Response(JSON.stringify({
+    code: "PT409",
+    message: "Version conflict",
+    details: "Expected version 3",
+    hint: "Reload the record",
+  }), { status: 409, headers: { "Content-Type": "application/json" } }));
+
+  await assert.rejects(() => cloud.cloudSelect("jobs"), (error) => {
+    assert.ok(error instanceof cloud.CloudRequestError);
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "PT409");
+    assert.equal(error.message, "Version conflict");
+    assert.equal(error.details, "Expected version 3");
+    assert.equal(error.hint, "Reload the record");
+    assert.equal(cloud.isCloudConflictError(error), true);
+    return true;
+  });
+});
+
+test("private download HTTP failures retain server text and fallback status", async () => {
+  const denied = loadCloudClient(async () => new Response("Private file access denied", { status: 403 })).cloud;
+  await assert.rejects(() => denied.downloadPrivateObject("organisation-a/job-a/file.pdf"), /Private file access denied/);
+
+  const unavailable = loadCloudClient(async () => new Response("", { status: 503 })).cloud;
+  await assert.rejects(() => unavailable.downloadPrivateObject("organisation-a/job-a/file.pdf"), /Private file download failed \(503\)\./);
 });
 
 test("HTTP responses still retain Supabase's specific error message", () => {

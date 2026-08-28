@@ -3,9 +3,11 @@
 import { cloudConfig, cloudStorageBucket } from "./config";
 import {
   captureSupabaseSessionOwnership,
+  cloudServiceUnavailableMessage,
   readSupabaseSession,
   readSupabaseSessionOwnershipEpoch,
   saveSupabaseSession,
+  SupabaseRequestError,
   type SupabaseSession,
   type SupabaseSessionOwnership,
 } from "../supabase/client";
@@ -56,13 +58,21 @@ function requestHeaders(session?: CloudSession, extra?: HeadersInit) {
   return result;
 }
 
+async function fetchCloudResponse(url: string, init: RequestInit) {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new SupabaseRequestError("network", cloudServiceUnavailableMessage);
+  }
+}
+
 async function request<T>(path: string, init: RequestInit = {}, session?: CloudSession, authenticated = true, allowPasswordRecovery = false): Promise<T> {
   if (!cloudConfig.isConfigured) throw new Error("Supabase is not configured.");
   if (authenticated && !session) throw new Error("Your cloud session has expired. Sign in again to continue.");
   if (authenticated && session?.isPasswordRecovery && !allowPasswordRecovery) {
     throw new Error("Complete password recovery before accessing JR OS data.");
   }
-  const response = await fetch(`${cloudConfig.url}${path}`, { ...init, headers: requestHeaders(session, init.headers) });
+  const response = await fetchCloudResponse(`${cloudConfig.url}${path}`, { ...init, headers: requestHeaders(session, init.headers) });
   if (!response.ok) {
     const responseText = await response.text();
     let body: PostgrestErrorBody | null = null;
@@ -177,7 +187,7 @@ export async function downloadPrivateObject(path: string) {
   const session = cloudSession.load();
   if (!session) throw new Error("Your cloud session has expired. Sign in again to continue.");
   if (session.isPasswordRecovery) throw new Error("Complete password recovery before accessing JR OS data.");
-  const response = await fetch(
+  const response = await fetchCloudResponse(
     `${cloudConfig.url}/storage/v1/object/authenticated/${cloudStorageBucket}/${encodedObjectPath(path)}`,
     { method: "GET", headers: requestHeaders(session, { Accept: "application/octet-stream" }) },
   );
