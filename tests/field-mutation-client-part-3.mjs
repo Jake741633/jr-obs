@@ -54,9 +54,9 @@ test("overlapping flush attempts cannot reorder secure mutation responses", asyn
   assert.notStrictEqual(next, first);
   assert.deepEqual(await next, responses[1]);
   assert.equal(calls, 2);
-  assert.match(repository, /const runSyncQueueFlush = serialSingleFlightByKey<\[string\], SyncQueueFlushResult>/);
+  assert.match(repository, /const runSyncQueueFlush = serialSingleFlightByKey<\[string, SyncQueueFlushOrigin\], SyncQueueFlushResult>/);
   assert.match(repository, /syncAuthorizationFlightKey\(\) === expectedAuthorizationKey[\s\S]*flushSyncQueueOnce\(\)/);
-  assert.match(repository, /return runSyncQueueFlush\(syncAuthorizationFlightKey\(\)\)/);
+  assert.match(repository, /return runSyncQueueFlush\(syncAuthorizationFlightKey\(\), "manual"\)/);
 });
 
 

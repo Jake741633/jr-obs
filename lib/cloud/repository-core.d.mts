@@ -80,6 +80,10 @@ export function serialSingleFlightByKey<TArgs extends unknown[], TResult>(
   task: (...args: TArgs) => Promise<TResult>,
   keyForArgs: (...args: TArgs) => string,
 ): (...args: TArgs) => Promise<TResult>;
+export function trailingSingleFlightByKey<TArgs extends unknown[], TResult>(
+  task: (...args: TArgs) => Promise<TResult>,
+  keyForArgs: (...args: TArgs) => string,
+): (...args: TArgs) => Promise<TResult>;
 export function withExclusiveBrowserLock<TResult>(
   lockManager: { request(name: string, options: { mode: "exclusive" }, task: () => Promise<TResult>): Promise<TResult> } | undefined,
   name: string,
