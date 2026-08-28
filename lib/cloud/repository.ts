@@ -8,7 +8,7 @@ import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { assertCloudPageOperationCurrent } from "./cloudPageIdentity-core.mjs";
 
 export type SyncState = "Synced" | "Pending" | "Offline" | "Conflict" | "Failed";
-export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: string; customer_source_id?: string | null; job_source_id?: string | null; version: number; source_updated_at?: string; payload: T; created_at?: string; updated_at?: string; deleted_at?: string | null; }
+export interface TypedCloudEnvelope<T> { organisation_id: string; source_id: string; customer_source_id?: string | null; job_source_id?: string | null; version: number; source_updated_at?: string; payload: T; created_by?: string | null; updated_by?: string | null; created_at?: string; updated_at?: string; deleted_at?: string | null; }
 export interface GenericCloudEnvelope<T> extends TypedCloudEnvelope<T> { collection_key: string; }
 export type CloudEnvelope<T> = TypedCloudEnvelope<T> | GenericCloudEnvelope<T>;
 export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; role?: string; customerSourceId?: string; payload?: T; expectedVersion?: number; baseVersion?: number; baseIntent?: "create" | "update" | "unknown"; mutationId?: string; sentAt?: string; queuedAt: string; attempts: number; state: SyncState; error?: string; }

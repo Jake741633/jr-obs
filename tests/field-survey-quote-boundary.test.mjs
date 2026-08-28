@@ -12,7 +12,7 @@ test("pricing documents remain outside the approved electrician mutation routes"
 
 test("field survey detail fails closed before quote creation", () => {
   assert.match(surveyPage, /useCloudIdentity\(\)/);
-  assert.match(surveyPage, /const fieldMode = identity\?\.role === "electrician"/);
+  assert.match(surveyPage, /const fieldMode = identityState\.mode !== "local" && identityState\.identity\?\.role === "electrician"/);
   assert.match(surveyPage, /if \(fieldMode\) \{[\s\S]*?Quote creation is restricted to office roles\.[\s\S]*?return;/);
   assert.match(surveyPage, /fieldMode \? <p[^>]*>Survey recommendations are ready for office review\. Quote creation is restricted to office roles\.<\/p> : <Button onClick=\{createQuote\}>/);
 });

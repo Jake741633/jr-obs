@@ -3,10 +3,12 @@
 import { cloudSelect } from "./client";
 import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
+import { creatorMapForCloudRows, normaliseRecordCreatorMap, retainRecordCreatorsForRecords } from "./recordCreatorMetadata-core.mjs";
 import { queueChange, type CloudEnvelope } from "./repository";
 import { roleProjectionCacheGeneration, roleProjectionCachePolicy, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
+export type RecordCreatorMap = Record<string, string>;
 
 export function organisationStorageKey(storageKey: string, organisationId: string) {
   return `${storageKey}:organisation:${JSON.stringify([organisationId])}`;
@@ -28,10 +30,17 @@ function writeLocal<T>(storageKey: string, records: T[]) {
 
 function versionKey(storageKey: string) { return `jr-os-cloud-versions:${storageKey}`; }
 function projectionGenerationKey(storageKey: string) { return `jr-os-cloud-projection-generation:${storageKey}`; }
+export function recordCreatorStorageKey(storageKey: string) { return `jr-os-cloud-created-by:${storageKey}`; }
 function readVersions(storageKey: string): Record<string, number> {
   try { return JSON.parse(window.localStorage.getItem(versionKey(storageKey)) || "{}") as Record<string, number>; } catch { return {}; }
 }
 function writeVersions(storageKey: string, versions: Record<string, number>) { window.localStorage.setItem(versionKey(storageKey), JSON.stringify(versions)); }
+function readRecordCreators(storageKey: string): RecordCreatorMap {
+  try { return normaliseRecordCreatorMap(JSON.parse(window.localStorage.getItem(recordCreatorStorageKey(storageKey)) || "{}")); } catch { return {}; }
+}
+function writeRecordCreators(storageKey: string, creators: RecordCreatorMap) {
+  try { window.localStorage.setItem(recordCreatorStorageKey(storageKey), JSON.stringify(creators)); } catch { /* Optional metadata must never block record sync. */ }
+}
 
 export function createCollectionRepository<T extends RepositoryRecord>(options: {
   storageKey: string;
@@ -47,10 +56,17 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
   const scopedStorageKey = accountStorageKey(storageKey, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId);
   const readTable = collectionCloudReadTable(table, cacheRole, collectionKey);
   const collectionFilter = collectionKey ? `&collection_key=eq.${encodeURIComponent(collectionKey)}` : "";
+  let currentRecordCreators = readRecordCreators(scopedStorageKey);
+
+  function replaceRecordCreators(creators: RecordCreatorMap) {
+    currentRecordCreators = normaliseRecordCreatorMap(creators);
+    writeRecordCreators(scopedStorageKey, currentRecordCreators);
+  }
 
   return {
     mode: effectiveCloudMode(),
     storageKey: scopedStorageKey,
+    recordCreators() { return { ...currentRecordCreators }; },
     async list(): Promise<T[]> {
       const mode = effectiveCloudMode();
       const cached = readLocal<T>(scopedStorageKey);
@@ -60,6 +76,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         ? []
         : sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cached });
       if (local !== cached) writeLocal(scopedStorageKey, local);
+      replaceRecordCreators(cachePolicy === "purge" ? {} : retainRecordCreatorsForRecords(currentRecordCreators, local));
 
       if (mode === "local" || !navigator.onLine) return local;
 
@@ -74,6 +91,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         const roleProjectionRecords = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cloudRecords });
         writeLocal(scopedStorageKey, roleProjectionRecords);
         writeVersions(scopedStorageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));
+        replaceRecordCreators(creatorMapForCloudRows(rows, roleProjectionRecords));
         const projectionGeneration = roleProjectionCacheGeneration({ storageKey, role: cacheRole });
         if (projectionGeneration) window.localStorage.setItem(projectionGenerationKey(scopedStorageKey), projectionGeneration);
         return roleProjectionRecords;
@@ -87,10 +105,16 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       if (effectiveCloudMode() === "local") return;
       const version = expectedVersion ?? readVersions(scopedStorageKey)[record.id];
       const baseIntent = version === 0 ? "create" : version !== undefined ? "update" : index < 0 ? "create" : "unknown";
+      if (expectedVersion === 0 && userId) {
+        replaceRecordCreators({ ...currentRecordCreators, [record.id]: userId });
+      }
       queueChange({ table, storageKey: scopedStorageKey, operation: "upsert", organisationId, sourceId: record.id, payload: record, expectedVersion: version, baseIntent, baseVersion: baseIntent === "update" ? version : undefined, collectionKey, userId, role: cacheRole, customerSourceId: cacheCustomerSourceId });
     },
     remove(sourceId: string, expectedVersion?: number) {
       writeLocal(scopedStorageKey, readLocal<T>(scopedStorageKey).filter((record) => record.id !== sourceId));
+      const creators = { ...currentRecordCreators };
+      delete creators[sourceId];
+      replaceRecordCreators(creators);
       if (effectiveCloudMode() === "local") return;
       const version = expectedVersion ?? readVersions(scopedStorageKey)[sourceId];
       const baseIntent = version !== undefined ? "update" : "unknown";

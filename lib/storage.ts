@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { accountStorageKey, createCollectionRepository, type RepositoryRecord } from "./cloud/adapter";
+import { accountStorageKey, createCollectionRepository, type RecordCreatorMap, type RepositoryRecord } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
 import { cloudSafeFileRecord, usePrivateFileCollectionBridge } from "./cloud/privateFiles";
 import { useCloudIdentity } from "./cloud/useCloudIdentity";
@@ -28,6 +28,7 @@ function recordId(value: unknown) {
 export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) {
   const initialValueRef = useRef(initialValue);
   const [items, setItems] = useState<T[]>(initialValue);
+  const [createdBySourceId, setCreatedBySourceId] = useState<RecordCreatorMap>({});
   const [isReady, setIsReady] = useState(false);
   const previousRef = useRef<T[]>(initialValue);
   const suppressSyncRef = useRef(true);
@@ -45,6 +46,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     suppressSyncRef.current = true;
     previousRef.current = initialValueRef.current;
     setItems(initialValueRef.current);
+    setCreatedBySourceId({});
     setIsReady(false);
   }, [identityReady]);
 
@@ -59,6 +61,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       setIsReady(false);
 
       let loaded = readLocal(activeStorageKey, initialValueRef.current);
+      let loadedCreators: RecordCreatorMap = {};
 
       if (target && organisationId && userId) {
         const repository = createCollectionRepository<RepositoryRecord>({
@@ -72,11 +75,13 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
           cacheCustomerSourceId,
         });
         loaded = await repository.list() as T[];
+        loadedCreators = repository.recordCreators();
       }
 
       if (!active) return;
       previousRef.current = loaded;
       setItems(loaded);
+      setCreatedBySourceId(loadedCreators);
       setIsReady(true);
       queueMicrotask(() => {
         suppressSyncRef.current = false;
@@ -111,6 +116,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       cacheRole,
       cacheCustomerSourceId,
     });
+    let creatorMetadataChanged = false;
 
     for (const [id, item] of nextById) {
       const before = previousById.get(id);
@@ -119,11 +125,16 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
           cloudSafeFileRecord(key, item as unknown as object) as RepositoryRecord,
           before ? undefined : 0,
         );
+        if (!before) creatorMetadataChanged = true;
       }
     }
     for (const id of previousById.keys()) {
-      if (!nextById.has(id)) repository.remove(id);
+      if (!nextById.has(id)) {
+        repository.remove(id);
+        creatorMetadataChanged = true;
+      }
     }
+    if (creatorMetadataChanged) setCreatedBySourceId(repository.recordCreators());
     previousRef.current = items;
   }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, items, key, mode, organisationId, target, userId]);
 
@@ -153,7 +164,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     setItems((current) => current.filter((item) => !predicate(item)));
   }, []);
 
-  return { items: displayItems, setItems, remove, isReady };
+  return { items: displayItems, setItems, remove, isReady, createdBySourceId };
 }
 
 export const useLocalStorageCollection = useCloudLocalCollection;
