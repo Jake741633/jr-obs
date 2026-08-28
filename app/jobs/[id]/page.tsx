@@ -110,6 +110,7 @@ export default function JobDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = params.id;
   const identityState = useCloudIdentity();
+  const fieldJobRecord = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const timelineMutationRoute = collectionCloudMutationRoute("cloud_collections", identityState.identity?.role, "jr-os-job-timeline");
   const fieldTimelineMode = identityState.mode !== "local"
     && fieldMutationRouteAllows(timelineMutationRoute, "upsert", "create");
@@ -173,7 +174,7 @@ export default function JobDetailPage() {
   if (!isReady) return <Card>Loading job…</Card>;
 
   if (!job) {
-    return <div className="space-y-6"><Link href="/jobs" className="inline-flex items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200"><ArrowLeft className="size-4" />Back to jobs</Link><Card><h1 className="text-xl font-bold">Job not found</h1><p className="mt-2 text-sm text-slate-400">This job may have been deleted or the link is no longer valid.</p></Card></div>;
+    return <div className="space-y-6"><Link href={fieldJobRecord ? "/field/jobs" : "/jobs"} className="inline-flex min-h-12 items-center gap-2 text-sm font-semibold text-cyan-300 hover:text-cyan-200"><ArrowLeft className="size-4" />{fieldJobRecord ? "Back to field jobs" : "Back to jobs"}</Link><Card><h1 className="text-xl font-bold">Job not found</h1><p className="mt-2 text-sm text-slate-400">This job may have been deleted or the link is no longer valid.</p></Card></div>;
   }
 
   const formattedDate = job.startDate ? new Date(`${job.startDate}T12:00:00`).toLocaleDateString("en-GB") : "Not scheduled";
@@ -325,7 +326,7 @@ export default function JobDetailPage() {
   }
 
   return <div className="space-y-6">
-    <Link href="/jobs" className="inline-flex items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200"><ArrowLeft className="size-4" />Back to jobs</Link>
+    <Link href={fieldJobRecord ? "/field/jobs" : "/jobs"} className="inline-flex min-h-12 items-center gap-2 text-sm font-semibold text-cyan-300 hover:text-cyan-200"><ArrowLeft className="size-4" />{fieldJobRecord ? "Back to field jobs" : "Back to jobs"}</Link>
 
     <Card className="border-cyan-400/30">
       <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job record</p><h1 className="mt-2 text-3xl font-bold">{job.title}</h1></div><StatusBadge status={job.status} /></div>

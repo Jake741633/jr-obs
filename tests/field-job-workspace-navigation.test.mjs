@@ -4,6 +4,7 @@ import test from "node:test";
 import { canAccessPath } from "../lib/cloud/permissions.ts";
 
 const workspace = readFileSync(new URL("../app/jobs/[id]/workspace/page.tsx", import.meta.url), "utf8");
+const jobRecord = readFileSync(new URL("../app/jobs/[id]/page.tsx", import.meta.url), "utf8");
 
 function section(source, startText, endText) {
   const start = source.indexOf(startText);
@@ -80,4 +81,23 @@ test("field workspace back actions return electricians to field job control", ()
   assert.match(workspaceBack, /className="inline-flex min-h-12/);
   assert.match(workspaceBack, /\{fieldWorkspace \? "Back to field jobs" : "Back to job record"\}/);
   assert.doesNotMatch(workspaceBack, /min-h-11/);
+});
+
+test("job record back actions return electricians to field job control", () => {
+  assert.equal(canAccessPath("electrician", "/jobs/job-1"), true);
+  assert.equal(canAccessPath("electrician", "/field/jobs"), true);
+  assert.match(
+    jobRecord,
+    /const fieldJobRecord = identityState\.mode !== "local" && identityState\.identity\?\.role === "electrician"/,
+  );
+
+  const missingJobBack = section(jobRecord, "if (!job) {", "const formattedDate");
+  const jobRecordBack = section(jobRecord, '\n  return <div className="space-y-6">', '<Card className="border-cyan-400/30">');
+
+  for (const backAction of [missingJobBack, jobRecordBack]) {
+    assert.match(backAction, /href=\{fieldJobRecord \? "\/field\/jobs" : "\/jobs"\}/);
+    assert.match(backAction, /className="inline-flex min-h-12/);
+    assert.match(backAction, /\{fieldJobRecord \? "Back to field jobs" : "Back to jobs"\}/);
+    assert.doesNotMatch(backAction, /min-h-11/);
+  }
 });
