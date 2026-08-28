@@ -172,7 +172,7 @@ test("day planner labels partial saves and gates every confirmed success surface
   assert.match(page, /cloudFieldMode \? "Confirmed complete" : "Complete"/);
   assert.match(page, /cloudFieldMode \? "Confirmed time" : "Logged time"/);
   assert.match(page, /entry\.status === "Complete" && plannerConfirmed/);
-  assert.match(page, /disabled=\{entry\.status === "Complete" \|\| Boolean\(labourAttempt\)\}/);
+  assert.match(page, /disabled=\{entry\.status === "Complete" \|\| Boolean\(labourAttempt\) \|\| Boolean\(visitStartBlock\)\}/);
   assert.match(page, /href="\/cloud"/);
   assert.doesNotMatch(page, /href="\/cloud\/queue"/);
   assert.ok(page.includes(': `${formatMinutes(paidMinutes(record))} saved for ${entry.title}.`);'));
