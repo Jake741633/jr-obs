@@ -12,7 +12,7 @@ export interface SupabaseSession {
 
 const sessionKey = "jr-os-supabase-session";
 const sessionOwnershipEpochKey = "jr-os-supabase-session-epoch";
-const cloudServiceUnavailableMessage = "JR OS cloud service is unavailable. Check your connection and confirm the Supabase project is active, then try again.";
+export const cloudServiceUnavailableMessage = "JR OS cloud service is unavailable. Check your connection and confirm the Supabase project is active, then try again.";
 const sessionInvalidatingAuthCodes = new Set([
   "bad_jwt",
   "invalid_credentials",
