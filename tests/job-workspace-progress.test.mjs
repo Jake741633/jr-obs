@@ -29,11 +29,11 @@ test("mobile job workspace edits only operational progress metrics", () => {
 test("mobile progress sliders provide 48px touch targets", () => {
   assert.match(
     workspace,
-    /<input id=\{`progress-\$\{key\}`\} type="range"[^>]*className="mt-3 min-h-12 w-full/,
+    /<input id=\{`progress-\$\{key\}`\} type="range"[^\n]*className="mt-3 min-h-12 w-full/,
   );
   assert.doesNotMatch(
     workspace,
-    /<input id=\{`progress-\$\{key\}`\} type="range"[^>]*min-h-11/,
+    /<input id=\{`progress-\$\{key\}`\} type="range"[^\n]*min-h-11/,
   );
 });
 
