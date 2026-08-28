@@ -9,6 +9,7 @@ const requiredSuites = [
   "customer-portal-tenant-boundary.test.mjs",
   "offline-queue-tenant-isolation.test.mjs",
   "background-sync-tenant-isolation.test.mjs",
+  "background-online-sync.test.mjs",
   "private-file-ownership-isolation.test.mjs",
   "audit-log-tenant-boundary.test.mjs",
   "audit-policy-integrity.test.mjs",

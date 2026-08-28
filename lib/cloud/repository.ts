@@ -3,7 +3,7 @@
 import { cloudPatch, cloudRpc, cloudSelect, cloudUpsert, isCloudConflictError } from "./client";
 import { collectionCloudMutationRoute, collectionCloudReadTable, fieldMutationRouteAllows, isServerAuthoredFieldTimeline, normaliseFieldRequestedJobStatus } from "./collections";
 import { effectiveCloudMode } from "./config";
-import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, fieldMutationReplayExpired, hasVersionConflict, makeTombstone, mergeProcessedQueue, pendingImports, projectFieldMutationPayload, rebaseQueuedFieldMutation, reconcileVersionedRecordCache, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, sameQueueTarget, sanitizeQueuedFieldMutationProjection, serialSingleFlightByKey, shouldReconcileFieldMutationPayload, tenantRecordQuery, tenantRecordVersionQuery, validateFieldMutationResponse, withExclusiveBrowserLock } from "./repository-core.mjs";
+import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, fieldMutationReplayExpired, hasVersionConflict, makeTombstone, mergeProcessedQueue, pendingImports, projectFieldMutationPayload, rebaseQueuedFieldMutation, reconcileVersionedRecordCache, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, sameQueueTarget, sanitizeQueuedFieldMutationProjection, serialSingleFlightByKey, shouldReconcileFieldMutationPayload, tenantRecordQuery, tenantRecordVersionQuery, trailingSingleFlightByKey, validateFieldMutationResponse, withExclusiveBrowserLock } from "./repository-core.mjs";
 import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { assertCloudPageOperationCurrent } from "./cloudPageIdentity-core.mjs";
 
@@ -14,6 +14,7 @@ export type CloudEnvelope<T> = TypedCloudEnvelope<T> | GenericCloudEnvelope<T>;
 export interface SyncQueueItem<T = unknown> { id: string; table: string; storageKey?: string; operation: "upsert" | "delete"; organisationId: string; sourceId: string; collectionKey?: string; userId?: string; role?: string; customerSourceId?: string; payload?: T; expectedVersion?: number; baseVersion?: number; baseIntent?: "create" | "update" | "unknown"; mutationId?: string; sentAt?: string; queuedAt: string; attempts: number; state: SyncState; error?: string; }
 export interface SyncQueueFlushResult { processed: number; cleared: number; remaining: number; conflicts: number; failed: number; }
 export interface SyncAuthorizationContext { organisationId: string; userId: string; role: string; customerSourceId?: string; }
+type SyncQueueFlushOrigin = "manual" | "automatic";
 interface FieldMutationResponse<T = Record<string, unknown>> { status: "applied" | "replayed"; resource: "jobs" | "cloud_collections"; sourceId: string; collectionKey?: string; version: number; sourceUpdatedAt: string; payload: T; }
 
 const QUEUE_KEY = "jr-os-cloud-sync-queue";
@@ -47,6 +48,14 @@ function sameSyncAuthorization(left: SyncAuthorizationContext, right: SyncAuthor
     && left.userId === right.userId
     && left.role === right.role
     && (left.customerSourceId ?? null) === (right.customerSourceId ?? null);
+}
+function syncAuthorizationKey(authorization: SyncAuthorizationContext) {
+  return JSON.stringify([
+    authorization.organisationId,
+    authorization.userId,
+    authorization.role,
+    authorization.customerSourceId ?? null,
+  ]);
 }
 function queueItemMatchesAuthorization(item: SyncQueueItem, authorization: SyncAuthorizationContext) {
   return item.organisationId === authorization.organisationId
@@ -191,6 +200,7 @@ export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "mutationId" 
   if (authorization && queueItemMatchesAuthorization(next, authorization)) {
     const activeQueue = coalesced.filter((entry) => queueItemMatchesAuthorization(entry, authorization));
     syncStatus.set(navigator.onLine ? statusForQueue(activeQueue) : "Offline");
+    if (effectiveCloudMode() === "cloud" && navigator.onLine) scheduleAutomaticSyncQueueFlush(authorization);
   }
 }
 
@@ -477,9 +487,7 @@ async function flushSyncQueueOnce(): Promise<SyncQueueFlushResult> {
 
 function syncAuthorizationFlightKey() {
   const authorization = currentSyncAuthorization();
-  return authorization
-    ? JSON.stringify([authorization.organisationId, authorization.userId, authorization.role, authorization.customerSourceId ?? null])
-    : "no-active-authorization";
+  return authorization ? syncAuthorizationKey(authorization) : "no-active-authorization";
 }
 
 const EMPTY_SYNC_QUEUE_FLUSH_RESULT: SyncQueueFlushResult = {
@@ -490,16 +498,31 @@ const EMPTY_SYNC_QUEUE_FLUSH_RESULT: SyncQueueFlushResult = {
   failed: 0,
 };
 
-const runSyncQueueFlush = serialSingleFlightByKey<[string], SyncQueueFlushResult>((expectedAuthorizationKey) => withExclusiveBrowserLock<SyncQueueFlushResult>(
+const runSyncQueueFlush = serialSingleFlightByKey<[string, SyncQueueFlushOrigin], SyncQueueFlushResult>((expectedAuthorizationKey) => withExclusiveBrowserLock<SyncQueueFlushResult>(
   typeof navigator === "undefined" ? undefined : navigator.locks,
   "jr-os-cloud-sync-queue-flush",
   () => syncAuthorizationFlightKey() === expectedAuthorizationKey
     ? flushSyncQueueOnce()
     : Promise.resolve(EMPTY_SYNC_QUEUE_FLUSH_RESULT),
-), (authorizationKey) => authorizationKey);
+), (authorizationKey, origin) => JSON.stringify([authorizationKey, origin]));
+
+const runAutomaticSyncQueueFlush = trailingSingleFlightByKey<[SyncAuthorizationContext], SyncQueueFlushResult>(async (authorization) => {
+  if (effectiveCloudMode() !== "cloud" || !navigator.onLine || !activeSyncAuthorizationMatches(authorization)) {
+    return EMPTY_SYNC_QUEUE_FLUSH_RESULT;
+  }
+  try {
+    return await runSyncQueueFlush(syncAuthorizationKey(authorization), "automatic");
+  } catch {
+    return EMPTY_SYNC_QUEUE_FLUSH_RESULT;
+  }
+}, (authorization) => syncAuthorizationKey(authorization));
+
+function scheduleAutomaticSyncQueueFlush(authorization: SyncAuthorizationContext) {
+  void runAutomaticSyncQueueFlush(authorization);
+}
 
 export function flushSyncQueue(): Promise<SyncQueueFlushResult> {
-  return runSyncQueueFlush(syncAuthorizationFlightKey());
+  return runSyncQueueFlush(syncAuthorizationFlightKey(), "manual");
 }
 
 export async function importLocalCollection<T extends { id: string; updatedAt?: string; customerId?: string; customerSourceId?: string; jobId?: string; jobSourceId?: string }>(storageKey: string, table: string, organisationId: string, collectionKey?: string, userId?: string, operationIsCurrent?: () => boolean) {
