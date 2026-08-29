@@ -179,7 +179,7 @@ export async function uploadPrivateObject(path: string, body: Blob, mimeType: st
   return request<unknown>(`/storage/v1/object/${cloudStorageBucket}/${encodedObjectPath(path)}`, {
     method: "POST",
     body,
-    headers: { "Content-Type": mimeType, "x-upsert": "false" },
+    headers: { "Content-Type": mimeType, "x-upsert": "true" },
   }, cloudSession.load() || undefined);
 }
 

@@ -1658,6 +1658,12 @@ try {
     "Read-only field collections must remain denied",
     "Electrician direct generic write must fail closed for",
     "Electrician private object upload must fail closed without an assigned upload intent",
+    "Metadata-first x-upsert should create a missing private object",
+    "Exact metadata-bound x-upsert should retry an existing private object",
+    "Another tenant must not x-upsert a metadata-bound private object",
+    "A field role must not x-upsert an office-owned private object",
+    "Existing private objects without exact metadata must not be overwritten",
+    "Exact metadata should make an orphaned private object retryable",
   ]) {
     if (!supportedSource.includes(requiredPhrase)) {
       throw new Error(`Generated live RLS test is missing field confidentiality coverage: ${requiredPhrase}`);

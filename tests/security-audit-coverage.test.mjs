@@ -12,6 +12,7 @@ const requiredSuites = [
   "background-online-sync.test.mjs",
   "private-file-ownership-isolation.test.mjs",
   "private-file-queue-collection-scope.test.mjs",
+  "private-file-replay-stage-order.test.mjs",
   "audit-log-tenant-boundary.test.mjs",
   "audit-policy-integrity.test.mjs",
   "multi-tenant-penetration-regression.test.mjs",
