@@ -4,6 +4,7 @@ import test from "node:test";
 
 const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
 const privateUploadQueue = readFileSync(new URL("../lib/cloud/privateUploadQueue-core.mjs", import.meta.url), "utf8");
+const privateUploadReplay = readFileSync(new URL("../lib/cloud/privateUploadReplay-core.mjs", import.meta.url), "utf8");
 
 test("private uploads and metadata remain organisation scoped", () => {
   assert.match(privateFiles, /organisationId: identity\.organisationId/);
@@ -27,8 +28,12 @@ test("private upload replay stops when active or live authorisation changes", ()
   assert.match(privateFiles, /readSupabaseSession\(\)\?\.user\?\.id === authorization\.userId/);
   assert.match(privateFiles, /activeSyncAuthorizationMatches\(authorization\)/);
   assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
+  assert.equal(privateUploadReplay.match(/await input\.revalidateAuthorization\(\)/g)?.length, 3);
+  assert.match(privateUploadReplay, /const metadata = await input\.upsertMetadata\(\)[\s\S]*await input\.uploadObject\(\)/);
+  assert.match(privateUploadReplay, /authorisation changed before object upload/);
+  assert.match(privateUploadReplay, /authorisation changed before upload confirmation/);
   assert.match(privateFiles, /for \(const \[index, item\] of activeQueue\.entries\(\)\) \{\s*if \(!activeReplayOwnerMatches\(authorization\)\) \{\s*remaining\.push\(\.\.\.activeQueue\.slice\(index\)\);\s*break;/s);
-  assert.match(privateFiles, /const result = await uploadQueuedPrivateFile[\s\S]*if \(!activeReplayOwnerMatches\(authorization\)\) \{[\s\S]*remaining\.push\(\.\.\.activeQueue\.slice\(index \+ 1\)\);[\s\S]*break;/);
+  assert.match(privateFiles, /const result = await uploadQueuedPrivateFile[\s\S]*if \(!activeReplayOwnerMatches\(authorization\)\) \{[\s\S]*state: result\.state === "Synced" \? "Pending" : result\.state[\s\S]*remaining\.push\(\.\.\.activeQueue\.slice\(index \+ 1\)\);[\s\S]*break;/);
   assert.match(privateFiles, /if \(result\.state === "Synced"\) onSynced\?\.\(item, result\)/);
 });
 

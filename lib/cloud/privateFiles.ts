@@ -5,6 +5,7 @@ import { readSupabaseSession } from "../supabase/client";
 import { cloudInsert, cloudUpsert, downloadPrivateObject, uploadPrivateObject } from "./client";
 import { cloudStorageBucket, effectiveCloudMode, type CloudMode } from "./config";
 import { partitionPrivateUploadQueue, privateUploadMatchesAuthorization } from "./privateUploadQueue-core.mjs";
+import { replayPrivateUploadStages } from "./privateUploadReplay-core.mjs";
 import { activeSyncAuthorizationMatches, revalidateSyncAuthorization, type SyncAuthorizationContext } from "./repository";
 import type { CloudIdentity } from "./useCloudIdentity";
 
@@ -213,13 +214,11 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
   if (effectiveCloudMode() === "local") return { state: "Pending" as const };
   if (typeof navigator !== "undefined" && !navigator.onLine) return { state: "Offline" as const };
   const authorization = privateUploadAuthorization(item);
-  if (!activeReplayOwnerMatches(authorization) || !(await revalidateSyncAuthorization(authorization))) {
+  if (!activeReplayOwnerMatches(authorization)) {
     throw new Error("Private upload authorisation changed before replay.");
   }
   const blob = dataUrlToBlob(item.dataUrl, item.mimeType);
   if (blob.size !== item.size && Math.abs(blob.size - item.size) > 4) throw new Error("The cached file size does not match the queued upload.");
-
-  await uploadPrivateObject(item.objectPath, blob, item.mimeType);
 
   const metadata: PrivateFileMetadata = {
     organisation_id: item.organisationId,
@@ -234,7 +233,12 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
     created_by: item.userId,
     updated_by: item.userId,
   };
-  const rows = await cloudUpsert<PrivateFileMetadata>("private_files", [metadata]);
+  const rows = await replayPrivateUploadStages({
+    authorizationIsCurrent: () => activeReplayOwnerMatches(authorization),
+    revalidateAuthorization: () => revalidateSyncAuthorization(authorization),
+    upsertMetadata: () => cloudUpsert<PrivateFileMetadata>("private_files", [metadata]),
+    uploadObject: () => uploadPrivateObject(item.objectPath, blob, item.mimeType),
+  });
   return { state: "Synced" as const, metadata: rows[0] ?? metadata };
 }
 
@@ -254,7 +258,12 @@ export async function flushPrivateFileUploadQueue(
     try {
       const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() });
       if (!activeReplayOwnerMatches(authorization)) {
-        if (result.state !== "Synced") remaining.push({ ...item, state: result.state, updatedAt: new Date().toISOString() });
+        remaining.push({
+          ...item,
+          state: result.state === "Synced" ? "Pending" : result.state,
+          error: result.state === "Synced" ? undefined : item.error,
+          updatedAt: new Date().toISOString(),
+        });
         remaining.push(...activeQueue.slice(index + 1));
         break;
       }

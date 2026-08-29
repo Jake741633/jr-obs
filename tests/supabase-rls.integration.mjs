@@ -188,6 +188,14 @@ async function uploadStorageObject(account, path, bytes, mimeType, storageBucket
   });
 }
 
+async function upsertStorageObject(account, path, bytes, mimeType, storageBucket = bucket) {
+  return authenticated(account, `/storage/v1/object/${storageBucket}/${encodedPath(path)}`, {
+    method: "POST",
+    rawBody: bytes,
+    extraHeaders: { "Content-Type": mimeType, "x-upsert": "true" },
+  });
+}
+
 async function uploadSigned(signedPayload, bytes, mimeType) {
   const value = signedPayload.signedURL || signedPayload.signedUrl || signedPayload.url;
   assert.ok(value, "Signed upload response did not contain a URL");
@@ -1643,6 +1651,57 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       organisation_id: organisationA, source_id: source("file-other-alias"), job_source_id: otherCustomerJobA, customer_source_id: otherCustomerA,
       bucket, object_path: otherCustomerPath, file_name: "other.png", mime_type: "image/png",
     }), "Staff must not alias an existing private object to a second metadata row");
+
+    const metadataFirstFile = source("metadata-first-file");
+    const metadataFirstPath = `${organisationA}/jobs/${jobA}/${metadataFirstFile}/metadata-first.png`;
+    const orphanRetryFile = source("orphan-retry-file");
+    const orphanRetryPath = `${organisationA}/jobs/${jobA}/${orphanRetryFile}/orphan-retry.png`;
+    context.objectPaths.push(metadataFirstPath, orphanRetryPath);
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "job_documents", typedRecord(organisationA, metadataFirstFile, customerA, jobA, { name: "Metadata-first file", category: "Photo" })),
+      "Office should create the metadata-first backing document",
+    );
+    await expectAllowed(await insertRecord(accounts.A.office, "private_files", {
+      organisation_id: organisationA, source_id: metadataFirstFile, storage_key: "jr-os-job-documents", job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: metadataFirstPath, file_name: "metadata-first.png", mime_type: "image/png",
+    }), "Office should register metadata before private object creation");
+    await expectAllowed(
+      await upsertStorageObject(accounts.A.office, metadataFirstPath, pngBytes, "image/png"),
+      "Metadata-first x-upsert should create a missing private object",
+    );
+    await expectAllowed(
+      await upsertStorageObject(accounts.A.office, metadataFirstPath, new Uint8Array([...pngBytes, 1]), "image/png"),
+      "Exact metadata-bound x-upsert should retry an existing private object",
+    );
+    await expectDenied(
+      await upsertStorageObject(accounts.B.office, metadataFirstPath, pngBytes, "image/png"),
+      "Another tenant must not x-upsert a metadata-bound private object",
+    );
+    await expectDenied(
+      await upsertStorageObject(accounts.A.electrician, metadataFirstPath, pngBytes, "image/png"),
+      "A field role must not x-upsert an office-owned private object",
+    );
+
+    await expectAllowed(
+      await uploadStorageObject(accounts.A.office, orphanRetryPath, pngBytes, "image/png"),
+      "Office should create the orphan-retry object fixture",
+    );
+    await expectDenied(
+      await upsertStorageObject(accounts.A.office, orphanRetryPath, pngBytes, "image/png"),
+      "Existing private objects without exact metadata must not be overwritten",
+    );
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "job_documents", typedRecord(organisationA, orphanRetryFile, customerA, jobA, { name: "Orphan retry file", category: "Photo" })),
+      "Office should create the orphan-retry backing document",
+    );
+    await expectAllowed(await insertRecord(accounts.A.office, "private_files", {
+      organisation_id: organisationA, source_id: orphanRetryFile, storage_key: "jr-os-job-documents", job_source_id: jobA, customer_source_id: customerA,
+      bucket, object_path: orphanRetryPath, file_name: "orphan-retry.png", mime_type: "image/png",
+    }), "Office should bind exact metadata before orphan recovery");
+    await expectAllowed(
+      await upsertStorageObject(accounts.A.office, orphanRetryPath, pngBytes, "image/png"),
+      "Exact metadata should make an orphaned private object retryable",
+    );
 
     await expectDenied(
       await uploadStorageObject(accounts.A.electrician, tenantBPath, pngBytes, "image/png"),
