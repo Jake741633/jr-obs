@@ -14,7 +14,7 @@ test("private file bridge receives the base allowlisted collection key", () => {
 test("private file queues remain authorisation scoped when using base collection keys", () => {
   assert.match(privateFiles, /readPrivateUploadQueue\(identity\)/);
   assert.match(privateFiles, /\.filter\(\(item\) => item\.storageKey === storageKey\)/);
-  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity,/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity, storageKey,/);
   assert.match(privateFiles, /queued\.storageKey !== storageKey/);
 });
 

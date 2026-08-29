@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
+const privateUploadQueue = readFileSync(new URL("../lib/cloud/privateUploadQueue-core.mjs", import.meta.url), "utf8");
 
 test("private uploads and metadata remain organisation scoped", () => {
   assert.match(privateFiles, /organisationId: identity\.organisationId/);
@@ -13,9 +14,11 @@ test("private uploads and metadata remain organisation scoped", () => {
 
 test("private upload queues do not cross authorisation boundaries", () => {
   assert.match(privateFiles, /readPrivateUploadQueue\(identity\)/);
-  assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => !privateUploadMatchesAuthorization\(item, authorization\)\)/);
-  assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => privateUploadMatchesAuthorization\(item, authorization\)\)/);
-  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity,/);
+  assert.match(privateUploadQueue, /item\.organisationId === authorization\.organisationId/);
+  assert.match(privateUploadQueue, /item\.userId === authorization\.userId/);
+  assert.match(privateUploadQueue, /item\.authorizationRole === authorization\.role/);
+  assert.match(privateFiles, /partitionPrivateUploadQueue\(allQueue, authorization, storageKey\)/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity, storageKey,/);
   assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 

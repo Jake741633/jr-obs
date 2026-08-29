@@ -9,6 +9,7 @@ const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf
 const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
 const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
+const privateUploadQueue = readFileSync(new URL("../lib/cloud/privateUploadQueue-core.mjs", import.meta.url), "utf8");
 const cloudAccessGuard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
 const aiPage = readFileSync(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
 const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf8");
@@ -131,10 +132,12 @@ test("JR AI settings and backup actions use the resolved organisation identity",
 test("private upload queue retries preserve every other authorisation context", () => {
   assert.match(privateFiles, /export function readPrivateUploadQueue\(authorization: SyncAuthorizationContext\)/);
   assert.match(privateFiles, /queue\.filter\(\(item\) => privateUploadMatchesAuthorization\(item, authorization\)\)/);
-  assert.match(privateFiles, /const preserved = allQueue\.filter\(\(item\) => !privateUploadMatchesAuthorization\(item, authorization\)\)/);
-  assert.match(privateFiles, /const activeQueue = allQueue\.filter\(\(item\) => privateUploadMatchesAuthorization\(item, authorization\)\)/);
+  assert.match(privateUploadQueue, /privateUploadMatchesAuthorization\(item, authorization\) && item\.storageKey === storageKey/);
+  assert.match(privateUploadQueue, /activeQueue\.push\(item\)/);
+  assert.match(privateUploadQueue, /preserved\.push\(item\)/);
+  assert.match(privateFiles, /partitionPrivateUploadQueue\(allQueue, authorization, storageKey\)/);
   assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
-  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity,/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity, storageKey,/);
   assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
 });
 

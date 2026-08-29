@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import { readSupabaseSession } from "../supabase/client";
 import { cloudInsert, cloudUpsert, downloadPrivateObject, uploadPrivateObject } from "./client";
 import { cloudStorageBucket, effectiveCloudMode, type CloudMode } from "./config";
+import { partitionPrivateUploadQueue, privateUploadMatchesAuthorization } from "./privateUploadQueue-core.mjs";
 import { activeSyncAuthorizationMatches, revalidateSyncAuthorization, type SyncAuthorizationContext } from "./repository";
 import type { CloudIdentity } from "./useCloudIdentity";
 
@@ -181,13 +182,6 @@ function privateUploadAuthorization(item: PrivateFileUploadQueueItem): SyncAutho
   return { organisationId: item.organisationId, userId: item.userId, role: item.authorizationRole, customerSourceId: item.authorizationCustomerSourceId };
 }
 
-function privateUploadMatchesAuthorization(item: PrivateFileUploadQueueItem, authorization: SyncAuthorizationContext) {
-  return item.organisationId === authorization.organisationId
-    && item.userId === authorization.userId
-    && item.authorizationRole === authorization.role
-    && (item.authorizationCustomerSourceId ?? null) === (authorization.customerSourceId ?? null);
-}
-
 export function readPrivateUploadQueue(authorization: SyncAuthorizationContext) {
   const queue = readAllPrivateUploadQueue();
   return queue.filter((item) => privateUploadMatchesAuthorization(item, authorization));
@@ -246,11 +240,11 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
 
 export async function flushPrivateFileUploadQueue(
   authorization: SyncAuthorizationContext,
+  storageKey: string,
   onSynced?: (item: PrivateFileUploadQueueItem, result: Awaited<ReturnType<typeof uploadQueuedPrivateFile>>) => void,
 ) {
   const allQueue = readAllPrivateUploadQueue();
-  const preserved = allQueue.filter((item) => !privateUploadMatchesAuthorization(item, authorization));
-  const activeQueue = allQueue.filter((item) => privateUploadMatchesAuthorization(item, authorization));
+  const { preserved, activeQueue } = partitionPrivateUploadQueue(allQueue, authorization, storageKey);
   const remaining: PrivateFileUploadQueueItem[] = [];
   for (const [index, item] of activeQueue.entries()) {
     if (!activeReplayOwnerMatches(authorization)) {
@@ -376,7 +370,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
       });
     }
 
-    const flush = () => void flushPrivateFileUploadQueue(identity, (queued, result) => {
+    const flush = () => void flushPrivateFileUploadQueue(identity, storageKey, (queued, result) => {
       if (queued.storageKey !== storageKey || result.state !== "Synced") return;
       setItems((current) => current.map((item) => {
         const record = item as PrivateFileBackedRecord;
