@@ -14,10 +14,11 @@ test("field survey RPC requires an assigned canonical job", () => {
 
 test("electrician survey creation binds the first save to a selected job", () => {
   assert.match(surveysPage, /useCloudIdentity\(\)/);
-  assert.match(surveysPage, /const fieldMode = identity\?\.role === "electrician"/);
+  assert.match(surveysPage, /const fieldMode = identityState\.mode !== "local" && identityState\.identity\?\.role === "electrician"/);
   assert.match(surveysPage, /Choose one of your assigned jobs before creating a field survey/);
   assert.match(surveysPage, /survey\.jobId = job\.id/);
   assert.match(surveysPage, /survey\.customerId = job\.customerId/);
+  assert.match(surveysPage, /surveys\.createItem\(survey\)/);
   assert.match(surveysPage, /Field surveys must be bound to an assigned job before the first cloud save/);
 });
 

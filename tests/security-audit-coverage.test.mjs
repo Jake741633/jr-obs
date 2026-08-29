@@ -73,6 +73,7 @@ const requiredSuites = [
   "cloud-record-creator-metadata.test.mjs",
   "field-survey-edit-ownership.test.mjs",
   "field-survey-sync-feedback.test.mjs",
+  "survey-create-confirmation.test.mjs",
   "field-job-confidentiality.test.mjs",
   "field-mutation-boundary.test.mjs",
   "field-mutation-boundary-live-rls.test.mjs",

@@ -56,6 +56,6 @@ test("collection hook exposes creator metadata without merging it into items", (
   assert.match(storage, /const \[createdBySourceId, setCreatedBySourceId\] = useState<RecordCreatorMap>\(\{\}\)/);
   assert.match(storage, /loadedCreators = repository\.recordCreators\(\)/);
   assert.match(storage, /setCreatedBySourceId\(repository\.recordCreators\(\)\)/);
-  assert.match(storage, /return \{ items: displayItems, setItems, remove, isReady, createdBySourceId \}/);
+  assert.match(storage, /return \{ items: displayItems, setItems, createItem, remove, isReady, createdBySourceId \}/);
   assert.doesNotMatch(storage, /\.\.\.item,\s*createdBy/);
 });
