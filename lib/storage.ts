@@ -164,7 +164,40 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     setItems((current) => current.filter((item) => !predicate(item)));
   }, []);
 
-  return { items: displayItems, setItems, remove, isReady, createdBySourceId };
+  const createItem = useCallback((item: T) => {
+    const id = recordId(item);
+    if (!isReady) throw new Error("Collection is not ready for record creation.");
+    if (!id) throw new Error("A new collection record requires a stable id.");
+
+    const current = previousRef.current;
+    if (current.some((record) => recordId(record) === id)) {
+      throw new Error("A collection record with this id already exists.");
+    }
+    const next = [item, ...current];
+
+    if (target && organisationId && userId) {
+      const repository = createCollectionRepository<RepositoryRecord>({
+        storageKey: key,
+        table: target.table,
+        collectionKey: target.collectionKey,
+        organisationId,
+        userId,
+        cacheUserId,
+        cacheRole,
+        cacheCustomerSourceId,
+      });
+      repository.save(cloudSafeFileRecord(key, item as unknown as object) as RepositoryRecord, 0);
+      setCreatedBySourceId(repository.recordCreators());
+    } else {
+      window.localStorage.setItem(activeStorageKey, JSON.stringify(next));
+    }
+
+    previousRef.current = next;
+    setItems(next);
+    return item;
+  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, key, organisationId, target, userId]);
+
+  return { items: displayItems, setItems, createItem, remove, isReady, createdBySourceId };
 }
 
 export const useLocalStorageCollection = useCloudLocalCollection;
