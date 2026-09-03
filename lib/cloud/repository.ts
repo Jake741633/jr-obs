@@ -28,8 +28,13 @@ function read<T>(key: string, fallback: T): T { try { return JSON.parse(window.l
 function write(key: string, value: unknown) { window.localStorage.setItem(key, JSON.stringify(value)); }
 function readAllSyncQueue() {
   const queue = read<SyncQueueItem[]>(QUEUE_KEY, []);
-  const sanitized = queue.map((item) => sanitizeQueuedFieldMutationProjection(item) as SyncQueueItem);
-  if (sanitized.some((item, index) => item !== queue[index])) write(QUEUE_KEY, sanitized);
+  const sanitized = queue.flatMap((item) => {
+    const retained = sanitizeQueuedFieldMutationProjection(item) as SyncQueueItem | undefined;
+    return retained ? [retained] : [];
+  });
+  if (sanitized.length !== queue.length || sanitized.some((item, index) => item !== queue[index])) {
+    write(QUEUE_KEY, sanitized);
+  }
   return sanitized;
 }
 function activeOrganisationId() { return typeof window === "undefined" ? null : window.localStorage.getItem(ACTIVE_ORGANISATION_KEY); }
@@ -189,7 +194,8 @@ export function discardSyncQueueItem(itemId: string) {
 
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "mutationId" | "sentAt" | "queuedAt" | "attempts" | "state">) {
   const queue = readAllSyncQueue();
-  const safeItem = sanitizeQueuedFieldMutationProjection(item) as typeof item;
+  const safeItem = sanitizeQueuedFieldMutationProjection(item) as typeof item | undefined;
+  if (!safeItem) return;
   if (isServerAuthoredFieldTimeline(safeItem.table, safeItem.role, safeItem.collectionKey, safeItem.payload)) return;
   const queuedAt = Date.now();
   const mutationId = crypto.randomUUID();

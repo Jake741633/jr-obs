@@ -65,7 +65,7 @@ export function coalesceQueue<T extends QueueMutation>(queue: T[], next: T): T[]
 export function rebaseQueuedFieldMutation<T extends QueueMutation>(change: T, currentVersion: number): T;
 export function fieldMutationReplayExpired(sentAt?: string, now?: number): boolean;
 export function projectFieldMutationPayload<T>(input: { collectionKey?: string; role?: string; payload: T }): T;
-export function sanitizeQueuedFieldMutationProjection<T extends { collectionKey?: string; role?: string; payload?: unknown; sentAt?: string }>(change: T, now?: number): T;
+export function sanitizeQueuedFieldMutationProjection<T extends { table?: string; collectionKey?: string; role?: string; payload?: unknown; sentAt?: string }>(change: T, now?: number): T | undefined;
 export function mergeProcessedQueue<T extends QueueMutation>(liveQueue: T[], processedQueue: T[], remainingQueue: T[]): T[];
 export function shouldReconcileFieldMutationPayload<T extends QueueMutation>(retainedQueue: T[], mutation: T): boolean;
 export function reconcileVersionedRecordCache<T extends { id?: string }>(input: {

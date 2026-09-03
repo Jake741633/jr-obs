@@ -79,6 +79,7 @@ const requiredSuites = [
   "field-job-confidentiality.test.mjs",
   "field-mutation-boundary.test.mjs",
   "field-mutation-boundary-live-rls.test.mjs",
+  "field-testing-certificate-handoff.test.mjs",
   "field-inventory-projections.test.mjs",
   "field-inventory-ui-privacy.test.mjs",
   "customer-role-projections.test.mjs",
