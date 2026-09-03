@@ -21,6 +21,7 @@ import {
   paymentTermsFromTemplate,
 } from "../../lib/businessSettings";
 import { usePricingDocumentsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { strictHttpsJobDocumentUrl } from "../../lib/cloud/fieldJobDocumentCapability-core.mjs";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
@@ -279,15 +280,10 @@ export default function QuotesPage() {
     const name = attachmentLink.name.trim();
     const externalUrl = attachmentLink.url.trim();
     if (!name || !externalUrl) { setAttachmentError("Enter a name and URL for the attachment."); return; }
-    try {
-      const url = new URL(externalUrl);
-      if (!["http:", "https:"].includes(url.protocol)) throw new Error("Invalid protocol");
-    } catch {
-      setAttachmentError("Enter a valid http or https URL.");
-      return;
-    }
+    const safeExternalUrl = strictHttpsJobDocumentUrl(externalUrl);
+    if (!safeExternalUrl) { setAttachmentError("Enter a valid HTTPS URL without embedded credentials."); return; }
     const now = new Date().toISOString();
-    setAttachments((current) => [...current, { id: makeId("attachment"), name, fileName: "", mimeType: "", externalUrl, notes: "", createdAt: now }]);
+    setAttachments((current) => [...current, { id: makeId("attachment"), name, fileName: "", mimeType: "", externalUrl: safeExternalUrl, notes: "", createdAt: now }]);
     setAttachmentLink({ name: "", url: "" });
     setAttachmentError("");
   }

@@ -1137,8 +1137,9 @@ const secureJobReadCoverage = `${secureJobReadAnchor}
     const unassignedJobDocument = source("unassigned-job-document-a");
     const deletedJobDocument = source("deleted-job-document-a");
     const crossTenantJobDocument = source("cross-tenant-job-document-b");
+    const fieldDocumentCapabilityQuery = "select=organisation_id,source_id,job_source_id,payload,deleted_at&organisation_id=eq." + encodeURIComponent(organisationA) + "&source_id=eq." + encodeURIComponent(assignedJobDocument) + "&job_source_id=eq." + encodeURIComponent(jobA) + "&payload->>jobId=eq." + encodeURIComponent(jobA) + "&deleted_at=is.null&limit=2";
     await expectAllowed(
-      await insertRecord(accounts.A.office, "job_documents", typedRecord(organisationA, assignedJobDocument, null, jobA, { name: "Assigned site photo", category: "Photo" })),
+      await insertRecord(accounts.A.office, "job_documents", typedRecord(organisationA, assignedJobDocument, null, jobA, { name: "Assigned site photo", category: "Photo", externalUrl: "https://documents.example/assigned?token=field-live-only" })),
       "Office should create a production-shaped assigned job document without a customer envelope",
     );
     await expectAllowed(
@@ -1158,13 +1159,15 @@ const secureJobReadCoverage = `${secureJobReadAnchor}
       "Owner should soft-delete the job document fixture",
     );
 
-    const assignedFieldDocument = await listRecords(accounts.A.electrician, "job_documents", \`select=source_id,payload&source_id=eq.\${assignedJobDocument}\`);
+    const assignedFieldDocument = await listRecords(accounts.A.electrician, "job_documents", fieldDocumentCapabilityQuery);
     await expectAllowed(assignedFieldDocument, "Assigned electrician job-document query should execute");
     assert.equal(assignedFieldDocument.payload.length, 1, "Assigned electrician should retain the production-shaped null-customer job document");
     assert.equal(assignedFieldDocument.payload[0].payload.name, "Assigned site photo");
-    const coworkerAssignedFieldDocument = await listRecords(accounts.A.coworker, "job_documents", \`select=source_id&source_id=eq.\${assignedJobDocument}\`);
+    assert.equal(assignedFieldDocument.payload[0].payload.externalUrl, "https://documents.example/assigned?token=field-live-only", "Assigned electrician should receive the current external document capability for guarded activation");
+    const coworkerAssignedFieldDocument = await listRecords(accounts.A.coworker, "job_documents", fieldDocumentCapabilityQuery);
     await expectAllowed(coworkerAssignedFieldDocument, "Co-assigned electrician job-document query should execute");
     assert.equal(coworkerAssignedFieldDocument.payload.length, 1, "Co-assigned electrician should retain the assigned job document");
+    assert.equal(coworkerAssignedFieldDocument.payload[0].payload.externalUrl, "https://documents.example/assigned?token=field-live-only", "Co-assigned electrician should receive the current guarded document capability");
     const unassignedFieldDocument = await listRecords(accounts.A.electrician, "job_documents", \`select=source_id&source_id=eq.\${unassignedJobDocument}\`);
     await expectAllowed(unassignedFieldDocument, "Unassigned same-tenant job-document query should execute safely");
     assert.deepEqual(unassignedFieldDocument.payload, [], "Electrician must not read an unassigned same-tenant job document");
@@ -1177,6 +1180,9 @@ const secureJobReadCoverage = `${secureJobReadAnchor}
     const officeUnassignedDocument = await listRecords(accounts.A.office, "job_documents", \`select=source_id&source_id=eq.\${unassignedJobDocument}\`);
     await expectAllowed(officeUnassignedDocument, "Office unassigned job-document query should execute");
     assert.equal(officeUnassignedDocument.payload.length, 1, "Office should retain unassigned job document access");
+    const customerAssignedDocument = await listRecords(accounts.A.customer, "job_documents", \`select=source_id&source_id=eq.\${assignedJobDocument}\`);
+    await expectAllowed(customerAssignedDocument, "Customer canonical job-document query should fail closed");
+    assert.deepEqual(customerAssignedDocument.payload, [], "Customer must not read an assigned electrician document capability");
 
     const customerCommercialJob = await listRecords(accounts.A.customer, "jobs", \`select=source_id,payload&source_id=eq.\${jobA}\`);
     await expectAllowed(customerCommercialJob, "Customer complete job query should fail closed");
@@ -1589,9 +1595,18 @@ const fieldMutationCoverage = [
   '    const replayJobBeforeAssignmentChange = await listRecords(accounts.A.office, "jobs", "select=payload&source_id=eq." + jobA);',
   '    await expectAllowed(replayJobBeforeAssignmentChange, "Office should read the replay job before assignment revocation");',
   '    await expectAllowed(await patchRecords(accounts.A.owner, "jobs", "source_id=eq." + jobA, { payload: { ...replayJobBeforeAssignmentChange.payload[0].payload, assignedTo: [fieldTeamCoworkerA] } }), "Owner should revoke the replaying electrician job assignment");',
+  '    const revokedFieldDocumentCapability = await listRecords(accounts.A.electrician, "job_documents", fieldDocumentCapabilityQuery);',
+  '    await expectAllowed(revokedFieldDocumentCapability, "Fresh field document capability query after assignment revocation should execute safely");',
+  '    assert.deepEqual(revokedFieldDocumentCapability.payload, [], "Fresh field document activation must fail after assignment revocation");',
+  '    const coworkerFieldDocumentCapability = await listRecords(accounts.A.coworker, "job_documents", fieldDocumentCapabilityQuery);',
+  '    await expectAllowed(coworkerFieldDocumentCapability, "Co-assigned field document capability query should execute after another assignment is revoked");',
+  '    assert.equal(coworkerFieldDocumentCapability.payload[0].payload.externalUrl, "https://documents.example/assigned?token=field-live-only", "Co-assigned electrician should retain the current document capability");',
   '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", { method: "POST", body: { record_source_id: jobA, expected_version: electricianFieldJob.payload[0].version, requested_status: "Second fix", mutation_id: jobStatusMutationId } }), "42501", "Job-status receipt replay must revalidate the active job assignment");',
   '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: fieldSurveyId, expected_version: 0, record_payload: fieldSurveyPayload, mutation_id: surveyMutationId } }), "42501", "Collection receipt replay must revalidate the active job assignment");',
   '    await expectAllowed(await patchRecords(accounts.A.owner, "jobs", "source_id=eq." + jobA, { payload: replayJobBeforeAssignmentChange.payload[0].payload }), "Owner should restore the replaying electrician job assignment");',
+  '    const restoredFieldDocumentCapability = await listRecords(accounts.A.electrician, "job_documents", fieldDocumentCapabilityQuery);',
+  '    await expectAllowed(restoredFieldDocumentCapability, "Fresh field document capability query after assignment restoration should execute");',
+  '    assert.equal(restoredFieldDocumentCapability.payload[0].payload.externalUrl, "https://documents.example/assigned?token=field-live-only", "Fresh field document activation should recover only after assignment restoration");',
   '    const restoredStatusReplay = await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", { method: "POST", body: { record_source_id: jobA, expected_version: electricianFieldJob.payload[0].version, requested_status: "Second fix", mutation_id: jobStatusMutationId } });',
   '    await expectAllowed(restoredStatusReplay, "Job-status receipt replay should recover after assignment restoration");',
   '    assert.deepEqual(restoredStatusReplay.payload, statusMutation.payload);',

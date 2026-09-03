@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -27,8 +27,11 @@ import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
 import { useJobVariationsCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { strictHttpsJobDocumentUrl } from "../../../lib/cloud/fieldJobDocumentCapability-core.mjs";
+import { openLiveFieldJobDocumentUrl } from "../../../lib/cloud/fieldJobDocumentCapability";
 import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../../lib/cloud/fieldMutationPolicy-core.mjs";
 import { canAccessPath, canEditFinance } from "../../../lib/cloud/permissions";
+import { activeSyncAuthorizationMatches, type SyncAuthorizationContext } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../../lib/jobManagement-core.mjs";
 import { fieldOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
@@ -140,7 +143,34 @@ export default function JobDetailPage() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [timelineError, setTimelineError] = useState("");
   const [documentError, setDocumentError] = useState("");
+  const [documentNotice, setDocumentNotice] = useState("");
+  const [openingDocumentId, setOpeningDocumentId] = useState("");
   const [invoiceMessage, setInvoiceMessage] = useState("");
+  const mountedRef = useRef(true);
+  const documentOperationGenerationRef = useRef(0);
+  const documentOpeningRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      documentOperationGenerationRef.current += 1;
+      documentOpeningRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    documentOperationGenerationRef.current += 1;
+    documentOpeningRef.current = false;
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        setOpeningDocumentId("");
+        setDocumentNotice("");
+      }
+    });
+    return () => { active = false; };
+  }, [identityState.identity?.customerSourceId, identityState.identity?.organisationId, identityState.identity?.role, identityState.identity?.userId, identityState.mode, jobId]);
 
   const job = jobs.items.find((item) => item.id === jobId);
   const customer = customers.items.find((item) => item.id === job?.customerId);
@@ -249,8 +279,10 @@ export default function JobDetailPage() {
     if (documentMutationRestricted) { setDocumentError(documentHandoffMessage); return; }
     const name = documentForm.name.trim();
     const externalUrl = documentForm.externalUrl.trim();
+    const safeExternalUrl = externalUrl ? strictHttpsJobDocumentUrl(externalUrl) : undefined;
     if (!name) { setDocumentError("Enter a document name."); return; }
     if (!selectedFile && !externalUrl) { setDocumentError("Choose a file or add an external document link."); return; }
+    if (externalUrl && !safeExternalUrl) { setDocumentError("Enter a valid HTTPS document link without embedded credentials."); return; }
     if (selectedFile && selectedFile.size > 2_000_000) { setDocumentError("For local storage, choose a file smaller than 2 MB. Larger cloud uploads will be added later."); return; }
 
     let dataUrl = "";
@@ -273,7 +305,7 @@ export default function JobDetailPage() {
       fileName: selectedFile?.name ?? "",
       mimeType: selectedFile?.type ?? "",
       dataUrl,
-      externalUrl,
+      externalUrl: safeExternalUrl ?? "",
       notes: documentForm.notes.trim(),
       uploadedBy: documentForm.uploadedBy.trim() || "Jake",
       uploadedAt: now,
@@ -289,6 +321,73 @@ export default function JobDetailPage() {
   function deleteDocument(document: JobDocument) {
     if (documentMutationRestricted) return;
     if (window.confirm(`Delete ${document.name} from this job?`)) documents.remove((item) => item.id === document.id);
+  }
+
+  function fieldAuthorization(): SyncAuthorizationContext | null {
+    const identity = identityState.identity;
+    if (!identity) return null;
+    return {
+      organisationId: identity.organisationId,
+      userId: identity.userId,
+      role: identity.role,
+      customerSourceId: identity.customerSourceId,
+    };
+  }
+
+  function documentOperationIsCurrent(authorization: SyncAuthorizationContext, generation: number) {
+    return mountedRef.current
+      && documentOperationGenerationRef.current === generation
+      && activeSyncAuthorizationMatches(authorization);
+  }
+
+  async function openLiveDocument(document: Pick<JobDocument, "id" | "jobId">) {
+    if (documentOpeningRef.current) return;
+    const authorization = fieldAuthorization();
+    if (!authorization || authorization.role !== "electrician" || document.jobId !== jobId) {
+      setDocumentNotice("This field account cannot open that document link.");
+      return;
+    }
+    if (!navigator.onLine) {
+      setDocumentNotice("Document links must be verified online. Check your connection and try again.");
+      return;
+    }
+
+    documentOpeningRef.current = true;
+    const generation = documentOperationGenerationRef.current + 1;
+    documentOperationGenerationRef.current = generation;
+    setOpeningDocumentId(document.id);
+    setDocumentNotice("");
+    try {
+      const opened = await openLiveFieldJobDocumentUrl(
+        { authorization, document },
+        () => documentOperationIsCurrent(authorization, generation),
+        (documentUrl) => window.location.assign(documentUrl),
+      );
+      if (!documentOperationIsCurrent(authorization, generation)) return;
+      if (!opened) {
+        setDocumentNotice("This document link is no longer available. Refresh the job or contact the office.");
+      }
+    } catch {
+      if (documentOperationIsCurrent(authorization, generation)) {
+        setDocumentNotice("We could not verify this document link. Check your connection and try again.");
+      }
+    } finally {
+      if (mountedRef.current && documentOperationGenerationRef.current === generation) {
+        documentOpeningRef.current = false;
+        setOpeningDocumentId("");
+      }
+    }
+  }
+
+  function documentExternalLink(document: JobDocument) {
+    const safeDocumentUrl = strictHttpsJobDocumentUrl(document.externalUrl);
+    if (!safeDocumentUrl) return null;
+    if (fieldJobRecord) {
+      return <Button type="button" disabled={Boolean(openingDocumentId)} onClick={() => openLiveDocument({ id: document.id, jobId: document.jobId })}>
+        <ExternalLink className="size-4" />{openingDocumentId === document.id ? "Verifying link…" : "Open link"}
+      </Button>;
+    }
+    return <a href={safeDocumentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><ExternalLink className="size-4" />Open link</a>;
   }
 
   function generateInvoice() {
@@ -370,7 +469,8 @@ export default function JobDetailPage() {
         <div className="md:col-span-2 flex justify-end"><Button type="submit">Save document</Button></div>
       </form></Card> : null}
 
-      {jobDocuments.length === 0 ? <Card><div className="flex items-start gap-3"><FolderOpen className="mt-0.5 size-5 text-slate-500" /><div><h3 className="font-semibold">No uploaded documents yet</h3><p className="mt-1 text-sm text-slate-400">{documentMutationRestricted ? "No assigned job documents are currently available to review." : "Add certificates, site photos, drawings, RAMS or external cloud links to build this job folder."}</p></div></div></Card> : <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((document) => <Card key={document.id}><div className="flex items-start gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p><h3 className="mt-1 truncate font-bold">{document.name}</h3><p className="mt-1 text-xs text-slate-500">{new Date(document.uploadedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} · {document.uploadedBy}</p></div>{!documentMutationRestricted ? <button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div>{document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{document.dataUrl ? <a href={document.dataUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}{document.externalUrl ? <a href={document.externalUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><ExternalLink className="size-4" />Open link</a> : null}</div></div></div></Card>)}</div>}
+      {documentNotice ? <p className="text-sm text-amber-200">{documentNotice}</p> : null}
+      {jobDocuments.length === 0 ? <Card><div className="flex items-start gap-3"><FolderOpen className="mt-0.5 size-5 text-slate-500" /><div><h3 className="font-semibold">No uploaded documents yet</h3><p className="mt-1 text-sm text-slate-400">{documentMutationRestricted ? "No assigned job documents are currently available to review." : "Add certificates, site photos, drawings, RAMS or external cloud links to build this job folder."}</p></div></div></Card> : <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((document) => <Card key={document.id}><div className="flex items-start gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p><h3 className="mt-1 truncate font-bold">{document.name}</h3><p className="mt-1 text-xs text-slate-500">{new Date(document.uploadedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} · {document.uploadedBy}</p></div>{!documentMutationRestricted ? <button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div>{document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{document.dataUrl ? <a href={document.dataUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}{documentExternalLink(document)}</div></div></div></Card>)}</div>}
 
       {!financeRestricted && (linkedQuotes.length > 0 || linkedInvoices.length > 0) ? <div className="grid gap-4 md:grid-cols-2">
         <Card><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Commercial documents</p><h3 className="mt-1 text-lg font-bold">Quotes and estimates</h3></div><Link href="/quotes" className="text-sm text-cyan-300 hover:text-cyan-200">Open all</Link></div><div className="mt-4 space-y-2">{linkedQuotes.map((quote) => <Link key={quote.id} href={`/quotes/${quote.id}`} className="flex items-center justify-between rounded-xl bg-slate-950/60 px-3 py-3 hover:bg-slate-950"><span><span className="block font-semibold">{quote.number}</span><span className="text-xs text-slate-500">{quote.type} · {quote.status}</span></span><span className="font-semibold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(documentTotal(quote))}</span></Link>)}</div></Card>
