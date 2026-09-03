@@ -40,6 +40,7 @@ export function isCloudCollectionStorageKey(storageKey: string): boolean;
 export function isGenericCloudCollectionStorageKey(storageKey: string): boolean;
 export function isLegacyAggregateStorageKey(storageKey: string): boolean;
 export function backupStorageScope(storageKey: string): "account" | "organisation" | null;
+export function accountBackupStorageKeyAllowed(storageKey: string, role: string): boolean;
 export function isCompleteAccountStorageContext(context: unknown): context is AccountStorageContext;
 export function sameAccountStorageContext(left: unknown, right: unknown): boolean;
 export function typedLegacyMigrationStorageKeys(storage: StorageReader): string[];

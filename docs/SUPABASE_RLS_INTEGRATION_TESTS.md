@@ -51,6 +51,7 @@ The suite verifies:
 - Field-write table policies.
 - Customer Portal read and insert scope.
 - Customer Portal approvals and appointment requests resolve only eligible same-customer pricing and planner targets, and those targets cannot be retargeted later.
+- Customer payment-link projections stay memory-only in cloud and migration modes. Opening a link revalidates the active account and session, then makes an exact no-store projection read; offline, failed, ambiguous, revoked, paid or tombstoned results never fall back to a cached URL. Office and local/demo persistence is unchanged.
 - Generic `cloud_collections` tenant and customer scope.
 - Typed entity-table tenant scope.
 - Soft-delete tombstones remain available for synchronisation.

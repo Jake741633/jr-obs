@@ -45,7 +45,7 @@ test("collection creator sidecar stays account scoped and outside record payload
   assert.match(adapter, /recordCreators\(\) \{ return \{ \.\.\.currentRecordCreators \}; \}/);
   assert.match(adapter, /cachePolicy === "purge" \? \{\} : retainRecordCreatorsForRecords\(currentRecordCreators, local\)/);
   assert.match(adapter, /replaceRecordCreators\(creatorMapForCloudRows\(rows, roleProjectionRecords\)\)/);
-  assert.match(adapter, /if \(expectedVersion === 0 && userId\)[\s\S]*\[record\.id\]: userId/);
+  assert.match(adapter, /if \(!networkOnly && expectedVersion === 0 && userId\)[\s\S]*\[record\.id\]: userId/);
   assert.match(adapter, /delete creators\[sourceId\];[\s\S]*replaceRecordCreators\(creators\)/);
   assert.match(adapter, /function writeRecordCreators[\s\S]*try \{ window\.localStorage\.setItem[\s\S]*\} catch \{/);
   assert.match(adapter, /queueChange\(\{[^}]*payload: record[^}]*\}\)/);

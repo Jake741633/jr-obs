@@ -110,6 +110,29 @@ test("collection and private download fetch failures share the actionable networ
   assert.deepEqual(sessionSaves, []);
 });
 
+test("fresh collection reads bypass browser caches without changing normal reads", async () => {
+  const requests = [];
+  const { cloud } = loadCloudClient(async (url, init) => {
+    requests.push({ url, init });
+    return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } });
+  });
+
+  await cloud.cloudSelectFresh("customer_portal_payment_links", "select=payload&source_id=eq.link-a");
+  await cloud.cloudSelect("jobs", "select=source_id");
+
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].url, "https://project.supabase.co/rest/v1/customer_portal_payment_links?select=payload&source_id=eq.link-a");
+  assert.equal(requests[0].init.method, "GET");
+  assert.equal(requests[0].init.cache, "no-store");
+  assert.equal(requests[0].init.headers.has("Cache-Control"), false);
+  assert.equal(requests[0].init.headers.has("Pragma"), false);
+  assert.equal(requests[0].init.headers.get("Authorization"), "Bearer access-token");
+  assert.equal(requests[1].url, "https://project.supabase.co/rest/v1/jobs?select=source_id");
+  assert.equal(requests[1].init.cache, undefined);
+  assert.equal(requests[1].init.headers.has("Cache-Control"), false);
+  assert.equal(requests[1].init.headers.get("Authorization"), "Bearer access-token");
+});
+
 test("cloud HTTP conflicts retain their status code and PostgREST detail", async () => {
   const { cloud } = loadCloudClient(async () => new Response(JSON.stringify({
     code: "PT409",

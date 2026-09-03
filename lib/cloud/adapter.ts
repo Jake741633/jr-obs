@@ -1,11 +1,11 @@
 "use client";
 
-import { cloudSelect } from "./client";
+import { cloudSelect, cloudSelectFresh } from "./client";
 import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
 import { creatorMapForCloudRows, normaliseRecordCreatorMap, retainRecordCreatorsForRecords } from "./recordCreatorMetadata-core.mjs";
 import { queueChange, type CloudEnvelope } from "./repository";
-import { roleProjectionCacheGeneration, roleProjectionCachePolicy, roleProjectionVersionMap, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
+import { purgeCustomerNetworkOnlyCollectionCaches, purgeRoleProjectionCacheStorage, roleProjectionCacheGeneration, roleProjectionCachePolicy, roleProjectionVersionMap, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
 export type RecordCreatorMap = Record<string, string>;
@@ -63,21 +63,34 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     writeRecordCreators(scopedStorageKey, currentRecordCreators);
   }
 
+  function purgeDormantCustomerCapabilities(mode: ReturnType<typeof effectiveCloudMode>) {
+    if (mode !== "local" && cacheUserId && cacheRole) {
+      purgeCustomerNetworkOnlyCollectionCaches(window.localStorage, storageKey);
+    }
+  }
+
   return {
     mode: effectiveCloudMode(),
     storageKey: scopedStorageKey,
     recordCreators() { return { ...currentRecordCreators }; },
     async list(): Promise<T[]> {
       const mode = effectiveCloudMode();
+      purgeDormantCustomerCapabilities(mode);
       const cached = readLocal<T>(scopedStorageKey);
       const cachedGeneration = window.localStorage.getItem(projectionGenerationKey(scopedStorageKey)) ?? undefined;
       const cachePolicy = roleProjectionCachePolicy({ storageKey, role: cacheRole, mode, generation: cachedGeneration });
-      const local = cachePolicy === "purge"
+      const networkOnly = cachePolicy === "network-only";
+      const local = cachePolicy === "purge" || networkOnly
         ? []
         : sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cached });
-      if (local !== cached) writeLocal(scopedStorageKey, local);
-      replaceRecordCreators(cachePolicy === "purge" ? {} : retainRecordCreatorsForRecords(currentRecordCreators, local));
-      if (cachePolicy === "purge") writeVersions(scopedStorageKey, {});
+      if (networkOnly) {
+        purgeRoleProjectionCacheStorage(window.localStorage, scopedStorageKey);
+        currentRecordCreators = {};
+      } else {
+        if (local !== cached) writeLocal(scopedStorageKey, local);
+        replaceRecordCreators(cachePolicy === "purge" ? {} : retainRecordCreatorsForRecords(currentRecordCreators, local));
+        if (cachePolicy === "purge") writeVersions(scopedStorageKey, {});
+      }
 
       if (mode === "local" || !navigator.onLine) return local;
 
@@ -87,36 +100,58 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       if (mode === "migration" && local.length > 0) return local;
 
       try {
-        const rows = await cloudSelect<CloudEnvelope<T>>(readTable, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`);
+        const select = networkOnly ? cloudSelectFresh : cloudSelect;
+        const rows = await select<CloudEnvelope<T>>(readTable, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`);
         const cloudRecords = rows.map((row) => row.payload);
         const roleProjectionRecords = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cloudRecords });
-        writeLocal(scopedStorageKey, roleProjectionRecords);
-        writeVersions(scopedStorageKey, roleProjectionVersionMap(rows, roleProjectionRecords));
-        replaceRecordCreators(creatorMapForCloudRows(rows, roleProjectionRecords));
-        const projectionGeneration = roleProjectionCacheGeneration({ storageKey, role: cacheRole });
-        if (projectionGeneration) window.localStorage.setItem(projectionGenerationKey(scopedStorageKey), projectionGeneration);
+        if (networkOnly) {
+          purgeRoleProjectionCacheStorage(window.localStorage, scopedStorageKey);
+          currentRecordCreators = {};
+        } else {
+          writeLocal(scopedStorageKey, roleProjectionRecords);
+          writeVersions(scopedStorageKey, roleProjectionVersionMap(rows, roleProjectionRecords));
+          replaceRecordCreators(creatorMapForCloudRows(rows, roleProjectionRecords));
+          const projectionGeneration = roleProjectionCacheGeneration({ storageKey, role: cacheRole });
+          if (projectionGeneration) window.localStorage.setItem(projectionGenerationKey(scopedStorageKey), projectionGeneration);
+        }
         return roleProjectionRecords;
-      } catch { return local; }
+      } catch { return networkOnly ? [] : local; }
     },
     save(record: T, expectedVersion?: number) {
-      const local = readLocal<T>(scopedStorageKey);
+      const mode = effectiveCloudMode();
+      purgeDormantCustomerCapabilities(mode);
+      const networkOnly = roleProjectionCachePolicy({ storageKey, role: cacheRole, mode }) === "network-only";
+      const local = networkOnly ? [] : readLocal<T>(scopedStorageKey);
       const index = local.findIndex((item) => item.id === record.id);
       if (index >= 0) local[index] = record; else local.push(record);
+      if (networkOnly) {
+        purgeRoleProjectionCacheStorage(window.localStorage, scopedStorageKey);
+        currentRecordCreators = {};
+        return;
+      }
       writeLocal(scopedStorageKey, local);
-      if (effectiveCloudMode() === "local") return;
+      if (mode === "local") return;
       const version = expectedVersion ?? readVersions(scopedStorageKey)[record.id];
       const baseIntent = version === 0 ? "create" : version !== undefined ? "update" : index < 0 ? "create" : "unknown";
-      if (expectedVersion === 0 && userId) {
+      if (!networkOnly && expectedVersion === 0 && userId) {
         replaceRecordCreators({ ...currentRecordCreators, [record.id]: userId });
       }
       queueChange({ table, storageKey: scopedStorageKey, operation: "upsert", organisationId, sourceId: record.id, payload: record, expectedVersion: version, baseIntent, baseVersion: baseIntent === "update" ? version : undefined, collectionKey, userId, role: cacheRole, customerSourceId: cacheCustomerSourceId });
     },
     remove(sourceId: string, expectedVersion?: number) {
+      const mode = effectiveCloudMode();
+      purgeDormantCustomerCapabilities(mode);
+      const networkOnly = roleProjectionCachePolicy({ storageKey, role: cacheRole, mode }) === "network-only";
+      if (networkOnly) {
+        purgeRoleProjectionCacheStorage(window.localStorage, scopedStorageKey);
+        currentRecordCreators = {};
+        return;
+      }
       writeLocal(scopedStorageKey, readLocal<T>(scopedStorageKey).filter((record) => record.id !== sourceId));
       const creators = { ...currentRecordCreators };
       delete creators[sourceId];
       replaceRecordCreators(creators);
-      if (effectiveCloudMode() === "local") return;
+      if (mode === "local") return;
       const version = expectedVersion ?? readVersions(scopedStorageKey)[sourceId];
       const baseIntent = version !== undefined ? "update" : "unknown";
       queueChange({ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId, expectedVersion: version, baseIntent, baseVersion: version, collectionKey, userId, role: cacheRole, customerSourceId: cacheCustomerSourceId });

@@ -104,7 +104,7 @@ test("customer clients read the projection while other roles keep role-specific 
   assert.match(collections, /customer:\s*\{[\s\S]*pricing_documents:\s*"customer_pricing_documents"/i);
   assert.match(collections, /roleReadTables\[role\]\?\.\[table\] \?\? table/i);
   assert.match(adapter, /const readTable = collectionCloudReadTable\(table, cacheRole, collectionKey\)/);
-  assert.match(adapter, /cloudSelect<CloudEnvelope<T>>\(readTable,/);
+  assert.match(adapter, /select<CloudEnvelope<T>>\(readTable,/);
 });
 
 test("recovery deployment and live RLS coverage retain the status boundary", () => {
