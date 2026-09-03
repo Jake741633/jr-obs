@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ClipboardCheck, Plus, Search, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { StatusBadge } from "../../components/ui/StatusBadge";
-import { useSurveysCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useSurveysCollection, useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
 import { activeSyncAuthorizationMatches, flushSyncQueue, getSyncQueue, type SyncAuthorizationContext, type SyncState } from "../../lib/cloud/repository";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
+import { fieldOperatorMemberId } from "../../lib/siteDiaryIdentity-core.mjs";
 import { confirmSurveyBeforeNavigation, fieldSurveyCreationAllowed, persistSurveyBeforeNavigation, surveyCreateSyncMessage, surveyCreationRequiresCloudConfirmation } from "../../lib/surveyCreation-core.mjs";
 import type { Customer, Job, SiteSurvey } from "../../lib/models";
 
@@ -27,13 +28,22 @@ function blankSurvey(index: number): SiteSurvey {
   };
 }
 
+const unresolvedFieldSurveyIdentityMessage = "Your active team identity could not be resolved. Refresh your account before creating a field survey.";
+
 export default function SurveysPage() {
   const router = useRouter();
   const surveys = useSurveysCollection();
   const customers = useCloudLocalCollection<Customer>("jr-os-customers");
   const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
+  const team = useTeamCollection();
   const identityState = useCloudIdentity();
   const fieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
+  const fieldSurveyOperatorMemberId = useMemo(() => fieldOperatorMemberId({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
+  const fieldSurveyIdentityBlocked = fieldMode && !fieldSurveyOperatorMemberId;
   const [search, setSearch] = useState("");
   const [newSurveyJobId, setNewSurveyJobId] = useState("");
   const [message, setMessage] = useState("");
@@ -94,6 +104,7 @@ export default function SurveysPage() {
 
   async function retrySurveyConfirmation() {
     if (!unconfirmedSurveyId || creatingRef.current) return;
+    if (fieldSurveyIdentityBlocked) return;
     const expectedAuthorization = pendingAuthorizationRef.current;
     const operationGeneration = beginCreationOperation();
     if (operationGeneration === null) return;
@@ -126,6 +137,10 @@ export default function SurveysPage() {
 
   async function createSurvey() {
     if (creatingRef.current || unconfirmedSurveyId) return;
+    if (fieldSurveyIdentityBlocked) {
+      setMessage(unresolvedFieldSurveyIdentityMessage);
+      return;
+    }
     const survey = blankSurvey(surveys.items.length);
     if (fieldMode) {
       const job = jobs.items.find((item) => item.id === newSurveyJobId);
@@ -194,7 +209,7 @@ export default function SurveysPage() {
     return `${survey.number} ${customer} ${job} ${survey.propertyType}`.toLowerCase().includes(search.toLowerCase());
   });
 
-  if (!identityState.isReady || !surveys.isReady || !customers.isReady || !jobs.isReady) return <Card>Loading surveys…</Card>;
+  if (!identityState.isReady || !surveys.isReady || !customers.isReady || !jobs.isReady || (fieldMode && !team.isReady)) return <Card>Loading surveys…</Card>;
 
   return <div className="space-y-6">
     <div className="flex flex-wrap items-end justify-between gap-4">
@@ -202,9 +217,9 @@ export default function SurveysPage() {
       {!fieldMode ? <Button onClick={createSurvey} disabled={creating || Boolean(unconfirmedSurveyId)}><Plus className="mr-2 size-4" />{creating ? "Creating…" : "New survey"}</Button> : null}
     </div>
 
-    {message ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100"><p>{message}</p>{unconfirmedSurveyId ? <Button variant="secondary" onClick={retrySurveyConfirmation} disabled={creating}>{creating ? "Confirming…" : "Retry cloud confirmation"}</Button> : null}</div> : null}
+    {message ? <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100"><p>{message}</p>{unconfirmedSurveyId ? <Button variant="secondary" onClick={retrySurveyConfirmation} disabled={creating || fieldSurveyIdentityBlocked}>{creating ? "Confirming…" : "Retry cloud confirmation"}</Button> : null}</div> : null}
 
-    {fieldMode ? <Card className="border-cyan-400/30"><div className="grid gap-3 md:grid-cols-[1fr_auto]"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Assigned job for new survey</span><select value={newSurveyJobId} disabled={creating || Boolean(unconfirmedSurveyId)} onChange={(event) => { setNewSurveyJobId(event.target.value); setMessage(""); }} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose assigned job</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label><div className="flex items-end"><Button onClick={createSurvey} disabled={!newSurveyJobId || creating || Boolean(unconfirmedSurveyId)}><Plus className="mr-2 size-4" />{creating ? "Creating…" : "New field survey"}</Button></div></div><p className="mt-3 text-xs text-slate-400">Field surveys must be bound to an assigned job before the first cloud save.</p></Card> : null}
+    {fieldMode ? <Card className="border-cyan-400/30"><div className="grid gap-3 md:grid-cols-[1fr_auto]"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Assigned job for new survey</span><select value={newSurveyJobId} disabled={creating || Boolean(unconfirmedSurveyId)} onChange={(event) => { setNewSurveyJobId(event.target.value); setMessage(""); }} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose assigned job</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label><div className="flex items-end"><Button onClick={createSurvey} disabled={!newSurveyJobId || creating || Boolean(unconfirmedSurveyId) || fieldSurveyIdentityBlocked}><Plus className="mr-2 size-4" />{creating ? "Creating…" : "New field survey"}</Button></div></div>{fieldSurveyIdentityBlocked ? <p role="alert" className="mt-3 text-sm text-amber-200">{unresolvedFieldSurveyIdentityMessage}</p> : null}<p className="mt-3 text-xs text-slate-400">Field surveys must be bound to an assigned job before the first cloud save.</p></Card> : null}
 
     <Card><div className="relative"><Search className="pointer-events-none absolute left-3 top-3 size-5 text-slate-500" /><input aria-label="Search surveys" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search survey, customer or job" className="min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-3 text-white outline-none placeholder:text-slate-600 focus:border-cyan-400" /></div></Card>
 
