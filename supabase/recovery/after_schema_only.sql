@@ -367,4 +367,9 @@ begin;
 \ir ../migrations/20260903144000_keep_field_certificate_defaults_office_only.sql
 commit;
 
+\echo 'Keeping fleet records office-only'
+begin;
+\ir ../migrations/20260903153000_keep_field_fleet_office_only.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
