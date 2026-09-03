@@ -95,6 +95,10 @@ identity. Production-shaped null-customer envelopes remain supported, while
 item costs and pricing-document links, unassigned and unbound lists, revoked or
 deleted-job lists, canonical source rows, and other tenants remain hidden.
 
+Certificate-default settings remain office-only. Electricians cannot read the
+canonical collection or a pre-existing generic field projection, including
+inspector identity, scheme registration, numbering defaults and private notes.
+
 ### Generic collections covered
 
 - Surveys
