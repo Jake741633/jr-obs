@@ -8,6 +8,7 @@ import {
   fieldJobStatusTransitions,
   normaliseFieldJobStatus,
 } from "../lib/jobManagement-core.mjs";
+import { fieldOperatorMemberId } from "../lib/siteDiaryIdentity-core.mjs";
 
 const jobsPath = "app/jobs/page.tsx";
 const workspacePath = "app/jobs/[id]/workspace/page.tsx";
@@ -112,15 +113,17 @@ function assertJobsUpdater(call, source, expectedUpdater) {
   assert.equal(compact(call.arguments[0].getText(source)), expectedUpdater, "The optimistic write must use the audited transition result unchanged");
 }
 
-function assertHandlerGuardsBeforeOptimism(source, path, transitionCondition, expectedUpdater) {
+function assertHandlerGuardsBeforeOptimism(source, path, transitionCondition, expectedUpdater, syncCallee) {
   const handler = functionNode(source, path, "updateStatus");
   const unavailableGuard = exactTopLevelGuard(handler, source, "jobStatusMutationDenied", `${path} unavailable guard`);
+  const identityGuard = exactTopLevelGuard(handler, source, "fieldJobStatusRestricted&&!fieldJobOperatorMemberId", `${path} field identity guard`);
   const transitionGuard = exactTopLevelGuard(handler, source, transitionCondition, `${path} transition guard`);
-  const effects = ["transitionJobStatus", "jobs.setItems", "timeline.setItems"].map((callee) => {
+  const effects = ["transitionJobStatus", "jobs.setItems", "timeline.setItems", syncCallee].map((callee) => {
     const calls = collectNodes(handler.body, (node) => ts.isCallExpression(node)
       && node.expression.getText(source) === callee);
     assert.equal(calls.length, 1, `Expected exactly one ${callee} call in ${path} updateStatus`);
     assert.ok(unavailableGuard.end < calls[0].getStart(source), `${callee} must follow the unavailable guard`);
+    assert.ok(identityGuard.end < calls[0].getStart(source), `${callee} must follow the exact-one field identity guard`);
     assert.ok(transitionGuard.end < calls[0].getStart(source), `${callee} must follow the transition guard`);
     return calls[0];
   });
@@ -182,11 +185,11 @@ function assertListStatusHelpers() {
   assert.ok(ts.isReturnStatement(locked.body.statements[0]) && locked.body.statements[0].expression);
   assert.equal(
     compact(locked.body.statements[0].expression.getText(jobsSource)),
-    "jobStatusMutationDenied||(fieldJobStatusRestricted&&fieldJobStatusTransitions(job.status).length===0)||jobStatusSyncBlocked(job)",
+    "jobStatusMutationDenied||(fieldJobStatusRestricted&&!fieldJobOperatorMemberId)||(fieldJobStatusRestricted&&fieldJobStatusTransitions(job.status).length===0)||jobStatusSyncBlocked(job)",
   );
 
   const notice = functionNode(jobsSource, jobsPath, "jobStatusNotice");
-  assert.equal(notice.body.statements.length, 5, "jobStatusNotice must handle target sync truth, deny, terminal field, then unlocked cases");
+  assert.equal(notice.body.statements.length, 6, "jobStatusNotice must handle target sync truth, deny, field identity, terminal field, then unlocked cases");
   const syncDeclaration = notice.body.statements[0];
   assert.ok(ts.isVariableStatement(syncDeclaration));
   assert.equal(compact(syncDeclaration.getText(jobsSource)), "constsyncState=jobStatusSyncState(job);");
@@ -198,7 +201,11 @@ function assertListStatusHelpers() {
   assert.ok(ts.isIfStatement(unavailable));
   assert.equal(compact(unavailable.expression.getText(jobsSource)), "jobStatusMutationDenied");
   assert.equal(returnedExpression(unavailable.thenStatement, jobsSource, "unavailable notice").getText(jobsSource), "unavailableStatusMessage");
-  const terminal = notice.body.statements[3];
+  const unresolvedIdentity = notice.body.statements[3];
+  assert.ok(ts.isIfStatement(unresolvedIdentity));
+  assert.equal(compact(unresolvedIdentity.expression.getText(jobsSource)), "fieldJobStatusRestricted&&!fieldJobOperatorMemberId");
+  assert.equal(returnedExpression(unresolvedIdentity.thenStatement, jobsSource, "field identity notice").getText(jobsSource), "unresolvedFieldIdentityMessage");
+  const terminal = notice.body.statements[4];
   assert.ok(ts.isIfStatement(terminal));
   assert.equal(
     compact(terminal.expression.getText(jobsSource)),
@@ -207,7 +214,7 @@ function assertListStatusHelpers() {
   const terminalMessage = returnedExpression(terminal.thenStatement, jobsSource, "terminal field notice");
   assert.ok(ts.isStringLiteral(terminalMessage));
   assert.equal(terminalMessage.text, "Further lifecycle changes for this job require office review.");
-  const unlocked = notice.body.statements[4];
+  const unlocked = notice.body.statements[5];
   assert.ok(ts.isReturnStatement(unlocked) && unlocked.expression && ts.isStringLiteral(unlocked.expression));
   assert.equal(unlocked.expression.text, "");
 }
@@ -333,6 +340,40 @@ function assertStatusBoundaryInitializers(source, path) {
   assert.equal(initializer(source, path, "jobStatusMutationDenied"), "identityState.mode!==\"local\"&&!directJobStatusMutation&&!fieldJobStatusRestricted");
 }
 
+function assertFieldIdentityInitializer(source, path) {
+  const declarations = collectNodes(source, (node) => ts.isVariableDeclaration(node)
+    && ts.isIdentifier(node.name)
+    && node.name.text === "fieldJobOperatorMemberId");
+  assert.equal(declarations.length, 1, `Expected one fieldJobOperatorMemberId declaration in ${path}`);
+  const calls = collectNodes(declarations[0], (node) => ts.isCallExpression(node)
+    && node.expression.getText(source) === "fieldOperatorMemberId");
+  assert.equal(calls.length, 1, `Expected ${path} to use the shared field identity resolver once`);
+  assert.equal(calls[0].arguments.length, 1);
+  assert.equal(
+    compact(calls[0].arguments[0].getText(source)),
+    "{identity:identityState.identity,teamMembers:team.items,mode:identityState.mode,}",
+  );
+}
+
+test("field job status identity requires exactly one active cloud team match", () => {
+  const teamMembers = [
+    { id: "field-1", email: "field@example.com", status: "Active" },
+    { id: "former", email: "field@example.com", status: "Inactive" },
+  ];
+  const options = { identity: { email: " FIELD@example.com " }, teamMembers, mode: "cloud" };
+  assert.equal(fieldOperatorMemberId(options), "field-1");
+  assert.equal(fieldOperatorMemberId({
+    ...options,
+    teamMembers: [...teamMembers, { id: "duplicate", email: "FIELD@example.com", status: "Active" }],
+  }), "");
+  assert.equal(fieldOperatorMemberId({ ...options, identity: { email: "missing@example.com" } }), "");
+  assert.equal(fieldOperatorMemberId({ ...options, identity: { email: "" } }), "");
+  assert.equal(fieldOperatorMemberId({
+    ...options,
+    teamMembers: teamMembers.map((member) => ({ ...member, status: "Inactive" })),
+  }), "");
+});
+
 test("client field transitions exactly match the final server RPC graph", () => {
   const rpc = finalJobStatusRpc();
   assert.equal(compactSql(transitionPredicate(rpc)), expectedTransitionPredicate());
@@ -368,12 +409,19 @@ test("client field transitions exactly match the final server RPC graph", () => 
 test("both electrician-accessible job status surfaces fail closed before optimistic writes", () => {
   assertStatusBoundaryInitializers(jobsSource, jobsPath);
   assertStatusBoundaryInitializers(workspaceSource, workspacePath);
+  assertFieldIdentityInitializer(jobsSource, jobsPath);
+  assertFieldIdentityInitializer(workspaceSource, workspacePath);
+  assert.match(jobsPage, /const team = useTeamCollection\(\)/);
+  assert.match(workspacePage, /const team = useTeamCollection\(\)/);
+  assert.equal(initializer(jobsSource, jobsPath, "jobStatusBoundaryReady"), "identityState.isReady&&(!fieldJobStatusRestricted||team.isReady)");
+  assert.match(jobsPage, /if \(!jobStatusBoundaryReady\) return <Card>Loading jobs…<\/Card>;/);
 
   const listHandler = assertHandlerGuardsBeforeOptimism(
     jobsSource,
     jobsPath,
     "fieldJobStatusRestricted&&!fieldJobStatusTransitionAllowed(job.status,nextStatus)",
     "(current)=>current.map((item)=>item.id===id?result.job:item)",
+    "setJobStatusSyncProjection",
   );
   assertListStatusMessage(listHandler);
   const workspaceHandler = assertHandlerGuardsBeforeOptimism(
@@ -381,6 +429,7 @@ test("both electrician-accessible job status surfaces fail closed before optimis
     workspacePath,
     "fieldJobStatusRestricted&&!fieldJobStatusTransitionAllowed(currentStatus,nextStatus)",
     "(current)=>current.map((item)=>item.id===currentJob.id?result.job:item)",
+    "setJobStatusSync",
   );
   assertWorkspaceStatusMessage(workspaceHandler);
 });
@@ -403,7 +452,7 @@ test("field controls expose only current and server-approved next stages while o
 
   assert.equal(initializer(workspaceSource, workspacePath, "statusOptions"), "fieldJobStatusRestricted?[currentStatus,...fieldStatusTransitions]:canonicalJobStatuses");
   assert.equal(initializer(workspaceSource, workspacePath, "currentStatus"), "fieldJobStatusRestricted?normaliseFieldJobStatus(job.status):normaliseJobStatus(job.status)");
-  assert.equal(initializer(workspaceSource, workspacePath, "statusControlLocked"), "jobStatusMutationDenied||(fieldJobStatusRestricted&&fieldStatusTransitions.length===0)||jobStatusSyncBlocked");
+  assert.equal(initializer(workspaceSource, workspacePath, "statusControlLocked"), "jobStatusMutationDenied||(fieldJobStatusRestricted&&!fieldJobOperatorMemberId)||(fieldJobStatusRestricted&&fieldStatusTransitions.length===0)||jobStatusSyncBlocked");
   const workspaceSelects = collectNodes(workspaceSource, (node) => ts.isJsxElement(node)
     && node.openingElement.tagName.getText(workspaceSource) === "select"
     && node.openingElement.getText(workspaceSource).includes("disabled={statusControlLocked}"));
@@ -415,6 +464,7 @@ test("field controls expose only current and server-approved next stages while o
     "statusOptions.map((status)=><optionkey={status}value={status}>{status}</option>)",
   );
   assert.match(workspacePage, /Further lifecycle changes for this job require office review/);
+  assert.match(workspacePage, /fieldJobStatusRestricted && !fieldJobOperatorMemberId \? <p[^>]*>\{unresolvedFieldIdentityMessage\}<\/p>/);
 });
 
 test("dedicated field start actions remain inside the same approved Scheduled to First fix edge", () => {

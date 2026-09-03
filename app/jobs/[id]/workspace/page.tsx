@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   BookOpenText,
@@ -41,6 +41,7 @@ import { getSyncQueue, type SyncState } from "../../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../../lib/cloud/useCloudIdentity";
 import { acceptedVariationValue as calculateAcceptedVariationValue, canonicalJobStatuses, fieldJobStatusTransitionAllowed, fieldJobStatusTransitions, normaliseFieldJobStatus, normaliseJobStatus, transitionJobStatus } from "../../../../lib/jobManagement-core.mjs";
 import { normaliseJobProgress } from "../../../../lib/jobProgress-core.mjs";
+import { fieldOperatorMemberId } from "../../../../lib/siteDiaryIdentity-core.mjs";
 import { jobTaskCounts } from "../../../../lib/jobTasks-core.mjs";
 import { makeId } from "../../../../lib/storage";
 import type { CanonicalJobStatus, JobTimelineEntry } from "../../../../lib/models";
@@ -93,6 +94,7 @@ const progressSyncMessages: Record<SyncState, string> = {
   Failed: "Failed: progress sync did not complete. Displayed values may be local; reconnect and retry sync or contact the office.",
   Conflict: "Conflict: progress sync could not be confirmed against the current cloud record. Refresh from cloud before trying again.",
 };
+const unresolvedFieldIdentityMessage = "Your active team identity could not be resolved. Refresh your account before changing a job stage.";
 
 const jobStatusSyncMessages: Record<SyncState, string> = {
   Synced: "Job stage synced securely.",
@@ -151,6 +153,11 @@ export default function JobWorkspacePage() {
   const [progressSync, setProgressSync] = useState<ProgressSyncState>({ targetKey: "", state: null });
 
   const progressRecord = progress.items.find((item) => item.jobId === jobId);
+  const fieldJobOperatorMemberId = useMemo(() => fieldOperatorMemberId({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
   const progressValue = normaliseJobProgress(progressRecord?.manual ?? {}) as NormalisedJobProgress;
   const progressRecordId = progressRecord?.id ?? `job-progress-${jobId}`;
   const progressCloudTracking = identityState.mode !== "local" && Boolean(identityState.identity);
@@ -320,6 +327,7 @@ export default function JobWorkspacePage() {
     ? [currentStatus, ...fieldStatusTransitions]
     : canonicalJobStatuses;
   const statusControlLocked = jobStatusMutationDenied
+    || (fieldJobStatusRestricted && !fieldJobOperatorMemberId)
     || (fieldJobStatusRestricted && fieldStatusTransitions.length === 0)
     || jobStatusSyncBlocked;
   const displayedStatusMessage = activeJobStatusSyncState
@@ -341,6 +349,10 @@ export default function JobWorkspacePage() {
     }
     if (jobStatusMutationDenied) {
       setStatusMessage("Job status changes are unavailable until an approved cloud identity is active.");
+      return;
+    }
+    if (fieldJobStatusRestricted && !fieldJobOperatorMemberId) {
+      setStatusMessage(unresolvedFieldIdentityMessage);
       return;
     }
     if (fieldJobStatusRestricted && !fieldJobStatusTransitionAllowed(currentStatus, nextStatus)) {
@@ -460,7 +472,7 @@ export default function JobWorkspacePage() {
         </select>
         <Button type="button" onClick={updateStatus} disabled={statusControlLocked} className="w-full sm:w-auto">Save status</Button>
       </div>
-      {jobStatusMutationDenied ? <p className="mt-3 text-sm text-amber-200">Status changes remain read-only until an approved cloud identity is active.</p> : fieldJobStatusRestricted && fieldStatusTransitions.length === 0 ? <p className="mt-3 text-sm text-amber-200">Further lifecycle changes for this job require office review.</p> : null}
+      {jobStatusMutationDenied ? <p className="mt-3 text-sm text-amber-200">Status changes remain read-only until an approved cloud identity is active.</p> : fieldJobStatusRestricted && !fieldJobOperatorMemberId ? <p className="mt-3 text-sm text-amber-200">{unresolvedFieldIdentityMessage}</p> : fieldJobStatusRestricted && fieldStatusTransitions.length === 0 ? <p className="mt-3 text-sm text-amber-200">Further lifecycle changes for this job require office review.</p> : null}
       {displayedStatusMessage ? <p role="status" className={`mt-3 text-sm ${statusMessageTone}`}>{displayedStatusMessage}</p> : null}
     </Card>
 
