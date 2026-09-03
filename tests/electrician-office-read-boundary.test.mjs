@@ -6,6 +6,10 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20260809_043_restrict_electrician_office_reads.sql", import.meta.url),
   "utf8",
 );
+const stockMovementBoundary = readFileSync(
+  new URL("../supabase/migrations/20260903132756_keep_field_stock_movements_office_only.sql", import.meta.url),
+  "utf8",
+);
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 const setup = readFileSync(new URL("../docs/SUPABASE_SETUP.md", import.meta.url), "utf8");
 const liveRls = readFileSync(new URL("./supabase-rls.integration.mjs", import.meta.url), "utf8");
@@ -87,7 +91,7 @@ test("the final generic SELECT policy preserves tenant and customer portal scope
   }
 });
 
-test("office-only typed payloads no longer match electrician sessions", () => {
+test("the historical office-only typed boundary excluded then-supported field tables", () => {
   const officeOnly = migration.slice(migration.indexOf("-- These typed tables"), migration.indexOf("-- Invoice, payment"));
   assert.match(officeOnly, /'expenses'/i);
   assert.match(officeOnly, /'ai_recommendation_evidence'/i);
@@ -95,6 +99,14 @@ test("office-only typed payloads no longer match electrician sessions", () => {
   for (const fieldTable of ["materials", "stock_items", "stock_movements", "purchase_lists", "team_members", "timesheets"]) {
     assert.doesNotMatch(officeOnly, new RegExp(`'${fieldTable}'`));
   }
+});
+
+test("the final focused boundary keeps canonical stock movement rows office-only", () => {
+  assert.match(stockMovementBoundary, /drop policy if exists stock_movements_select on public\.stock_movements/i);
+  assert.match(
+    stockMovementBoundary,
+    /create policy stock_movements_select[\s\S]*organisation_id = private\.current_organisation_id\(\)[\s\S]*\(select private\.can_manage_office_data\(\)\)/i,
+  );
 });
 
 test("customer-facing finance and portal tables exclude electricians without breaking customer reads", () => {

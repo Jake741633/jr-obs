@@ -352,4 +352,9 @@ begin;
 \ir ../migrations/20260903121755_keep_field_electrical_testing_office_only.sql
 commit;
 
+\echo 'Keeping canonical stock movement history office-only'
+begin;
+\ir ../migrations/20260903132756_keep_field_stock_movements_office_only.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
