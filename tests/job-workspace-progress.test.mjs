@@ -64,7 +64,7 @@ test("job progress reports exact replay failure state without claiming rollback 
   assert.match(workspace, /queueTargetSyncState\(getSyncQueue\(\),/);
   assert.match(workspace, /table: "cloud_collections",\s*collectionKey: "jr-os-job-progress",\s*sourceId: progressRecordId/s);
   assert.match(workspace, /state: navigator\.onLine \? "Pending" : "Offline"/);
-  assert.match(workspace, /disabled=\{progressSyncBlocked\}/);
+  assert.match(workspace, /disabled=\{progressControlLocked\}/);
   assert.match(workspace, /Failed: progress sync did not complete/);
   assert.match(workspace, /Conflict: progress sync could not be confirmed against the current cloud record/);
   assert.match(workspace, /Displayed percentages may be local and are not confirmed by cloud/);
@@ -83,7 +83,39 @@ test("terminal progress sync preserves newer unsaved field edits", () => {
     /nextState === "Failed" \|\| nextState === "Conflict"[\s\S]{0,260}setProgressDraft/,
   );
   assert.match(workspace, /const progressSyncBlocked = activeProgressSyncState === "Failed" \|\| activeProgressSyncState === "Conflict"/);
-  assert.match(workspace, /disabled=\{progressSyncBlocked\}/);
+  assert.match(workspace, /disabled=\{progressControlLocked\}/);
+});
+
+test("field progress requires one exact active team identity before local or queued mutation", () => {
+  assert.match(workspace, /const fieldWorkspace = identityState\.mode !== "local" && identityState\.identity\?\.role === "electrician";/);
+  assert.match(workspace, /fieldOperatorMemberId\(\{[\s\S]*identity: identityState\.identity,[\s\S]*teamMembers: team\.items,[\s\S]*mode: identityState\.mode/);
+  assert.match(workspace, /const progressIdentityBlocked = fieldWorkspace && !fieldJobOperatorMemberId;/);
+  assert.match(workspace, /const progressControlLocked = progressSyncBlocked \|\| progressIdentityBlocked;/);
+  assert.match(workspace, /progressIdentityBlocked \? <p role="alert"[^>]*>\{unresolvedFieldProgressIdentityMessage\}<\/p> : null/);
+  assert.match(workspace, /updatedBy: "JR OS mobile workspace"/);
+
+  const updateMetric = workspace.slice(
+    workspace.indexOf("function updateProgressMetric"),
+    workspace.indexOf("\n\n  function saveProgress"),
+  );
+  const updateGuard = updateMetric.indexOf("if (progressControlLocked) return;");
+  assert.ok(updateGuard >= 0);
+  for (const sideEffect of ["setProgressDraft(", "setProgressSync(", "setProgressMessage("]) {
+    assert.ok(updateGuard < updateMetric.indexOf(sideEffect), `${sideEffect} must follow the field progress control guard`);
+  }
+
+  const saveProgress = workspace.slice(
+    workspace.indexOf("function saveProgress"),
+    workspace.indexOf("\n\n  return <main"),
+  );
+  const identityGuard = saveProgress.indexOf("if (progressIdentityBlocked) return;");
+  assert.ok(identityGuard > saveProgress.indexOf("if (progressSyncBlocked) return;"));
+  for (const sideEffect of ["new Date()", "normaliseJobProgress(", "progress.setItems(", "setProgressDraft(", "setProgressSync(", "setProgressMessage("]) {
+    assert.ok(identityGuard < saveProgress.indexOf(sideEffect), `${sideEffect} must follow the exact-one field identity guard`);
+  }
+
+  assert.match(workspace, /<input id=\{`progress-\$\{key\}`\}[^\n]*disabled=\{progressControlLocked\}/);
+  assert.match(workspace, /<Button type="button" onClick=\{saveProgress\} disabled=\{progressControlLocked\}>Save field progress<\/Button>/);
 });
 
 test("mobile job workspace creates one canonical progress record shape when none exists", () => {

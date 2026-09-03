@@ -95,6 +95,7 @@ const progressSyncMessages: Record<SyncState, string> = {
   Conflict: "Conflict: progress sync could not be confirmed against the current cloud record. Refresh from cloud before trying again.",
 };
 const unresolvedFieldIdentityMessage = "Your active team identity could not be resolved. Refresh your account before changing a job stage.";
+const unresolvedFieldProgressIdentityMessage = "Your active team identity could not be resolved. Refresh your account before saving field progress.";
 
 const jobStatusSyncMessages: Record<SyncState, string> = {
   Synced: "Job stage synced securely.",
@@ -203,6 +204,9 @@ export default function JobWorkspacePage() {
   const hasActiveProgressDraft = Object.keys(activeProgressDraft).length > 0;
   const progressDraftValue: NormalisedJobProgress = { ...progressValue, ...activeProgressDraft };
   const activeProgressSyncState = progressCloudTracking && progressSync.targetKey === progressSyncTargetKey ? progressSync.state : null;
+  const progressSyncBlocked = activeProgressSyncState === "Failed" || activeProgressSyncState === "Conflict";
+  const progressIdentityBlocked = fieldWorkspace && !fieldJobOperatorMemberId;
+  const progressControlLocked = progressSyncBlocked || progressIdentityBlocked;
   const progressStatusMessage = hasActiveProgressDraft
     ? activeProgressSyncState === "Failed" || activeProgressSyncState === "Conflict"
       ? `${progressSyncMessages[activeProgressSyncState]} Unsaved progress changes remain preserved on this device.`
@@ -212,7 +216,6 @@ export default function JobWorkspacePage() {
     : activeProgressSyncState
       ? progressSyncMessages[activeProgressSyncState]
       : progressMessage.targetKey === progressTargetKey ? progressMessage.text : "";
-  const progressSyncBlocked = activeProgressSyncState === "Failed" || activeProgressSyncState === "Conflict";
   const progressStatusTone = progressSyncBlocked
     ? "text-rose-200"
     : activeProgressSyncState === "Synced"
@@ -378,7 +381,7 @@ export default function JobWorkspacePage() {
   }
 
   function updateProgressMetric(metric: EditableProgressMetric, value: string) {
-    if (progressSyncBlocked) return;
+    if (progressControlLocked) return;
     const numericValue = Number(value);
     const boundedValue = Number.isFinite(numericValue) ? Math.min(100, Math.max(0, Math.round(numericValue))) : 0;
     setProgressDraft((current) => ({
@@ -396,6 +399,7 @@ export default function JobWorkspacePage() {
 
   function saveProgress() {
     if (progressSyncBlocked) return;
+    if (progressIdentityBlocked) return;
     const now = new Date().toISOString();
     const normalised = normaliseJobProgress(progressDraftValue) as NormalisedJobProgress;
     const fieldManual = {
@@ -451,11 +455,12 @@ export default function JobWorkspacePage() {
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         {editableProgressMetrics.map(({ key, label }) => <label key={key} htmlFor={`progress-${key}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
           <span className="flex items-center justify-between gap-3 text-sm"><span className="font-medium text-slate-300">{label}</span><span className="font-semibold text-cyan-200">{progressDraftValue[key]}%</span></span>
-          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraftValue[key]} disabled={progressSyncBlocked} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-12 w-full accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-60" />
+          <input id={`progress-${key}`} type="range" min="0" max="100" step="1" value={progressDraftValue[key]} disabled={progressControlLocked} onChange={(event) => updateProgressMetric(key, event.target.value)} className="mt-3 min-h-12 w-full accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-60" />
         </label>)}
         {!fieldWorkspace ? <div className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">{progressBar("Payments (office controlled)", progressValue.payments)}</div> : null}
       </div>
-      <div className="mt-5 flex flex-wrap items-center gap-3"><Button type="button" onClick={saveProgress} disabled={progressSyncBlocked}>Save field progress</Button><p className="text-xs text-slate-500">Only operational percentages are sent by the field app.</p></div>
+      <div className="mt-5 flex flex-wrap items-center gap-3"><Button type="button" onClick={saveProgress} disabled={progressControlLocked}>Save field progress</Button><p className="text-xs text-slate-500">Only operational percentages are sent by the field app.</p></div>
+      {progressIdentityBlocked ? <p role="alert" className="mt-3 text-sm text-amber-200">{unresolvedFieldProgressIdentityMessage}</p> : null}
       {progressStatusMessage ? <p role="status" className={`mt-3 text-sm ${progressStatusTone}`}>{progressStatusMessage}</p> : null}
       {!progressRecord ? <p className="mt-4 text-sm text-amber-300">No saved progress record yet. Saving will create one for this assigned job.</p> : unsyncedProgressRecordMessage ? <p className="mt-4 text-xs text-amber-200">{unsyncedProgressRecordMessage}</p> : <p className="mt-4 text-xs text-slate-500">Last updated {new Date(progressRecord.updatedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} by {progressRecord.updatedBy || "JR OS"}.</p>}
     </Card>
