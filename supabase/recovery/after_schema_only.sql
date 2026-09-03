@@ -362,4 +362,9 @@ begin;
 \ir ../migrations/20260903141000_scope_field_purchase_list_reads_to_assignments.sql
 commit;
 
+\echo 'Keeping certificate defaults office-only'
+begin;
+\ir ../migrations/20260903144000_keep_field_certificate_defaults_office_only.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
