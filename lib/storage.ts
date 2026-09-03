@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { accountStorageKey, createCollectionRepository, type RecordCreatorMap, type RepositoryRecord } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
 import { cloudSafeFileRecord, usePrivateFileCollectionBridge } from "./cloud/privateFiles";
+import { purgeCustomerNetworkOnlyCollectionCaches, purgeRoleProjectionCacheStorage, roleProjectionCachePolicy } from "./cloud/roleProjectionCache-core.mjs";
 import { useCloudIdentity } from "./cloud/useCloudIdentity";
 
 export function makeId(prefix: string) {
@@ -40,6 +41,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   const cacheRole = identity?.role;
   const cacheCustomerSourceId = identity?.customerSourceId;
   const activeStorageKey = organisationId ? accountStorageKey(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId) : key;
+  const networkOnly = roleProjectionCachePolicy({ storageKey: key, role: cacheRole, mode }) === "network-only";
 
   useEffect(() => {
     if (identityReady) return;
@@ -96,6 +98,14 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
 
   useEffect(() => {
     if (!isReady) return;
+    if (mode !== "local" && userId && cacheRole) {
+      purgeCustomerNetworkOnlyCollectionCaches(window.localStorage, key);
+    }
+    if (networkOnly) {
+      purgeRoleProjectionCacheStorage(window.localStorage, activeStorageKey);
+      previousRef.current = items;
+      return;
+    }
     window.localStorage.setItem(activeStorageKey, JSON.stringify(items));
 
     if (suppressSyncRef.current || !target || !organisationId || !userId || mode === "local") {
@@ -136,7 +146,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     }
     if (creatorMetadataChanged) setCreatedBySourceId(repository.recordCreators());
     previousRef.current = items;
-  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, items, key, mode, organisationId, target, userId]);
+  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, items, key, mode, networkOnly, organisationId, target, userId]);
 
   useEffect(() => {
     function reconcileCloudCache(event: Event) {
@@ -168,6 +178,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     const id = recordId(item);
     if (!isReady) throw new Error("Collection is not ready for record creation.");
     if (!id) throw new Error("A new collection record requires a stable id.");
+    if (networkOnly) throw new Error("This live capability collection is read-only and cannot be stored on this device.");
 
     const current = previousRef.current;
     if (current.some((record) => recordId(record) === id)) {
@@ -195,7 +206,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     previousRef.current = next;
     setItems(next);
     return item;
-  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, key, organisationId, target, userId]);
+  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, key, networkOnly, organisationId, target, userId]);
 
   return { items: displayItems, setItems, createItem, remove, isReady, createdBySourceId };
 }

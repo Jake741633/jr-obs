@@ -19,7 +19,8 @@ test("authenticated collection caches are scoped by the complete authorisation i
 
 test("migration mode never trusts a legacy unscoped cache for an authenticated organisation", () => {
   assert.match(adapter, /const scopedStorageKey = accountStorageKey\(storageKey, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId\)/);
-  assert.match(adapter, /const local = readLocal<T>\(scopedStorageKey\)/);
+  assert.match(adapter, /const cached = readLocal<T>\(scopedStorageKey\)/);
+  assert.match(adapter, /const local = cachePolicy === "purge" \|\| networkOnly[\s\S]*sanitizeRoleProjectionCache/);
   assert.doesNotMatch(adapter, /const local = readLocal<T>\(storageKey\)/);
   assert.match(adapter, /legacy unscoped key is[\s\S]*never trusted/);
 });

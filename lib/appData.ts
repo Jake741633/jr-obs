@@ -3,6 +3,7 @@
 import { accountStorageKey, organisationStorageKey } from "./cloud/adapter";
 import {
   aggregateLegacyMigrationStorageKeys,
+  accountBackupStorageKeyAllowed,
   backupStorageScope,
   claimLegacyMigrationStorage,
   collectAccountBusinessData,
@@ -105,6 +106,7 @@ export async function importJrOsBackup(
   }
   let restored = 0;
   Object.entries(parsed.data).forEach(([key, value]) => {
+    if (!accountBackupStorageKeyAllowed(key, context.role)) return;
     const scope = backupStorageScope(key);
     if (!scope) return;
     const destinationKey = scope === "account"

@@ -104,6 +104,7 @@ Use separate test users for owner, office, electrician and customer. Verify:
 - office users cannot manage owner/admin permissions
 - only owner/admin users can delete typed records
 - customer portal approvals cannot reference Draft, expired, missing or another customer's pricing document, and appointment requests cannot reference cancelled, missing or cross-customer planner entries
+- authenticated customer payment URLs are never kept in browser storage or replayed offline; each click must revalidate the current account and fetch one exact, still-eligible invoice link with a no-store request, while office and local/demo records retain their existing behavior
 - portal approval document targets and request planner targets remain immutable after submission
 - private storage objects cannot be opened using an unauthenticated permanent URL
 

@@ -9,7 +9,7 @@ const guard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.
 const permissions = readFileSync(new URL("../lib/cloud/permissions.ts", import.meta.url), "utf8");
 
 test("authenticated customer sessions are bound to the profile customer source id", () => {
-  assert.match(portal, /const \{ identity \} = useCloudIdentity\(\)/);
+  assert.match(portal, /const \{ identity, mode \} = useCloudIdentity\(\)/);
   assert.match(portal, /const customerSession = identity\?\.role === "customer"/);
   assert.match(portal, /const authenticatedCustomerId = customerSession \? identity\.customerSourceId \?\? "" : ""/);
   assert.match(portal, /const activeCustomerId = customerSession \? authenticatedCustomerId : selectedCustomerId/);

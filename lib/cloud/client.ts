@@ -165,6 +165,12 @@ export async function refreshSession(session = cloudSession.load()) {
 }
 
 export async function cloudSelect<T>(table: string, query = "select=*") { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}?${query}`, { method: "GET" }, cloudSession.load() || undefined); }
+export async function cloudSelectFresh<T>(table: string, query = "select=*") {
+  return request<T[]>(`/rest/v1/${encodeURIComponent(table)}?${query}`, {
+    method: "GET",
+    cache: "no-store",
+  }, cloudSession.load() || undefined);
+}
 export async function cloudInsert<T extends object>(table: string, records: T[]) { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}`, { method: "POST", body: JSON.stringify(records), headers: { Prefer: "return=representation" } }, cloudSession.load() || undefined); }
 export async function cloudUpsert<T extends object>(table: string, records: T[], conflictColumns = "organisation_id,source_id") { return request<T[]>(`/rest/v1/${encodeURIComponent(table)}?on_conflict=${encodeURIComponent(conflictColumns)}`, { method: "POST", body: JSON.stringify(records), headers: { Prefer: "resolution=merge-duplicates,return=representation" } }, cloudSession.load() || undefined); }
 export async function cloudPatch<TResult extends object = Record<string, unknown>, TPatch extends object = Record<string, unknown>>(table: string, query: string, patch: TPatch) { return request<TResult[]>(`/rest/v1/${encodeURIComponent(table)}?${query}`, { method: "PATCH", body: JSON.stringify(patch), headers: { Prefer: "return=representation" } }, cloudSession.load() || undefined); }

@@ -135,13 +135,18 @@ test("role projection cache generations fail closed on the first upgraded offlin
   for (const storageKey of [
     "jr-os-certificates", "jr-os-customers", "jr-os-deposit-requirements",
     "jr-os-invoices", "jr-os-job-timeline", "jr-os-jobs", "jr-os-payments",
-    "jr-os-portal-payment-links", "jr-os-pricing-documents",
+    "jr-os-pricing-documents",
   ]) {
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud" }), "purge");
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "customer", mode: "migration", generation: "old" }), "purge");
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud", generation: CUSTOMER_PROJECTION_CACHE_GENERATION }), "keep");
     assert.equal(roleProjectionCacheGeneration({ storageKey, role: "customer" }), CUSTOMER_PROJECTION_CACHE_GENERATION);
   }
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-portal-payment-links", role: "customer", mode: "cloud" }), "network-only");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-portal-payment-links", role: "customer", mode: "migration", generation: CUSTOMER_PROJECTION_CACHE_GENERATION }), "network-only");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-portal-payment-links", role: "customer", mode: "local" }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-portal-payment-links", role: "office", mode: "cloud" }), "keep");
+  assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-portal-payment-links", role: "customer" }), undefined);
   for (const storageKey of ["jr-os-job-documents", "jr-os-planner", "jr-os-portal-access", "jr-os-portal-activity", "jr-os-portal-photo-shares"]) {
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "customer", mode: "cloud", generation: CUSTOMER_PROJECTION_CACHE_GENERATION }), "purge");
   }

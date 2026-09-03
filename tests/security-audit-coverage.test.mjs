@@ -120,6 +120,7 @@ const requiredSuites = [
   "portal-approval-evidence-guard.test.mjs",
   "portal-approval-atomicity.test.mjs",
   "portal-payment-link-binding-guard.test.mjs",
+  "portal-payment-link-live-capability.test.mjs",
   "portal-target-binding-guard.test.mjs",
   "customer-timeline-projection.test.mjs",
   "customer-timeline-live-rls.test.mjs",
@@ -151,6 +152,19 @@ test("penetration suite retains every final attack class", () => {
     "forged or expired browser sessions",
   ]) {
     assert.match(penetration, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
+  }
+});
+
+test("customer payment capability suite retains cache and activation boundaries", () => {
+  const capability = readFileSync(resolve(testsDirectory, "portal-payment-link-live-capability.test.mjs"), "utf8");
+  for (const requiredPhrase of [
+    "customer payment-link caches are network-only outside local mode",
+    "network-only adapter never replays a stale URL offline",
+    "click-time loader revalidates live identity",
+    "click activation navigates only with a fresh result",
+    "without passing the rendered URL",
+  ]) {
+    assert.match(capability, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }
 });
 
