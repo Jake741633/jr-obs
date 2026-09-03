@@ -1,0 +1,87 @@
+name: JR OS Supabase RLS Integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type JR_OS_RLS_TEST to confirm this is the dedicated disposable test project
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jr-os-supabase-rls-test
+  cancel-in-progress: false
+
+jobs:
+  rls-integration:
+    runs-on: ubuntu-latest
+    environment: supabase-test
+    timeout-minutes: 20
+    env:
+      SUPABASE_TEST_URL: ${{ secrets.SUPABASE_TEST_URL }}
+      SUPABASE_TEST_PROJECT_REF: ${{ vars.SUPABASE_TEST_PROJECT_REF }}
+      SUPABASE_TEST_ANON_KEY: ${{ secrets.SUPABASE_TEST_ANON_KEY }}
+      SUPABASE_TEST_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_TEST_SERVICE_ROLE_KEY }}
+      SUPABASE_TEST_CONFIRM: ${{ inputs.confirmation }}
+    steps:
+      - name: Validate protected test configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SUPABASE_TEST_CONFIRM" = "JR_OS_RLS_TEST" || {
+            echo "The confirmation input must exactly equal JR_OS_RLS_TEST."
+            exit 1
+          }
+          test -n "$SUPABASE_TEST_URL" || {
+            echo "Missing SUPABASE_TEST_URL in the supabase-test environment."
+            exit 1
+          }
+          test -n "$SUPABASE_TEST_PROJECT_REF" || {
+            echo "Missing SUPABASE_TEST_PROJECT_REF in the supabase-test environment."
+            exit 1
+          }
+          [[ "$SUPABASE_TEST_PROJECT_REF" =~ ^[a-z0-9]{20}$ ]] || {
+            echo "SUPABASE_TEST_PROJECT_REF must be the exact 20-character hosted project reference."
+            exit 1
+          }
+          test -n "$SUPABASE_TEST_ANON_KEY" || {
+            echo "Missing SUPABASE_TEST_ANON_KEY in the supabase-test environment."
+            exit 1
+          }
+          test -n "$SUPABASE_TEST_SERVICE_ROLE_KEY" || {
+            echo "Missing SUPABASE_TEST_SERVICE_ROLE_KEY in the supabase-test environment."
+            exit 1
+          }
+          expected_url="https://${SUPABASE_TEST_PROJECT_REF}.supabase.co"
+          case "$SUPABASE_TEST_URL" in
+            "$expected_url"|"$expected_url/") ;;
+            *)
+              echo "SUPABASE_TEST_URL must exactly match the protected project reference."
+              exit 1
+              ;;
+          esac
+
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify disposable project has the latest migration
+        run: npm run verify:supabase-schema
+
+      - name: Run multi-tenant RLS and private Storage integration tests
+        run: npm run test:rls
+
+      - name: Clean disposable Supabase test data
+        if: ${{ always() }}
+        run: node tests/supabase-rls.cleanup.mjs

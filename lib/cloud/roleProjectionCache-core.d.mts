@@ -1,0 +1,45 @@
+export type RoleProjectionCacheMode = "local" | "cloud" | "migration";
+
+export interface RoleProjectionCacheInput<T> {
+  storageKey: string;
+  role?: string;
+  mode: RoleProjectionCacheMode;
+  records: T[];
+}
+
+export const ELECTRICIAN_VARIATION_TIMELINE_NOTE: "Variation status updated.";
+export const ELECTRICIAN_BUILDER_PROJECTION_CACHE_GENERATION: "20260826132500";
+export const ELECTRICIAN_CUSTOMER_PROJECTION_CACHE_GENERATION: "20260820150000";
+export const ELECTRICIAN_INVENTORY_PROJECTION_CACHE_GENERATION: "20260809_050";
+export const ELECTRICIAN_STOCK_LOCATION_PROJECTION_CACHE_GENERATION: "20260903163000";
+export const ELECTRICIAN_TEAM_PROJECTION_CACHE_GENERATION: "20260809_046";
+export const ELECTRICIAN_JOB_COMPLETION_CACHE_GENERATION: "20260826121246";
+export const ELECTRICIAN_JOB_MATERIAL_USAGE_CACHE_GENERATION: "20260826110301";
+export const ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION: "20260826144606";
+export const ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION: "20260820143000";
+export const ELECTRICIAN_JOB_QA_INSPECTION_CACHE_GENERATION: "20260826120037";
+export const ELECTRICIAN_JOB_TASK_CACHE_GENERATION: "20260826114300";
+export const ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION: "20260826123514";
+export const ELECTRICIAN_JOB_VARIATION_CACHE_GENERATION: "20260826101908";
+export const ELECTRICIAN_SITE_DIARY_CACHE_GENERATION: "20260820163000";
+export const CUSTOMER_PROJECTION_CACHE_GENERATION: "20260814091500";
+export function roleProjectionVersionMap(rows: unknown, records: unknown): Record<string, number>;
+export function roleProjectionCacheStorageKeys(scopedStorageKey: string): string[];
+export function purgeRoleProjectionCacheStorage(
+  storage: { removeItem(key: string): void } | null | undefined,
+  scopedStorageKey: string,
+): void;
+export function purgeCustomerNetworkOnlyCollectionCaches(
+  storage: { readonly length: number; key(index: number): string | null; removeItem(key: string): void } | null | undefined,
+  storageKey: string,
+): void;
+export function purgeElectricianNetworkOnlyCollectionCaches(
+  storage: { readonly length: number; key(index: number): string | null; removeItem(key: string): void } | null | undefined,
+  storageKey: string,
+): void;
+export function purgeElectricianFleetCollectionCaches(
+  storage: { readonly length: number; key(index: number): string | null; removeItem(key: string): void } | null | undefined,
+): void;
+export function roleProjectionCacheGeneration(input: Pick<RoleProjectionCacheInput<never>, "storageKey" | "role">): string | undefined;
+export function roleProjectionCachePolicy(input: Omit<RoleProjectionCacheInput<never>, "records"> & { generation?: string }): "keep" | "purge" | "network-only";
+export function sanitizeRoleProjectionCache<T>(input: RoleProjectionCacheInput<T>): T[];

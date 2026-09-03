@@ -1,26 +1,26 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+:root { color-scheme: dark; --background: #020617; --foreground: #f8fafc; }
+@theme inline { --color-background: var(--background); --color-foreground: var(--foreground); --font-sans: var(--font-geist-sans); --font-mono: var(--font-geist-mono); }
+* { box-sizing: border-box; }
+html { min-height: 100%; background: var(--background); overflow-x: hidden; -webkit-text-size-adjust: 100%; }
+body { min-height: 100%; margin: 0; overflow-x: hidden; background: radial-gradient(circle at top right, rgba(34,211,238,.08), transparent 28rem), var(--background); color: var(--foreground); font-family: Arial, Helvetica, sans-serif; overscroll-behavior-y: none; }
+button, input, textarea, select { font: inherit; }
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+input, textarea, select { min-width: 0; }
+img, video, canvas, svg { max-width: 100%; }
+@media (max-width: 639px) {
+  input, textarea, select { width: 100%; font-size: 16px; }
+  table { font-size: .8125rem; }
+  form, form > *, form .grid, form .flex { min-width: 0; }
+  form button:not([aria-label]) { width: 100%; }
+  form [role="group"] { width: 100%; }
 }
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+@media (min-width: 640px) {
+  form button:not([aria-label]) { width: auto; }
 }
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@media print {
+  body.quote-printing * { visibility: hidden; }
+  body.quote-printing [data-quote-print-root], body.quote-printing [data-quote-print-root] * { visibility: visible; }
+  body.quote-printing [data-quote-print-root] { position: absolute; inset: 0; width: 100%; }
 }

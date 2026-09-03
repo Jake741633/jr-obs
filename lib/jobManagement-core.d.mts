@@ -1,0 +1,30 @@
+import type { CanonicalJobStatus, CanonicalVariationStatus, Job, JobStatus, JobTimelineEntry, JobVariation, PricingLineItem, SiteDiaryEntry, VariationStatus } from "./models";
+
+export const canonicalJobStatuses: ReadonlyArray<CanonicalJobStatus> & { includes(searchElement: string, fromIndex?: number): boolean };
+export function normaliseJobStatus(status: JobStatus | string): CanonicalJobStatus;
+export function normaliseFieldJobStatus(status: JobStatus | string): CanonicalJobStatus;
+export function fieldJobStatusTransitions(status: JobStatus | string): readonly CanonicalJobStatus[];
+export function fieldJobStatusTransitionAllowed(currentStatus: JobStatus | string, requestedStatus: JobStatus | string): boolean;
+export function isCanonicalJobStatus(status: string): status is CanonicalJobStatus;
+export function isJobClosedStatus(status: JobStatus | string): boolean;
+export function isJobInactiveStatus(status: JobStatus | string): boolean;
+export function isJobOnSiteStatus(status: JobStatus | string): boolean;
+export function transitionJobStatus(input: { job: Job; nextStatus: CanonicalJobStatus; now: string; timelineId: string; completedBy?: string }): { job: Job & { status: CanonicalJobStatus }; timelineEntry: JobTimelineEntry | null };
+export function initialJobTimelineEntry(input: { job: Job; now: string; timelineId: string; completedBy?: string }): JobTimelineEntry;
+export function newestJobActivityFirst<T extends Pick<JobTimelineEntry, "id" | "completedAt" | "createdAt">>(entries: T[]): T[];
+export function normaliseSiteDiaryEntry(entry: SiteDiaryEntry): SiteDiaryEntry & Required<Pick<SiteDiaryEntry, "staffPresent" | "otherStaffPresent" | "builderInstructions" | "customerInstructions" | "materialsRequired" | "photos" | "photoDocumentIds" | "voiceNoteTranscript" | "weather" | "issuesAndRisks" | "followUpActions">>;
+export function siteDiaryDurationHours(entry: Pick<SiteDiaryEntry, "workDate" | "startedAt" | "finishedAt" | "breakMinutes">): number;
+export function siteDiaryTimelineEntry(input: { entry: SiteDiaryEntry; timelineId: string; completedBy?: string; now: string }): JobTimelineEntry;
+export const canonicalVariationStatuses: readonly CanonicalVariationStatus[];
+export function normaliseVariationStatus(status: VariationStatus | string): CanonicalVariationStatus;
+export function isAcceptedVariationStatus(status: VariationStatus | string): boolean;
+export function acceptedVariationValue(variations: JobVariation[]): number;
+export function currentJobContractValue(originalContractValue: number, variations: JobVariation[]): number;
+export function nextJobVariationNumber(variations: JobVariation[], jobId: string): string;
+export function variationFinancials(variation: JobVariation): { labourCost: number; labourSelling: number; materialCost: number; materialSelling: number; otherCost: number; otherSelling: number; itemisedSellingPrice: number; costPrice: number; sellingPrice: number; grossProfit: number; grossMargin: number };
+export interface VariationPresentationView { audience: "Customer" | "Builder" | "Internal"; number: string; title: string; description: string; customerNotes: string; status: CanonicalVariationStatus; sellingPrice: number; labour?: { hours: number; rate: number; total: number }; materials?: { total: number }; internalCost?: number; grossProfit?: number; grossMargin?: number; internalNotes?: string; }
+export function variationPresentationView(variation: JobVariation, audience?: "Customer" | "Builder" | "Internal"): VariationPresentationView;
+export function transitionVariation(input: { variation: JobVariation; nextStatus: CanonicalVariationStatus; now: string; auditId: string; completedBy?: string; recipient?: "Customer" | "Builder"; detail?: string; approvalMethod?: JobVariation["approvalMethod"]; approvalReference?: string; invoiceId?: string }): JobVariation & { status: CanonicalVariationStatus };
+export function applyVariationContractValue(input: { job: Job; variation: JobVariation; nextStatus: CanonicalVariationStatus; now: string }): Job;
+export function variationTimelineEntry(input: { variation: JobVariation; fromStatus: VariationStatus; toStatus: CanonicalVariationStatus; timelineId: string; completedBy?: string; now: string }): JobTimelineEntry;
+export function variationInvoiceLine(variation: JobVariation, lineId: string): PricingLineItem;

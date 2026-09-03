@@ -1,0 +1,35 @@
+import type { InvoiceStatus, JobStatus, PricingDocumentStatus } from "../../lib/models";
+
+type SupportedStatus = JobStatus | PricingDocumentStatus | InvoiceStatus | "Ready to invoice";
+
+const styles: Record<SupportedStatus, string> = {
+  Lead: "bg-slate-800 text-slate-300",
+  Enquiry: "bg-slate-800 text-slate-300",
+  "Survey required": "bg-indigo-500/15 text-indigo-300",
+  Quoted: "bg-violet-500/15 text-violet-300",
+  Accepted: "bg-emerald-500/15 text-emerald-300",
+  "Awaiting deposit": "bg-amber-500/15 text-amber-300",
+  Scheduled: "bg-blue-500/15 text-blue-300",
+  "In progress": "bg-amber-500/15 text-amber-300",
+  "First fix": "bg-cyan-500/15 text-cyan-300",
+  "Awaiting builder": "bg-amber-500/15 text-amber-300",
+  "Second fix": "bg-blue-500/15 text-blue-300",
+  Testing: "bg-violet-500/15 text-violet-300",
+  Snagging: "bg-orange-500/15 text-orange-300",
+  Complete: "bg-emerald-500/15 text-emerald-300",
+  Invoiced: "bg-cyan-500/15 text-cyan-300",
+  "On hold": "bg-rose-500/15 text-rose-300",
+  Draft: "bg-slate-800 text-slate-300",
+  Sent: "bg-blue-500/15 text-blue-300",
+  Declined: "bg-rose-500/15 text-rose-300",
+  Expired: "bg-amber-500/15 text-amber-300",
+  "Part paid": "bg-amber-500/15 text-amber-300",
+  Paid: "bg-emerald-500/15 text-emerald-300",
+  Overdue: "bg-rose-500/15 text-rose-300",
+  Cancelled: "bg-slate-800 text-slate-400",
+  "Ready to invoice": "bg-cyan-500/15 text-cyan-300",
+};
+
+export function StatusBadge({ status }: { status: SupportedStatus }) {
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status]}`}>{status}</span>;
+}
