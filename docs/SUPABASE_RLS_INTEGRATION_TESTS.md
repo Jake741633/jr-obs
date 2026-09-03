@@ -52,6 +52,7 @@ The suite verifies:
 - Customer Portal read and insert scope.
 - Customer Portal approvals and appointment requests resolve only eligible same-customer pricing and planner targets, and those targets cannot be retargeted later.
 - Customer payment-link projections stay memory-only in cloud and migration modes. Opening a link revalidates the active account and session, then makes an exact no-store projection read; offline, failed, ambiguous, revoked, paid or tombstoned results never fall back to a cached URL. Office and local/demo persistence is unchanged.
+- Customer certificate projections stay memory-only in cloud and migration modes so superseded, deleted, reassigned or revoked PDF URLs cannot be replayed from cache or backup. Download activation revalidates the exact issued-certificate tuple and current session with a no-store read, rejects non-HTTPS or credential-bearing URLs, and fails closed offline or on ambiguity; valid office and local/demo links remain direct.
 - Generic `cloud_collections` tenant and customer scope.
 - Typed entity-table tenant scope.
 - Soft-delete tombstones remain available for synchronisation.
