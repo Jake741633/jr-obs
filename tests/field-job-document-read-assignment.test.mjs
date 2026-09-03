@@ -7,7 +7,6 @@ const migration = readFileSync(new URL(`../supabase/migrations/${migrationName}`
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 const setup = readFileSync(new URL("../docs/SUPABASE_SETUP.md", import.meta.url), "utf8");
 const cache = readFileSync(new URL("../lib/cloud/roleProjectionCache-core.mjs", import.meta.url), "utf8");
-const cacheTypes = readFileSync(new URL("../lib/cloud/roleProjectionCache-core.d.mts", import.meta.url), "utf8");
 const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url), "utf8");
 const fieldMutationPolicy = readFileSync(new URL("../lib/cloud/fieldMutationPolicy-core.mjs", import.meta.url), "utf8");
 const runner = readFileSync(new URL("./run-supabase-rls.integration.mjs", import.meta.url), "utf8");
@@ -102,17 +101,13 @@ test("field document writes remain default-deny", () => {
   assert.match(fieldMutationPolicy, /return \{ kind: "deny" \};/i);
 });
 
-test("stale electrician job-document caches purge before offline fallback", () => {
-  assert.match(cache, /ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION = "20260820153000"/);
-  assert.match(
-    cache,
-    /role === "electrician" && storageKey === "jr-os-job-documents"[\s\S]*return ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION/,
-  );
-  assert.match(cache, /expectedGeneration && generation !== expectedGeneration[\s\S]*return "purge"/);
-  assert.match(cacheTypes, /ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION: "20260820153000"/);
+test("electrician job-document links are network-only before offline fallback", () => {
+  assert.match(cache, /ELECTRICIAN_NETWORK_ONLY_STORAGE_KEYS = new Set\(\[[\s\S]*"jr-os-job-documents"/);
+  assert.match(cache, /role === "electrician" && ELECTRICIAN_NETWORK_ONLY_STORAGE_KEYS\.has\(storageKey\)[\s\S]*return "network-only"/);
   assert.match(adapter, /roleProjectionCachePolicy\(\{ storageKey, role: cacheRole, mode, generation: cachedGeneration \}\)/);
+  assert.match(adapter, /const networkOnly = cachePolicy === "network-only"/);
+  assert.match(adapter, /if \(networkOnly\)[\s\S]*purgeRoleProjectionCacheStorage/);
   assert.match(adapter, /if \(mode === "local" \|\| !navigator\.onLine\) return local/);
-  assert.match(adapter, /roleProjectionCacheGeneration\(\{ storageKey, role: cacheRole \}\)/);
 });
 
 test("live RLS coverage retains assigned documents and denies broader field reads", () => {
@@ -123,6 +118,10 @@ test("live RLS coverage retains assigned documents and denies broader field read
     "Electrician must not read a deleted job document",
     "Assigned electrician must not read another organisation's job document",
     "Office should retain unassigned job document access",
+    "Customer must not read an assigned electrician document capability",
+    "Fresh field document activation must fail after assignment revocation",
+    "Co-assigned electrician should retain the current document capability",
+    "Fresh field document activation should recover only after assignment restoration",
   ]) assert.match(runner, new RegExp(phrase.replaceAll(" ", "\\s+"), "i"));
 
   for (const phrase of [

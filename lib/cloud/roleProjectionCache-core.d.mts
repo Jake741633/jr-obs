@@ -13,7 +13,6 @@ export const ELECTRICIAN_CUSTOMER_PROJECTION_CACHE_GENERATION: "20260820150000";
 export const ELECTRICIAN_INVENTORY_PROJECTION_CACHE_GENERATION: "20260809_050";
 export const ELECTRICIAN_STOCK_LOCATION_PROJECTION_CACHE_GENERATION: "20260903163000";
 export const ELECTRICIAN_TEAM_PROJECTION_CACHE_GENERATION: "20260809_046";
-export const ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION: "20260820153000";
 export const ELECTRICIAN_JOB_COMPLETION_CACHE_GENERATION: "20260826121246";
 export const ELECTRICIAN_JOB_MATERIAL_USAGE_CACHE_GENERATION: "20260826110301";
 export const ELECTRICIAN_JOB_PROGRESS_CACHE_GENERATION: "20260826144606";
@@ -31,6 +30,10 @@ export function purgeRoleProjectionCacheStorage(
   scopedStorageKey: string,
 ): void;
 export function purgeCustomerNetworkOnlyCollectionCaches(
+  storage: { readonly length: number; key(index: number): string | null; removeItem(key: string): void } | null | undefined,
+  storageKey: string,
+): void;
+export function purgeElectricianNetworkOnlyCollectionCaches(
   storage: { readonly length: number; key(index: number): string | null; removeItem(key: string): void } | null | undefined,
   storageKey: string,
 ): void;

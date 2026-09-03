@@ -5,7 +5,7 @@ import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
 import { creatorMapForCloudRows, normaliseRecordCreatorMap, retainRecordCreatorsForRecords } from "./recordCreatorMetadata-core.mjs";
 import { queueChange, type CloudEnvelope } from "./repository";
-import { purgeCustomerNetworkOnlyCollectionCaches, purgeRoleProjectionCacheStorage, roleProjectionCacheGeneration, roleProjectionCachePolicy, roleProjectionVersionMap, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
+import { purgeCustomerNetworkOnlyCollectionCaches, purgeElectricianNetworkOnlyCollectionCaches, purgeRoleProjectionCacheStorage, roleProjectionCacheGeneration, roleProjectionCachePolicy, roleProjectionVersionMap, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
 export type RecordCreatorMap = Record<string, string>;
@@ -63,9 +63,10 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     writeRecordCreators(scopedStorageKey, currentRecordCreators);
   }
 
-  function purgeDormantCustomerCapabilities(mode: ReturnType<typeof effectiveCloudMode>) {
+  function purgeDormantNetworkOnlyCapabilities(mode: ReturnType<typeof effectiveCloudMode>) {
     if (mode !== "local" && cacheUserId && cacheRole) {
       purgeCustomerNetworkOnlyCollectionCaches(window.localStorage, storageKey);
+      purgeElectricianNetworkOnlyCollectionCaches(window.localStorage, storageKey);
     }
   }
 
@@ -75,7 +76,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     recordCreators() { return { ...currentRecordCreators }; },
     async list(): Promise<T[]> {
       const mode = effectiveCloudMode();
-      purgeDormantCustomerCapabilities(mode);
+      purgeDormantNetworkOnlyCapabilities(mode);
       const cached = readLocal<T>(scopedStorageKey);
       const cachedGeneration = window.localStorage.getItem(projectionGenerationKey(scopedStorageKey)) ?? undefined;
       const cachePolicy = roleProjectionCachePolicy({ storageKey, role: cacheRole, mode, generation: cachedGeneration });
@@ -119,7 +120,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     },
     save(record: T, expectedVersion?: number) {
       const mode = effectiveCloudMode();
-      purgeDormantCustomerCapabilities(mode);
+      purgeDormantNetworkOnlyCapabilities(mode);
       const networkOnly = roleProjectionCachePolicy({ storageKey, role: cacheRole, mode }) === "network-only";
       const local = networkOnly ? [] : readLocal<T>(scopedStorageKey);
       const index = local.findIndex((item) => item.id === record.id);
@@ -140,7 +141,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     },
     remove(sourceId: string, expectedVersion?: number) {
       const mode = effectiveCloudMode();
-      purgeDormantCustomerCapabilities(mode);
+      purgeDormantNetworkOnlyCapabilities(mode);
       const networkOnly = roleProjectionCachePolicy({ storageKey, role: cacheRole, mode }) === "network-only";
       if (networkOnly) {
         purgeRoleProjectionCacheStorage(window.localStorage, scopedStorageKey);

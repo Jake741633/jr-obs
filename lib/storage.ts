@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { accountStorageKey, createCollectionRepository, type RecordCreatorMap, type RepositoryRecord } from "./cloud/adapter";
 import { collectionCloudTarget } from "./cloud/collections";
 import { cloudSafeFileRecord, usePrivateFileCollectionBridge } from "./cloud/privateFiles";
-import { purgeCustomerNetworkOnlyCollectionCaches, purgeRoleProjectionCacheStorage, roleProjectionCachePolicy } from "./cloud/roleProjectionCache-core.mjs";
+import { purgeCustomerNetworkOnlyCollectionCaches, purgeElectricianNetworkOnlyCollectionCaches, purgeRoleProjectionCacheStorage, roleProjectionCachePolicy } from "./cloud/roleProjectionCache-core.mjs";
 import { useCloudIdentity } from "./cloud/useCloudIdentity";
 
 export function makeId(prefix: string) {
@@ -100,6 +100,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     if (!isReady) return;
     if (mode !== "local" && userId && cacheRole) {
       purgeCustomerNetworkOnlyCollectionCaches(window.localStorage, key);
+      purgeElectricianNetworkOnlyCollectionCaches(window.localStorage, key);
     }
     if (networkOnly) {
       purgeRoleProjectionCacheStorage(window.localStorage, activeStorageKey);

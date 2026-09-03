@@ -102,7 +102,7 @@ test("finance gates leave assigned documents and operational timeline available"
   );
   assert.match(assignedDocuments, /jobDocuments\.map/);
   assert.match(assignedDocuments, /document\.dataUrl[\s\S]*Download/);
-  assert.match(assignedDocuments, /document\.externalUrl[\s\S]*Open link/);
+  assert.match(assignedDocuments, /documentExternalLink\(document\)/);
   assert.doesNotMatch(assignedDocuments, /financeRestricted/);
 
   const operationalTimeline = section(
