@@ -15,6 +15,14 @@ const boundary = readFileSync(
   new URL("../supabase/migrations/20260813235633_secure_field_mutation_boundary.sql", import.meta.url),
   "utf8",
 );
+const historicalTypedReads = readFileSync(
+  new URL("../supabase/migrations/20260803_017_customer_typed_table_reads.sql", import.meta.url),
+  "utf8",
+);
+const stockMovementBoundary = readFileSync(
+  new URL("../supabase/migrations/20260903132756_keep_field_stock_movements_office_only.sql", import.meta.url),
+  "utf8",
+);
 const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
 const setup = readFileSync(new URL("../docs/SUPABASE_SETUP.md", import.meta.url), "utf8");
@@ -127,6 +135,24 @@ test("complete inventory source rows are office-only after the projection migrat
   assert.match(migration, /organisation_id = private\.current_organisation_id\(\)[\s\S]*private\.can_manage_office_data\(\)/i);
 });
 
+test("canonical stock movement history is office-only after the final read boundary", () => {
+  assert.match(
+    historicalTypedReads,
+    /'stock_movements'[\s\S]*public\.current_jr_role\(\) in \(''owner'',''admin'',''office'',''electrician''\)/i,
+    "the historical policy must demonstrate the field-read exposure being closed",
+  );
+  const policyStart = stockMovementBoundary.indexOf("drop policy if exists stock_movements_select");
+  const policyEnd = stockMovementBoundary.indexOf("create or replace function public.jr_os_deployed_migration", policyStart);
+  const policy = stockMovementBoundary.slice(policyStart, policyEnd);
+  assert.match(policy, /drop policy if exists stock_movements_select on public\.stock_movements/i);
+  assert.match(policy, /create policy stock_movements_select[\s\S]*for select to authenticated/i);
+  assert.match(policy, /organisation_id = private\.current_organisation_id\(\)/i);
+  assert.match(policy, /and \(select private\.can_manage_office_data\(\)\)/i);
+  assert.doesNotMatch(policy, /electrician|customer|deleted_at/i);
+  assert.doesNotMatch(stockMovementBoundary, /for (?:insert|update|delete)/i);
+  assert.match(stockMovementBoundary, /'20260903132756_keep_field_stock_movements_office_only\.sql'/i);
+});
+
 test("electrician repositories read price-safe typed inventory projections", () => {
   assert.match(collections, /electrician:\s*\{[\s\S]*materials:\s*"field_materials"/i);
   assert.match(collections, /electrician:\s*\{[\s\S]*purchase_lists:\s*"field_purchase_lists"/i);
@@ -140,8 +166,16 @@ test("recovery and deployment guidance retain typed inventory pricing privacy", 
   const genericIndex = recovery.indexOf("20260809_048_field_cloud_collection_projection.sql");
   const inventoryIndex = recovery.indexOf("20260809_049_field_inventory_projections.sql");
   const metadataIndex = recovery.indexOf("20260809_050_restrict_field_material_price_metadata.sql");
+  const electricalTestingIndex = recovery.indexOf("20260903121755_keep_field_electrical_testing_office_only.sql");
+  const stockMovementIndex = recovery.indexOf("20260903132756_keep_field_stock_movements_office_only.sql");
   assert.ok(genericIndex >= 0 && inventoryIndex > genericIndex, "typed inventory projection must follow generic field projection hardening");
   assert.ok(metadataIndex > inventoryIndex, "material price metadata hardening must follow typed inventory projection creation");
+  assert.ok(stockMovementIndex > electricalTestingIndex, "stock movement read hardening must follow the prior final migration");
+  assert.match(
+    recovery,
+    /begin;\s*\\ir \.\.\/migrations\/20260903132756_keep_field_stock_movements_office_only\.sql\s*commit;/i,
+  );
   assert.match(setup, /typed inventory reads remove material trade and sell prices, price-check metadata, stock unit costs and purchase-list item costs/i);
   assert.match(setup, /inventory edits preserve hidden office pricing/i);
+  assert.match(setup, /canonical stock-movement history, including job links, movement notes and timestamps, remains office-only/i);
 });

@@ -37,6 +37,15 @@ test("cloud materials guards mutation entry points before optimistic writes", ()
   }
 });
 
+test("mobile field materials needs no canonical stock movement history", () => {
+  const match = page.match(/function useMaterial\([^)]*\) \{([\s\S]*?)\n  \}/);
+  assert.ok(match, "useMaterial should exist");
+  const guardIndex = match[1].indexOf("if (cloudFieldMode)");
+  const writeIndex = match[1].indexOf("movements.setItems");
+  assert.ok(guardIndex >= 0 && writeIndex > guardIndex, "the cloud guard must run before the movement write");
+  assert.doesNotMatch(page, /movements\.items/, "the field page must not consume canonical movement history");
+});
+
 test("materials scanning remains available while local mode retains mutation workflow", () => {
   assert.match(page, /function findByScanCode/);
   assert.match(page, /onClick=\{findByScanCode\}/);
@@ -64,4 +73,3 @@ test("cloud field material shortcuts stay on permitted field routes", () => {
   assert.doesNotMatch(electricianPages[1], /"\/(?:materials|stock|purchases)"/);
   assert.match(fieldLookup, /export default function/);
 });
-

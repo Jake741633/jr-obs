@@ -214,6 +214,35 @@ test("electrician canonical certificate caches never survive outside local mode"
   assert.deepEqual(roleProjectionVersionMap(rows, records), { "certificate-1": 7 });
 });
 
+test("electrician canonical stock movement caches never survive outside local mode", () => {
+  const records = [{
+    id: "movement-1",
+    stockItemId: "stock-1",
+    type: "Transferred",
+    quantity: 2,
+    jobId: "job-1",
+    fromLocationId: "van-1",
+    toLocationId: "store-1",
+    note: "Private van transfer note",
+    movedAt: "2026-09-03T12:00:00.000Z",
+    createdAt: "2026-09-03T12:00:00.000Z",
+  }];
+
+  for (const mode of ["cloud", "migration"]) {
+    assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-stock-movements", role: "electrician", mode }), "purge");
+    assert.deepEqual(sanitizeRoleProjectionCache({ storageKey: "jr-os-stock-movements", role: "electrician", mode, records }), []);
+  }
+  assert.strictEqual(
+    sanitizeRoleProjectionCache({ storageKey: "jr-os-stock-movements", role: "electrician", mode: "local", records }),
+    records,
+  );
+  assert.strictEqual(
+    sanitizeRoleProjectionCache({ storageKey: "jr-os-stock-movements", role: "office", mode: "cloud", records }),
+    records,
+  );
+  assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-stock-movements", role: "electrician" }), undefined);
+});
+
 test("role projection version metadata retains only visible matching records", () => {
   const rows = [
     { source_id: "job-1", version: 3, payload: { id: "job-1" } },

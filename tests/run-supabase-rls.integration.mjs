@@ -1017,7 +1017,7 @@ const secureFieldCasesSnippet = `    // Direct field writes are closed; only exi
     const closedFieldCases = [
       ["materials", source("material-a"), { name: "Cable" }],
       ["stock_items", source("stock-a"), { quantity: 4 }],
-      ["stock_movements", source("movement-a"), { type: "Used", quantity: 1 }],
+      ["stock_movements", source("movement-a"), { stockItemId: source("stock-a"), type: "Used", quantity: 1, note: "Private van transfer note", movedAt: "2026-09-03T12:00:00.000Z" }],
       ["purchase_lists", source("purchase-a"), { status: "Draft" }],
       ["certificates", source("certificate-a"), { status: "Draft" }],
       ["electrical_testing_records", source("testing-a"), { status: "Draft" }],
@@ -1028,6 +1028,42 @@ const secureFieldCasesSnippet = `    // Direct field writes are closed; only exi
       await expectAllowed(await insertRecord(accounts.A.office, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Office should retain direct write access for \${table}\`);
       await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);
     }
+    const electricianAssignedMovementRead = await listRecords(accounts.A.electrician, "stock_movements", "select=source_id,customer_source_id,job_source_id,payload,created_at,updated_at&source_id=eq." + source("movement-a"));
+    await expectAllowed(electricianAssignedMovementRead, "Electrician canonical stock movement query should fail closed");
+    assert.deepEqual(electricianAssignedMovementRead.payload, [], "Electrician must not read assigned stock movement records");
+    const officeMovementRead = await listRecords(accounts.A.office, "stock_movements", "select=source_id,customer_source_id,job_source_id,payload,created_at,updated_at&source_id=eq." + source("movement-a"));
+    await expectAllowed(officeMovementRead, "Office canonical stock movement query should execute");
+    assert.equal(officeMovementRead.payload.length, 1, "Office should retain complete stock movement records");
+    assert.equal(officeMovementRead.payload[0].payload.note, "Private van transfer note");
+    assert.equal(officeMovementRead.payload[0].job_source_id, jobA);
+    const customerMovementRead = await listRecords(accounts.A.customer, "stock_movements", "select=source_id,payload&source_id=eq." + source("movement-a"));
+    await expectAllowed(customerMovementRead, "Customer canonical stock movement query should fail closed");
+    assert.deepEqual(customerMovementRead.payload, [], "Customer must not read stock movement records");
+    const crossTenantMovementRead = await listRecords(accounts.B.office, "stock_movements", "select=source_id,payload&source_id=eq." + source("movement-a"));
+    await expectAllowed(crossTenantMovementRead, "Cross-tenant stock movement query should execute safely");
+    assert.deepEqual(crossTenantMovementRead.payload, [], "Another organisation must not read stock movement records");
+    const unassignedMovementSource = source("movement-unassigned");
+    await expectAllowed(
+      await insertRecord(accounts.A.office, "stock_movements", typedRecord(organisationA, unassignedMovementSource, otherCustomerA, otherCustomerJobA, {
+        stockItemId: source("stock-a"), type: "Transferred", quantity: 2, note: "Private unassigned job movement", movedAt: "2026-09-03T12:30:00.000Z",
+      })),
+      "Office should create an unassigned stock movement fixture",
+    );
+    const electricianUnassignedMovementRead = await listRecords(accounts.A.electrician, "stock_movements", "select=source_id,payload&source_id=eq." + unassignedMovementSource);
+    await expectAllowed(electricianUnassignedMovementRead, "Electrician unassigned stock movement query should fail closed");
+    assert.deepEqual(electricianUnassignedMovementRead.payload, [], "Electrician must not read unassigned stock movement records");
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "stock_movements", "source_id=eq." + source("movement-a"), { deleted_at: new Date().toISOString() }),
+      "Owner should tombstone the stock movement fixture",
+    );
+    const officeDeletedMovementRead = await listRecords(accounts.A.office, "stock_movements", "select=source_id,payload,deleted_at&source_id=eq." + source("movement-a"));
+    await expectAllowed(officeDeletedMovementRead, "Office stock movement tombstone query should execute");
+    assert.equal(officeDeletedMovementRead.payload.length, 1, "Office should retain stock movement tombstone history");
+    assert.ok(officeDeletedMovementRead.payload[0].deleted_at);
+    assert.equal(officeDeletedMovementRead.payload[0].payload.note, "Private van transfer note");
+    const electricianDeletedMovementRead = await listRecords(accounts.A.electrician, "stock_movements", "select=source_id,deleted_at&source_id=eq." + source("movement-a"));
+    await expectAllowed(electricianDeletedMovementRead, "Electrician deleted stock movement query should fail closed");
+    assert.deepEqual(electricianDeletedMovementRead.payload, [], "Electrician must not read deleted stock movement records");
     const electricianCertificateRead = await listRecords(accounts.A.electrician, "certificates", "select=source_id,payload&source_id=eq." + source("certificate-a"));
     await expectAllowed(electricianCertificateRead, "Electrician canonical certificate query should fail closed");
     assert.deepEqual(electricianCertificateRead.payload, [], "Electrician must not read complete certificate records");
@@ -1492,6 +1528,13 @@ try {
     "Another organisation must not read complete electrical testing records",
     "Office should retain electrical testing tombstone history",
     "Electrician must not read deleted electrical testing records",
+    "Electrician must not read assigned stock movement records",
+    "Electrician must not read unassigned stock movement records",
+    "Electrician must not read deleted stock movement records",
+    "Office should retain complete stock movement records",
+    "Office should retain stock movement tombstone history",
+    "Customer must not read stock movement records",
+    "Another organisation must not read stock movement records",
     "Electrician should create their own assigned-job timesheet row",
     "Electrician should read their own timesheet row",
     "Electrician must not read another actor timesheet row",
