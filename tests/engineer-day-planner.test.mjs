@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canStopDayPlannerVisit, dayPlannerSummary, dayPlannerVisitStartBlock, formatMinutes, minutesBetween, paidMinutes, sequenceDayEntries } from "../lib/engineerDayPlanner-core.mjs";
+import { canStopDayPlannerVisit, dayPlannerSummary, dayPlannerVisitStartBlock, fieldDayPlannerWriteAllowed, formatMinutes, minutesBetween, paidMinutes, sequenceDayEntries } from "../lib/engineerDayPlanner-core.mjs";
 
 const page = readFileSync(new URL("../app/field/day-planner/page.tsx", import.meta.url), "utf8");
 const navigation = readFileSync(new URL("../components/navigation.ts", import.meta.url), "utf8");
@@ -38,6 +38,37 @@ test("one visit owns the running or stopped-unsaved time log", () => {
   assert.equal(canStopDayPlannerVisit({ activeEntryId: "visit-a", entryId: "visit-b", startedAt: "08:00", finishedAt: "" }), false);
   assert.equal(canStopDayPlannerVisit({ activeEntryId: "visit-a", entryId: "visit-a", startedAt: "08:00", finishedAt: "09:00" }), false);
   assert.equal(canStopDayPlannerVisit({ activeEntryId: "visit-a", entryId: "visit-a", startedAt: "", finishedAt: "" }), false);
+});
+
+test("field day planner writes require the exact visit and job assignment", () => {
+  const operatorMemberId = "field-1";
+  const entry = { id: "visit-1", jobId: "job-1", customerId: "customer-1", teamMemberIds: ["field-1", "field-2"] };
+  const job = { id: "job-1", customerId: "customer-1", assignedTo: ["field-2", "field-1"] };
+
+  assert.equal(fieldDayPlannerWriteAllowed({ entry, job, operatorMemberId }), true);
+  assert.equal(fieldDayPlannerWriteAllowed({
+    entry: { ...entry, customerId: undefined, customerSourceId: "customer-1" },
+    job: { ...job, customerId: undefined, customerSourceId: "customer-1" },
+    operatorMemberId,
+  }), true);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry: { ...entry, customerId: "customer-2" }, job, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry: { ...entry, customerId: undefined }, job, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry, job: { ...job, customerId: undefined }, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({
+    entry: { ...entry, customerId: undefined },
+    job: { ...job, customerId: undefined },
+    operatorMemberId,
+  }), true);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry: { ...entry, customerId: "" }, job: { ...job, customerId: "" }, operatorMemberId }), true);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry: { ...entry, customerId: "" }, job: { ...job, customerId: undefined }, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry: { ...entry, jobId: "job-2" }, job, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry: { ...entry, teamMemberIds: ["field-2"] }, job, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry: { ...entry, teamMemberIds: undefined }, job, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry, job: { ...job, assignedTo: ["field-2"] }, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry, job: { ...job, assignedTo: undefined }, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry, job, operatorMemberId: "" }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry: null, job, operatorMemberId }), false);
+  assert.equal(fieldDayPlannerWriteAllowed({ entry, job: null, operatorMemberId }), false);
 });
 
 test("day planner handlers cannot rebind or overwrite an unsaved visit", () => {

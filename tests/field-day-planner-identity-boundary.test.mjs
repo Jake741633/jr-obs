@@ -84,7 +84,26 @@ test("day planner binds field timesheets to the canonical job customer", () => {
 test("day planner fails closed for unlinked cloud visits and unresolved identity", () => {
   assert.match(page, /cloudFieldMode && !entry\.jobId/);
   assert.match(page, /if \(!operatorMemberId\)/);
-  assert.match(page, /cloudWriteLocked = cloudFieldMode && \(!entry\.jobId \|\| !job \|\| !operatorMemberId\)/);
+  assert.match(page, /cloudWriteLocked = cloudFieldMode && !fieldDayPlannerWriteAllowed\(\{ entry, job, operatorMemberId \}\)/);
+});
+
+test("day planner revalidates exact visit and job assignment before every field write", () => {
+  const startEntry = page.slice(page.indexOf("function startEntry"), page.indexOf("function stopEntry"));
+  const saveTime = page.slice(page.indexOf("function saveTime"), page.indexOf("\n  return <div"));
+  const startGuard = startEntry.indexOf("if (cloudFieldMode && !fieldDayPlannerWriteAllowed({ entry, job, operatorMemberId }))");
+  const saveGuard = saveTime.indexOf("if (cloudFieldMode && !fieldDayPlannerWriteAllowed({ entry, job: linkedJob, operatorMemberId }))");
+
+  assert.ok(startGuard >= 0, "arrival must revalidate both assignment envelopes");
+  for (const sideEffect of ["setActiveEntryId", "planner.setItems", "transitionJobStatus", "jobs.setItems"]) {
+    assert.ok(startGuard < startEntry.indexOf(sideEffect), `${sideEffect} must follow the arrival assignment guard`);
+  }
+
+  assert.ok(saveGuard >= 0, "labour save must revalidate both assignment envelopes");
+  for (const sideEffect of ["makeId", "registerLabourSyncAttempt", "timesheets.setItems", "planner.setItems"]) {
+    assert.ok(saveGuard < saveTime.indexOf(sideEffect), `${sideEffect} must follow the labour assignment guard`);
+  }
+
+  assert.match(page, /This visit or its linked job is no longer assigned to your active team identity\. Refresh the planner before recording time\./);
 });
 
 test("arrival only advances a scheduled job to first fix", () => {
