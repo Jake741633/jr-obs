@@ -23,6 +23,7 @@ export const ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION: "20260826123514";
 export const ELECTRICIAN_JOB_VARIATION_CACHE_GENERATION: "20260826101908";
 export const ELECTRICIAN_SITE_DIARY_CACHE_GENERATION: "20260820163000";
 export const CUSTOMER_PROJECTION_CACHE_GENERATION: "20260814091500";
+export function roleProjectionVersionMap(rows: unknown, records: unknown): Record<string, number>;
 export function roleProjectionCacheGeneration(input: Pick<RoleProjectionCacheInput<never>, "storageKey" | "role">): string | undefined;
 export function roleProjectionCachePolicy(input: Omit<RoleProjectionCacheInput<never>, "records"> & { generation?: string }): "keep" | "purge";
 export function sanitizeRoleProjectionCache<T>(input: RoleProjectionCacheInput<T>): T[];

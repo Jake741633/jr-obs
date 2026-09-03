@@ -5,7 +5,7 @@ import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
 import { creatorMapForCloudRows, normaliseRecordCreatorMap, retainRecordCreatorsForRecords } from "./recordCreatorMetadata-core.mjs";
 import { queueChange, type CloudEnvelope } from "./repository";
-import { roleProjectionCacheGeneration, roleProjectionCachePolicy, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
+import { roleProjectionCacheGeneration, roleProjectionCachePolicy, roleProjectionVersionMap, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
 export type RecordCreatorMap = Record<string, string>;
@@ -77,6 +77,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         : sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cached });
       if (local !== cached) writeLocal(scopedStorageKey, local);
       replaceRecordCreators(cachePolicy === "purge" ? {} : retainRecordCreatorsForRecords(currentRecordCreators, local));
+      if (cachePolicy === "purge") writeVersions(scopedStorageKey, {});
 
       if (mode === "local" || !navigator.onLine) return local;
 
@@ -90,7 +91,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         const cloudRecords = rows.map((row) => row.payload);
         const roleProjectionRecords = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cloudRecords });
         writeLocal(scopedStorageKey, roleProjectionRecords);
-        writeVersions(scopedStorageKey, Object.fromEntries(rows.map((row) => [row.source_id, row.version])));
+        writeVersions(scopedStorageKey, roleProjectionVersionMap(rows, roleProjectionRecords));
         replaceRecordCreators(creatorMapForCloudRows(rows, roleProjectionRecords));
         const projectionGeneration = roleProjectionCacheGeneration({ storageKey, role: cacheRole });
         if (projectionGeneration) window.localStorage.setItem(projectionGenerationKey(scopedStorageKey), projectionGeneration);
