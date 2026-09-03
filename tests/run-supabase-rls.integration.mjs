@@ -1035,6 +1035,31 @@ const secureFieldCasesSnippet = `    // Direct field writes are closed; only exi
     await expectAllowed(officeCertificateRead, "Office canonical certificate query should execute");
     assert.equal(officeCertificateRead.payload.length, 1, "Office should retain complete certificate records");
     assert.equal(officeCertificateRead.payload[0].payload.status, "Draft");
+    const electricianTestingRead = await listRecords(accounts.A.electrician, "electrical_testing_records", "select=source_id,payload&source_id=eq." + source("testing-a"));
+    await expectAllowed(electricianTestingRead, "Electrician canonical electrical testing query should fail closed");
+    assert.deepEqual(electricianTestingRead.payload, [], "Electrician must not read complete electrical testing records");
+    const officeTestingRead = await listRecords(accounts.A.office, "electrical_testing_records", "select=source_id,payload&source_id=eq." + source("testing-a"));
+    await expectAllowed(officeTestingRead, "Office canonical electrical testing query should execute");
+    assert.equal(officeTestingRead.payload.length, 1, "Office should retain complete electrical testing records");
+    assert.equal(officeTestingRead.payload[0].payload.status, "Draft");
+    const customerTestingRead = await listRecords(accounts.A.customer, "electrical_testing_records", "select=source_id&source_id=eq." + source("testing-a"));
+    await expectAllowed(customerTestingRead, "Customer canonical electrical testing query should fail closed");
+    assert.deepEqual(customerTestingRead.payload, [], "Customer must not read complete electrical testing records");
+    const crossTenantTestingRead = await listRecords(accounts.B.office, "electrical_testing_records", "select=source_id&source_id=eq." + source("testing-a"));
+    await expectAllowed(crossTenantTestingRead, "Cross-tenant electrical testing query should execute safely");
+    assert.deepEqual(crossTenantTestingRead.payload, [], "Another organisation must not read complete electrical testing records");
+    await expectAllowed(
+      await patchRecords(accounts.A.owner, "electrical_testing_records", "source_id=eq." + source("testing-a"), { deleted_at: new Date().toISOString() }),
+      "Owner should tombstone the electrical testing fixture",
+    );
+    const officeDeletedTestingRead = await listRecords(accounts.A.office, "electrical_testing_records", "select=source_id,payload,deleted_at&source_id=eq." + source("testing-a"));
+    await expectAllowed(officeDeletedTestingRead, "Office electrical testing tombstone query should execute");
+    assert.equal(officeDeletedTestingRead.payload.length, 1, "Office should retain electrical testing tombstone history");
+    assert.ok(officeDeletedTestingRead.payload[0].deleted_at);
+    assert.equal(officeDeletedTestingRead.payload[0].payload.status, "Draft");
+    const electricianDeletedTestingRead = await listRecords(accounts.A.electrician, "electrical_testing_records", "select=source_id,deleted_at&source_id=eq." + source("testing-a"));
+    await expectAllowed(electricianDeletedTestingRead, "Electrician deleted electrical testing query should fail closed");
+    assert.deepEqual(electricianDeletedTestingRead.payload, [], "Electrician must not read deleted electrical testing records");
     for (const [table, sourceId, payload] of [
       ["planner_entries", source("planner-a"), { teamMemberIds: [fieldTeamA], startDate: "2026-08-01" }],
       ["timesheets", source("timesheet-a"), { teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, hours: 8 }],
@@ -1461,6 +1486,12 @@ try {
     "Electrician direct RAMS writes must fail closed",
     "Electrician must not read complete certificate records",
     "Office should retain complete certificate records",
+    "Electrician must not read complete electrical testing records",
+    "Office should retain complete electrical testing records",
+    "Customer must not read complete electrical testing records",
+    "Another organisation must not read complete electrical testing records",
+    "Office should retain electrical testing tombstone history",
+    "Electrician must not read deleted electrical testing records",
     "Electrician should create their own assigned-job timesheet row",
     "Electrician should read their own timesheet row",
     "Electrician must not read another actor timesheet row",

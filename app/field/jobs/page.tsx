@@ -8,7 +8,7 @@ import { PageHeader } from "../../../components/ui/PageHeader";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import {
   useCustomersCollection,
-  useElectricalTestingCollection,
+  useFieldElectricalTestingCollection,
   useJobDocumentsCollection,
   useJobsCollection,
   usePlannerCollection,
@@ -41,7 +41,7 @@ export default function MobileJobControlPage() {
   const customers = useCustomersCollection();
   const planner = usePlannerCollection();
   const purchaseLists = usePurchaseListsCollection();
-  const testing = useElectricalTestingCollection();
+  const testing = useFieldElectricalTestingCollection();
   const documents = useJobDocumentsCollection();
   const [selectedView, setSelectedView] = useState<JobView>("today");
   const todayDate = today();
