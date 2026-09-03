@@ -67,7 +67,7 @@ const jobReadCoverage = `${jobReadAnchor}\n\n    const officeCommercialJob = awa
 
 const genericCasesSnippet = `    const genericCases = [\n      ["jr-os-surveys", source("survey-a"), { circuits: [{ id: "c1" }] }],\n      ["jr-os-rams", source("rams-a"), { risks: [{ id: "r1" }] }],\n      ["jr-os-job-packs", source("pack-a"), { materials: [{ id: "m1" }] }],\n    ];`;
 
-const safeGenericCasesSnippet = `    const genericCases = [\n      ["jr-os-surveys", source("survey-a"), { circuits: [{ id: "c1" }], labourHours: 8, labourRate: 65 }],\n      ["jr-os-job-packs", source("pack-a"), { labourHours: 8, labourRate: 65, materials: [{ id: "m1", description: "Cable", quantity: 10, unitPrice: 4.5 }] }],\n      ["jr-os-job-variations", source("variation-a"), { number: "V001", title: "Extra socket", description: "Add socket", status: "Draft", approvalMethod: "Not approved", requestedBy: "Site", labourHours: 4, labourRate: 70, labourCostRate: 30, materialCost: 100, materialCharge: 200, otherCost: 10, otherCharge: 20, fixedPrice: 600, internalNotes: "Private variation note" }],\n      ["jr-os-job-material-usage", source("material-usage-a"), { description: "Cable", quantity: 5, unit: "Metre", unitCost: 2.5, supplier: "CEF", recordedBy: "Electrician" }],\n    ];`;
+const safeGenericCasesSnippet = `    const genericCases = [\n      ["jr-os-surveys", source("survey-a"), { circuits: [{ id: "c1" }], labourHours: 8, labourRate: 65 }],\n      ["jr-os-job-packs", source("pack-a"), { labourHours: 8, labourRate: 65, materials: [{ id: "m1", description: "Cable", quantity: 10, unitPrice: 4.5 }] }],\n      ["jr-os-job-variations", source("variation-a"), { number: "V001", title: "Extra socket", description: "Add socket", status: "Draft", approvalMethod: "Not approved", requestedBy: "Site", labourHours: 4, labourRate: 70, labourCostRate: 30, materialCost: 100, materialCharge: 200, otherCost: 10, otherCharge: 20, fixedPrice: 600, internalNotes: "Private variation note" }],\n      ["jr-os-job-material-usage", source("material-usage-a"), { description: "Cable", quantity: 5, unit: "Metre", unitCost: 2.5, supplier: "CEF", recordedBy: "Electrician" }],\n      ["jr-os-stock-locations", source("stock-location-a"), { name: "Field van", type: "Van", vehicleId: source("private-vehicle-a"), notes: "Private office location note", createdAt: "2026-09-03T12:00:00.000Z", updatedAt: "2026-09-03T12:00:00.000Z", futureOfficeField: "private" }],\n    ];`;
 
 const genericReadSnippet = `      const electricianFieldRead = await listRecords(accounts.A.electrician, "cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);\n      await expectAllowed(electricianFieldRead, \`Electrician field \${collectionKey} query should execute\`);\n      assert.equal(electricianFieldRead.payload.length, 1, \`Electrician should retain field collection reads: \${collectionKey}\`);`;
 
@@ -1494,9 +1494,11 @@ const genericInsertSnippet = `      await expectAllowed(await insertRecord(accou
       await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationB, collectionKey, \`\${sourceId}-cross\`, accounts.A.electrician, customerB, jobB, payload)), \`Cross-tenant generic write must fail for \${collectionKey}\`);
       assert.deepEqual((await listRecords(accounts.B.owner, "cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`)).payload, []);`;
 
-const secureGenericInsertSnippet = `      await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.electrician, customerA, jobA, payload)), \`Electrician direct generic write must fail closed for \${collectionKey}\`);
-      await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.office, customerA, jobA, payload)), \`Office should seed complete generic record \${collectionKey}\`);
-      await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationB, collectionKey, \`\${sourceId}-cross\`, accounts.A.electrician, customerB, jobB, payload)), \`Cross-tenant generic write must fail for \${collectionKey}\`);
+const secureGenericInsertSnippet = `      const genericCustomerSourceId = collectionKey === "jr-os-stock-locations" ? null : customerA;
+      const genericJobSourceId = collectionKey === "jr-os-stock-locations" ? null : jobA;
+      await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.electrician, genericCustomerSourceId, genericJobSourceId, payload)), \`Electrician direct generic write must fail closed for \${collectionKey}\`);
+      await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, collectionKey, sourceId, accounts.A.office, genericCustomerSourceId, genericJobSourceId, payload)), \`Office should seed complete generic record \${collectionKey}\`);
+      await expectDenied(await insertRecord(accounts.A.electrician, "cloud_collections", genericRecord(organisationB, collectionKey, \`\${sourceId}-cross\`, accounts.A.electrician, collectionKey === "jr-os-stock-locations" ? null : customerB, collectionKey === "jr-os-stock-locations" ? null : jobB, payload)), \`Cross-tenant generic write must fail for \${collectionKey}\`);
       assert.deepEqual((await listRecords(accounts.B.owner, "cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`)).payload, []);`;
 
 const secureGenericReadSnippet = `      const electricianCompleteFieldRead = await listRecords(accounts.A.electrician, "cloud_collections", \`select=source_id,payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
@@ -1521,7 +1523,41 @@ const secureGenericReadSnippet = `      const electricianCompleteFieldRead = awa
         assert.equal(fieldPayload.fixedPrice, undefined, "Field variation projection must omit fixed prices");
         assert.equal(fieldPayload.internalNotes, undefined, "Field variation projection must omit internal notes");
       }
-      if (collectionKey === "jr-os-job-material-usage") assert.equal(fieldPayload.unitCost, undefined, "Field material usage projection must omit unit costs");`;
+      if (collectionKey === "jr-os-job-material-usage") assert.equal(fieldPayload.unitCost, undefined, "Field material usage projection must omit unit costs");
+      if (collectionKey === "jr-os-stock-locations") {
+        assert.deepEqual(fieldPayload, { id: sourceId, name: "Field van" }, "Field stock-location projection must expose exactly the ID and display name");
+        const officeStockLocation = await listRecords(accounts.A.office, "cloud_collections", \`select=source_id,payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
+        await expectAllowed(officeStockLocation, "Office complete stock-location query should execute");
+        assert.equal(officeStockLocation.payload[0].payload.vehicleId, payload.vehicleId, "Office must retain the canonical stock-location vehicle link");
+        assert.equal(officeStockLocation.payload[0].payload.notes, "Private office location note", "Office must retain canonical stock-location notes");
+        assert.equal(officeStockLocation.payload[0].payload.futureOfficeField, "private", "Unknown canonical stock-location fields must remain office-only");
+        const customerStockLocation = await listRecords(accounts.A.customer, "field_cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
+        await expectAllowed(customerStockLocation, "Customer stock-location projection query should execute safely");
+        assert.deepEqual(customerStockLocation.payload, [], "Customers must not read field stock-location projections");
+        const coworkerStockLocation = await listRecords(accounts.A.coworker, "field_cloud_collections", \`select=payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
+        await expectAllowed(coworkerStockLocation, "Same-tenant coworker stock-location projection query should execute");
+        assert.deepEqual(coworkerStockLocation.payload[0].payload, { id: sourceId, name: "Field van" }, "Shared stock-location projection must remain exact for another field worker");
+        const crossTenantStockLocation = await listRecords(accounts.B.electrician, "field_cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
+        await expectAllowed(crossTenantStockLocation, "Cross-tenant stock-location projection query should execute safely");
+        assert.deepEqual(crossTenantStockLocation.payload, [], "Another organisation must not read the stock-location projection");
+        await expectAllowed(
+          await patchRecords(accounts.A.office, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, {
+            updated_by: accounts.A.office.id,
+            payload: { id: sourceId, name: "Updated field van", type: "Van", vehicleId: payload.vehicleId, notes: "Updated private office note", futureOfficeField: "still private" },
+          }),
+          "Office should update the canonical stock location",
+        );
+        const updatedStockLocation = await listRecords(accounts.A.electrician, "field_cloud_collections", \`select=payload&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
+        await expectAllowed(updatedStockLocation, "Updated field stock-location projection query should execute");
+        assert.deepEqual(updatedStockLocation.payload[0].payload, { id: sourceId, name: "Updated field van" }, "Field stock-location projection must refresh the exact safe label");
+        await expectAllowed(
+          await patchRecords(accounts.A.owner, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, { deleted_at: new Date().toISOString(), updated_by: accounts.A.owner.id }),
+          "Owner should tombstone the canonical stock location",
+        );
+        const deletedStockLocation = await listRecords(accounts.A.electrician, "field_cloud_collections", \`select=source_id&collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`);
+        await expectAllowed(deletedStockLocation, "Tombstoned field stock-location query should execute safely");
+        assert.deepEqual(deletedStockLocation.payload, [], "Electrician must not read a tombstoned stock-location projection");
+      }`;
 
 const fieldMutationCoverage = [
   '    await expectDenied(await request("/rest/v1/rpc/jr_field_save_collection", { method: "POST", body: { collection_key_value: "jr-os-surveys", record_source_id: source("anonymous-rpc"), expected_version: 0, record_payload: { id: source("anonymous-rpc"), jobId: jobA, status: "Draft" }, mutation_id: crypto.randomUUID() } }), "Anonymous field mutation RPC calls must fail");',

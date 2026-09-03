@@ -88,6 +88,7 @@ const requiredSuites = [
   "field-testing-read-boundary.test.mjs",
   "electrician-role-projection-cache.test.mjs",
   "field-inventory-projections.test.mjs",
+  "field-stock-location-projection.test.mjs",
   "field-purchase-list-read-assignment.test.mjs",
   "field-certificate-defaults-office-boundary.test.mjs",
   "field-fleet-office-boundary.test.mjs",
@@ -180,6 +181,19 @@ test("customer certificate capability suite retains cache and activation boundar
     "without passing the rendered URL",
   ]) {
     assert.match(capability, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
+  }
+});
+
+test("field stock-location suite retains server, cache and live RLS boundaries", () => {
+  const stockLocations = readFileSync(resolve(testsDirectory, "field-stock-location-projection.test.mjs"), "utf8");
+  for (const requiredPhrase of [
+    "field stock-location projection exposes only IDs and names",
+    "electrician stock-location caches purge complete legacy payloads",
+    "safe stock-location labels remain available after one online cache refresh",
+    "field stock-location UI consumes only the projected label contract",
+    "live RLS suite verifies exact stock-location payloads",
+  ]) {
+    assert.match(stockLocations, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
   }
 });
 
