@@ -7,7 +7,7 @@ import { sameSupabaseSessionOwnership } from "../supabase/sessionOwnership-core.
 import { effectiveCloudMode } from "./config";
 import type { JrRole } from "./permissions";
 import { setActiveSyncIdentity } from "./repository";
-import { purgeElectricianFleetCollectionCaches } from "./roleProjectionCache-core.mjs";
+import { purgeCustomerNetworkOnlyCollectionCaches, purgeElectricianFleetCollectionCaches } from "./roleProjectionCache-core.mjs";
 
 export interface CloudIdentity {
   userId: string;
@@ -30,7 +30,11 @@ const IDENTITY_REVALIDATION_INTERVAL_MS = 30_000;
 
 function emit(next: IdentitySnapshot) {
   if (typeof window !== "undefined" && effectiveCloudMode() !== "local") {
-    try { purgeElectricianFleetCollectionCaches(window.localStorage); }
+    try {
+      purgeCustomerNetworkOnlyCollectionCaches(window.localStorage, "jr-os-certificates");
+      purgeCustomerNetworkOnlyCollectionCaches(window.localStorage, "jr-os-portal-payment-links");
+      purgeElectricianFleetCollectionCaches(window.localStorage);
+    }
     catch { /* Best-effort privacy cleanup must not invalidate a live identity. */ }
   }
   snapshot = next;

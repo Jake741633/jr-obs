@@ -122,6 +122,7 @@ const requiredSuites = [
   "portal-approval-atomicity.test.mjs",
   "portal-payment-link-binding-guard.test.mjs",
   "portal-payment-link-live-capability.test.mjs",
+  "customer-certificate-live-capability.test.mjs",
   "portal-target-binding-guard.test.mjs",
   "customer-timeline-projection.test.mjs",
   "customer-timeline-live-rls.test.mjs",
@@ -163,6 +164,19 @@ test("customer payment capability suite retains cache and activation boundaries"
     "network-only adapter never replays a stale URL offline",
     "click-time loader revalidates live identity",
     "click activation navigates only with a fresh result",
+    "without passing the rendered URL",
+  ]) {
+    assert.match(capability, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
+  }
+});
+
+test("customer certificate capability suite retains cache and activation boundaries", () => {
+  const capability = readFileSync(resolve(testsDirectory, "customer-certificate-live-capability.test.mjs"), "utf8");
+  for (const requiredPhrase of [
+    "customer certificate caches are network-only outside local mode",
+    "network-only adapter never replays a stale certificate URL offline",
+    "certificate click-time loader revalidates identity",
+    "certificate click activation navigates only with a fresh result",
     "without passing the rendered URL",
   ]) {
     assert.match(capability, new RegExp(requiredPhrase.replaceAll(" ", "\\s+"), "i"));
