@@ -100,6 +100,10 @@ Certificate-default settings remain office-only. Electricians cannot read the
 canonical collection or a pre-existing generic field projection, including
 inspector identity, scheme registration, numbering defaults and private notes.
 
+Fleet records remain office-only. Electricians cannot read the canonical
+collection or a pre-existing generic field projection containing vehicle
+registrations, staff assignments, compliance dates, mileage or private notes.
+
 ### Generic collections covered
 
 - Surveys

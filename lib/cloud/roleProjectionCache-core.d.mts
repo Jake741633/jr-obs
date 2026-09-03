@@ -33,6 +33,9 @@ export function purgeCustomerNetworkOnlyCollectionCaches(
   storage: { readonly length: number; key(index: number): string | null; removeItem(key: string): void } | null | undefined,
   storageKey: string,
 ): void;
+export function purgeElectricianFleetCollectionCaches(
+  storage: { readonly length: number; key(index: number): string | null; removeItem(key: string): void } | null | undefined,
+): void;
 export function roleProjectionCacheGeneration(input: Pick<RoleProjectionCacheInput<never>, "storageKey" | "role">): string | undefined;
 export function roleProjectionCachePolicy(input: Omit<RoleProjectionCacheInput<never>, "records"> & { generation?: string }): "keep" | "purge" | "network-only";
 export function sanitizeRoleProjectionCache<T>(input: RoleProjectionCacheInput<T>): T[];

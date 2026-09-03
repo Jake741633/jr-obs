@@ -7,6 +7,7 @@ import { sameSupabaseSessionOwnership } from "../supabase/sessionOwnership-core.
 import { effectiveCloudMode } from "./config";
 import type { JrRole } from "./permissions";
 import { setActiveSyncIdentity } from "./repository";
+import { purgeElectricianFleetCollectionCaches } from "./roleProjectionCache-core.mjs";
 
 export interface CloudIdentity {
   userId: string;
@@ -28,6 +29,10 @@ const listeners = new Set<() => void>();
 const IDENTITY_REVALIDATION_INTERVAL_MS = 30_000;
 
 function emit(next: IdentitySnapshot) {
+  if (typeof window !== "undefined" && effectiveCloudMode() !== "local") {
+    try { purgeElectricianFleetCollectionCaches(window.localStorage); }
+    catch { /* Best-effort privacy cleanup must not invalidate a live identity. */ }
+  }
   snapshot = next;
   setActiveSyncIdentity(
     next.identity?.organisationId ?? null,
