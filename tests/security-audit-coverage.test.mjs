@@ -20,6 +20,7 @@ const requiredSuites = [
   "email-auth-recovery-flow.test.mjs",
   "suspended-cloud-context.test.mjs",
   "jobProgressCore.test.mjs",
+  "job-workspace-progress.test.mjs",
   "generic-collection-role-guard.test.mjs",
   "private-storage-customer-scope.test.mjs",
   "customer-profile-visibility.test.mjs",
