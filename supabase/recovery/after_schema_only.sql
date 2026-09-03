@@ -357,4 +357,9 @@ begin;
 \ir ../migrations/20260903132756_keep_field_stock_movements_office_only.sql
 commit;
 
+\echo 'Scoping field purchase-list reads to assigned jobs'
+begin;
+\ir ../migrations/20260903141000_scope_field_purchase_list_reads_to_assignments.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

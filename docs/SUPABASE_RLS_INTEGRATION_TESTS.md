@@ -89,6 +89,12 @@ Field builder projections expose only contact-safe data for builders referenced
 by a live canonical job assigned to the electrician's unique active field
 identity. Same-tenant unassigned and orphan builder contacts remain hidden.
 
+Field purchase-list projections retain operational supplier and quantity data
+only for live canonical jobs assigned to the electrician's unique active field
+identity. Production-shaped null-customer envelopes remain supported, while
+item costs and pricing-document links, unassigned and unbound lists, revoked or
+deleted-job lists, canonical source rows, and other tenants remain hidden.
+
 ### Generic collections covered
 
 - Surveys
