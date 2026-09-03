@@ -56,7 +56,7 @@ test("survey sync starts fail closed and absence cannot erase observed field sta
 
   assert.match(surveyPage, /initialized: false/);
   assert.match(surveyPage, /const surveySyncAwaiting = !surveySyncInitialized/);
-  assert.match(surveyPage, /const surveyEditBlocked = fieldOwnershipBlocked \|\| surveySyncAwaiting \|\| surveySyncBlocked/);
+  assert.match(surveyPage, /const surveyEditBlocked = fieldSurveyIdentityBlocked \|\| fieldOwnershipBlocked \|\| surveySyncAwaiting \|\| surveySyncBlocked/);
   assert.match(surveyPage, /Checking secure survey sync state…/);
   assert.match(surveyPage, /if \(!identityState\.isReady \|\| !surveys\.isReady/);
   assert.match(surveyPage, /nextSurveySyncTracker\(\{[\s\S]*requiresReconciliation: fieldMode/);
@@ -72,6 +72,6 @@ test("survey detail reports device-only states and locks terminal failures", () 
   assert.match(surveyPage, /Offline: changes are saved on this device and are not cloud-confirmed yet/);
   assert.match(surveyPage, /Failed: cloud sync did not complete[\s\S]*further editing is locked/);
   assert.match(surveyPage, /Conflict: cloud could not confirm these changes[\s\S]*further editing is locked/);
-  assert.match(surveyPage, /const surveyEditBlocked = fieldOwnershipBlocked \|\| surveySyncAwaiting \|\| surveySyncBlocked/);
+  assert.match(surveyPage, /const surveyEditBlocked = fieldSurveyIdentityBlocked \|\| fieldOwnershipBlocked \|\| surveySyncAwaiting \|\| surveySyncBlocked/);
   assert.doesNotMatch(surveyPage, />Saved automatically on this device\.</);
 });
