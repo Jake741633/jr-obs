@@ -61,11 +61,15 @@ test("legacy field diary reports partial and retained sync truth", () => {
   assert.match(page, /Site diary entry saved to the job record/);
 });
 
-test("legacy field diary revalidates the active job before optimistic writes", () => {
+test("legacy field diary revalidates the active assigned job before optimistic writes", () => {
   const handler = section(page, "function saveDiary", "\n\n  function choosePhoto");
-  const activeJobGuard = handler.indexOf("jobs.items.some((job) => job.id === form.jobId && !isJobInactiveStatus(job.status))");
-  assert.ok(activeJobGuard >= 0);
-  assert.ok(activeJobGuard < handler.indexOf("registerSiteDiarySyncAttempt"));
-  assert.ok(activeJobGuard < handler.indexOf("diary.setItems"));
-  assert.ok(activeJobGuard < handler.indexOf("timeline.setItems"));
+  const selectedJobLookup = handler.indexOf("const selectedJob = jobs.items.find((job) => job.id === form.jobId)");
+  const activeJobGuard = handler.indexOf("if (!selectedJob || isJobInactiveStatus(selectedJob.status))");
+  const assignmentGuard = handler.indexOf("if (cloudFieldMode && !fieldJobAssignedToOperator({ job: selectedJob, operatorMemberId }))");
+  assert.ok(selectedJobLookup >= 0);
+  assert.ok(activeJobGuard > selectedJobLookup);
+  assert.ok(assignmentGuard > activeJobGuard);
+  assert.ok(assignmentGuard < handler.indexOf("registerSiteDiarySyncAttempt"));
+  assert.ok(assignmentGuard < handler.indexOf("diary.setItems"));
+  assert.ok(assignmentGuard < handler.indexOf("timeline.setItems"));
 });

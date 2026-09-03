@@ -12,7 +12,7 @@ import { activeSyncAuthorizationMatches, getSyncQueue, type SyncState } from "..
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isJobInactiveStatus, siteDiaryTimelineEntry } from "../../../lib/jobManagement-core.mjs";
 import { buildDailyProgressSummary, dailyProgressWarnings } from "../../../lib/siteDiaryDailyProgress-core.mjs";
-import { siteDiaryOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
+import { fieldJobAssignedToOperator, fieldOperatorMemberId, siteDiaryOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { emptySiteDiarySyncProjection, refreshSiteDiarySyncProjection, registerSiteDiarySyncAttempt, siteDiaryAttemptStates, unpairedSiteDiaryTargetStates } from "../../../lib/siteDiarySync-core.mjs";
 import { makeId } from "../../../lib/storage";
 import type { JobTimelineEntry, SiteDiaryEntry } from "../../../lib/models";
@@ -46,6 +46,7 @@ const siteDiaryTargetMessages: Record<SiteDiaryTargetState, string> = {
 
 const today = () => new Date().toISOString().slice(0, 10);
 const nowTime = () => new Date().toTimeString().slice(0, 5);
+const fieldJobAssignmentMessage = "This job is no longer assigned to your active team identity. Refresh before recording field work.";
 
 const blankForm = {
   jobId: "",
@@ -84,14 +85,23 @@ export default function MobileSiteDiaryPage() {
   const [interactionScopeKey, setInteractionScopeKey] = useState("");
   const [siteDiarySyncProjection, setSiteDiarySyncProjection] = useState<SiteDiarySyncProjection>(() => emptySiteDiarySyncProjection());
 
-  const activeJobs = useMemo(() => jobs.items.filter((job) => !isJobInactiveStatus(job.status)), [jobs.items]);
   const jobsById = useMemo(() => new Map(jobs.items.map((job) => [job.id, job])), [jobs.items]);
   const operatorName = useMemo(() => siteDiaryOperatorName({
     identity: identityState.identity,
     teamMembers: team.items,
     mode: identityState.mode,
   }), [identityState.identity, identityState.mode, team.items]);
+  const operatorMemberId = useMemo(() => fieldOperatorMemberId({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
   const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
+  const activeJobs = useMemo(() => jobs.items.filter((job) => !isJobInactiveStatus(job.status)), [jobs.items]);
+  const selectableActiveJobs = useMemo(() => activeJobs.filter((job) => (
+    !cloudFieldMode || fieldJobAssignedToOperator({ job, operatorMemberId })
+  )), [activeJobs, cloudFieldMode, operatorMemberId]);
+  const selectedJobAvailable = Boolean(form.jobId && selectableActiveJobs.some((job) => job.id === form.jobId));
   const serverBoundLabour = cloudFieldMode;
   const siteDiarySyncScopeKey = JSON.stringify([
     identityState.identity?.organisationId ?? null,
@@ -184,8 +194,10 @@ export default function MobileSiteDiaryPage() {
   function saveDiary(event: FormEvent) {
     event.preventDefault();
     if (!form.jobId) return setMessage("Choose a job before saving the daily progress record.");
-    if (!activeJobs.some((job) => job.id === form.jobId)) return setMessage("The selected active job is no longer available. Refresh the diary before saving.");
-    if (!operatorName) return setMessage("Your active team identity could not be resolved. Refresh your account before saving.");
+    const selectedJob = jobsById.get(form.jobId);
+    if (!selectedJob || isJobInactiveStatus(selectedJob.status)) return setMessage("The selected active job is no longer available. Refresh the diary before saving.");
+    if (!operatorName || (cloudFieldMode && !operatorMemberId)) return setMessage("Your active team identity could not be resolved. Refresh your account before saving.");
+    if (cloudFieldMode && !fieldJobAssignedToOperator({ job: selectedJob, operatorMemberId })) return setMessage(fieldJobAssignmentMessage);
     if (!form.workCompleted.trim()) return setMessage("Record the work completed before saving.");
 
     const now = new Date().toISOString();
@@ -265,7 +277,7 @@ export default function MobileSiteDiaryPage() {
     <form onSubmit={saveDiary} className="space-y-4">
       <Card className="space-y-4">
         <h2 className="flex items-center gap-2 font-semibold"><ClipboardList className="size-5 text-cyan-300" />Job and working time</h2>
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose job</option>{activeJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose job</option>{selectableActiveJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select>{cloudFieldMode && form.jobId && !selectedJobAvailable ? <span role="status" className="text-xs font-normal text-amber-200">{fieldJobAssignmentMessage}</span> : null}</label>
         <div className="grid gap-3 sm:grid-cols-2"><InputField label="Work date" type="date" value={form.workDate} onChange={(event) => setForm({ ...form, workDate: event.target.value })} /><InputField label="Completed by" value={operatorName} readOnly aria-readonly="true" /></div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3"><InputField label="Started" type="time" value={form.startedAt} onChange={(event) => setForm({ ...form, startedAt: event.target.value })} /><InputField label="Finished" type="time" value={form.finishedAt} onChange={(event) => setForm({ ...form, finishedAt: event.target.value })} /><div className="col-span-2 sm:col-span-1"><InputField label="Break minutes" type="number" min="0" value={form.breakMinutes} onChange={(event) => setForm({ ...form, breakMinutes: event.target.value })} /></div></div>
         <div className="grid grid-cols-2 gap-2"><Button type="button" variant="secondary" onClick={() => setForm((current) => ({ ...current, startedAt: nowTime() }))}>Set arrival</Button><Button type="button" variant="secondary" onClick={() => setForm((current) => ({ ...current, finishedAt: nowTime() }))}>Set departure</Button></div>
@@ -309,9 +321,9 @@ export default function MobileSiteDiaryPage() {
         <p className="text-xs text-slate-400">Entering a name records the current timestamp when this local diary is saved. Final job completion sign-off remains in Completion Packs.</p>
       </Card>}
 
-      <Button type="submit" className="min-h-14 w-full text-base">{cloudFieldMode ? "Capture daily progress" : "Save daily progress"}</Button>
+      <Button type="submit" className="min-h-14 w-full text-base" disabled={cloudFieldMode && (!operatorName || !operatorMemberId || !selectedJobAvailable)}>{cloudFieldMode ? "Capture daily progress" : "Save daily progress"}</Button>
     </form>
 
-    {form.jobId ? <Link href={`/jobs/${form.jobId}`} className="inline-flex min-h-12 w-full items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link> : null}
+    {form.jobId && (!cloudFieldMode || selectedJobAvailable) ? <Link href={`/jobs/${form.jobId}`} className="inline-flex min-h-12 w-full items-center justify-center rounded-xl border border-slate-700 px-4 text-sm font-semibold">Open full job</Link> : null}
   </div>;
 }

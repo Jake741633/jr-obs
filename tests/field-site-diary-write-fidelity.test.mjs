@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { fieldJobAssignedToOperator, fieldOperatorMemberId } from "../lib/siteDiaryIdentity-core.mjs";
 
 const migrationName = "20260820170000_preserve_field_site_diary_progress.sql";
 const migration = readFileSync(new URL(`../supabase/migrations/${migrationName}`, import.meta.url), "utf8");
@@ -19,6 +20,82 @@ function section(source, startText, endText) {
   assert.ok(end > start, `Missing section end: ${endText}`);
   return source.slice(start, end);
 }
+
+test("field diary assignment requires one exact operator id in an array", () => {
+  const teamMembers = [
+    { id: "field-1", email: "field@example.com", status: "Active" },
+    { id: "former", email: "field@example.com", status: "Inactive" },
+  ];
+  const operatorMemberId = fieldOperatorMemberId({
+    identity: { email: " FIELD@example.com " },
+    teamMembers,
+    mode: "cloud",
+  });
+  assert.equal(operatorMemberId, "field-1");
+  assert.equal(fieldJobAssignedToOperator({ job: { assignedTo: ["field-1"] }, operatorMemberId }), true);
+  assert.equal(fieldJobAssignedToOperator({ job: { assignedTo: ["field-10", "other"] }, operatorMemberId }), false);
+  assert.equal(fieldJobAssignedToOperator({ job: { assignedTo: [] }, operatorMemberId }), false);
+  assert.equal(fieldJobAssignedToOperator({ job: { assignedTo: "field-1" }, operatorMemberId }), false);
+  assert.equal(fieldJobAssignedToOperator({ job: {}, operatorMemberId }), false);
+  assert.equal(fieldJobAssignedToOperator({ job: { assignedTo: ["field-1"] }, operatorMemberId: "" }), false);
+});
+
+test("both site diary entry points stop revoked assignments before optimistic effects", () => {
+  const handlers = [
+    {
+      name: "field workspace",
+      source: section(basicPage, "function saveDiary", "\n\n  function choosePhoto"),
+      diaryWrite: "diary.setItems",
+      reset: "setForm({ ...blankDiary",
+    },
+    {
+      name: "mobile site diary",
+      source: section(advancedPage, "function saveDiary", "\n\n  if (!ready)"),
+      diaryWrite: "diaries.setItems",
+      reset: "setForm({ ...blankForm",
+    },
+  ];
+
+  for (const handler of handlers) {
+    const identityGuard = handler.source.indexOf("cloudFieldMode && !operatorMemberId");
+    const assignmentGuard = handler.source.indexOf("if (cloudFieldMode && !fieldJobAssignedToOperator({ job: selectedJob, operatorMemberId }))");
+    assert.ok(identityGuard >= 0, `${handler.name} must require the exact operator identity`);
+    assert.ok(assignmentGuard > identityGuard, `${handler.name} must check assignment after resolving identity`);
+    for (const sideEffect of ["new Date", "makeId", "registerSiteDiarySyncAttempt", handler.diaryWrite, "timeline.setItems", "setMessage(cloudFieldMode", handler.reset]) {
+      assert.ok(assignmentGuard < handler.source.indexOf(sideEffect), `${handler.name} ${sideEffect} must follow the assignment guard`);
+    }
+  }
+});
+
+test("field workspace start and status changes require the current cached assignment", () => {
+  const startJob = section(basicPage, "function startJob", "\n\n  function stopJob");
+  const startGuard = startJob.indexOf("if (cloudFieldMode && !fieldJobAssignedToOperator({ job, operatorMemberId }))");
+  assert.ok(startGuard >= 0);
+  for (const sideEffect of ["fieldTimerStartBlock", "nowTime", "setForm", "updateJobStatus"]) {
+    assert.ok(startGuard < startJob.indexOf(sideEffect), `${sideEffect} must follow the start assignment guard`);
+  }
+
+  const updateJobStatus = section(basicPage, "function updateJobStatus", "\n\n  function startJob");
+  const updateGuard = updateJobStatus.indexOf("if (cloudFieldMode && !fieldJobAssignedToOperator({ job, operatorMemberId }))");
+  assert.ok(updateGuard >= 0);
+  for (const sideEffect of ["transitionJobStatus", "new Date", "makeId", "jobs.setItems"]) {
+    assert.ok(updateGuard < updateJobStatus.indexOf(sideEffect), `${sideEffect} must follow the status assignment guard`);
+  }
+});
+
+test("site diary controls expose only assigned cloud jobs while preserving local work", () => {
+  for (const page of [basicPage, advancedPage]) {
+    assert.match(page, /fieldOperatorMemberId\(\{[\s\S]*identity: identityState\.identity,[\s\S]*teamMembers: team\.items,[\s\S]*mode: identityState\.mode/);
+    assert.match(page, /!cloudFieldMode \|\| fieldJobAssignedToOperator\(\{ job, operatorMemberId \}\)/);
+    assert.match(page, /cloudFieldMode && \(!operatorName \|\| !operatorMemberId/);
+    assert.match(page, /This job is no longer assigned to your active team identity\. Refresh before recording field work\./);
+  }
+  assert.match(basicPage, /selectableDiaryJobs\.map\(\(job\) => <option/);
+  assert.match(basicPage, /jobStatusSyncBlocked\(job\.id\)/);
+  assert.match(basicPage, /!activeJobAssigned/);
+  assert.match(advancedPage, /selectableActiveJobs\.map\(\(job\) => <option/);
+  assert.match(advancedPage, /!selectedJobAvailable/);
+});
 
 test("field site-diary payload retains only bounded operational additions", () => {
   const helper = section(
