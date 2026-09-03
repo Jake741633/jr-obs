@@ -10,13 +10,14 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { accountStorageKey } from "../../lib/cloud/adapter";
-import { useBuildersCollection, useCustomersCollection, useJobsCollection, useJobTimelineCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useBuildersCollection, useCustomersCollection, useJobsCollection, useJobTimelineCollection, useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
 import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../lib/cloud/fieldMutationPolicy-core.mjs";
 import { canDeleteRecords, canEditFinance } from "../../lib/cloud/permissions";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
 import { getSyncQueue, type SyncState } from "../../lib/cloud/repository";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { canonicalJobStatuses, fieldJobStatusTransitionAllowed, fieldJobStatusTransitions, initialJobTimelineEntry, normaliseFieldJobStatus, normaliseJobStatus, transitionJobStatus } from "../../lib/jobManagement-core.mjs";
+import { fieldOperatorMemberId } from "../../lib/siteDiaryIdentity-core.mjs";
 import { makeId } from "../../lib/storage";
 import type { CanonicalJobStatus, Job } from "../../lib/models";
 
@@ -25,6 +26,7 @@ const jobEditHandoffMessage = "Job creation and commercial editing are managed b
 const jobDeleteHandoffMessage = "Only an owner or administrator can delete a job.";
 const fieldStatusHandoffMessage = "That stage change is not available in the field workflow. Choose an approved next stage or ask the office to update the job.";
 const unavailableStatusMessage = "Job status changes are unavailable until an approved cloud identity is active.";
+const unresolvedFieldIdentityMessage = "Your active team identity could not be resolved. Refresh your account before changing a job stage.";
 
 type JobStatusSyncProjection = {
   scopeKey: string;
@@ -73,6 +75,7 @@ export default function JobsPage() {
   const customers = useCustomersCollection();
   const builders = useBuildersCollection();
   const timeline = useJobTimelineCollection();
+  const team = useTeamCollection();
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -83,6 +86,12 @@ export default function JobsPage() {
   const [jobStatusSyncProjection, setJobStatusSyncProjection] = useState<JobStatusSyncProjection>({ scopeKey: "", states: {} });
   const customerNames = useMemo(() => new Map(customers.items.map((item) => [item.id, item.name])), [customers.items]);
   const builderNames = useMemo(() => new Map(builders.items.map((item) => [item.id, item.companyName])), [builders.items]);
+  const fieldJobOperatorMemberId = useMemo(() => fieldOperatorMemberId({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
+  const jobStatusBoundaryReady = identityState.isReady && (!fieldJobStatusRestricted || team.isReady);
   const filtered = useMemo(() => jobs.items.filter((job) => (status === "All" || jobCurrentStatus(job, fieldJobStatusRestricted) === status) && `${job.title} ${job.siteAddress} ${customerNames.get(job.customerId ?? "")} ${builderNames.get(job.builderId ?? "")}`.toLowerCase().includes(search.toLowerCase())), [jobs.items, status, search, customerNames, builderNames, fieldJobStatusRestricted]);
   const jobStatusCloudTracking = fieldJobStatusRestricted && Boolean(identityState.identity);
   const jobStatusSyncScopeKey = JSON.stringify([
@@ -177,6 +186,7 @@ export default function JobsPage() {
   }
   function jobStatusLocked(job: Job) {
     return jobStatusMutationDenied
+      || (fieldJobStatusRestricted && !fieldJobOperatorMemberId)
       || (fieldJobStatusRestricted && fieldJobStatusTransitions(job.status).length === 0)
       || jobStatusSyncBlocked(job);
   }
@@ -191,6 +201,7 @@ export default function JobsPage() {
     const syncState = jobStatusSyncState(job);
     if (syncState) return jobStatusSyncMessages[syncState];
     if (jobStatusMutationDenied) return unavailableStatusMessage;
+    if (fieldJobStatusRestricted && !fieldJobOperatorMemberId) return unresolvedFieldIdentityMessage;
     if (fieldJobStatusRestricted && fieldJobStatusTransitions(job.status).length === 0) {
       return "Further lifecycle changes for this job require office review.";
     }
@@ -233,6 +244,7 @@ export default function JobsPage() {
       return;
     }
     if (jobStatusMutationDenied) { setStatusMessage(""); setError(unavailableStatusMessage); return; }
+    if (fieldJobStatusRestricted && !fieldJobOperatorMemberId) { setStatusMessage(""); setError(unresolvedFieldIdentityMessage); return; }
     if (fieldJobStatusRestricted && !fieldJobStatusTransitionAllowed(job.status, nextStatus)) {
       setStatusMessage("");
       setError(fieldStatusHandoffMessage);
@@ -259,6 +271,7 @@ export default function JobsPage() {
     if (blockJobDelete()) return;
     if (window.confirm(`Delete ${job.title}? This cannot be undone.`)) jobs.remove((item) => item.id === job.id);
   }
+  if (!jobStatusBoundaryReady) return <Card>Loading jobs…</Card>;
   const relatedName = (job: Job) => customerNames.get(job.customerId ?? "") || builderNames.get(job.builderId ?? "") || "Direct job";
 
   return <div className="space-y-5 pb-24 sm:space-y-6 sm:pb-0">
