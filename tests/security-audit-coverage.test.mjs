@@ -71,6 +71,7 @@ const requiredSuites = [
   "field-jobs-crud-boundary.test.mjs",
   "field-job-status-transition-boundary.test.mjs",
   "field-cloud-collection-projection.test.mjs",
+  "field-survey-job-binding.test.mjs",
   "field-survey-read-assignment.test.mjs",
   "field-survey-assist-photo-boundary.test.mjs",
   "field-survey-photo-read-boundary.test.mjs",
