@@ -10,6 +10,8 @@ import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
 import type { PrivateUploadState } from "./privateFiles";
+import { canPromoteLegacySiteDiaries } from "./permissions";
+import { useCloudIdentity } from "./useCloudIdentity";
 
 export const coreBusinessStorageKeys = {
   customers: "jr-os-customers",
@@ -94,6 +96,7 @@ export function useLeadActivitiesCollection() { return useCloudLocalCollection<L
 export function useJobVariationsCollection() { return useCloudLocalCollection<JobVariation>(coreBusinessStorageKeys.jobVariations); }
 export function useJobTimelineCollection() { return useCloudLocalCollection<JobTimelineEntry>(coreBusinessStorageKeys.jobTimeline); }
 export function useSiteDiariesCollection() {
+  const { identity, mode } = useCloudIdentity();
   const canonical = useCloudLocalCollection<SiteDiaryEntry>(coreBusinessStorageKeys.siteDiaries);
   const legacy = useCloudLocalCollection<SiteDiaryEntry>(coreBusinessStorageKeys.legacySiteDiaries);
   const canonicalItems = canonical.items;
@@ -103,6 +106,7 @@ export function useSiteDiariesCollection() {
   const legacyItems = legacy.items;
   const legacyReady = legacy.isReady;
   const removeLegacy = legacy.remove;
+  const legacyPromotionAllowed = canPromoteLegacySiteDiaries(mode, identity?.role);
   const mergedItems = useMemo(() => {
     const byId = new Map(canonicalItems.map((entry) => [entry.id, entry]));
     legacyItems.forEach((entry) => { if (!byId.has(entry.id)) byId.set(entry.id, entry); });
@@ -110,11 +114,11 @@ export function useSiteDiariesCollection() {
   }, [canonicalItems, legacyItems]);
 
   useEffect(() => {
-    if (!canonicalReady || !legacyReady) return;
+    if (!legacyPromotionAllowed || !canonicalReady || !legacyReady) return;
     const canonicalIds = new Set(canonicalItems.map((entry) => entry.id));
     const missing = legacyItems.filter((entry) => !canonicalIds.has(entry.id));
     if (missing.length) setCanonicalItems((current) => [...missing, ...current]);
-  }, [canonicalItems, canonicalReady, legacyItems, legacyReady, setCanonicalItems]);
+  }, [canonicalItems, canonicalReady, legacyItems, legacyPromotionAllowed, legacyReady, setCanonicalItems]);
 
   const remove = useCallback((predicate: (entry: SiteDiaryEntry) => boolean) => {
     removeCanonical(predicate);

@@ -129,3 +129,12 @@ export function canEditFinance(role: JrRole | undefined) {
 export function canEditFieldRecords(role: JrRole | undefined) {
   return isJrRole(role) && role !== "customer";
 }
+
+export function canPromoteLegacySiteDiaries(
+  mode: "local" | "cloud" | "migration",
+  role: JrRole | undefined,
+) {
+  if (mode === "local") return true;
+  if (mode === "migration" && role === undefined) return true;
+  return role === "owner" || role === "admin" || role === "office";
+}

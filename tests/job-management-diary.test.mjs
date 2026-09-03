@@ -8,6 +8,7 @@ import {
   siteDiaryDurationHours,
   siteDiaryTimelineEntry,
 } from "../lib/jobManagement-core.mjs";
+import { canPromoteLegacySiteDiaries } from "../lib/cloud/permissions.ts";
 import { cloudRowsToCache, linkedSourceIds, tenantListQuery } from "../lib/cloud/repository-core.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -61,10 +62,37 @@ test("site diary collection keeps existing singular-key records while moving to 
   const collections = await readFile(path.join(root, "lib/cloud/coreBusinessCollections.ts"), "utf8");
   assert.match(collections, /siteDiaries: "jr-os-site-diaries"/);
   assert.match(collections, /legacySiteDiaries: "jr-os-site-diary"/);
-  assert.match(collections, /legacyItems\.filter/);
+  const mergedStart = collections.indexOf("const mergedItems = useMemo");
+  const promotionStart = collections.indexOf("useEffect(() =>", mergedStart);
+  const promotionEnd = collections.indexOf("const remove = useCallback", promotionStart);
+  assert.ok(mergedStart >= 0 && promotionStart > mergedStart && promotionEnd > promotionStart);
+  const merged = collections.slice(mergedStart, promotionStart);
+  const promotion = collections.slice(promotionStart, promotionEnd);
+  assert.match(merged, /new Map\(canonicalItems\.map/);
+  assert.match(merged, /legacyItems\.forEach/);
+  assert.match(merged, /if \(!byId\.has\(entry\.id\)\)/);
+  assert.match(promotion, /if \(!legacyPromotionAllowed \|\| !canonicalReady \|\| !legacyReady\) return;/);
+  assert.ok(promotion.indexOf("!legacyPromotionAllowed") < promotion.indexOf("setCanonicalItems"));
+  assert.match(promotion, /legacyItems\.filter/);
   assert.match(collections, /removeCanonical\(predicate\)/);
   assert.match(collections, /removeLegacy\(predicate\)/);
   assert.match(tenantListQuery({ organisationId: "org-a", collectionKey: "jr-os-site-diaries" }), /organisation_id=eq\.org-a/);
+});
+
+test("legacy site-diary promotion is limited to local or office-controlled workspaces", () => {
+  for (const role of [undefined, "owner", "admin", "office", "electrician", "customer"]) {
+    assert.equal(canPromoteLegacySiteDiaries("local", role), true);
+  }
+  for (const mode of ["cloud", "migration"]) {
+    for (const role of ["owner", "admin", "office"]) {
+      assert.equal(canPromoteLegacySiteDiaries(mode, role), true);
+    }
+    for (const role of ["electrician", "customer"]) {
+      assert.equal(canPromoteLegacySiteDiaries(mode, role), false);
+    }
+  }
+  assert.equal(canPromoteLegacySiteDiaries("cloud", undefined), false);
+  assert.equal(canPromoteLegacySiteDiaries("migration", undefined), true);
 });
 
 test("mobile diary workflow captures every required on-site field and writes job activity", async () => {
