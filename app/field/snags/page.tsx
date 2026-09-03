@@ -12,6 +12,7 @@ import { activeSyncAuthorizationMatches, getSyncQueue, type SyncState } from "..
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { fieldJobTaskStatusTransitionAllowed, jobTaskTimelineEntry, transitionJobTask } from "../../../lib/jobTasks-core.mjs";
 import { prioritiseSnags, snagCategories, snagSummary } from "../../../lib/mobileSnagControl-core.mjs";
+import { fieldOperatorMemberId } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { emptySnagSyncProjection, refreshSnagSyncProjection, registerSnagSyncAttempt, snagAttemptStates, snagTaskHasUnconfirmedSync, unpairedSnagTargetStates } from "../../../lib/snagSync-core.mjs";
 import { makeId } from "../../../lib/storage";
 import type { JobPriority, JobTask, JobTaskCategory, JobTimelineEntry } from "../../../lib/models";
@@ -55,10 +56,14 @@ export default function MobileSnagsPage() {
   const summary = useMemo(() => snagSummary(tasks.items, visibleJobId), [tasks.items, visibleJobId]);
   const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const operatorMember = useMemo(() => {
-    const identityEmail = identityState.identity?.email?.trim().toLowerCase();
-    if (!identityEmail) return undefined;
-    return team.items.find((member) => member.status === "Active" && member.email?.trim().toLowerCase() === identityEmail);
-  }, [identityState.identity?.email, team.items]);
+    const operatorMemberId = fieldOperatorMemberId({
+      identity: identityState.identity,
+      teamMembers: team.items,
+      mode: identityState.mode,
+    });
+    if (!operatorMemberId) return undefined;
+    return team.items.find((member) => member.id === operatorMemberId);
+  }, [identityState.identity, identityState.mode, team.items]);
   const snagSyncScopeKey = JSON.stringify([
     identityState.identity?.organisationId ?? null,
     identityState.identity?.userId ?? null,
