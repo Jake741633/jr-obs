@@ -55,6 +55,7 @@ export function buildTypedEnvelope<T>(input: CloudEnvelopeInput<T>): TypedCloudR
 export function buildGenericEnvelope<T>(input: CloudEnvelopeInput<T> & { collectionKey: string }): GenericCloudRow<T>;
 export function buildCloudEnvelope<T>(input: CloudEnvelopeInput<T>): TypedCloudRow<T> | GenericCloudRow<T>;
 export function buildCloudUpdatePatch<T>(input: CloudEnvelopeInput<T>): CloudUpdatePatch<T>;
+export function hasReplayableSyncQueueItems(queue: Array<Pick<QueueMutation, "state">>): boolean;
 export function queueTargetSyncState(
   queue: Array<Pick<QueueMutation, "table" | "sourceId" | "collectionKey" | "state">>,
   target: Pick<QueueIdentity, "table" | "sourceId" | "collectionKey">,
