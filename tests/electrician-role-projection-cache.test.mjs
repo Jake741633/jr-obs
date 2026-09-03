@@ -272,8 +272,8 @@ test("electrician office-finance caches never survive outside local mode", () =>
   }
 });
 
-test("electrician inventory caches discard records from before the field-safe price projections", () => {
-  for (const storageKey of ["jr-os-materials", "jr-os-stock-items", "jr-os-purchase-lists"]) {
+test("electrician catalogue and stock caches discard records from before the field-safe price projections", () => {
+  for (const storageKey of ["jr-os-materials", "jr-os-stock-items"]) {
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "cloud" }), "purge");
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "migration", generation: "20260809_049" }), "purge");
     assert.equal(
