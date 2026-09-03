@@ -5,6 +5,7 @@ import {
   CUSTOMER_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_CUSTOMER_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_INVENTORY_PROJECTION_CACHE_GENERATION,
+  ELECTRICIAN_TEAM_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_JOB_DOCUMENT_CACHE_GENERATION,
   ELECTRICIAN_JOB_PROJECTION_CACHE_GENERATION,
   ELECTRICIAN_JOB_TIMELINE_CACHE_GENERATION,
@@ -210,6 +211,36 @@ test("electrician inventory caches discard records from before the field-safe pr
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "electrician", mode: "local" }), "keep");
     assert.equal(roleProjectionCachePolicy({ storageKey, role: "office", mode: "cloud" }), "keep");
   }
+});
+
+test("electrician team caches discard complete HR rows from before the field-safe projection", () => {
+  const completeTeamCache = [{
+    id: "team-1",
+    name: "Field electrician",
+    hourlyCost: 32,
+    chargeRate: 55,
+    emergencyContact: "Private contact",
+    emergencyPhone: "07000000000",
+    notes: "Private HR note",
+    qualifications: [{ id: "qualification-1", name: "ECS", certificateNumber: "PRIVATE-123" }],
+  }];
+  const firstCloudReadPolicy = roleProjectionCachePolicy({ storageKey: "jr-os-team", role: "electrician", mode: "cloud" });
+  const firstCloudRead = firstCloudReadPolicy === "purge"
+    ? []
+    : sanitizeRoleProjectionCache({ storageKey: "jr-os-team", role: "electrician", mode: "cloud", records: completeTeamCache });
+
+  assert.equal(firstCloudReadPolicy, "purge");
+  assert.deepEqual(firstCloudRead, []);
+  assert.equal(completeTeamCache[0].hourlyCost, 32, "purging must not mutate the legacy source cache");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-team", role: "electrician", mode: "migration" }), "purge");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-team", role: "electrician", mode: "cloud", generation: "20260809_045" }), "purge");
+  assert.equal(
+    roleProjectionCachePolicy({ storageKey: "jr-os-team", role: "electrician", mode: "cloud", generation: ELECTRICIAN_TEAM_PROJECTION_CACHE_GENERATION }),
+    "keep",
+  );
+  assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-team", role: "electrician" }), ELECTRICIAN_TEAM_PROJECTION_CACHE_GENERATION);
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-team", role: "electrician", mode: "local" }), "keep");
+  assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-team", role: "office", mode: "cloud" }), "keep");
 });
 
 test("customer generic finance caches retain only the projection allowlists", () => {
