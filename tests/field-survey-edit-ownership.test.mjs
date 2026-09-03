@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fieldSurveyEditAllowed } from "../lib/fieldSurveyOwnership-core.mjs";
+import { fieldOperatorMemberId } from "../lib/siteDiaryIdentity-core.mjs";
 
 const surveyPage = readFileSync(new URL("../app/surveys/[id]/page.tsx", import.meta.url), "utf8");
 
@@ -28,6 +29,38 @@ test("survey detail derives field ownership from the scoped envelope sidecar", (
   assert.match(surveyPage, /fieldSurveyEditAllowed\(\{[\s\S]*fieldMode,[\s\S]*userId: identityState\.identity\?\.userId,[\s\S]*creatorId: surveyCreatorId/);
   assert.match(surveyPage, /the creator of this assigned survey could not be confirmed/);
   assert.match(surveyPage, /this assigned survey was created by another user/);
+});
+
+test("survey detail requires exactly one active team identity before field edits", () => {
+  const members = [
+    { id: "field-1", email: "field@example.com", status: "Active", role: "electrician" },
+    { id: "inactive", email: "former@example.com", status: "Suspended", role: "electrician" },
+  ];
+  const identity = { email: "FIELD@example.com" };
+  assert.equal(fieldOperatorMemberId({ identity, teamMembers: members, mode: "cloud" }), "field-1");
+  assert.equal(fieldOperatorMemberId({ identity: { email: "missing@example.com" }, teamMembers: members, mode: "cloud" }), "");
+  assert.equal(fieldOperatorMemberId({ identity: { email: "former@example.com" }, teamMembers: members, mode: "cloud" }), "");
+  assert.equal(fieldOperatorMemberId({ identity, teamMembers: [...members, { ...members[0], id: "duplicate" }], mode: "cloud" }), "");
+
+  assert.match(surveyPage, /useSurveysCollection, useTeamCollection/);
+  assert.match(surveyPage, /const team = useTeamCollection\(\);/);
+  assert.match(surveyPage, /fieldOperatorMemberId\(\{\s*identity: identityState\.identity,\s*teamMembers: team\.items,\s*mode: identityState\.mode,?\s*\}\)/);
+  assert.match(surveyPage, /const fieldSurveyIdentityBlocked = fieldMode && !fieldSurveyOperatorMemberId;/);
+  assert.match(surveyPage, /const surveyEditBlocked = fieldSurveyIdentityBlocked \|\| fieldOwnershipBlocked \|\| surveySyncAwaiting \|\| surveySyncBlocked;/);
+  assert.match(surveyPage, /\|\| \(fieldMode && !team\.isReady\)/);
+  assert.match(surveyPage, /fieldSurveyIdentityBlocked \? <p role="alert"[^>]*>\{unresolvedFieldSurveyIdentityMessage\}<\/p> : fieldOwnershipBlocked/);
+
+  const update = section(surveyPage, "function update", "\n\n  function toggle");
+  const guard = update.indexOf("if (surveyEditBlocked) return;");
+  assert.ok(guard >= 0);
+  for (const sideEffect of ["new Date()", "surveys.setItems(", "setSurveySync("]) {
+    assert.ok(guard < update.indexOf(sideEffect), `${sideEffect} must follow the exact field edit guard`);
+  }
+
+  const createQuote = section(surveyPage, "function createQuote", "\n\n  return <div");
+  assert.match(createQuote, /setMessage\(fieldSurveyIdentityBlocked\s*\? unresolvedFieldSurveyIdentityMessage\s*: fieldOwnershipBlocked/);
+  assert.match(surveyPage, /<fieldset disabled=\{surveyEditBlocked\}/);
+  assert.match(surveyPage, /disabled=\{surveyEditBlocked\} onChange=\{\(event\) => update\(\{ status:/);
 });
 
 test("ownership denial returns before every optimistic survey write", () => {

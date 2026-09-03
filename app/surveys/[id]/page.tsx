@@ -2,16 +2,17 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { accountStorageKey } from "../../../lib/cloud/adapter";
-import { useCustomersCollection, useJobsCollection, usePricingDocumentsCollection, useSurveysCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { useCustomersCollection, useJobsCollection, usePricingDocumentsCollection, useSurveysCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { queueTargetSyncState } from "../../../lib/cloud/repository-core.mjs";
 import { getSyncQueue, type SyncState } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { fieldSurveyEditAllowed, nextSurveySyncTracker, surveySyncStateBlocksEdits } from "../../../lib/fieldSurveyOwnership-core.mjs";
+import { fieldOperatorMemberId } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { makeId } from "../../../lib/storage";
 import type { PricingDocument, SiteSurvey, SurveyCircuit } from "../../../lib/models";
 
@@ -43,6 +44,7 @@ const surveySyncMessages: Record<SyncState, string> = {
   Failed: "Failed: cloud sync did not complete. Displayed changes may be local; further editing is locked.",
   Conflict: "Conflict: cloud could not confirm these changes against the current survey. Displayed values may be local; further editing is locked.",
 };
+const unresolvedFieldSurveyIdentityMessage = "Read-only: your active team identity could not be resolved. Refresh your account before editing this field survey.";
 
 export default function SurveyDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -50,8 +52,15 @@ export default function SurveyDetailPage() {
   const customers = useCustomersCollection();
   const jobs = useJobsCollection();
   const quotes = usePricingDocumentsCollection();
+  const team = useTeamCollection();
   const identityState = useCloudIdentity();
   const fieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
+  const fieldSurveyOperatorMemberId = useMemo(() => fieldOperatorMemberId({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
+  const fieldSurveyIdentityBlocked = fieldMode && !fieldSurveyOperatorMemberId;
   const [step, setStep] = useState(0);
   const [message, setMessage] = useState("");
   const [surveySync, setSurveySync] = useState<SurveySyncTracker>({ targetKey: "", state: null, initialized: false });
@@ -89,7 +98,7 @@ export default function SurveyDetailPage() {
     || (surveySync.targetKey === surveySyncTargetKey && surveySync.initialized);
   const surveySyncAwaiting = !surveySyncInitialized;
   const surveySyncBlocked = surveySyncStateBlocksEdits(activeSurveySyncState);
-  const surveyEditBlocked = fieldOwnershipBlocked || surveySyncAwaiting || surveySyncBlocked;
+  const surveyEditBlocked = fieldSurveyIdentityBlocked || fieldOwnershipBlocked || surveySyncAwaiting || surveySyncBlocked;
   const surveySyncTone = surveySyncBlocked
     ? "text-rose-200"
     : activeSurveySyncState === "Synced"
@@ -131,7 +140,7 @@ export default function SurveyDetailPage() {
     };
   }, [fieldMode, id, surveyCloudTracking, surveyStorageKey, surveySyncTargetKey]);
 
-  if (!identityState.isReady || !surveys.isReady || !customers.isReady || !jobs.isReady || !quotes.isReady) return <Card>Loading survey…</Card>;
+  if (!identityState.isReady || !surveys.isReady || !customers.isReady || !jobs.isReady || !quotes.isReady || (fieldMode && !team.isReady)) return <Card>Loading survey…</Card>;
   if (!survey) return <Card>Survey not found.</Card>;
 
   const activeSurvey: SiteSurvey = survey;
@@ -175,9 +184,11 @@ export default function SurveyDetailPage() {
 
   function createQuote() {
     if (surveyEditBlocked) {
-      setMessage(fieldOwnershipBlocked
-        ? fieldOwnershipMessage
-        : activeSurveySyncState ? surveySyncMessages[activeSurveySyncState] : "Survey editing is currently locked.");
+      setMessage(fieldSurveyIdentityBlocked
+        ? unresolvedFieldSurveyIdentityMessage
+        : fieldOwnershipBlocked
+          ? fieldOwnershipMessage
+          : activeSurveySyncState ? surveySyncMessages[activeSurveySyncState] : "Survey editing is currently locked.");
       return;
     }
     if (fieldMode) {
@@ -211,7 +222,7 @@ export default function SurveyDetailPage() {
 
   return <div className="space-y-6">
     <Link href="/surveys" className="inline-flex items-center gap-2 text-sm text-cyan-300"><ArrowLeft className="size-4" />Back to surveys</Link>
-    <Card className="border-cyan-400/30"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{activeSurvey.number}</p><h1 className="mt-2 text-3xl font-bold">Smart site survey</h1><p className="mt-2 text-sm text-slate-400">{surveySyncAwaiting ? "Checking secure survey sync state…" : surveyCloudTracking ? activeSurveySyncState ? "Cloud sync status:" : "No unconfirmed survey changes are queued." : "Changes are saved automatically on this device."}</p>{fieldOwnershipBlocked ? <p role="status" className="mt-2 max-w-2xl text-sm text-amber-200">{fieldOwnershipMessage}</p> : null}{activeSurveySyncState ? <p role="status" className={`mt-2 max-w-2xl text-sm ${surveySyncTone}`}>{surveySyncMessages[activeSurveySyncState]}</p> : null}</div><select className={`${fieldClass} disabled:cursor-not-allowed disabled:opacity-60`} style={{ width: 160 }} value={activeSurvey.status} disabled={surveyEditBlocked} onChange={(event) => update({ status: event.target.value as SiteSurvey["status"] })}><option>Draft</option><option>In progress</option><option>Complete</option></select></div></Card>
+    <Card className="border-cyan-400/30"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{activeSurvey.number}</p><h1 className="mt-2 text-3xl font-bold">Smart site survey</h1><p className="mt-2 text-sm text-slate-400">{surveySyncAwaiting ? "Checking secure survey sync state…" : surveyCloudTracking ? activeSurveySyncState ? "Cloud sync status:" : "No unconfirmed survey changes are queued." : "Changes are saved automatically on this device."}</p>{fieldSurveyIdentityBlocked ? <p role="alert" className="mt-2 max-w-2xl text-sm text-amber-200">{unresolvedFieldSurveyIdentityMessage}</p> : fieldOwnershipBlocked ? <p role="status" className="mt-2 max-w-2xl text-sm text-amber-200">{fieldOwnershipMessage}</p> : null}{activeSurveySyncState ? <p role="status" className={`mt-2 max-w-2xl text-sm ${surveySyncTone}`}>{surveySyncMessages[activeSurveySyncState]}</p> : null}</div><select className={`${fieldClass} disabled:cursor-not-allowed disabled:opacity-60`} style={{ width: 160 }} value={activeSurvey.status} disabled={surveyEditBlocked} onChange={(event) => update({ status: event.target.value as SiteSurvey["status"] })}><option>Draft</option><option>In progress</option><option>Complete</option></select></div></Card>
 
     <div className="grid grid-cols-2 gap-2 md:grid-cols-7">{steps.map((label, index) => <button key={label} onClick={() => setStep(index)} className={`rounded-xl border p-3 text-xs font-semibold ${index === step ? "border-cyan-400 bg-cyan-400 text-slate-950" : "border-slate-800 bg-slate-900 text-slate-400"}`}><span className="block">{index + 1}</span>{label}</button>)}</div>
 
