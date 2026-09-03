@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { AlertTriangle, ClipboardCheck } from "lucide-react";
 import { Card } from "./ui/Card";
+import { useFieldElectricalTestingCollection } from "../lib/cloud/coreBusinessCollections";
 import { useLocalStorageCollection } from "../lib/storage";
 import type { Job } from "../lib/models";
-import { testingProgress, validateTestingRecord, type ElectricalTestingRecord } from "../lib/electricalTesting";
+import { testingProgress, validateTestingRecord } from "../lib/electricalTesting";
 
 export function MobileTestingProgress({ activeJobId }: { activeJobId?: string }) {
-  const records = useLocalStorageCollection<ElectricalTestingRecord>("jr-os-electrical-testing");
+  const records = useFieldElectricalTestingCollection();
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   if (!records.isReady || !jobs.isReady) return <Card>Loading testing progress…</Card>;
 

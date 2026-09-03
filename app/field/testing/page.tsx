@@ -7,7 +7,7 @@ import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
-import { useElectricalTestingCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { useFieldElectricalTestingCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { fieldOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { isJobOnSiteStatus, normaliseJobStatus } from "../../../lib/jobManagement-core.mjs";
@@ -26,8 +26,6 @@ import {
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none transition focus:border-cyan-400";
 const statuses: TestingRecordStatus[] = ["Draft", "In progress", "Ready for certificate", "Complete"];
 const polarities: PolarityResult[] = ["", "Confirmed", "Not confirmed", "Not tested"];
-const fieldTestingDraftStorageKey = "jr-os-field-electrical-testing-drafts";
-
 function blankCircuit(): CircuitTestResult {
   return { id: makeId("circuit-test"), circuitReference: "", description: "", protectiveDevice: "", r1r2: "", insulationResistance: "", polarity: "", zs: "", rcdTest: "", notes: "" };
 }
@@ -41,13 +39,11 @@ export default function MobileTestingPage() {
   const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const customers = useCloudLocalCollection<Customer>("jr-os-customers");
   const certificates = useCloudLocalCollection<ElectricalCertificate>("jr-os-certificates");
-  const canonicalRecords = useElectricalTestingCollection();
-  const fieldDraftRecords = useCloudLocalCollection<ElectricalTestingRecord>(fieldTestingDraftStorageKey);
+  const records = useFieldElectricalTestingCollection();
   const team = useTeamCollection();
   const identityState = useCloudIdentity();
   const fieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const localTestingMode = fieldMode || identityState.mode === "local";
-  const records = fieldMode ? fieldDraftRecords : canonicalRecords;
   const testingIdentityScopeKey = JSON.stringify([
     identityState.identity?.organisationId ?? null,
     identityState.identity?.userId ?? null,

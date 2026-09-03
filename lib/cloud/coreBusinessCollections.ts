@@ -9,8 +9,10 @@ import type { JobQaInspection } from "../jobQaTypes";
 import type { PaymentRecord } from "../payments";
 import type { ScheduledPlannerEntry } from "../scheduling";
 import { useCloudLocalCollection } from "../storage";
+import { accountStorageKey } from "./adapter";
 import type { PrivateUploadState } from "./privateFiles";
 import { canPromoteLegacySiteDiaries } from "./permissions";
+import { purgeRoleProjectionCacheStorage } from "./roleProjectionCache-core.mjs";
 import { useCloudIdentity } from "./useCloudIdentity";
 
 export const coreBusinessStorageKeys = {
@@ -57,6 +59,8 @@ export const coreBusinessStorageKeys = {
   crmFollowUpSettings: "jr-os-crm-follow-up-settings",
 } as const;
 
+export const fieldElectricalTestingDraftStorageKey = "jr-os-field-electrical-testing-drafts";
+
 export interface CloudJobDocument extends JobDocument {
   privateStoragePath?: string;
   privateFileId?: string;
@@ -79,6 +83,28 @@ export function usePurchaseListsCollection() { return useCloudLocalCollection<Pu
 export function useTeamCollection() { return useCloudLocalCollection<TeamMember>(coreBusinessStorageKeys.team); }
 export function useTimesheetsCollection() { return useCloudLocalCollection<TimesheetEntry>(coreBusinessStorageKeys.timesheets); }
 export function useElectricalTestingCollection() { return useCloudLocalCollection<ElectricalTestingRecord>(coreBusinessStorageKeys.electricalTesting); }
+export function useFieldElectricalTestingCollection() {
+  const { identity, mode } = useCloudIdentity();
+  useEffect(() => {
+    if (mode === "local" || identity?.role !== "electrician") return;
+    for (const canonicalStorageKey of [coreBusinessStorageKeys.electricalTesting, "jr-os-electrical-testing-records"]) {
+      purgeRoleProjectionCacheStorage(
+        window.localStorage,
+        accountStorageKey(
+          canonicalStorageKey,
+          identity.organisationId,
+          identity.userId,
+          identity.role,
+          identity.customerSourceId,
+        ),
+      );
+    }
+  }, [identity, mode]);
+  const storageKey = mode !== "local" && identity?.role === "electrician"
+    ? fieldElectricalTestingDraftStorageKey
+    : coreBusinessStorageKeys.electricalTesting;
+  return useCloudLocalCollection<ElectricalTestingRecord>(storageKey);
+}
 export function useCertificatesCollection() { return useCloudLocalCollection<ComplianceCertificate>(coreBusinessStorageKeys.certificates); }
 export function useJobDocumentsCollection() { return useCloudLocalCollection<CloudJobDocument>(coreBusinessStorageKeys.jobDocuments); }
 export function usePortalApprovalsCollection() { return useCloudLocalCollection<PortalApprovalRecord>(coreBusinessStorageKeys.portalApprovals); }

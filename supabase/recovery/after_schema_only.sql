@@ -347,4 +347,9 @@ begin;
 \ir ../migrations/20260903104633_keep_field_certificates_office_only.sql
 commit;
 
+\echo 'Keeping canonical electrical testing records office-only'
+begin;
+\ir ../migrations/20260903121755_keep_field_electrical_testing_office_only.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
