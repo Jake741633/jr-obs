@@ -13,6 +13,7 @@ import {
   ELECTRICIAN_VARIATION_TIMELINE_NOTE,
   roleProjectionCacheGeneration,
   roleProjectionCachePolicy,
+  roleProjectionVersionMap,
   sanitizeRoleProjectionCache,
 } from "../lib/cloud/roleProjectionCache-core.mjs";
 
@@ -61,6 +62,9 @@ test("electrician job projection caches mirror the field-job allowlist", () => {
     createdAt: "2026-08-14T08:00:00.000Z",
     updatedAt: "2026-08-14T09:00:00.000Z",
   }]);
+  assert.deepEqual(roleProjectionVersionMap([{ source_id: "job-1", version: 4, payload: jobs[0] }], sanitized), {
+    "job-1": 4,
+  });
   assert.equal(jobs[0].notes, "Margin is thin; discuss internally.", "the source record must not be mutated");
   assert.equal(jobs[0].value, 12_345, "the source record must not be mutated");
 });
@@ -205,6 +209,24 @@ test("electrician canonical certificate caches never survive outside local mode"
     sanitizeRoleProjectionCache({ storageKey: "jr-os-certificates", role: "office", mode: "cloud", records }),
     records,
   );
+  const rows = [{ source_id: "certificate-1", version: 7, payload: records[0] }];
+  assert.deepEqual(roleProjectionVersionMap(rows, []), {});
+  assert.deepEqual(roleProjectionVersionMap(rows, records), { "certificate-1": 7 });
+});
+
+test("role projection version metadata retains only visible matching records", () => {
+  const rows = [
+    { source_id: "job-1", version: 3, payload: { id: "job-1" } },
+    { source_id: "hidden-job", version: 4, payload: { id: "hidden-job" } },
+    { source_id: "mismatch", version: 5, payload: { id: "other" } },
+    { source_id: "zero-version", version: 0, payload: { id: "zero-version" } },
+    { source_id: "fractional-version", version: 1.5, payload: { id: "fractional-version" } },
+  ];
+  assert.deepEqual(roleProjectionVersionMap(rows, [{ id: "job-1" }, { id: "mismatch" }, { id: "zero-version" }, { id: "fractional-version" }]), {
+    "job-1": 3,
+  });
+  assert.deepEqual(roleProjectionVersionMap(null, [{ id: "job-1" }]), {});
+  assert.deepEqual(roleProjectionVersionMap(rows, null), {});
 });
 
 test("electrician office-finance caches never survive outside local mode", () => {
@@ -286,9 +308,12 @@ test("collection adapter sanitizes cached fallback and fetched role-projection r
   assert.match(adapter, /roleProjectionCachePolicy\(\{ storageKey, role: cacheRole, mode, generation: cachedGeneration \}\)/);
   assert.match(adapter, /cachePolicy === "purge"[\s\S]*\? \[\]/);
   assert.match(adapter, /if \(local !== cached\) writeLocal\(scopedStorageKey, local\)/);
+  assert.match(adapter, /if \(cachePolicy === "purge"\) writeVersions\(scopedStorageKey, \{\}\)/);
   assert.match(adapter, /if \(mode === "local" \|\| !navigator\.onLine\) return local/);
   assert.match(adapter, /const roleProjectionRecords = sanitizeRoleProjectionCache\(\{ storageKey, role: cacheRole, mode, records: cloudRecords \}\)/);
   assert.match(adapter, /writeLocal\(scopedStorageKey, roleProjectionRecords\)/);
+  assert.match(adapter, /writeVersions\(scopedStorageKey, roleProjectionVersionMap\(rows, roleProjectionRecords\)\)/);
+  assert.doesNotMatch(adapter, /Object\.fromEntries\(rows\.map\(\(row\) => \[row\.source_id, row\.version\]\)\)/);
   assert.match(adapter, /const projectionGeneration = roleProjectionCacheGeneration\(\{ storageKey, role: cacheRole \}\)/);
   assert.match(adapter, /if \(projectionGeneration\) window\.localStorage\.setItem\(projectionGenerationKey\(scopedStorageKey\), projectionGeneration\)/);
   assert.match(adapter, /return roleProjectionRecords/);
