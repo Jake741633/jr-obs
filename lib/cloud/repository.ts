@@ -3,7 +3,7 @@
 import { cloudPatch, cloudRpc, cloudSelect, cloudUpsert, isCloudConflictError } from "./client";
 import { collectionCloudMutationRoute, collectionCloudReadTable, fieldMutationRouteAllows, isServerAuthoredFieldTimeline, normaliseFieldRequestedJobStatus } from "./collections";
 import { effectiveCloudMode } from "./config";
-import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, fieldMutationReplayExpired, hasVersionConflict, makeTombstone, mergeProcessedQueue, pendingImports, projectFieldMutationPayload, rebaseQueuedFieldMutation, reconcileVersionedRecordCache, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, sameQueueTarget, sanitizeQueuedFieldMutationProjection, serialSingleFlightByKey, shouldReconcileFieldMutationPayload, tenantRecordQuery, tenantRecordVersionQuery, trailingSingleFlightByKey, validateFieldMutationResponse, withExclusiveBrowserLock } from "./repository-core.mjs";
+import { buildCloudEnvelope, buildCloudUpdatePatch, cloudRecordMatchesQueuedPayload, coalesceQueue, fieldMutationReplayExpired, hasReplayableSyncQueueItems, hasVersionConflict, makeTombstone, mergeProcessedQueue, pendingImports, projectFieldMutationPayload, rebaseQueuedFieldMutation, reconcileVersionedRecordCache, retainDeletedRecordConflict, retainPatchConflict, retainProjectionMutationConflict, sameQueueTarget, sanitizeQueuedFieldMutationProjection, serialSingleFlightByKey, shouldReconcileFieldMutationPayload, tenantRecordQuery, tenantRecordVersionQuery, trailingSingleFlightByKey, validateFieldMutationResponse, withExclusiveBrowserLock } from "./repository-core.mjs";
 import { readSupabaseSession, supabaseFetch } from "../supabase/client";
 import { assertCloudPageOperationCurrent } from "./cloudPageIdentity-core.mjs";
 
@@ -152,7 +152,17 @@ export function setActiveSyncIdentity(organisationId: string | null, userId: str
   else window.localStorage.removeItem(ACTIVE_ROLE_KEY);
   if (customerSourceId) window.localStorage.setItem(ACTIVE_CUSTOMER_SOURCE_KEY, customerSourceId);
   else window.localStorage.removeItem(ACTIVE_CUSTOMER_SOURCE_KEY);
-  syncStatus.set(navigator.onLine ? statusForQueue(getSyncQueue()) : "Offline");
+  const authorization = currentSyncAuthorization();
+  const activeQueue = authorization
+    ? readAllSyncQueue().filter((item) => queueItemMatchesAuthorization(item, authorization))
+    : [];
+  syncStatus.set(navigator.onLine ? statusForQueue(activeQueue) : "Offline");
+  if (authorization
+    && effectiveCloudMode() === "cloud"
+    && navigator.onLine
+    && hasReplayableSyncQueueItems(activeQueue)) {
+    scheduleAutomaticSyncQueueFlush(authorization);
+  }
 }
 
 export function setActiveSyncOrganisation(organisationId: string | null) {
@@ -513,7 +523,10 @@ const runSyncQueueFlush = serialSingleFlightByKey<[string, SyncQueueFlushOrigin]
 ), (authorizationKey, origin) => JSON.stringify([authorizationKey, origin]));
 
 const runAutomaticSyncQueueFlush = trailingSingleFlightByKey<[SyncAuthorizationContext], SyncQueueFlushResult>(async (authorization) => {
-  if (effectiveCloudMode() !== "cloud" || !navigator.onLine || !activeSyncAuthorizationMatches(authorization)) {
+  if (effectiveCloudMode() !== "cloud"
+    || !navigator.onLine
+    || !activeSyncAuthorizationMatches(authorization)
+    || !hasReplayableSyncQueueItems(getSyncQueue())) {
     return EMPTY_SYNC_QUEUE_FLUSH_RESULT;
   }
   try {

@@ -193,6 +193,7 @@ test("background sync stops processing when active authorisation changes", () =>
 test("online retries resolve the active organisation at execution time", () => {
   assert.match(repository, /window\.addEventListener\("online", \(\) => void flushSyncQueue\(\)\)/);
   assert.match(repository, /setActiveSyncOrganisation\(organisationId: string \| null\)/);
-  assert.match(repository, /syncStatus\.set\(navigator\.onLine \? statusForQueue\(getSyncQueue\(\)\) : "Offline"\)/);
+  assert.match(repository, /const activeQueue = authorization\s*\? readAllSyncQueue\(\)\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)\s*:\s*\[\]/);
+  assert.match(repository, /syncStatus\.set\(navigator\.onLine \? statusForQueue\(activeQueue\) : "Offline"\)/);
   assert.match(repository, /revalidateSyncAuthorization\(authorization\)/);
 });
