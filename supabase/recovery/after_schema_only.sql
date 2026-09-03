@@ -372,4 +372,9 @@ begin;
 \ir ../migrations/20260903153000_keep_field_fleet_office_only.sql
 commit;
 
+\echo 'Projecting field-safe stock-location labels'
+begin;
+\ir ../migrations/20260903163000_redact_field_stock_locations.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

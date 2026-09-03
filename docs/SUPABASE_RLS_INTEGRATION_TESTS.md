@@ -105,6 +105,12 @@ Fleet records remain office-only. Electricians cannot read the canonical
 collection or a pre-existing generic field projection containing vehicle
 registrations, staff assignments, compliance dates, mileage or private notes.
 
+Stock-location labels remain available for the shared field inventory workflow,
+but the projection contains exactly the stable ID and display name. The suite
+verifies that vehicle links, office notes, timestamps and unknown future fields
+remain only in the canonical office record, while customer and cross-tenant
+projection reads stay empty.
+
 ### Generic collections covered
 
 - Surveys
