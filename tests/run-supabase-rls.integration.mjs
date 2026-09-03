@@ -1028,6 +1028,13 @@ const secureFieldCasesSnippet = `    // Direct field writes are closed; only exi
       await expectAllowed(await insertRecord(accounts.A.office, table, typedRecord(organisationA, sourceId, customerA, jobA, payload)), \`Office should retain direct write access for \${table}\`);
       await expectDenied(await insertRecord(accounts.A.electrician, table, typedRecord(organisationB, \`\${sourceId}-cross\`, customerB, jobB, payload)), \`Electrician must not write cross-tenant \${table}\`);
     }
+    const electricianCertificateRead = await listRecords(accounts.A.electrician, "certificates", "select=source_id,payload&source_id=eq." + source("certificate-a"));
+    await expectAllowed(electricianCertificateRead, "Electrician canonical certificate query should fail closed");
+    assert.deepEqual(electricianCertificateRead.payload, [], "Electrician must not read complete certificate records");
+    const officeCertificateRead = await listRecords(accounts.A.office, "certificates", "select=source_id,payload&source_id=eq." + source("certificate-a"));
+    await expectAllowed(officeCertificateRead, "Office canonical certificate query should execute");
+    assert.equal(officeCertificateRead.payload.length, 1, "Office should retain complete certificate records");
+    assert.equal(officeCertificateRead.payload[0].payload.status, "Draft");
     for (const [table, sourceId, payload] of [
       ["planner_entries", source("planner-a"), { teamMemberIds: [fieldTeamA], startDate: "2026-08-01" }],
       ["timesheets", source("timesheet-a"), { teamMemberId: fieldTeamA, customerId: customerA, jobId: jobA, hours: 8 }],
@@ -1452,6 +1459,8 @@ try {
     "Electrician must not read another organisation's RAMS",
     "Electrician must not read RAMS after its canonical job is deleted",
     "Electrician direct RAMS writes must fail closed",
+    "Electrician must not read complete certificate records",
+    "Office should retain complete certificate records",
     "Electrician should create their own assigned-job timesheet row",
     "Electrician should read their own timesheet row",
     "Electrician must not read another actor timesheet row",

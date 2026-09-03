@@ -342,4 +342,9 @@ begin;
 \ir ../migrations/20260827001445_keep_field_rams_office_only.sql
 commit;
 
+\echo 'Keeping canonical certificate records office-only'
+begin;
+\ir ../migrations/20260903104633_keep_field_certificates_office_only.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -72,7 +72,7 @@ Create Auth users and profiles linked to the same organisation. Supported roles 
 - `owner`: all application and tenant administration
 - `admin`: all application and tenant administration
 - `office`: office, finance, customer and scheduling records
-- `electrician`: field, job, planner, materials, testing and certificate records
+- `electrician`: field, assigned-job, planner, materials and testing records; canonical certificate authoring and issue remain office-controlled
 - `customer`: only customer-scoped portal records
 
 For a customer portal user, set `profiles.customer_source_id` to the stable JR OS customer record ID. Customer RLS uses that value to restrict records.
@@ -90,6 +90,7 @@ Use separate test users for owner, office, electrician and customer. Verify:
 - electricians cannot query office-only finance, CRM history, settings or AI records directly
 - electricians cannot read full pricing documents, internal costs, markup or margin data through typed APIs
 - electricians receive only the field-safe team directory projection; payroll rates, emergency contacts and private team notes remain office-only
+- electricians cannot query or retain canonical certificate rows; complete installation, inspection and internal drafting payloads remain office-only, while customers use the separate issued-only projection
 - electricians and customers never read complete job commercial payloads; role projections remove contract value, retention and accepted quote profitability before Data API delivery, and electricians receive only jobs assigned to their active field identity, plus the contact-safe customers linked to those assigned jobs
 - electrician field updates preserve hidden office-only job pricing while changing only allowlisted operational job fields
 - electrician job-status, generic field-collection and progress receipt replays revalidate the current active job assignment before returning an idempotent result
