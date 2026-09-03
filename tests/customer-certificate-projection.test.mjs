@@ -6,6 +6,10 @@ const migration = readFileSync(
   new URL("../supabase/migrations/20260809_057_customer_issued_certificate_projection.sql", import.meta.url),
   "utf8",
 );
+const fieldBoundaryMigration = readFileSync(
+  new URL("../supabase/migrations/20260903104633_keep_field_certificates_office_only.sql", import.meta.url),
+  "utf8",
+);
 const collections = readFileSync(new URL("../lib/cloud/collections.ts", import.meta.url), "utf8");
 const portal = readFileSync(new URL("../app/customer-portal/page.tsx", import.meta.url), "utf8");
 const recovery = readFileSync(new URL("../supabase/recovery/after_schema_only.sql", import.meta.url), "utf8");
@@ -19,15 +23,20 @@ test("customers read certificates through an issued-only projection", () => {
   assert.match(collections, /certificates:\s*"customer_certificates"/i);
 });
 
-test("complete certificate rows are no longer customer-readable", () => {
-  assert.match(
-    migration,
-    /create policy certificates_select[\s\S]*private\.current_jr_role\(\) in \('owner', 'admin', 'office', 'electrician'\)/i,
-  );
-  assert.doesNotMatch(
-    migration.match(/create policy certificates_select[\s\S]*?;\n/i)?.[0] ?? "",
-    /customer/i,
-  );
+test("the historical customer projection excludes customers from canonical rows", () => {
+  const historicalPolicy = migration.match(/create policy certificates_select[\s\S]*?;\n/i)?.[0] ?? "";
+  assert.doesNotMatch(historicalPolicy, /customer/i);
+});
+
+test("canonical certificate rows are office-only after the field handoff", () => {
+  const selectPolicy = /create policy certificates_select[\s\S]*?;\n/i.exec(fieldBoundaryMigration)?.[0] ?? "";
+  assert.match(fieldBoundaryMigration, /drop policy if exists certificates_select on public\.certificates/i);
+  assert.match(selectPolicy, /for select to authenticated/i);
+  assert.match(selectPolicy, /organisation_id\s*=\s*private\.current_organisation_id\(\)/i);
+  assert.match(selectPolicy, /private\.can_manage_office_data\(\)/i);
+  assert.doesNotMatch(selectPolicy, /electrician|customer/i);
+  assert.doesNotMatch(selectPolicy, /deleted_at/i, "Office certificate history must retain the existing tombstone visibility contract");
+  assert.doesNotMatch(fieldBoundaryMigration, /customer_certificates_customer_select/i);
 });
 
 test("customer certificate payload omits internal structured observation metadata", () => {
@@ -63,5 +72,8 @@ test("portal retains issued-only presentation as defence in depth", () => {
 });
 
 test("schema-only recovery reapplies the customer certificate boundary", () => {
-  assert.match(recovery, /20260809_057_customer_issued_certificate_projection\.sql/i);
+  const customerProjection = recovery.indexOf("20260809_057_customer_issued_certificate_projection.sql");
+  const officeBoundary = recovery.indexOf("20260903104633_keep_field_certificates_office_only.sql");
+  assert.ok(customerProjection >= 0, "Recovery must include the issued-only customer projection");
+  assert.ok(officeBoundary > customerProjection, "Recovery must apply the office-only canonical policy after the historical policy");
 });

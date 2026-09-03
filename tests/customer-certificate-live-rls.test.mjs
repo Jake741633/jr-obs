@@ -10,6 +10,13 @@ const integrationSource = readFileSync(new URL("./supabase-rls.integration.mjs",
 
 const anchor = "    // Customer scoping for typed tables and portal writes.";
 
+for (const phrase of [
+  "Electrician must not read complete certificate records",
+  "Office should retain complete certificate records",
+]) {
+  assert.match(runnerSource, new RegExp(phrase.replaceAll(" ", "\\s+"), "i"));
+}
+
 const certificateCoverage = [
   "    const certificateA = source(\"certificate-a\");",
   "    const draftBaseCertificate = await listRecords(accounts.A.customer, \"certificates\", \"select=source_id,payload&source_id=eq.\" + certificateA);",
@@ -67,6 +74,10 @@ const certificateCoverage = [
   "    assert.equal(officeIssuedCertificate.payload.length, 1, \"Office should retain the complete issued certificate\");",
   "    assert.equal(officeIssuedCertificate.payload[0].payload.structuredObservations[0].sourceText, \"Internal drafting source\", \"Office should retain internal certificate drafting metadata\");",
   "",
+  "    const electricianIssuedCertificate = await listRecords(accounts.A.electrician, \"certificates\", \"select=source_id,payload&source_id=eq.\" + certificateA);",
+  "    await expectAllowed(electricianIssuedCertificate, \"Electrician complete issued certificate query should fail closed\");",
+  "    assert.deepEqual(electricianIssuedCertificate.payload, [], \"Electrician must not read complete issued certificate records\");",
+  "",
   "    const customerIssuedCertificate = await listRecords(accounts.A.customer, \"customer_certificates\", \"select=source_id,payload&source_id=eq.\" + certificateA);",
   "    await expectAllowed(customerIssuedCertificate, \"Customer issued certificate projection query should execute\");",
   "    assert.equal(customerIssuedCertificate.payload.length, 1, \"Issued certificates should appear in the customer projection\");",
@@ -117,6 +128,7 @@ for (const phrase of [
   "Draft certificates must not appear in the customer projection",
   "Electrician direct certificate issuance must fail closed",
   "Office should issue a same-tenant certificate",
+  "Electrician must not read complete issued certificate records",
   "Issued certificates should appear in the customer projection",
   "Customer certificate projection must omit internal structured observations",
   "Customer must not bypass the projection through the base certificate table",

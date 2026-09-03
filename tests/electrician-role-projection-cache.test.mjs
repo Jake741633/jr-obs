@@ -185,6 +185,28 @@ test("electrician survey caches require a live assigned read", () => {
   assert.equal(roleProjectionCacheGeneration({ storageKey: "jr-os-surveys", role: "electrician" }), undefined);
 });
 
+test("electrician canonical certificate caches never survive outside local mode", () => {
+  const records = [{
+    id: "certificate-1",
+    installationAddress: "1 Private Street",
+    externalPdfUrl: "https://example.com/private-certificate.pdf",
+    structuredObservations: [{ sourceText: "Internal drafting source" }],
+  }];
+
+  for (const mode of ["cloud", "migration"]) {
+    assert.equal(roleProjectionCachePolicy({ storageKey: "jr-os-certificates", role: "electrician", mode }), "purge");
+    assert.deepEqual(sanitizeRoleProjectionCache({ storageKey: "jr-os-certificates", role: "electrician", mode, records }), []);
+  }
+  assert.strictEqual(
+    sanitizeRoleProjectionCache({ storageKey: "jr-os-certificates", role: "electrician", mode: "local", records }),
+    records,
+  );
+  assert.strictEqual(
+    sanitizeRoleProjectionCache({ storageKey: "jr-os-certificates", role: "office", mode: "cloud", records }),
+    records,
+  );
+});
+
 test("electrician office-finance caches never survive outside local mode", () => {
   for (const storageKey of [
     "jr-os-pricing-documents",
