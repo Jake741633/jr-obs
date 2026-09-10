@@ -309,9 +309,12 @@ export default function CloudPage() {
     }
   }
 
-  function accountDetailsAreValid() {
+  function accountDetailsAreValid(creatingAccount = false) {
     if (!email.trim()) { setAccountMessage("Enter your email address."); return false; }
-    if (password.length < 8) { setAccountMessage("Your password must be at least 8 characters long."); return false; }
+    if (!password) { setAccountMessage("Enter your password."); return false; }
+    // Existing credentials are checked by Supabase; a new password policy must
+    // not prevent an existing account from signing in.
+    if (creatingAccount && password.length < 8) { setAccountMessage("Your password must be at least 8 characters long."); return false; }
     return true;
   }
 
@@ -326,7 +329,7 @@ export default function CloudPage() {
   }
 
   async function createAccount() {
-    if (!accountDetailsAreValid()) return;
+    if (!accountDetailsAreValid(true)) return;
     const submittedEmail = email;
     const submittedPassword = password;
     const submittedEmailRevision = emailRevisionRef.current;
@@ -392,7 +395,7 @@ export default function CloudPage() {
       <Card><CheckCircle2 className="size-6 text-amber-300" /><p className="mt-3 font-bold">Last successful upload</p><p className="mt-2 text-sm text-slate-400">{visibleLastSync ? new Date(visibleLastSync).toLocaleString("en-GB") : "No cloud upload completed yet."}</p></Card>
     </div>
     {!configured ? <Card className="border-amber-500/30"><h2 className="text-xl font-bold">Connection required</h2><p className="mt-2 text-sm text-slate-400">Run both SQL files and add NEXT_PUBLIC_SUPABASE_URL plus NEXT_PUBLIC_SUPABASE_ANON_KEY. Local storage continues working meanwhile.</p></Card> : null}
-    <Card><h2 className="text-xl font-bold">JR OS account</h2>{userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button type="button" disabled={operationBusy} onClick={() => void signOut()}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={signIn}><label className="grid gap-2 text-sm">Email<input type="email" autoComplete="email" required className={fieldClass} value={email} onChange={(event) => { emailRevisionRef.current += 1; setEmail(event.target.value); }} /></label><label className="grid gap-2 text-sm">Password<input type="password" autoComplete="current-password" minLength={8} required className={fieldClass} value={password} onChange={(event) => { passwordRevisionRef.current += 1; setPassword(event.target.value); }} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={operationBusy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={operationBusy || !configured} type="button" onClick={() => void createAccount()}>Create account</Button></div></form>}{accountMessage ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{accountMessage}</p> : null}</Card>
+    <Card><h2 className="text-xl font-bold">JR OS account</h2>{userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button type="button" disabled={operationBusy} onClick={() => void signOut()}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={signIn}><label className="grid gap-2 text-sm">Email<input type="email" autoComplete="email" required className={fieldClass} value={email} onChange={(event) => { emailRevisionRef.current += 1; setEmail(event.target.value); }} /></label><label className="grid gap-2 text-sm">Password<input type="password" autoComplete="current-password" required className={fieldClass} value={password} onChange={(event) => { passwordRevisionRef.current += 1; setPassword(event.target.value); }} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={operationBusy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={operationBusy || !configured} type="button" onClick={() => void createAccount()}>Create account</Button></div></form>}{accountMessage ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{accountMessage}</p> : null}</Card>
     <Card>
       <h2 className="text-xl font-bold">Data migration controls</h2>
       <p className="mt-2 text-sm text-slate-400">The legacy backup copy remains available. The typed migration copies individual records using their existing local IDs and skips unchanged records.</p>
