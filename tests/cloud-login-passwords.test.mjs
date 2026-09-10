@@ -46,6 +46,7 @@ function accountHarness() {
     "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" },
     "../../components/ui/Card": { Card: "Card" },
+    "../../components/mobile/InstallAppGuide": { InstallAppGuide: "InstallAppGuide" },
     "../../lib/cloud/cloudPageIdentity-core.mjs": pageIdentity,
     "../../lib/cloud/config": { effectiveCloudMode: () => "cloud" },
     "../../lib/cloud/repository": {},
