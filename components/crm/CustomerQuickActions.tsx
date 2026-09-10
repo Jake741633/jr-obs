@@ -47,7 +47,7 @@ export function CustomerQuickActions({
   const query = `customerId=${encodeURIComponent(customer.id)}&action=create`;
   const mapAddress = encodeURIComponent(customer.address);
 
-  return <section aria-label="Customer quick actions" className="fixed inset-x-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-30 px-2 lg:static lg:px-0">
+  return <section aria-label="Customer quick actions" className="mobile-safe-inline fixed inset-x-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-30 px-2 lg:static lg:px-0">
     <div className="mx-auto flex max-w-2xl gap-1 overflow-x-auto rounded-2xl border border-slate-700/80 bg-slate-950/95 p-2 shadow-2xl shadow-black/40 backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:max-w-none lg:grid-cols-5 lg:gap-2 lg:border-slate-800 lg:bg-slate-900/80 lg:shadow-none">
       <QuickAction label="Call" icon={<Phone className="size-5 text-cyan-300" />} href={customer.phone ? `tel:${customer.phone}` : undefined} disabled={!customer.phone} />
       <QuickAction label="Text" icon={<MessageSquareText className="size-5 text-cyan-300" />} href={customer.phone ? `sms:${customer.phone}` : undefined} disabled={!customer.phone} />

@@ -600,7 +600,7 @@ export default function QuotesPage() {
     </form></Card> : null}
 
     {showForm ? <>
-      <button type="button" onClick={() => scrollToBuilderSection("quote-line-composer")} aria-label="Add pricing line" className="fixed right-4 bottom-[calc(10.5rem+env(safe-area-inset-bottom))] z-30 grid size-14 place-items-center rounded-full bg-cyan-400 text-slate-950 shadow-xl shadow-cyan-950/50 active:scale-95 lg:hidden"><Plus className="size-6" /></button>
+      <button type="button" onClick={() => scrollToBuilderSection("quote-line-composer")} aria-label="Add pricing line" className="fixed right-[max(1rem,env(safe-area-inset-right))] bottom-[calc(10.5rem+env(safe-area-inset-bottom))] z-30 grid size-14 place-items-center rounded-full bg-cyan-400 text-slate-950 shadow-xl shadow-cyan-950/50 active:scale-95 lg:hidden"><Plus className="size-6" /></button>
       <MobileActionDock summary={<div><p className="truncate text-[11px] text-slate-400">Customer total</p><p className="truncate text-sm font-bold text-white">{money.format(profitability.sellingPrice + vat)}</p></div>}>
         <MobileDockAction icon={<Save className="size-5" />} label={editingId ? "Update" : "Save"} form="quote-builder-form" type="submit" />
         <MobileDockAction icon={<Eye className="size-5" />} label="Preview" onClick={() => scrollToBuilderSection("quote-preview")} />

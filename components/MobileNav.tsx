@@ -28,14 +28,16 @@ export function MobileNav() {
     })
     : mobileNavigation;
   const visible = roleNavigation.filter((item) => item.href === "/menu" || unrestricted || canAccessPath(identity?.role, item.href));
-  const navigation = identity?.role === "customer"
-    ? [{ label: "Portal", href: "/customer-portal", icon: Users }, { label: "Account", href: "/cloud", icon: Cloud }]
-    : visible;
+  const navigation = mode === "cloud" && !identity
+    ? [{ label: "Account", href: "/cloud", icon: Cloud }]
+    : identity?.role === "customer"
+      ? [{ label: "Portal", href: "/customer-portal", icon: Users }, { label: "Account", href: "/cloud", icon: Cloud }]
+      : visible;
 
   return (
     <nav
       aria-label="Primary mobile navigation"
-      className={`fixed inset-x-0 bottom-0 z-40 grid border-t border-slate-800/90 bg-slate-950/95 px-1.5 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-12px_32px_rgba(2,6,23,.55)] backdrop-blur-xl lg:hidden ${navigation.length === 2 ? "grid-cols-2" : navigation.length === 3 ? "grid-cols-3" : "grid-cols-5"}`}
+      className={`mobile-safe-inline fixed inset-x-0 bottom-0 z-40 grid border-t border-slate-800/90 bg-slate-950/95 px-1.5 pb-[max(.5rem,env(safe-area-inset-bottom))] pt-1.5 shadow-[0_-12px_32px_rgba(2,6,23,.55)] backdrop-blur-xl lg:hidden ${navigation.length === 1 ? "grid-cols-1" : navigation.length === 2 ? "grid-cols-2" : navigation.length === 3 ? "grid-cols-3" : "grid-cols-5"}`}
     >
       {navigation.map(({ label, href, icon: Icon }) => {
         const primaryMatch = (itemHref: string) => itemHref === "/"
@@ -55,9 +57,9 @@ export function MobileNav() {
             key={href}
             href={href}
             aria-current={active ? "page" : undefined}
-            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-[10px] font-semibold transition active:scale-[.98] ${active ? "bg-cyan-400/10 text-cyan-300" : "text-slate-500 hover:bg-slate-900 hover:text-slate-300"}`}
+            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-xs font-semibold transition active:scale-[.98] focus-visible:outline-2 focus-visible:outline-cyan-400 ${active ? "bg-cyan-400/10 text-cyan-300" : "text-slate-400 hover:bg-slate-900 hover:text-slate-300"}`}
           >
-            <Icon className="size-5 shrink-0" />
+            <Icon aria-hidden="true" className="size-5 shrink-0" />
             <span className="max-w-full truncate">{label}</span>
           </Link>
         );
