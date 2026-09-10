@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
 import { ArrowRight, BookOpen, FileText, Plus, Save, Search, Smartphone, Trash2 } from "lucide-react";
 import { MobileActionDock, MobileDockAction } from "../../../components/mobile/MobileActionDock";
 import { Button } from "../../../components/ui/Button";
@@ -42,6 +42,8 @@ export default function MobileQuotesPage() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const attemptedDraftId = useRef<string | null>(null);
+  const collectionsReady = documents.isReady && customers.isReady && builders.isReady && priceBook.isReady;
 
   const names = useMemo(() => new Map([
     ...customers.items.map((item) => [item.id, item.name] as const),
@@ -97,6 +99,8 @@ export default function MobileQuotesPage() {
 
   function saveQuickDraft(event?: FormEvent) {
     event?.preventDefault();
+    setMessage("");
+    if (!collectionsReady) { setError("Quotes are still loading. Please try again."); return; }
     const fixedPrice = Number(draft.fixedPrice);
     const hasPriceBookLines = selectedPriceBookLines.length > 0;
     if (!draft.title.trim()) { setError("Enter a title or scope for the quote."); return; }
@@ -116,7 +120,7 @@ export default function MobileQuotesPage() {
           unitPrice: fixedPrice,
         }];
     const document: PricingDocument = {
-      id: makeId("doc"),
+      id: attemptedDraftId.current ?? makeId("doc"),
       number,
       type: "Quote",
       status: "Draft",
@@ -139,13 +143,25 @@ export default function MobileQuotesPage() {
       updatedAt: now,
     };
 
-    documents.setItems((current) => [document, ...current]);
+    // Keep the same record on retry if the device write succeeds but queueing fails.
+    attemptedDraftId.current = document.id;
+    try {
+      documents.createItem(document);
+    } catch {
+      setError("The draft could not be saved. Your entries are still here; please try again.");
+      return;
+    }
+    attemptedDraftId.current = null;
     setDraft(blankDraft);
     setPriceBookSelections([]);
+    setPriceBookItemId("");
+    setPriceBookQuantity("1");
     setShowQuickDraft(false);
     setError("");
-    setMessage(`${number} saved as a fixed-price draft.`);
+    setMessage(`${number} saved on this device as a fixed-price draft.`);
   }
+
+  if (!collectionsReady) return <Card>Loading quick quotes…</Card>;
 
   return <div className={`space-y-6 ${showQuickDraft ? "pb-32 lg:pb-0" : ""}`}>
     <PageHeader
@@ -179,7 +195,7 @@ export default function MobileQuotesPage() {
 
       {!selectedPriceBookLines.length ? <InputField label="Customer fixed price (£)" inputMode="decimal" type="number" min="0.01" step="0.01" value={draft.fixedPrice} onChange={(event) => setDraft({ ...draft, fixedPrice: event.target.value })} /> : null}
       <TextareaField label="Scope notes" placeholder="Include what is covered, exclusions and anything still to confirm." value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} />
-      {error ? <p className="text-sm text-red-300">{error}</p> : null}
+      {error ? <p role="alert" className="text-sm text-red-300">{error}</p> : null}
       <div className="hidden justify-end gap-3 lg:flex"><Button type="button" variant="secondary" onClick={() => setShowQuickDraft(false)}>Cancel</Button><Button type="submit"><Save className="mr-2 size-4" />Save fixed-price draft</Button></div>
     </form></Card> : null}
 

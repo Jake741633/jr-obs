@@ -12,7 +12,7 @@ test("mobile quick quotes creates a fixed-price draft through the cloud-backed p
   assert.match(pageSource, /category: "Other"/);
   assert.match(pageSource, /quantity: 1/);
   assert.match(pageSource, /unitPrice: fixedPrice/);
-  assert.match(pageSource, /documents\.setItems\(\(current\) => \[document, \.\.\.current\]\)/);
+  assert.match(pageSource, /documents\.createItem\(document\)/);
 });
 
 test("mobile quick quote workflow requires a recipient and positive fixed price", () => {
