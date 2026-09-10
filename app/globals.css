@@ -9,6 +9,14 @@ button, input, textarea, select { font: inherit; }
 button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 input, textarea, select { min-width: 0; }
 img, video, canvas, svg { max-width: 100%; }
+@media (max-width: 1023px) {
+  html { scroll-padding-top: calc(5rem + env(safe-area-inset-top)); scroll-padding-bottom: calc(6rem + env(safe-area-inset-bottom)); }
+  .app-header { padding-top: env(safe-area-inset-top); }
+  .mobile-safe-inline, .app-content { padding-left: max(.75rem, env(safe-area-inset-left)); padding-right: max(.75rem, env(safe-area-inset-right)); }
+}
+@media (min-width: 640px) and (max-width: 1023px) {
+  .app-content { padding-left: max(1.5rem, env(safe-area-inset-left)); padding-right: max(1.5rem, env(safe-area-inset-right)); }
+}
 @media (display-mode: standalone), (display-mode: fullscreen) {
   .app-install-guide { display: none; }
 }

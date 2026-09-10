@@ -160,7 +160,7 @@ export default function RoomEstimatorPage() {
 
     {!rooms.items.length ? <Card><p className="text-sm text-slate-400">Add the first room to begin a property estimate.</p></Card> : null}
 
-    <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 px-4 lg:left-64">
+    <div className="mobile-safe-inline fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-30 px-4 lg:left-64">
       <div className="mx-auto flex max-w-3xl items-center justify-between rounded-2xl border border-cyan-500/20 bg-slate-950/95 p-3 shadow-2xl backdrop-blur">
         <div><p className="text-xs text-slate-400">Property estimate</p><p className="font-bold text-cyan-200">{money.format(summary.sellingPrice)}</p></div>
         <p className="text-right text-xs text-slate-400">{summary.roomCount} rooms<br />{summary.pointCount} points</p>

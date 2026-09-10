@@ -3,6 +3,12 @@
 JR OS can be installed from its normal HTTPS address as a home-screen app. It
 opens in a standalone window and uses the existing role-aware mobile workspaces.
 
+The phone header keeps workspace and account access above the page content. The
+bottom tabs remain within thumb reach, with an Account tab when cloud sign-in is
+required. Sync status appears only after account checks succeed; signed-out users
+see Sign in. Header, content and shared action bars respect the phone's safe areas
+in portrait and landscape. Page zoom remains enabled.
+
 ## Install
 
 - **iPhone/iPad:** open the normal JR OS address in Safari, tap **Share → Add to
