@@ -9,6 +9,9 @@ button, input, textarea, select { font: inherit; }
 button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 input, textarea, select { min-width: 0; }
 img, video, canvas, svg { max-width: 100%; }
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .app-install-guide { display: none; }
+}
 @media (max-width: 639px) {
   input, textarea, select { width: 100%; font-size: 16px; }
   table { font-size: .8125rem; }

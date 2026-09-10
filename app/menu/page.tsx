@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ArrowRight, Search, Settings } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { InstallAppGuide } from "../../components/mobile/InstallAppGuide";
 import { secondaryNavigation } from "../../components/navigation";
 import { canAccessPath, isOperatorOnlyPath } from "../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
@@ -146,6 +147,7 @@ export default function MenuPage() {
         <span className="flex items-center gap-2"><Settings className="size-4 text-cyan-300" />Settings</span>
         <ArrowRight className="size-4 text-cyan-300" />
       </Link> : null}
+      <InstallAppGuide />
     </main>
   );
 }
