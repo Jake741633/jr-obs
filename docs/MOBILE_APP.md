@@ -9,6 +9,12 @@ required. Sync status appears only after account checks succeed; signed-out user
 see Sign in. Header, content and shared action bars respect the phone's safe areas
 in portrait and landscape. Page zoom remains enabled.
 
+The account screen puts sign-in first, with a single-column form, password
+visibility control and announced request feedback. Submitting or changing
+accounts clears the submitted password and hides it again. A verified account
+can open its role-appropriate workspace directly. Cloud configuration and data
+migration tools remain available in a collapsed section below installation help.
+
 ## Install
 
 - **iPhone/iPad:** open the normal JR OS address in Safari, tap **Share → Add to

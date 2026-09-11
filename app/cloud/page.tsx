@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Cloud, CloudDownload, CloudOff, CloudUpload, LogIn, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { ArrowRight, CheckCircle2, Cloud, CloudDownload, CloudOff, CloudUpload, Eye, EyeOff, LogIn, LogOut, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InstallAppGuide } from "../../components/mobile/InstallAppGuide";
@@ -47,6 +48,7 @@ export default function CloudPage() {
   const { identity, isReady: identityReady } = useCloudIdentity();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [accountUser, setAccountUser] = useState<CloudAccountUser | null>(null);
   const [settledIdentity, setSettledIdentity] = useState<CloudPageIdentity | null>(null);
   const [accountMessage, setAccountMessage] = useState("");
@@ -95,6 +97,7 @@ export default function CloudPage() {
     passwordRevisionRef.current += 1;
     setEmail("");
     setPassword("");
+    setPasswordVisible(false);
   }, []);
 
   const clearOwnedState = useCallback(() => {
@@ -248,6 +251,7 @@ export default function CloudPage() {
     if (passwordRevisionRef.current === submittedPasswordRevision) {
       passwordRevisionRef.current += 1;
       setPassword("");
+      setPasswordVisible(false);
     }
     setAccountMessage("");
     let succeeded = false;
@@ -387,17 +391,42 @@ export default function CloudPage() {
   const migrationUnavailable = !configured || !displayIdentity || !identityReady || !settledOwnerMatchesDisplay || !canManageCloudMigration(displayIdentity.role) || operationBusy;
   const retryUnavailable = !configured || !displayIdentity || !identityReady || !settledOwnerMatchesDisplay || operationBusy;
 
-  return <div className="space-y-6">
-    <div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Cloud foundation</p><h1 className="mt-1 text-3xl font-bold">Cloud & account</h1><p className="mt-2 text-sm text-slate-400">Connect JR OS to account-based storage without deleting or disabling existing browser records.</p></div>
+  return <div className="mx-auto max-w-3xl space-y-5">
+    <div><h1 className="text-2xl font-bold sm:text-3xl">Your account</h1><p className="mt-2 text-sm text-slate-400">{userEmail ? "Manage your JR OS account and connection." : "Sign in to connect to your JR OS workspace."}</p></div>
+    <Card>
+      <h2 className="text-xl font-bold">{userEmail ? "JR OS account" : "Sign in to JR OS"}</h2>
+      {userEmail ? <div className="mt-4 space-y-4">
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><p className="font-semibold text-emerald-200">Signed in</p><p className="mt-1 break-all text-sm text-slate-300">{userEmail}</p></div>
+        <div className="flex flex-wrap gap-3">
+          {identityReady && displayIdentity ? <Link href="/app" className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-400">Open workspace<ArrowRight aria-hidden="true" className="size-4" /></Link> : null}
+          <Button type="button" variant="secondary" disabled={operationBusy} onClick={() => void signOut()}><LogOut aria-hidden="true" className="mr-2 size-4" />{activeOperation === "sign-out" ? "Signing out…" : "Sign out"}</Button>
+        </div>
+        {!displayIdentity ? <p className="text-sm text-slate-400">{identityReady ? "Your account is signed in, but workspace access is not ready. Contact your JR OS administrator if this continues." : "Checking your workspace access…"}</p> : null}
+      </div> : <form className="mt-5 grid gap-4" onSubmit={signIn} aria-busy={operationBusy} aria-describedby={accountMessage ? "account-message" : undefined}>
+        <label className="grid gap-2 text-sm" htmlFor="account-email">Email<input id="account-email" name="email" type="email" autoComplete="email" autoCapitalize="none" spellCheck={false} inputMode="email" required className={fieldClass} value={email} onChange={(event) => { emailRevisionRef.current += 1; setEmail(event.target.value); }} /></label>
+        <div className="grid gap-2">
+          <label className="text-sm" htmlFor="account-password">Password</label>
+          <div className="relative">
+            <input id="account-password" name="password" type={passwordVisible ? "text" : "password"} autoComplete="current-password" autoCapitalize="none" spellCheck={false} required className={`${fieldClass} pr-14`} value={password} onChange={(event) => { passwordRevisionRef.current += 1; setPassword(event.target.value); }} />
+            <button type="button" aria-label={passwordVisible ? "Hide password" : "Show password"} aria-controls="account-password" aria-pressed={passwordVisible} className="absolute inset-y-0 right-0 flex min-h-11 w-12 items-center justify-center rounded-r-xl text-slate-300 hover:text-white focus-visible:outline-2 focus-visible:outline-cyan-400" onClick={() => setPasswordVisible((visible) => !visible)}>{passwordVisible ? <EyeOff aria-hidden="true" className="size-5" /> : <Eye aria-hidden="true" className="size-5" />}</button>
+          </div>
+        </div>
+        <Button disabled={operationBusy || !configured} type="submit"><LogIn aria-hidden="true" className="mr-2 size-4" />{activeOperation === "sign-in" ? "Signing in…" : "Sign in"}</Button>
+        <Button variant="secondary" disabled={operationBusy || !configured} type="button" onClick={() => void createAccount()}>{activeOperation === "create-account" ? "Creating account…" : "Create account"}</Button>
+      </form>}
+      <div id="account-message" role="status" aria-live="polite" aria-atomic="true">{accountMessage ? <p className="mt-4 break-words rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{accountMessage}</p> : null}</div>
+      {!configured ? <p className="mt-4 text-sm text-amber-200">Cloud sign-in has not been set up for this JR OS address. Contact your JR OS administrator.</p> : null}
+    </Card>
+    <InstallAppGuide />
+    <details className="rounded-2xl border border-slate-800 bg-slate-900/50 p-4 sm:p-5">
+      <summary className="min-h-11 cursor-pointer content-center rounded-lg text-sm font-semibold text-slate-300 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-400">Cloud connection & data tools</summary>
+      <div className="mt-4 space-y-4">
     <div className="grid gap-4 md:grid-cols-4">
       <Card><Cloud className="size-6 text-cyan-300" /><p className="mt-3 font-bold">Configuration</p><p className="mt-2 text-sm text-slate-400">{configured ? "Supabase environment values detected." : "Waiting for Supabase project URL and public anon key."}</p></Card>
       <Card><ShieldCheck className="size-6 text-emerald-300" /><p className="mt-3 font-bold">Operating mode</p><p className="mt-2 text-sm capitalize text-slate-400">{effectiveCloudMode()}</p></Card>
       <Card>{visibleSync === "Offline" ? <CloudOff className="size-6 text-amber-300" /> : <RefreshCw className="size-6 text-cyan-300" />}<p className="mt-3 font-bold">Sync status</p><p className="mt-2 text-sm text-slate-400">{visibleSync}</p></Card>
       <Card><CheckCircle2 className="size-6 text-amber-300" /><p className="mt-3 font-bold">Last successful upload</p><p className="mt-2 text-sm text-slate-400">{visibleLastSync ? new Date(visibleLastSync).toLocaleString("en-GB") : "No cloud upload completed yet."}</p></Card>
     </div>
-    {!configured ? <Card className="border-amber-500/30"><h2 className="text-xl font-bold">Connection required</h2><p className="mt-2 text-sm text-slate-400">Run both SQL files and add NEXT_PUBLIC_SUPABASE_URL plus NEXT_PUBLIC_SUPABASE_ANON_KEY. Local storage continues working meanwhile.</p></Card> : null}
-    <Card><h2 className="text-xl font-bold">JR OS account</h2>{userEmail ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4"><div><p className="font-semibold text-emerald-200">Signed in</p><p className="text-sm text-slate-400">{userEmail}</p></div><Button type="button" disabled={operationBusy} onClick={() => void signOut()}><LogOut className="mr-2 size-4" />Sign out</Button></div> : <form className="mt-5 grid gap-4 md:grid-cols-2" onSubmit={signIn}><label className="grid gap-2 text-sm">Email<input type="email" autoComplete="email" required className={fieldClass} value={email} onChange={(event) => { emailRevisionRef.current += 1; setEmail(event.target.value); }} /></label><label className="grid gap-2 text-sm">Password<input type="password" autoComplete="current-password" required className={fieldClass} value={password} onChange={(event) => { passwordRevisionRef.current += 1; setPassword(event.target.value); }} /></label><div className="flex flex-wrap gap-3 md:col-span-2"><Button disabled={operationBusy || !configured} type="submit"><LogIn className="mr-2 size-4" />Sign in</Button><Button disabled={operationBusy || !configured} type="button" onClick={() => void createAccount()}>Create account</Button></div></form>}{accountMessage ? <p className="mt-4 rounded-xl border border-slate-700 bg-slate-950 p-3 text-sm text-cyan-200">{accountMessage}</p> : null}</Card>
-    <InstallAppGuide />
     <Card>
       <h2 className="text-xl font-bold">Data migration controls</h2>
       <p className="mt-2 text-sm text-slate-400">The legacy backup copy remains available. The typed migration copies individual records using their existing local IDs and skips unchanged records.</p>
@@ -422,5 +451,7 @@ export default function CloudPage() {
       </div>
     </Card>
     <Card><h2 className="text-xl font-bold">Conflict safety</h2><p className="mt-2 text-sm text-slate-400">Queued writes compare the expected record version with the current cloud version. Mismatches are marked Conflict and remain in the queue; JR OS does not silently overwrite the cloud record.</p></Card>
+      </div>
+    </details>
   </div>;
 }
