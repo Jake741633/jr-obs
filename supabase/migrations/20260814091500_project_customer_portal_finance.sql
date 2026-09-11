@@ -176,7 +176,8 @@ begin
       and pg_catalog.jsonb_typeof(new.payload -> 'pricingDocumentId') = 'string'
       and pg_catalog.jsonb_typeof(new.payload -> 'mode') = 'string'
       and new.payload ->> 'mode' in ('Fixed', 'Percentage')
-      and case
+      -- Keep CASE's THEN inside parentheses in the PL/pgSQL IF condition.
+      and (case
         when pg_catalog.jsonb_typeof(new.payload -> 'value') = 'number' then
           (new.payload ->> 'value')::numeric > 0
           and (
@@ -184,7 +185,7 @@ begin
             or (new.payload ->> 'value')::numeric <= 100
           )
         else false
-      end
+      end)
       and pg_catalog.jsonb_typeof(new.payload -> 'dueRule') = 'string'
       and new.payload ->> 'dueRule' in ('On acceptance', 'Specified date')
       and (
