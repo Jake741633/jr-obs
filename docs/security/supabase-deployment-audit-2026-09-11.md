@@ -17,9 +17,15 @@ Database contents were temporarily unavailable while the project reported
 `COMING_UP`; the account and schema checks were repeated after it became healthy.
 Do not diagnose missing data from checks made during restoration.
 
-These checks establish service availability. They do not prove a successful
-interactive password sign-in. That check requires the account holder's secure
-credential entry and a verified workspace session afterward.
+After those service checks, the account holder completed secure email/password
+entry in the development preview. Fresh page state confirmed a signed-in active
+owner account. Selecting **Open workspace** then opened the owner dashboard at
+the preview's root URL and rendered its workspace controls. This verifies the
+interactive sign-in and workspace handoff after restoration. Credentials were
+not exposed in chat or application logs, and the password was not changed.
+
+This browser check does not establish installed-app behavior on a physical phone
+or completion of the database security upgrade below.
 
 The organization is on the Free plan. Supabase documents automatic pausing for
 low activity and restoration within 90 days. The precise historical pause trigger
