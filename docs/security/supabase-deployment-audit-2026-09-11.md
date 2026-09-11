@@ -1,8 +1,11 @@
 # Supabase restoration and deployment audit
 
-Checked on 11 September 2026 against the Supabase project referenced by the
-`jr-os-v2` development preview. Source checkpoint:
+Initial restoration checked on 11 September 2026 against the Supabase project
+referenced by the `jr-os-v2` development preview. Source checkpoint:
 `51e5247fe3183e5bd441f74e9a98a7995e49e537`.
+
+The separately authorized test-project upgrade below was verified against
+`fd11b9c92c90dbd23de20876d949e6f19e2c745f` later the same day.
 
 ## Login availability restored
 
@@ -91,32 +94,127 @@ where n.nspname = 'private' and p.proname = 'current_jr_role';
 Object presence is diagnostic only. It does not replace exact migration-marker
 verification or live role and Storage tests.
 
-## Staged repair and acceptance checks
+## Authorized test-project upgrade
 
-1. Resume and verify the dedicated disposable test project, which was also
-   `INACTIVE` at this audit. Confirm its exact project reference before writing
-   anything. Never point the integration harness at the linked live project.
-2. Establish the test schema with the existing supported recovery path in
-   [Supabase setup](../SUPABASE_SETUP.md), then run the protected
+The dedicated `test` project, reference `tjfyneafvdgwrfdkpnlr`, was resumed from
+`INACTIVE` to `ACTIVE_HEALTHY`. After restoration, it contained the initial schema
+and nine effective migrations through `private_storage_signed_uploads`, with no
+Auth users, organizations or JR OS Storage objects. The existing initial schema
+was preserved.
+
+All 93 missing effective migrations were then applied in the order recorded by
+`supabase/recovery/after_schema_only.sql`, including the documented replacement of
+`063` with `064`. The final history contains 103 entries: the initial schema and
+all 102 effective migrations. Each expected migration name is present exactly
+once. Supabase's generated history timestamps differ from repository filenames;
+the names, SQL submitted during this upgrade and final marker were checked
+together.
+
+Two failures were diagnosed before proceeding:
+
+- Two early management-API calls received the same second-resolution migration
+  version. The failed transaction was verified absent from history, with its
+  prior policy intact. Spacing subsequent calls by more than one second resolved
+  the collision without editing migration history.
+- `20260814091500_project_customer_portal_finance.sql` failed to compile with
+  PostgreSQL error `42601`. Parenthesizing the SQL `CASE` expression inside its
+  PL/pgSQL `IF` condition fixed the parser boundary. The original transaction had
+  rolled back both projection tables and the function, so this unapplied
+  migration was repaired in [PR #229](https://github.com/Jake741633/jr-obs/pull/229).
+  Numeric, date and customer-binding validation remained intact. The corrected
+  migration applied successfully before the remaining upgrade continued.
+
+A rollback-only database check exercised 16 deposit cases: valid fixed and
+percentage amounts, percentage bounds, zero/negative values, invalid JSON value
+types, valid and invalid leap dates, missing due dates and unknown modes. It also
+checked canonical customer scope, private-field redaction, deletion cleanup and
+removal of a projection after an invalid update. All checks passed and all
+fixture and audit rows were rolled back.
+
+The repository's 1,522 tests passed before and after the fix was committed. Lint
+reported zero errors and 17 existing warnings; production build, TypeScript and
+dependency audit passed with zero vulnerabilities. All five required workflows
+and the development preview passed on merged commit `fd11b9c92c90dbd23de20876d949e6f19e2c745f`.
+
+Final staging catalog checks at 09:56 UTC found:
+
+| Check | Result |
+| --- | --- |
+| Deployed migration marker | `20260903163000_redact_field_stock_locations.sql` |
+| Public base tables | 44; all have RLS enabled |
+| Anonymous public-schema access and table privileges | No schema usage; no SELECT, INSERT, UPDATE or DELETE privileges |
+| Deployment-marker execution | Allowed for `service_role`; denied for `anon` and `authenticated` |
+| Active-session and signed-upload guards | Present; a request without a session has no active session or JR OS role |
+| Field and customer job/collection projections | Present |
+| JR OS Storage buckets | Private; zero objects |
+| Auth users, organizations, profiles, generic collections and audit rows | Zero after validation |
+
+### Advisor review
+
+The security advisor reported three authenticated `SECURITY DEFINER` RPCs:
+`jr_field_save_collection`, `jr_field_save_job_progress` and
+`jr_field_update_job_status`. These are the existing narrow field-write entry
+points. Their deployed grants deny anonymous and service-role execution, their
+search paths are empty, and their implementations derive identity from the
+active session and enforce canonical job assignment, including receipt replays.
+A transaction using the `authenticated` database role without a session verified
+that all three reject at the active-field-identity guard. This SQL probe does not
+replace tests with real Auth sessions. See the advisor's
+[SECURITY DEFINER review guidance](https://supabase.com/docs/guides/database/database-linter?lint=0029_authenticated_security_definer_function_executable).
+
+Performance findings remain recorded for follow-up after the protected RLS run:
+
+| Advisory | Findings | Follow-up |
+| --- | --- | --- |
+| [Unindexed foreign keys](https://supabase.com/docs/guides/database/database-linter?lint=0001_unindexed_foreign_keys) | 54 | Measure referenced-row update/delete plans before adding targeted indexes. |
+| [Per-row Auth function evaluation](https://supabase.com/docs/guides/database/database-linter?lint=0003_auth_rls_initplan) | 18 | Profile the policies and verify any statement-level evaluation change against the role suite. |
+| [Unused indexes](https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index) | 81 | Collect representative workload statistics; this empty test database cannot establish that an index is unnecessary. |
+| [Multiple permissive policies](https://supabase.com/docs/guides/database/database-linter?lint=0006_multiple_permissive_policies) | 3 | Review combined policy cost while preserving distinct customer and staff access contracts. |
+
+The linked live project was rechecked read-only after the staging upgrade. It
+remains `ACTIVE_HEALTHY`, and its migration history still ends at
+`private_file_object_path_uniqueness`. No production schema change was made.
+
+## Remaining acceptance checks
+
+1. Run the protected
    `verify:supabase-schema` and `test:rls` commands described in
-   [RLS integration tests](../SUPABASE_RLS_INTEGRATION_TESTS.md). All role,
-   revocation, recovery-session and private Storage scenarios must pass.
-3. Reconcile deployed migration names with repository files before preparing an
+   [RLS integration tests](../SUPABASE_RLS_INTEGRATION_TESTS.md), using the prepared
+   dedicated test project. All role, revocation, recovery-session and private
+   Storage scenarios must pass.
+2. Reconcile deployed migration names with repository files before preparing an
    incremental upgrade from the actual live baseline. Rehearse that upgrade on
-   staging, preserving existing records and bindings. Do not replay initial
-   schema setup over the live database or apply only selected hardening files.
+   staging with representative existing records and bindings. The completed
+   empty-project update does not establish that data-preservation result. Do not
+   replay initial schema setup over the live database or apply only selected
+   hardening files.
    Account for superseded migration `063` and its replacement `064` as documented
-   in the supported recovery path.
-4. Review the exact upgrade, a restorable backup and verification results before
-   scheduling the live database change. The authorization used for this incident
-   covered resuming the linked project, not applying production migrations.
-5. After the reviewed upgrade, verify the newest deployed marker and repeat the
+   in [Supabase setup](../SUPABASE_SETUP.md).
+3. Review the exact upgrade, a restorable backup and verification results before
+   scheduling the live database change. Authorization covered project restoration
+   and this dedicated test-project upgrade; production migrations still require
+   a separate reviewed decision.
+4. After the reviewed upgrade, verify the newest deployed marker and repeat the
    catalog/advisor checks and real role-specific app flows. Follow the existing
    Storage signed-URL key-rotation requirement in Supabase setup if old signed
    download links were issued. Keep cloud cutover blocked until all existing
    release checks pass.
 
-The disposable integration checks were not run during this audit. The local
-workspace has no protected test credentials or local Supabase runtime; those
-requirements were not bypassed. Repository tests, lint, build, type checks and
-dependency review remain separate from deployed-database acceptance.
+The protected HTTP RLS/Storage suite has not yet been run against this prepared
+schema and source checkpoint. The available GitHub connection can inspect runs
+but cannot dispatch a new workflow or read/write protected environment settings.
+Those settings were therefore not verified or changed during this session.
+
+A maintainer must open the
+[RLS workflow](https://github.com/Jake741633/jr-obs/actions/workflows/supabase-rls-integration.yml),
+select the current `jr-os-v2` branch, and enter `JR_OS_RLS_TEST`. The protected
+`supabase-test` environment must pin `SUPABASE_TEST_PROJECT_REF` to
+`tjfyneafvdgwrfdkpnlr` and contain that project's matching URL, public key and
+service-role secret as documented in the integration guide. Complete any missing
+configuration reported by the workflow without weakening its guards. A rerun of
+an older successful workflow would check out its older source commit and would
+not validate this checkpoint.
+
+Keep deployed-database acceptance pending until that exact-source workflow and
+its cleanup pass. Repository checks and these staging SQL checks remain separate
+evidence.
