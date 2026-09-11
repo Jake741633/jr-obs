@@ -206,6 +206,10 @@ Open:
 
 **Actions → JR OS Supabase RLS Integration → Run workflow**
 
+Select the current `jr-os-v2` branch so the schema verifier and live suite use
+the source being prepared for release. Rerunning an older workflow checks out
+its original commit and does not validate later migration or test changes.
+
 Enter the exact confirmation:
 
 ```text
