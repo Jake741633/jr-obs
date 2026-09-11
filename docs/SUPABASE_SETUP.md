@@ -2,6 +2,12 @@
 
 JR OS remains usable with browser local storage when Supabase is not configured. Do not switch to cloud mode until the SQL migrations, authentication users and Row Level Security checks have been completed.
 
+The [11 September deployment audit](./security/supabase-deployment-audit-2026-09-11.md)
+records restored login-service availability and a confirmed gap between the linked
+database and the repository's security migrations. Use its staged repair and
+acceptance checks before cloud cutover; green application CI alone does not prove
+that the database is current.
+
 ## 1. Create the Supabase project
 
 1. Create a Supabase project in the region appropriate for the business.
