@@ -4,9 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: Type JR_OS_RLS_TEST to confirm this is the dedicated disposable test project
+        description: Confirm the dedicated disposable test project
         required: true
-        type: string
+        type: choice
+        default: Do not run
+        options:
+          - Do not run
+          - JR_OS_RLS_TEST
 
 permissions:
   contents: read
