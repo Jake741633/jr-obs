@@ -1044,9 +1044,19 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
 
     // Customer scoping for typed tables and portal writes.
-    const customerJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
-    await expectAllowed(customerJobs, "Customer jobs read should execute");
-    assert.deepEqual(customerJobs.payload.map((row) => row.source_id), [jobA]);
+    const customerCanonicalJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
+    await expectAllowed(customerCanonicalJobs, "Customer canonical jobs query should execute safely");
+    assert.deepEqual(customerCanonicalJobs.payload, [], "Customer must not enumerate canonical jobs");
+    const customerJobs = await listRecords(accounts.A.customer, "customer_jobs", "select=organisation_id,source_id,customer_source_id,payload");
+    await expectAllowed(customerJobs, "Customer projected jobs read should execute");
+    assert.deepEqual(customerJobs.payload.map(({ organisation_id, source_id, customer_source_id }) => ({ organisation_id, source_id, customer_source_id })), [
+      { organisation_id: organisationA, source_id: jobA, customer_source_id: customerA },
+    ], "Customer job projection must return only the exact tenant and customer job");
+    assert.equal(customerJobs.payload[0].payload.id, jobA, "Customer projected payload must retain the canonical job identity");
+    const customerJobKeys = new Set(["id", "title", "customerId", "siteAddress", "status", "startDate", "targetCompletionDate", "createdAt", "updatedAt"]);
+    for (const key of Object.keys(customerJobs.payload[0].payload)) {
+      assert.ok(customerJobKeys.has(key), `Customer job projection must omit private field ${key}`);
+    }
     await expectDenied(await insertRecord(accounts.A.customer, "jobs", typedRecord(organisationA, source("customer-job-write"), customerA, null)), "Customer must not create jobs");
 
     const approvalA = source("approval-a");
