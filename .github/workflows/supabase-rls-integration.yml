@@ -65,6 +65,7 @@ jobs:
           esac
 
       - name: Check out repository
+        id: checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Use Node.js
@@ -83,5 +84,6 @@ jobs:
         run: npm run test:rls
 
       - name: Clean disposable Supabase test data
-        if: ${{ always() }}
+        # Cleanup needs checked-out sources; a rejected preflight creates no fixtures.
+        if: ${{ always() && steps.checkout.outcome == 'success' }}
         run: node tests/supabase-rls.cleanup.mjs
