@@ -21,6 +21,7 @@ const typedTables = [
   "ai_recommendation_evidence",
 ];
 const cleanupTables = ["private_files", "app_records", "cloud_collections", ...typedTables, "audit_log"];
+const pendingTestSignups = new WeakMap();
 
 function authHeaders(key, accessToken, extra = {}) {
   return {
@@ -53,12 +54,15 @@ async function service(path, options = {}) {
 
 async function createUser(label) {
   const email = `jr-os-rls-${label}-${runId}@example.com`;
+  const signupOrganisationName = `JR OS RLS Signup ${label} ${runId}`;
   const result = await service("/auth/v1/admin/users", {
     method: "POST",
-    body: { email, password, email_confirm: true, user_metadata: { jr_os_test_run: runId } },
+    body: { email, password, email_confirm: true, user_metadata: { jr_os_test_run: runId, business_name: signupOrganisationName } },
   });
   assert.equal(result.response.ok, true, `Unable to create ${label}: ${JSON.stringify(result.payload)}`);
-  return { id: result.payload.id, email, password };
+  const user = { id: result.payload.id, email, password };
+  pendingTestSignups.set(user, signupOrganisationName);
+  return user;
 }
 
 async function signIn(user) {
@@ -81,10 +85,39 @@ async function createOrganisation(name) {
 }
 
 async function createProfile(user, organisationId, role, customerSourceId) {
+  if (pendingTestSignups.has(user)) {
+    // Auth's signup trigger creates an owner membership in a new business.
+    // Only replace that fresh fixture profile; established memberships stay immutable.
+    const signup = await service(`/rest/v1/profiles?select=id,organisation_id,role&id=eq.${user.id}`);
+    await expectAllowed(signup, "Unable to inspect the new test user's signup profile");
+    assert.equal(signup.payload?.length, 1, "Expected exactly one signup profile");
+    const profile = signup.payload[0];
+    assert.equal(profile.id, user.id, "Unexpected signup profile identity");
+    assert.equal(profile.role, "owner", "Unexpected signup profile role");
+    assert.match(profile.organisation_id || "", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, "Invalid signup business identity");
+    assert.notEqual(profile.organisation_id, organisationId, "Signup business must be separate from the shared fixture business");
+    const business = await service(`/rest/v1/organisations?select=id,name&id=eq.${profile.organisation_id}`);
+    await expectAllowed(business, "Unable to inspect the signup business");
+    assert.equal(business.payload?.length, 1, "Expected exactly one signup business");
+    assert.equal(business.payload[0].id, profile.organisation_id, "Unexpected signup business identity");
+    assert.equal(business.payload[0].name, pendingTestSignups.get(user), "Unexpected signup business name");
+
+    // Track the verified generated business before a later fixture write can fail.
+    user.signupOrganisationId = profile.organisation_id;
+    user.signupOrganisationName = pendingTestSignups.get(user);
+    const removed = await service(`/rest/v1/profiles?id=eq.${user.id}&organisation_id=eq.${profile.organisation_id}&role=eq.owner`, {
+      method: "DELETE",
+      extraHeaders: { Prefer: "return=representation" },
+    });
+    await expectAllowed(removed, "Unable to remove the fresh fixture signup profile");
+    assert.equal(removed.payload?.length, 1, "Expected to remove exactly one fixture signup profile");
+    assert.equal(removed.payload[0].id, user.id, "Removed an unexpected signup profile");
+    pendingTestSignups.delete(user);
+  }
   const result = await service("/rest/v1/profiles", {
     method: "POST",
     body: { id: user.id, organisation_id: organisationId, role, active: true, customer_source_id: customerSourceId || null },
-    extraHeaders: { Prefer: "resolution=merge-duplicates,return=representation" },
+    extraHeaders: { Prefer: "return=representation" },
   });
   assert.equal(result.response.ok, true, `Unable to create ${role} profile: ${JSON.stringify(result.payload)}`);
 }
@@ -239,6 +272,11 @@ async function cleanup(context) {
   }
   for (const organisationId of context.organisations) {
     await service(`/rest/v1/organisations?id=eq.${organisationId}`, { method: "DELETE" }).catch(() => undefined);
+  }
+  for (const user of context.users) {
+    if (user.signupOrganisationId && user.signupOrganisationName) {
+      await service(`/rest/v1/organisations?id=eq.${user.signupOrganisationId}&name=eq.${encodeURIComponent(user.signupOrganisationName)}`, { method: "DELETE" }).catch(() => undefined);
+    }
   }
 }
 
@@ -1006,9 +1044,19 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
 
     // Customer scoping for typed tables and portal writes.
-    const customerJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
-    await expectAllowed(customerJobs, "Customer jobs read should execute");
-    assert.deepEqual(customerJobs.payload.map((row) => row.source_id), [jobA]);
+    const customerCanonicalJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
+    await expectAllowed(customerCanonicalJobs, "Customer canonical jobs query should execute safely");
+    assert.deepEqual(customerCanonicalJobs.payload, [], "Customer must not enumerate canonical jobs");
+    const customerJobs = await listRecords(accounts.A.customer, "customer_jobs", "select=organisation_id,source_id,customer_source_id,payload");
+    await expectAllowed(customerJobs, "Customer projected jobs read should execute");
+    assert.deepEqual(customerJobs.payload.map(({ organisation_id, source_id, customer_source_id }) => ({ organisation_id, source_id, customer_source_id })), [
+      { organisation_id: organisationA, source_id: jobA, customer_source_id: customerA },
+    ], "Customer job projection must return only the exact tenant and customer job");
+    assert.equal(customerJobs.payload[0].payload.id, jobA, "Customer projected payload must retain the canonical job identity");
+    const customerJobKeys = new Set(["id", "title", "customerId", "siteAddress", "status", "startDate", "targetCompletionDate", "createdAt", "updatedAt"]);
+    for (const key of Object.keys(customerJobs.payload[0].payload)) {
+      assert.ok(customerJobKeys.has(key), `Customer job projection must omit private field ${key}`);
+    }
     await expectDenied(await insertRecord(accounts.A.customer, "jobs", typedRecord(organisationA, source("customer-job-write"), customerA, null)), "Customer must not create jobs");
 
     const approvalA = source("approval-a");
