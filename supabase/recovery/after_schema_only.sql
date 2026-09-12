@@ -377,4 +377,9 @@ begin;
 \ir ../migrations/20260903163000_redact_field_stock_locations.sql
 commit;
 
+\echo 'Allowing management planner tombstone acknowledgements'
+begin;
+\ir ../migrations/20260912184426_allow_management_planner_tombstone_returns.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'
