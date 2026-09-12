@@ -1194,10 +1194,17 @@ const secureJobReadCoverage = `${secureJobReadAnchor}
     assert.deepEqual((await listRecords(accounts.A.customer, "customer_jobs", \`select=source_id&source_id=eq.\${otherCustomerJobA}\`)).payload, [], "Another customer must not read the portal job projection");
     assert.deepEqual((await listRecords(accounts.B.customer, "customer_jobs", \`select=source_id&source_id=eq.\${jobA}\`)).payload, [], "Another organisation must not read the portal job projection");
 
-    await expectDenied(
-      await patchRecords(accounts.A.electrician, "jobs", \`source_id=eq.\${jobA}\`, { payload: { id: jobA, status: "Second fix" } }),
-      "Electrician direct job updates must fail closed",
-    );
+    // Direct job writes must affect zero rows and leave the canonical record intact.
+    const officeJobBeforeDirectWrite = await listRecords(accounts.A.office, "jobs", \`select=*&source_id=eq.\${jobA}\`);
+    await expectAllowed(officeJobBeforeDirectWrite, "Office should read the job before a direct field write");
+    assert.equal(officeJobBeforeDirectWrite.payload.length, 1, "Direct-write test requires an existing canonical job");
+    const directFieldJobWrite = await patchRecords(accounts.A.electrician, "jobs", \`source_id=eq.\${jobA}\`, { payload: { id: jobA, status: "Second fix" } });
+    // RLS USING filters the job out of UPDATE, so PostgREST returns an empty representation.
+    await expectAllowed(directFieldJobWrite, "Filtered direct job update should execute without matching rows");
+    assert.deepEqual(directFieldJobWrite.payload, [], "Electrician direct job updates must fail closed");
+    const officeJobAfterDirectWrite = await listRecords(accounts.A.office, "jobs", \`select=*&source_id=eq.\${jobA}\`);
+    await expectAllowed(officeJobAfterDirectWrite, "Office should read the job after a direct field write");
+    assert.deepEqual(officeJobAfterDirectWrite.payload, officeJobBeforeDirectWrite.payload, "Electrician direct job updates must leave the entire canonical job unchanged");
     const rejectedJobStatusMutationId = crypto.randomUUID();
     await expectDeniedWithCode(
       await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", {
