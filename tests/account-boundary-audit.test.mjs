@@ -1,0 +1,162 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+
+const cloudSync = readFileSync(new URL("../lib/cloudSync.ts", import.meta.url), "utf8");
+const signupMigration = readFileSync(new URL("../supabase/migrations/20260802_009_neutral_signup_defaults.sql", import.meta.url), "utf8");
+const adapter = readFileSync(new URL("../lib/cloud/adapter.ts", import.meta.url), "utf8");
+const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf8");
+const repository = readFileSync(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
+const identity = readFileSync(new URL("../lib/cloud/useCloudIdentity.ts", import.meta.url), "utf8");
+const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
+const privateUploadQueue = readFileSync(new URL("../lib/cloud/privateUploadQueue-core.mjs", import.meta.url), "utf8");
+const cloudAccessGuard = readFileSync(new URL("../components/CloudAccessGuard.tsx", import.meta.url), "utf8");
+const aiPage = readFileSync(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
+const appData = readFileSync(new URL("../lib/appData.ts", import.meta.url), "utf8");
+const settingsPage = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
+
+test("account changes preserve browser-resident business records", () => {
+  assert.match(cloudSync, /export function clearLocalJrOsAccountData\(\)\s*\{\s*return 0;\s*\}/);
+  assert.doesNotMatch(cloudSync, /for \(const key of keys\) window\.localStorage\.removeItem/);
+  assert.match(cloudSync, /saveSupabaseSession\(null\)/);
+});
+
+test("new signups do not inherit Jake or JR Electrical Services metadata", () => {
+  const signupStart = cloudSync.indexOf("export async function signUpWithEmail");
+  const signupEnd = cloudSync.indexOf("export async function signOutCloudUser");
+  const signup = cloudSync.slice(signupStart, signupEnd);
+  assert.doesNotMatch(signup, /Jake Rinaldi/);
+  assert.doesNotMatch(signup, /JR Electrical Services/);
+  assert.match(signup, /New JR OS Business/);
+  assert.match(signupMigration, /New JR OS Business/);
+  assert.doesNotMatch(signupMigration, /'JR Electrical Services'/);
+});
+
+test("authenticated collection caches remain scoped to the full authorisation context", () => {
+  assert.match(adapter, /organisationStorageKey/);
+  assert.match(adapter, /:organisation:/);
+  assert.match(adapter, /export function accountStorageKey/);
+  assert.match(storage, /const cacheUserId = userId/);
+  assert.doesNotMatch(storage, /identity\?\.role === "customer" \? userId : undefined/);
+  assert.match(storage, /const cacheRole = identity\?\.role/);
+  assert.match(storage, /const cacheCustomerSourceId = identity\?\.customerSourceId/);
+  assert.match(storage, /activeStorageKey = organisationId \? accountStorageKey\(key, organisationId, cacheUserId, cacheRole, cacheCustomerSourceId\) : key/);
+  assert.match(storage, /window\.localStorage\.setItem\(activeStorageKey/);
+});
+
+test("legacy restore routes registered data to the current account and organisation scopes", () => {
+  assert.match(cloudSync, /if \(!payload\.storageKey \|\| !isLegacyAggregateStorageKey\(payload\.storageKey\)\) continue/);
+  assert.match(cloudSync, /const scope = backupStorageScope\(payload\.storageKey\)/);
+  assert.match(cloudSync, /accountStorageKey\(payload\.storageKey, organisationId, user\.id, role, customerSourceId\)/);
+  assert.match(cloudSync, /organisationStorageKey\(payload\.storageKey, organisationId\)/);
+  assert.match(cloudSync, /window\.localStorage\.setItem\(scopedKey/);
+});
+
+test("typed migration ignores already scoped tenant caches", () => {
+  assert.match(cloudSync, /typedLegacyMigrationStorageKeys\(window\.localStorage\)/);
+  assert.doesNotMatch(cloudSync, /key\?\.startsWith\(JR_OS_STORAGE_PREFIX\)/);
+});
+
+test("sync queue visibility and retries are restricted to live authorisation", () => {
+  assert.match(repository, /const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation"/);
+  assert.match(repository, /const ACTIVE_USER_KEY = "jr-os-active-user"/);
+  assert.match(repository, /const ACTIVE_ROLE_KEY = "jr-os-active-role"/);
+  assert.match(repository, /const ACTIVE_CUSTOMER_SOURCE_KEY = "jr-os-active-customer-source"/);
+  assert.match(repository, /export function setActiveSyncIdentity/);
+  assert.match(repository, /queueItemMatchesAuthorization/);
+  assert.match(repository, /revalidateSyncAuthorization/);
+  assert.match(repository, /const liveQueue = readAllSyncQueue\(\)/);
+  assert.match(repository, /const nextQueue = mergeProcessedQueue\(liveQueue, queue, remaining\)/);
+  assert.match(repository, /write\(QUEUE_KEY, nextQueue\)/);
+  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
+  assert.match(repository, /!activeSyncAuthorizationMatches\(authorization\)/);
+});
+
+test("resolved identity controls active sync ownership and clears it during account changes", () => {
+  assert.match(identity, /setActiveSyncIdentity\([\s\S]*next\.identity\?\.organisationId[\s\S]*next\.identity\?\.userId[\s\S]*next\.identity\?\.role[\s\S]*next\.identity\?\.customerSourceId/);
+  assert.match(identity, /emit\(\{ identity: null, isReady: false \}\)/);
+});
+
+test("cross-tab session replacement invalidates the previous tenant before loading the next identity", () => {
+  assert.match(identity, /function handleStorageChange\(event: StorageEvent\)/);
+  assert.match(identity, /if \(event\.key === "jr-os-supabase-session"\) void refreshCloudIdentity\(\);/);
+  assert.match(identity, /export function refreshCloudIdentity\(\) \{\s*emit\(\{ identity: null, isReady: false \}\);\s*return loadIdentity\(true\);\s*\}/);
+  assert.match(identity, /setActiveSyncIdentity\([\s\S]*next\.identity\?\.organisationId[\s\S]*next\.identity\?\.userId[\s\S]*next\.identity\?\.role[\s\S]*next\.identity\?\.customerSourceId/);
+});
+
+test("active tabs revalidate membership and session authority without waiting for a reload", () => {
+  assert.match(identity, /IDENTITY_REVALIDATION_INTERVAL_MS = 30_000/);
+  assert.match(identity, /document\.visibilityState === "visible"[\s\S]*revalidateCloudIdentity\(\)/);
+  assert.match(identity, /window\.addEventListener\("focus", handleWindowFocus\)/);
+  assert.match(identity, /function revalidateCloudIdentity\(\) \{\s*return identityRequest \?\? loadIdentity\(true\);\s*\}/);
+  assert.match(identity, /catch \{\s*if \(requestVersion === identityRequestVersion\) emit\(\{ identity: null, isReady: true \}\)/);
+});
+
+test("suspended profiles cannot resolve an application identity or expose cached tenant data", () => {
+  assert.match(identity, /active=eq\.true/);
+  assert.match(identity, /select=organisation_id,role,customer_source_id,active/);
+  assert.match(identity, /if \(!profile\?\.active \|\| !profile\?\.organisation_id \|\| !profile\?\.role\) return null;/);
+});
+
+test("secured workspace transient state resets when any authorisation identity field changes", () => {
+  assert.match(cloudAccessGuard, /Fragment, type ReactNode/);
+  assert.match(cloudAccessGuard, /const workspaceIdentityKey = JSON\.stringify\(\[[\s\S]*identity\.organisationId,[\s\S]*identity\.userId,[\s\S]*identity\.role,[\s\S]*identity\.customerSourceId \?\? "",[\s\S]*identity\.email\?\.trim\(\)\.toLowerCase\(\) \?\? "",[\s\S]*\]\)/);
+  assert.match(cloudAccessGuard, /<Fragment key=\{workspaceIdentityKey\}>\{children\}<\/Fragment>/);
+});
+
+test("AI-created CRM interactions attribute the signed-in user instead of Jake", () => {
+  assert.match(aiPage, /useCloudIdentity\(\)/);
+  assert.match(aiPage, /completedBy: identity\?\.email \?\? "JR OS user"/);
+  assert.doesNotMatch(aiPage, /completedBy: "Jake"/);
+});
+
+test("authenticated backups include the exact active account and exclude account internals", () => {
+  assert.match(appData, /accountStorageKey/);
+  assert.match(appData, /collectAccountBusinessData\(window\.localStorage, context\)/);
+  assert.match(appData, /backupStorageScope\(key\)/);
+  assert.match(appData, /sameAccountStorageContext\(context, currentContext\)/);
+  assert.match(appData, /This backup belongs to a different JR OS organisation/);
+  assert.match(appData, /accountStorageKey\(key, context\.organisationId, context\.userId, context\.role, context\.customerSourceId\)/);
+  assert.match(appData, /organisationStorageKey\(key, context\.organisationId\)/);
+});
+
+test("JR AI settings and backup actions use the resolved organisation identity", () => {
+  assert.match(settingsPage, /useCloudIdentity\(\)/);
+  assert.match(settingsPage, /organisationStorageKey\(profileKey, identity\.organisationId\)/);
+  assert.match(settingsPage, /downloadJrOsBackup\(identity\)/);
+  assert.match(settingsPage, /importJrOsBackup\(file, identity, refreshIdentity\)/);
+  assert.doesNotMatch(settingsPage, /window\.localStorage\.getItem\(profileKey\)/);
+  assert.doesNotMatch(settingsPage, /window\.localStorage\.setItem\(profileKey/);
+});
+
+test("private upload queue retries preserve every other authorisation context", () => {
+  assert.match(privateFiles, /export function readPrivateUploadQueue\(authorization: SyncAuthorizationContext\)/);
+  assert.match(privateFiles, /queue\.filter\(\(item\) => privateUploadMatchesAuthorization\(item, authorization\)\)/);
+  assert.match(privateUploadQueue, /privateUploadMatchesAuthorization\(item, authorization\) && item\.storageKey === storageKey/);
+  assert.match(privateUploadQueue, /activeQueue\.push\(item\)/);
+  assert.match(privateUploadQueue, /preserved\.push\(item\)/);
+  assert.match(privateFiles, /partitionPrivateUploadQueue\(allQueue, authorization, storageKey\)/);
+  assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
+  assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity, storageKey,/);
+  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
+});
+
+test("private authenticated transfers reject cross-organisation object paths", () => {
+  assert.match(privateFiles, /export function isOrganisationPrivateObjectPath/);
+  assert.match(privateFiles, /The private file does not belong to the active organisation/);
+  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(item\.organisationId, item\.objectPath\)/);
+  assert.match(privateFiles, /authenticatedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
+  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
+  assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(metadata\.organisation_id, metadata\.object_path\)/);
+  assert.match(privateFiles, /authenticatedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId\)/);
+});
+
+test("authenticated attachment URLs cannot be reused after an authorisation context change", () => {
+  assert.match(privateFiles, /export function privateDownloadCacheKey\(identity: CloudIdentity, sourceId: string\)/);
+  assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity, photo\.id\)/);
+  assert.match(privateFiles, /privateDownloadCacheKey\(identity, record\.id\)/);
+  assert.match(privateFiles, /URL\.revokeObjectURL\(url\)/);
+  assert.doesNotMatch(privateFiles, /downloadUrls\[photo\.id\]/);
+  assert.doesNotMatch(privateFiles, /downloadUrls\[record\.id\]/);
+});
