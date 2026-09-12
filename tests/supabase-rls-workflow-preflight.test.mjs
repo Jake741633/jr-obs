@@ -43,6 +43,20 @@ test("workflow preflight accepts the exact confirmed project with an optional tr
   assert.equal(preflight({ SUPABASE_TEST_URL: `${environment.SUPABASE_TEST_URL}/` }).status, 0);
 });
 
+test("confirmation picker requires an explicit selection and passes it unchanged to preflight", () => {
+  const input = workflow.match(/      confirmation:\n([\s\S]*?)\n\npermissions:/)?.[1];
+  assert.ok(input, "Workflow must declare a confirmation input");
+  assert.match(input, /^        required: true$/m);
+  assert.match(input, /^        type: choice$/m);
+  const defaultChoice = input.match(/^        default: (.+)$/m)?.[1];
+  const choices = [...input.matchAll(/^          - (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(choices, ["Do not run", "JR_OS_RLS_TEST"]);
+  assert.equal(defaultChoice, choices[0]);
+  assert.match(workflow, /^      SUPABASE_TEST_CONFIRM: \$\{\{ inputs\.confirmation \}\}$/m);
+  assert.equal(preflight({ SUPABASE_TEST_CONFIRM: defaultChoice }).status, 1, "Default selection must not authorize the live test");
+  assert.equal(preflight({ SUPABASE_TEST_CONFIRM: choices[1] }).status, 0, "Explicit confirmation must pass existing validation");
+});
+
 test("workflow preflight rejects empty, incorrect or whitespace-padded confirmation", () => {
   for (const confirmation of ["", "wrong", "    JR_OS_RLS_TEST", "JR_OS_RLS_TEST ", "JR_OS_RLS_TEST\n"]) {
     const result = preflight({ SUPABASE_TEST_CONFIRM: confirmation });
