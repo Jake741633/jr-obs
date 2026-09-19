@@ -1849,6 +1849,22 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await createSignedDownload(accounts.A.owner, ownPath, 31_536_000),
       "Signed download URL creation must be disabled",
     );
+    const ownerFileMetadata = await listRecords(
+      accounts.A.owner,
+      "private_files",
+      `select=organisation_id,source_id,bucket,object_path&source_id=eq.${source("file-own")}`,
+    );
+    await expectAllowed(ownerFileMetadata, "Owner should read the exact download metadata");
+    assert.deepEqual(ownerFileMetadata.payload, [{
+      organisation_id: organisationA,
+      source_id: source("file-own"),
+      bucket,
+      object_path: ownPath,
+    }], "Download fixture must retain its exact tenant, bucket and object path");
+    await expectAllowed(
+      await service(`/storage/v1/object/authenticated/${bucket}/${encodedPath(ownPath)}`),
+      "Trusted download should prove the uploaded bytes exist independently of user RLS",
+    );
     await expectAllowed(
       await downloadStorageObject(accounts.A.owner, ownPath),
       "Owner should download through a live authenticated request",
