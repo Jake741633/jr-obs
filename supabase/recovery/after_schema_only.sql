@@ -382,4 +382,9 @@ begin;
 \ir ../migrations/20260912184426_allow_management_planner_tombstone_returns.sql
 commit;
 
+\echo 'Allowing metadata-bound private Storage upserts'
+begin;
+\ir ../migrations/20260919080101_allow_metadata_bound_storage_upserts.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

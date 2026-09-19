@@ -1779,7 +1779,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
 
     await expectDenied(
-      await uploadStorageObject(accounts.A.electrician, tenantBPath, pngBytes, "image/png"),
+      await uploadStorageObject(accounts.A.office, tenantBPath, pngBytes, "image/png"),
       "Staff must not upload to another tenant path",
     );
     await expectDenied(
@@ -1795,7 +1795,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const badMimePath = `${organisationA}/jobs/${jobA}/${source("bad-mime")}/payload.exe`;
     context.objectPaths.push(badMimePath);
     await expectDenied(
-      await uploadStorageObject(accounts.A.electrician, badMimePath, new Uint8Array([1, 2, 3]), "application/x-msdownload"),
+      await uploadStorageObject(accounts.A.office, badMimePath, new Uint8Array([1, 2, 3]), "application/x-msdownload"),
       "Disallowed MIME upload must fail",
     );
 
@@ -1803,7 +1803,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     context.objectPaths.push(oversizedPath);
     const oversized = new Uint8Array((10 * 1024 * 1024) + 1);
     await expectDenied(
-      await uploadStorageObject(accounts.A.electrician, oversizedPath, oversized, "application/pdf"),
+      await uploadStorageObject(accounts.A.office, oversizedPath, oversized, "application/pdf"),
       "File larger than 10 MB must fail",
     );
 
@@ -1853,9 +1853,9 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await downloadStorageObject(accounts.A.owner, ownPath),
       "Owner should download through a live authenticated request",
     );
-    await expectAllowed(
+    await expectDenied(
       await downloadStorageObject(accounts.A.customer, ownPath),
-      "Customer should download their own scoped file through live authorization",
+      "Customer must not download unshared canonical job documents",
     );
     await expectDenied(
       await downloadStorageObject(accounts.A.customer, otherCustomerPath),
@@ -1866,25 +1866,31 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       "Another tenant must not download Tenant A files",
     );
 
-    await expectAllowed(
-      await service(`/auth/v1/admin/users/${accounts.A.electrician.id}/logout`, { method: "POST", body: { scope: "global" } }),
-      "Admin should revoke the Storage test session",
-    );
-    await expectDenied(
-      await uploadStorageObject(
-        accounts.A.electrician,
-        `${organisationA}/jobs/${jobA}/${source("revoked-upload")}/revoked.png`,
-        pngBytes,
-        "image/png",
-      ),
-      "Revoked sessions must not upload private objects",
-    );
-    await expectDenied(
-      await downloadStorageObject(accounts.A.electrician, ownPath),
-      "Revoked sessions must not download private objects",
-    );
-
     await expectDenied(await deleteStorageObject(accounts.A.office, ownPath), "Office must not delete private objects");
+    for (const account of [accounts.A.office, accounts.A.electrician]) {
+      await expectAllowed(
+        await downloadStorageObject(account, metadataFirstPath),
+        "Active office and assigned field sessions should download the backed job document before revocation",
+      );
+      await expectAllowed(
+        await request("/auth/v1/logout?scope=global", { method: "POST", accessToken: account.accessToken }),
+        "Authenticated user should revoke the Storage test session",
+      );
+      await expectDenied(
+        await uploadStorageObject(
+          account,
+          `${organisationA}/jobs/${jobA}/${source("revoked-upload")}/${account.id}.png`,
+          pngBytes,
+          "image/png",
+        ),
+        "Revoked sessions must not upload private objects",
+      );
+      await expectDenied(
+        await downloadStorageObject(account, metadataFirstPath),
+        "Revoked sessions must not download private objects",
+      );
+    }
+
     await expectAllowed(await deleteStorageObject(accounts.A.admin, ownPath), "Admin should delete private objects");
     context.objectPaths = context.objectPaths.filter((path) => path !== ownPath);
 
