@@ -24,10 +24,10 @@ jobs:
           cache-dependency-path: scripts/supabase-rehearsal/package-lock.json
       - name: Install isolated rehearsal dependencies
         run: npm ci --ignore-scripts --prefix scripts/supabase-rehearsal
-      - name: Audit rehearsal dependencies
-        run: npm audit --audit-level=moderate --prefix scripts/supabase-rehearsal
       - name: Rehearse the upgrade on a restored full Supabase database
         run: node scripts/supabase-rehearsal/full-stack.mjs
+      - name: Audit rehearsal dependencies
+        run: npm audit --audit-level=moderate --prefix scripts/supabase-rehearsal
 
   upgrade-rehearsal:
     runs-on: ubuntu-latest
@@ -43,10 +43,10 @@ jobs:
           cache-dependency-path: scripts/supabase-rehearsal/package-lock.json
       - name: Install isolated rehearsal dependencies
         run: npm ci --ignore-scripts --prefix scripts/supabase-rehearsal
-      - name: Audit rehearsal dependencies
-        run: npm audit --audit-level=moderate --prefix scripts/supabase-rehearsal
       - name: Rehearse the existing-data upgrade and synthetic backup restore
         run: npm test --prefix scripts/supabase-rehearsal
+      - name: Audit rehearsal dependencies
+        run: npm audit --audit-level=moderate --prefix scripts/supabase-rehearsal
 
   verify:
     runs-on: ubuntu-latest
@@ -61,11 +61,11 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-      - name: Audit dependencies
-        run: npm audit --audit-level=moderate
       - name: Test
         run: npm test
       - name: Lint
         run: npm run lint
       - name: Production build
         run: npm run build
+      - name: Audit dependencies
+        run: npm audit --audit-level=moderate
