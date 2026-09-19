@@ -203,7 +203,7 @@ const fieldBuilderReadCoverage = [
   '    await expectAllowed(officeUnassignedBuilder, "Office unassigned builder query should execute");',
   '    assert.equal(officeUnassignedBuilder.payload.length, 1, "Office should retain unassigned builder access");',
   '    await expectDenied(await patchRecords(accounts.A.electrician, "field_builders", "source_id=eq." + assignedBuilderA, { payload: { id: assignedBuilderA, companyName: "Forged field builder" } }), "Electrician must not write the field builder projection");',
-  '    await expectDenied(await patchRecords(accounts.A.electrician, "builders", "source_id=eq." + assignedBuilderA, { payload: { id: assignedBuilderA, companyName: "Forged complete builder" } }), "Electrician must not write complete builder CRM records");',
+  '    await expectFilteredUpdateUnchanged({ account: accounts.A.electrician, reader: accounts.A.office, table: "builders", filter: "source_id=eq." + assignedBuilderA, body: { payload: { id: assignedBuilderA, companyName: "Forged complete builder" } }, message: "Electrician must not write complete builder CRM records" });',
   '',
 ].join("\n");
 const fieldTimelineCoverage = [
@@ -475,7 +475,13 @@ const fieldProgressUpdateEnvelopeCoverage = [
   '    const mismatchedProgressJob = source("field-mismatched-progress-job-a");',
   '    const mismatchedCustomerProgress = source("field-mismatched-customer-progress-a");',
   '    await expectAllowed(await insertRecord(accounts.A.office, "jobs", typedRecord(organisationA, mismatchedProgressJob, customerA, null, { title: "Mismatched progress envelope job", status: "First fix", assignedTo: [fieldTeamA] })), "Office should create an assigned job for progress envelope coverage");',
-  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-progress", mismatchedCustomerProgress, accounts.A.office, otherCustomerA, mismatchedProgressJob, { ...progressPayload, id: mismatchedCustomerProgress, jobId: mismatchedProgressJob })), "Office should create a wrong non-null progress customer fixture");',
+  '    await expectDeniedWithCode(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-progress", mismatchedCustomerProgress, accounts.A.office, otherCustomerA, mismatchedProgressJob, { ...progressPayload, id: mismatchedCustomerProgress, jobId: mismatchedProgressJob })), "42501", "Wrong non-null progress customer inserts must fail canonical binding validation");',
+  '    await expectAllowed(await insertRecord(accounts.A.office, "cloud_collections", genericRecord(organisationA, "jr-os-job-progress", mismatchedCustomerProgress, accounts.A.office, customerA, mismatchedProgressJob, { ...progressPayload, id: mismatchedCustomerProgress, jobId: mismatchedProgressJob })), "Office should create valid progress before its job customer changes");',
+  '    const movedProgressJob = typedRecord(organisationA, mismatchedProgressJob, otherCustomerA, null, { title: "Reassigned progress customer", status: "First fix", assignedTo: [fieldTeamA] });',
+  '    const movedProgressJobResult = await patchRecords(accounts.A.office, "jobs", "source_id=eq." + mismatchedProgressJob, { customer_source_id: otherCustomerA, payload: movedProgressJob.payload });',
+  '    await expectAllowed(movedProgressJobResult, "Office should reassign the progress job to another valid customer");',
+  '    assert.equal(movedProgressJobResult.payload.length, 1, "Progress mismatch fixture requires a real job customer change");',
+  '    assert.equal(movedProgressJobResult.payload[0].customer_source_id, otherCustomerA);',
   '',
   '    const assignedProgressBeforeUpdate = await listRecords(accounts.A.office, "cloud_collections", "select=version,customer_source_id,payload&collection_key=eq.jr-os-job-progress&source_id=eq." + assignedProgress);',
   '    await expectAllowed(assignedProgressBeforeUpdate, "Office should read assigned progress before the field update");',
@@ -504,7 +510,15 @@ const fieldProgressUpdateEnvelopeCoverage = [
   '    await expectAllowed(await patchRecords(accounts.A.owner, "jobs", "source_id=eq." + assignedProgressJob, { payload: { ...assignedProgressJobBeforeRevocation.payload[0].payload, assignedTo: [] } }), "Owner should revoke the progress job assignment");',
   '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_job_progress", { method: "POST", body: progressMutationBody }), "42501", "Progress receipt replay must revalidate the active job assignment");',
   '',
-  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_job_progress", { method: "POST", body: { collection_key_value: "jr-os-job-progress", record_source_id: mismatchedCustomerProgress, expected_version: 1, record_payload: { ...progressPayload, id: mismatchedCustomerProgress, jobId: mismatchedProgressJob }, mutation_id: crypto.randomUUID() } }), "PT409", "Wrong non-null progress customer envelope must fail closed");',
+  '    const mismatchedProgressBeforeUpdate = await listRecords(accounts.A.office, "cloud_collections", "select=*&collection_key=eq.jr-os-job-progress&source_id=eq." + mismatchedCustomerProgress);',
+  '    await expectAllowed(mismatchedProgressBeforeUpdate, "Office should read the retained progress before a denied update");',
+  '    assert.equal(mismatchedProgressBeforeUpdate.payload.length, 1, "Progress mismatch denial requires an existing record");',
+  '    assert.equal(mismatchedProgressBeforeUpdate.payload[0].customer_source_id, customerA);',
+  '    assert.notEqual(customerA, otherCustomerA, "Progress mismatch fixture must retain a different customer from its job");',
+  '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_job_progress", { method: "POST", body: { collection_key_value: "jr-os-job-progress", record_source_id: mismatchedCustomerProgress, expected_version: mismatchedProgressBeforeUpdate.payload[0].version, record_payload: { ...progressPayload, id: mismatchedCustomerProgress, jobId: mismatchedProgressJob }, mutation_id: crypto.randomUUID() } }), "PT409", "Wrong non-null progress customer envelope must fail closed");',
+  '    const mismatchedProgressAfterUpdate = await listRecords(accounts.A.office, "cloud_collections", "select=*&collection_key=eq.jr-os-job-progress&source_id=eq." + mismatchedCustomerProgress);',
+  '    await expectAllowed(mismatchedProgressAfterUpdate, "Office should read progress after the denied mismatched update");',
+  '    assert.deepEqual(mismatchedProgressAfterUpdate.payload, mismatchedProgressBeforeUpdate.payload, "Rejected mismatched progress updates must preserve the full canonical record");',
   '    await expectDeniedWithCode(await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_save_job_progress", { method: "POST", body: { collection_key_value: "jr-os-job-progress", record_source_id: unassignedProgress, expected_version: 1, record_payload: { ...progressPayload, id: unassignedProgress, jobId: unassignedProgressJob }, mutation_id: crypto.randomUUID() } }), "42501", "Electrician must not update unassigned job progress");',
   '',
 ].join("\n");
@@ -1194,10 +1208,17 @@ const secureJobReadCoverage = `${secureJobReadAnchor}
     assert.deepEqual((await listRecords(accounts.A.customer, "customer_jobs", \`select=source_id&source_id=eq.\${otherCustomerJobA}\`)).payload, [], "Another customer must not read the portal job projection");
     assert.deepEqual((await listRecords(accounts.B.customer, "customer_jobs", \`select=source_id&source_id=eq.\${jobA}\`)).payload, [], "Another organisation must not read the portal job projection");
 
-    await expectDenied(
-      await patchRecords(accounts.A.electrician, "jobs", \`source_id=eq.\${jobA}\`, { payload: { id: jobA, status: "Second fix" } }),
-      "Electrician direct job updates must fail closed",
-    );
+    // Direct job writes must affect zero rows and leave the canonical record intact.
+    const officeJobBeforeDirectWrite = await listRecords(accounts.A.office, "jobs", \`select=*&source_id=eq.\${jobA}\`);
+    await expectAllowed(officeJobBeforeDirectWrite, "Office should read the job before a direct field write");
+    assert.equal(officeJobBeforeDirectWrite.payload.length, 1, "Direct-write test requires an existing canonical job");
+    const directFieldJobWrite = await patchRecords(accounts.A.electrician, "jobs", \`source_id=eq.\${jobA}\`, { payload: { id: jobA, status: "Second fix" } });
+    // RLS USING filters the job out of UPDATE, so PostgREST returns an empty representation.
+    await expectAllowed(directFieldJobWrite, "Filtered direct job update should execute without matching rows");
+    assert.deepEqual(directFieldJobWrite.payload, [], "Electrician direct job updates must fail closed");
+    const officeJobAfterDirectWrite = await listRecords(accounts.A.office, "jobs", \`select=*&source_id=eq.\${jobA}\`);
+    await expectAllowed(officeJobAfterDirectWrite, "Office should read the job after a direct field write");
+    assert.deepEqual(officeJobAfterDirectWrite.payload, officeJobBeforeDirectWrite.payload, "Electrician direct job updates must leave the entire canonical job unchanged");
     const rejectedJobStatusMutationId = crypto.randomUUID();
     await expectDeniedWithCode(
       await authenticated(accounts.A.electrician, "/rest/v1/rpc/jr_field_update_job_status", {
@@ -1518,10 +1539,12 @@ const secureGenericReadSnippet = `      const electricianCompleteFieldRead = awa
       if (collectionKey === "jr-os-job-packs") {
         assert.equal(fieldPayload.labourRate, undefined, "Field job pack projection must omit labour rates");
         assert.equal(fieldPayload.materials[0].unitPrice, undefined, "Field job pack projection must omit material prices");
-        await expectDenied(
-          await patchRecords(accounts.A.electrician, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, { payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 9 } }),
-          "Electrician direct job-pack updates must fail closed",
-        );
+        await expectFilteredUpdateUnchanged({
+          account: accounts.A.electrician, reader: accounts.A.office, table: "cloud_collections",
+          filter: \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`,
+          body: { payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 9 } },
+          message: "Electrician direct job-pack updates must fail closed",
+        });
       }
       if (collectionKey === "jr-os-job-variations") {
         assert.equal(fieldPayload.labourRate, undefined, "Field variation projection must omit labour rates");

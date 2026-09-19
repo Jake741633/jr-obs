@@ -128,7 +128,9 @@ projection reads stay empty.
 
 The suite uses the private `jr-os-private` bucket and verifies:
 
-- Authenticated staff can upload allowed content to their own tenant path.
+- Authenticated office roles can upload allowed content to their own tenant path; field uploads remain denied without an assigned upload intent.
+- Metadata-first POST uploads with `x-upsert=true` can create and retry an exact registered object. Orphan retries remain denied until exact metadata is registered.
+- Field roles and other tenants cannot use upsert to overwrite office-owned objects.
 - Client-created signed upload and download URLs are denied.
 - Signed upload bearer tokens are rejected at the Storage table.
 - Customers cannot upload files.
@@ -136,13 +138,17 @@ The suite uses the private `jr-os-private` bucket and verifies:
 - Unsupported MIME uploads are denied.
 - Files larger than 10 MB are denied.
 - Owners can download through live authenticated requests.
-- Customers can download only customer-scoped files.
+- Customers cannot download unshared canonical job documents, including their own customer's files.
 - Customers cannot download another customer's file.
 - Another organisation cannot read the file.
-- Revoked Auth sessions cannot upload or download private objects.
+- Active office and assigned field sessions can download a backed job document; revoking each session immediately denies its subsequent downloads and uploads.
 - Office users cannot delete private objects.
 - Admin users can delete private objects.
-- `private_files` metadata follows the same tenant and customer scope.
+- `private_files` metadata follows the same tenant, role and canonical record scope.
+
+The download checks verify the exact owner-visible metadata and independently
+confirm the uploaded bytes with a trusted request before testing authenticated
+access. A missing object cannot masquerade as a successful access denial.
 
 The test does not print access tokens, refresh tokens, service-role credentials or signed URLs.
 

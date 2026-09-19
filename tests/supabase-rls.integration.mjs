@@ -15,12 +15,13 @@ const bucket = "jr-os-private";
 const legacyBucket = "jr-os-files";
 
 const typedTables = [
-  "customers", "jobs", "pricing_documents", "invoices", "payments", "expenses", "materials",
+  "customers", "jobs", "builders", "pricing_documents", "invoices", "payments", "expenses", "materials",
   "stock_items", "stock_movements", "purchase_lists", "planner_entries", "team_members", "timesheets",
   "certificates", "electrical_testing_records", "job_documents", "portal_approvals", "portal_requests",
   "ai_recommendation_evidence",
 ];
 const cleanupTables = ["private_files", "app_records", "cloud_collections", ...typedTables, "audit_log"];
+const pendingTestSignups = new WeakMap();
 
 function authHeaders(key, accessToken, extra = {}) {
   return {
@@ -53,12 +54,15 @@ async function service(path, options = {}) {
 
 async function createUser(label) {
   const email = `jr-os-rls-${label}-${runId}@example.com`;
+  const signupOrganisationName = `JR OS RLS Signup ${label} ${runId}`;
   const result = await service("/auth/v1/admin/users", {
     method: "POST",
-    body: { email, password, email_confirm: true, user_metadata: { jr_os_test_run: runId } },
+    body: { email, password, email_confirm: true, user_metadata: { jr_os_test_run: runId, business_name: signupOrganisationName } },
   });
   assert.equal(result.response.ok, true, `Unable to create ${label}: ${JSON.stringify(result.payload)}`);
-  return { id: result.payload.id, email, password };
+  const user = { id: result.payload.id, email, password };
+  pendingTestSignups.set(user, signupOrganisationName);
+  return user;
 }
 
 async function signIn(user) {
@@ -81,10 +85,39 @@ async function createOrganisation(name) {
 }
 
 async function createProfile(user, organisationId, role, customerSourceId) {
+  if (pendingTestSignups.has(user)) {
+    // Auth's signup trigger creates an owner membership in a new business.
+    // Only replace that fresh fixture profile; established memberships stay immutable.
+    const signup = await service(`/rest/v1/profiles?select=id,organisation_id,role&id=eq.${user.id}`);
+    await expectAllowed(signup, "Unable to inspect the new test user's signup profile");
+    assert.equal(signup.payload?.length, 1, "Expected exactly one signup profile");
+    const profile = signup.payload[0];
+    assert.equal(profile.id, user.id, "Unexpected signup profile identity");
+    assert.equal(profile.role, "owner", "Unexpected signup profile role");
+    assert.match(profile.organisation_id || "", /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, "Invalid signup business identity");
+    assert.notEqual(profile.organisation_id, organisationId, "Signup business must be separate from the shared fixture business");
+    const business = await service(`/rest/v1/organisations?select=id,name&id=eq.${profile.organisation_id}`);
+    await expectAllowed(business, "Unable to inspect the signup business");
+    assert.equal(business.payload?.length, 1, "Expected exactly one signup business");
+    assert.equal(business.payload[0].id, profile.organisation_id, "Unexpected signup business identity");
+    assert.equal(business.payload[0].name, pendingTestSignups.get(user), "Unexpected signup business name");
+
+    // Track the verified generated business before a later fixture write can fail.
+    user.signupOrganisationId = profile.organisation_id;
+    user.signupOrganisationName = pendingTestSignups.get(user);
+    const removed = await service(`/rest/v1/profiles?id=eq.${user.id}&organisation_id=eq.${profile.organisation_id}&role=eq.owner`, {
+      method: "DELETE",
+      extraHeaders: { Prefer: "return=representation" },
+    });
+    await expectAllowed(removed, "Unable to remove the fresh fixture signup profile");
+    assert.equal(removed.payload?.length, 1, "Expected to remove exactly one fixture signup profile");
+    assert.equal(removed.payload[0].id, user.id, "Removed an unexpected signup profile");
+    pendingTestSignups.delete(user);
+  }
   const result = await service("/rest/v1/profiles", {
     method: "POST",
     body: { id: user.id, organisation_id: organisationId, role, active: true, customer_source_id: customerSourceId || null },
-    extraHeaders: { Prefer: "resolution=merge-duplicates,return=representation" },
+    extraHeaders: { Prefer: "return=representation" },
   });
   assert.equal(result.response.ok, true, `Unable to create ${role} profile: ${JSON.stringify(result.payload)}`);
 }
@@ -240,6 +273,11 @@ async function cleanup(context) {
   for (const organisationId of context.organisations) {
     await service(`/rest/v1/organisations?id=eq.${organisationId}`, { method: "DELETE" }).catch(() => undefined);
   }
+  for (const user of context.users) {
+    if (user.signupOrganisationId && user.signupOrganisationName) {
+      await service(`/rest/v1/organisations?id=eq.${user.signupOrganisationId}&name=eq.${encodeURIComponent(user.signupOrganisationName)}`, { method: "DELETE" }).catch(() => undefined);
+    }
+  }
 }
 
 async function expectAllowed(result, message) {
@@ -253,9 +291,23 @@ async function expectDeniedWithCode(result, code, message) {
   assert.equal(result.payload?.code, code, `${message}: expected PostgreSQL ${code}, received ${JSON.stringify(result.payload)}`);
 }
 
+async function expectFilteredUpdateUnchanged({ account, reader, table, filter, body, message }) {
+  const before = await listRecords(reader, table, `select=*&${filter}`);
+  await expectAllowed(before, `${message}: canonical read before update`);
+  assert.equal(before.payload.length, 1, `${message}: requires an existing canonical record`);
+  const result = await patchRecords(account, table, filter, body);
+  // RLS USING can deny an UPDATE by matching zero rows without an HTTP error.
+  await expectAllowed(result, `${message}: filtered update should execute without matching rows`);
+  assert.deepEqual(result.payload, [], `${message}: must return zero rows`);
+  const after = await listRecords(reader, table, `select=*&${filter}`);
+  await expectAllowed(after, `${message}: canonical read after update`);
+  assert.deepEqual(after.payload, before.payload, `${message}: entire canonical record must remain unchanged`);
+}
+
 const integrationTest = enabled ? test : test.skip;
 
-integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role boundaries", { timeout: 180_000 }, async () => {
+// The full suite makes hundreds of sequential Auth, database and Storage requests.
+integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role boundaries", { timeout: 300_000 }, async () => {
   const context = { users: [], organisations: [], objectPaths: [], legacyObjectPaths: [] };
   try {
     await expectDenied(
@@ -1006,9 +1058,19 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
 
     // Customer scoping for typed tables and portal writes.
-    const customerJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
-    await expectAllowed(customerJobs, "Customer jobs read should execute");
-    assert.deepEqual(customerJobs.payload.map((row) => row.source_id), [jobA]);
+    const customerCanonicalJobs = await listRecords(accounts.A.customer, "jobs", "select=source_id,customer_source_id");
+    await expectAllowed(customerCanonicalJobs, "Customer canonical jobs query should execute safely");
+    assert.deepEqual(customerCanonicalJobs.payload, [], "Customer must not enumerate canonical jobs");
+    const customerJobs = await listRecords(accounts.A.customer, "customer_jobs", "select=organisation_id,source_id,customer_source_id,payload");
+    await expectAllowed(customerJobs, "Customer projected jobs read should execute");
+    assert.deepEqual(customerJobs.payload.map(({ organisation_id, source_id, customer_source_id }) => ({ organisation_id, source_id, customer_source_id })), [
+      { organisation_id: organisationA, source_id: jobA, customer_source_id: customerA },
+    ], "Customer job projection must return only the exact tenant and customer job");
+    assert.equal(customerJobs.payload[0].payload.id, jobA, "Customer projected payload must retain the canonical job identity");
+    const customerJobKeys = new Set(["id", "title", "customerId", "siteAddress", "status", "startDate", "targetCompletionDate", "createdAt", "updatedAt"]);
+    for (const key of Object.keys(customerJobs.payload[0].payload)) {
+      assert.ok(customerJobKeys.has(key), `Customer job projection must omit private field ${key}`);
+    }
     await expectDenied(await insertRecord(accounts.A.customer, "jobs", typedRecord(organisationA, source("customer-job-write"), customerA, null)), "Customer must not create jobs");
 
     const approvalA = source("approval-a");
@@ -1129,11 +1191,12 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     assert.equal(viewedStaleDocumentVersion, 1, "Customer pricing projection must expose its server-authored document version");
     await expectAllowed(
       await patchRecords(accounts.A.office, "pricing_documents", `source_id=eq.${staleRevisionQuoteA}`, {
-        payload: {
+        // PATCH replaces the JSON payload; retain its canonical identity bindings.
+        payload: typedRecord(organisationA, staleRevisionQuoteA, customerA, jobA, {
           ...staleRevisionQuotePayload,
           title: "Unseen revised commercial offer",
           items: [{ id: source("stale-revision-line"), description: "Revised scope", quantity: 1, unitPrice: 999 }],
-        },
+        }).payload,
       }),
       "Office should revise and re-send the quote after the customer viewed it",
     );
@@ -1365,13 +1428,21 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectAllowed(electricianFieldRead, `Electrician field ${collectionKey} query should execute`);
       assert.equal(electricianFieldRead.payload.length, 1, `Electrician should retain field collection reads: ${collectionKey}`);
     }
-    await expectDenied(
+    const surveyBindingFilter = `collection_key=eq.${encodeURIComponent("jr-os-surveys")}&source_id=eq.${source("survey-a")}`;
+    const mismatchedSurveyBindings = { customer_source_id: otherCustomerA, job_source_id: otherCustomerJobA };
+    await expectFilteredUpdateUnchanged({
+      account: accounts.A.electrician, reader: accounts.A.office, table: "cloud_collections",
+      filter: surveyBindingFilter, body: mismatchedSurveyBindings,
+      message: "Electrician must not rewrite canonical survey bindings",
+    });
+    await expectDeniedWithCode(
       await patchRecords(
-        accounts.A.electrician,
+        accounts.A.office,
         "cloud_collections",
-        `collection_key=eq.${encodeURIComponent("jr-os-surveys")}&source_id=eq.${source("survey-a")}`,
-        { customer_source_id: otherCustomerA, job_source_id: otherCustomerJobA },
+        surveyBindingFilter,
+        mismatchedSurveyBindings,
       ),
+      "42501",
       "RLS metadata must match the stored business payload",
     );
     await expectDenied(
@@ -1425,10 +1496,11 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     assert.equal(officeMemoryRead.payload.length, 1, "Office should retain sensitive generic reads");
 
     // Soft delete/tombstone and conflict-safe versioning assumptions.
-    await expectDenied(
-      await patchRecords(accounts.A.electrician, "jobs", `source_id=eq.${jobA}`, { deleted_at: new Date().toISOString() }),
-      "Electrician must not create a soft-delete tombstone",
-    );
+    await expectFilteredUpdateUnchanged({
+      account: accounts.A.electrician, reader: accounts.A.office, table: "jobs",
+      filter: `source_id=eq.${jobA}`, body: { deleted_at: new Date().toISOString() },
+      message: "Electrician must not create a soft-delete tombstone",
+    });
     const tombstone = await patchRecords(accounts.A.owner, "jobs", `source_id=eq.${jobA}`, { deleted_at: new Date().toISOString() });
     await expectAllowed(tombstone, "Owner should create a soft-delete tombstone");
     assert.equal(tombstone.payload[0].version >= 2, true);
@@ -1524,7 +1596,10 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     });
     await expectAllowed(recoverySession, "Recovery token should create an Auth-only session");
     const recoveryAccount = { ...accounts.B.electrician, accessToken: recoverySession.payload.access_token };
-    const recoveryRead = await listRecords(recoveryAccount, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    // Use the assigned job seeded by field builder coverage; canonical jobs
+    // are hidden from electricians even when their regular session is active.
+    const sessionJobB = source("field-builder-job-b");
+    const recoveryRead = await listRecords(recoveryAccount, "field_jobs", `select=source_id&source_id=eq.${sessionJobB}`);
     await expectAllowed(recoveryRead, "Recovery-only tenant query should fail closed");
     assert.deepEqual(recoveryRead.payload, [], "Recovery-only sessions must not read tenant data");
     const recoveryProfileRead = await listRecords(recoveryAccount, "profiles", `select=id&id=eq.${accounts.B.electrician.id}`);
@@ -1541,12 +1616,12 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
 
     // Session revocation: active access works, then stale access and refresh
     // tokens both lose tenant authorization immediately after admin logout.
-    const activeSessionRead = await listRecords(accounts.B.electrician, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    const activeSessionRead = await listRecords(accounts.B.electrician, "field_jobs", `select=source_id&source_id=eq.${sessionJobB}`);
     await expectAllowed(activeSessionRead, "Active same-tenant session should read its job");
-    assert.deepEqual(activeSessionRead.payload.map((row) => row.source_id), [jobB]);
+    assert.deepEqual(activeSessionRead.payload.map((row) => row.source_id), [sessionJobB]);
     const revokeResult = await service(`/auth/v1/admin/users/${accounts.B.electrician.id}/logout`, { method: "POST", body: { scope: "global" } });
     await expectAllowed(revokeResult, "Admin should revoke a user session");
-    const revokedSessionRead = await listRecords(accounts.B.electrician, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    const revokedSessionRead = await listRecords(accounts.B.electrician, "field_jobs", `select=source_id&source_id=eq.${sessionJobB}`);
     await expectAllowed(revokedSessionRead, "Revoked access token query should fail closed");
     assert.deepEqual(revokedSessionRead.payload, [], "Revoked access tokens must not retain tenant reads");
     const revokedProfileRead = await listRecords(accounts.B.electrician, "profiles", `select=id&id=eq.${accounts.B.electrician.id}`);
@@ -1704,7 +1779,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     );
 
     await expectDenied(
-      await uploadStorageObject(accounts.A.electrician, tenantBPath, pngBytes, "image/png"),
+      await uploadStorageObject(accounts.A.office, tenantBPath, pngBytes, "image/png"),
       "Staff must not upload to another tenant path",
     );
     await expectDenied(
@@ -1720,7 +1795,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     const badMimePath = `${organisationA}/jobs/${jobA}/${source("bad-mime")}/payload.exe`;
     context.objectPaths.push(badMimePath);
     await expectDenied(
-      await uploadStorageObject(accounts.A.electrician, badMimePath, new Uint8Array([1, 2, 3]), "application/x-msdownload"),
+      await uploadStorageObject(accounts.A.office, badMimePath, new Uint8Array([1, 2, 3]), "application/x-msdownload"),
       "Disallowed MIME upload must fail",
     );
 
@@ -1728,7 +1803,7 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     context.objectPaths.push(oversizedPath);
     const oversized = new Uint8Array((10 * 1024 * 1024) + 1);
     await expectDenied(
-      await uploadStorageObject(accounts.A.electrician, oversizedPath, oversized, "application/pdf"),
+      await uploadStorageObject(accounts.A.office, oversizedPath, oversized, "application/pdf"),
       "File larger than 10 MB must fail",
     );
 
@@ -1774,13 +1849,29 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await createSignedDownload(accounts.A.owner, ownPath, 31_536_000),
       "Signed download URL creation must be disabled",
     );
+    const ownerFileMetadata = await listRecords(
+      accounts.A.owner,
+      "private_files",
+      `select=organisation_id,source_id,bucket,object_path&source_id=eq.${source("file-own")}`,
+    );
+    await expectAllowed(ownerFileMetadata, "Owner should read the exact download metadata");
+    assert.deepEqual(ownerFileMetadata.payload, [{
+      organisation_id: organisationA,
+      source_id: source("file-own"),
+      bucket,
+      object_path: ownPath,
+    }], "Download fixture must retain its exact tenant, bucket and object path");
+    await expectAllowed(
+      await service(`/storage/v1/object/authenticated/${bucket}/${encodedPath(ownPath)}`),
+      "Trusted download should prove the uploaded bytes exist independently of user RLS",
+    );
     await expectAllowed(
       await downloadStorageObject(accounts.A.owner, ownPath),
       "Owner should download through a live authenticated request",
     );
-    await expectAllowed(
+    await expectDenied(
       await downloadStorageObject(accounts.A.customer, ownPath),
-      "Customer should download their own scoped file through live authorization",
+      "Customer must not download unshared canonical job documents",
     );
     await expectDenied(
       await downloadStorageObject(accounts.A.customer, otherCustomerPath),
@@ -1791,25 +1882,31 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       "Another tenant must not download Tenant A files",
     );
 
-    await expectAllowed(
-      await service(`/auth/v1/admin/users/${accounts.A.electrician.id}/logout`, { method: "POST", body: { scope: "global" } }),
-      "Admin should revoke the Storage test session",
-    );
-    await expectDenied(
-      await uploadStorageObject(
-        accounts.A.electrician,
-        `${organisationA}/jobs/${jobA}/${source("revoked-upload")}/revoked.png`,
-        pngBytes,
-        "image/png",
-      ),
-      "Revoked sessions must not upload private objects",
-    );
-    await expectDenied(
-      await downloadStorageObject(accounts.A.electrician, ownPath),
-      "Revoked sessions must not download private objects",
-    );
-
     await expectDenied(await deleteStorageObject(accounts.A.office, ownPath), "Office must not delete private objects");
+    for (const account of [accounts.A.office, accounts.A.electrician]) {
+      await expectAllowed(
+        await downloadStorageObject(account, metadataFirstPath),
+        "Active office and assigned field sessions should download the backed job document before revocation",
+      );
+      await expectAllowed(
+        await request("/auth/v1/logout?scope=global", { method: "POST", accessToken: account.accessToken }),
+        "Authenticated user should revoke the Storage test session",
+      );
+      await expectDenied(
+        await uploadStorageObject(
+          account,
+          `${organisationA}/jobs/${jobA}/${source("revoked-upload")}/${account.id}.png`,
+          pngBytes,
+          "image/png",
+        ),
+        "Revoked sessions must not upload private objects",
+      );
+      await expectDenied(
+        await downloadStorageObject(account, metadataFirstPath),
+        "Revoked sessions must not download private objects",
+      );
+    }
+
     await expectAllowed(await deleteStorageObject(accounts.A.admin, ownPath), "Admin should delete private objects");
     context.objectPaths = context.objectPaths.filter((path) => path !== ownPath);
 

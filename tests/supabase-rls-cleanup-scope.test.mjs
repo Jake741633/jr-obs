@@ -107,6 +107,14 @@ test("Storage cleanup accepts only paths under the exact test organisation conta
 
 test("fallback cleanup verifies the schema first and deletes only exact test-run resources", async () => {
   const calls = [];
+  const builderRows = [
+    { organisation_id: organisationA.id, source_id: `field-assigned-builder-a-${runId}`, created_by: validUser.id },
+    { organisation_id: organisationB.id, source_id: `field-cross-tenant-builder-b-${runId}` },
+    { organisation_id: "44444444-4444-4444-8444-444444444444", source_id: `unrelated-builder-${runId}` },
+    { organisation_id: organisationA.id, source_id: "unrelated-builder" },
+    { organisation_id: organisationA.id, source_id: "field-builder-1786381200001-other123" },
+  ];
+  const preservedBuilders = builderRows.slice(2);
   const privateTestPath = `${organisationA.id}/jobs/job-a-${runId}/file-own-${runId}/photo.png`;
   const privateKeepPath = `${organisationA.id}/jobs/real-job/keep.png`;
   const legacyTestPath = `${organisationA.id}/legacy/legacy-file-${runId}/photo.png`;
@@ -171,7 +179,26 @@ test("fallback cleanup verifies the schema first and deletes only exact test-run
         { ...validUser, id: "99999999-9999-4999-8999-999999999999", email: "owner@example.com" },
       ] });
     }
-    if (init.method === "DELETE" && path.startsWith("/auth/v1/admin/users/")) return response({});
+    if (init.method === "DELETE" && parsed.pathname === "/rest/v1/builders") {
+      const organisationFilter = parsed.searchParams.get("organisation_id");
+      const sourceFilter = parsed.searchParams.get("source_id");
+      assert.ok([`eq.${organisationA.id}`, `eq.${organisationB.id}`].includes(organisationFilter));
+      assert.equal(sourceFilter, `like.*-${runId}`);
+      for (let index = builderRows.length - 1; index >= 0; index -= 1) {
+        const row = builderRows[index];
+        if (`eq.${row.organisation_id}` === organisationFilter && row.source_id.endsWith(sourceFilter.slice(6))) {
+          builderRows.splice(index, 1);
+        }
+      }
+      return response(undefined);
+    }
+    if (init.method === "DELETE" && path.startsWith("/auth/v1/admin/users/")) {
+      const userId = parsed.pathname.split("/").at(-1);
+      if (builderRows.some((row) => row.created_by === userId)) {
+        return response({ message: "Builder still references this user" }, { ok: false, status: 500 });
+      }
+      return response({});
+    }
     if (init.method === "DELETE" && path.startsWith("/rest/v1/organisations?id=eq.")) return response(undefined);
     throw new Error(`Unexpected request: ${init.method ?? "GET"} ${path}`);
   };
@@ -208,6 +235,7 @@ test("fallback cleanup verifies the schema first and deletes only exact test-run
     .filter((call) => call.type === "fetch" && call.init.method === "DELETE" && call.path.startsWith("/auth/v1/admin/users/"))
     .map((call) => call.path);
   assert.deepEqual(deletedUsers, [`/auth/v1/admin/users/${validUser.id}`]);
+  assert.deepEqual(builderRows, preservedBuilders, "Builder cleanup must retain other organisations and other run IDs");
 
   const deletedOrganisations = calls
     .filter((call) => call.type === "fetch" && call.init.method === "DELETE" && call.path.startsWith("/rest/v1/organisations?id=eq."))

@@ -177,6 +177,15 @@ export async function cleanupSupabaseRlsTest({
     if (pageUsers.length < USER_PAGE_SIZE) break;
   }
 
+  // Builder creator/updater foreign keys must be removed before Auth accounts.
+  // Limit recovery to records in each verified disposable organisation and run.
+  for (const organisation of organisations) {
+    await request(
+      `/rest/v1/builders?organisation_id=eq.${organisation.id}&source_id=like.*-${organisation.runId}`,
+      { method: "DELETE", headers: { Prefer: "return=minimal" } },
+    );
+  }
+
   let deletedUsers = 0;
   for (const user of users) {
     if (!isTestUserForProfiles(user, organisationsByKey, profilesByUserId)) continue;
