@@ -1,8 +1,14 @@
 # Full Supabase existing-data rehearsal
 
-This adds the `full-supabase-upgrade` job to JR OS CI. Acceptance is pending its
-first completed run. It starts an unlinked temporary Supabase project on the
-GitHub runner with PostgreSQL 17, Auth, the Data API and Storage, using pinned
+The full service rehearsal passed on 19 September 2026 at 17:15:36 UTC against
+code head `750dc5a0acbe422b4011bc85c717f07183e19fd1` in
+[CI run 35457448264](https://github.com/Jake741633/jr-obs/actions/runs/35457448264),
+job `105935146622`. The required npm audit subsequently failed during upstream
+maintenance, so the workflow is **not green** and
+[PR #241](https://github.com/Jake741633/jr-obs/pull/241) remains unmerged.
+
+The `full-supabase-upgrade` job starts an unlinked temporary Supabase project on
+the GitHub runner with PostgreSQL 17, Auth, the Data API and Storage, using pinned
 Supabase CLI 2.117.0 and a separate dependency lockfile.
 
 The runner accepts no connection arguments and requires an ephemeral GitHub
@@ -44,6 +50,50 @@ PostgreSQL leaves physical gaps after dropped columns, and a logical restore
 compacts those gaps. A focused native-dump regression check accepted that
 renumbering and still detected a visible column reorder. The full-platform run
 also covers this case in existing Auth tables.
+
+## Verified result
+
+| Check | Result |
+| --- | --- |
+| Native database | PostgreSQL 17.6, Supabase image `17.6.1.167`; linked project uses `17.6.1.155` |
+| Services | Auth `v2.196.0`, PostgREST `v16.2`, Storage `v1.72.1`, Kong `2.8.1`; exact image digests are in the run log |
+| Baseline | Initial schema plus 36 effective migrations, 107 existing public rows and representative managed-platform records |
+| Native logical restore | All snapshotted rows, catalog definitions/effective grants and synthetic migration history preserved |
+| Frozen upgrade | All 70 pending files passed; 98 public rows unchanged and nine transformations matched the reviewed rules |
+| Auth and Storage metadata | All existing platform rows preserved before service restart |
+| SQL access | Tenant/role checks and both rollback probes passed; all 44 public tables retain RLS |
+| Auth HTTP | Existing JWTs, owner/field/customer password sign-in, office token refresh, and revoked-token denial passed |
+| Data API | Management, field and customer scopes, cross-tenant isolation, stale/inactive/revoked actors and anonymous denial passed |
+| Stored files | Eight original byte hashes preserved; assigned-field reads and negative download cases passed |
+| File writes | Existing-file upsert and field readback passed; bulk deletion had no effect; single-file deletion removed metadata and prevented download |
+| Runtime | 76 seconds including container startup, followed by successful temporary-project cleanup |
+| Application checks | All 1,576 tests passed; lint had zero errors and 17 existing warnings; production build and preview passed |
+| Embedded SQL checks | Synthetic restore, all 70 migrations, preservation and four rejected baselines passed |
+| Current dependency audits | Blocked by npm maintenance; still required before merge |
+
+The successful run's disposable archive was 497,519 bytes with SHA-256
+`16f264f970398e2b9097a0aed42818980d56b8bc216d457a24ddecd42df64eea`.
+Random fixture IDs and timestamps make this hash specific to that run. No dump
+or credential artifact was uploaded.
+
+## CI audit blocker
+
+The same lockfiles passed the moderate-or-higher audit before the outage. Fresh
+local audits subsequently received HTTP 503 from npm's bulk advisory endpoint,
+with npm explicitly reporting maintenance. GitHub's bundled npm 10.9.8 falls
+back to the retired quick endpoint, which returns HTTP 400 and a misleading
+package-tree error. This affected both the unchanged application lockfile and
+the isolated rehearsal lockfile. No lockfile was regenerated in response.
+
+[npm's status page](https://status.npmjs.org/) announced maintenance for
+19 September, 17:00–19:00 UTC; that is a scheduled window, not a guaranteed
+recovery time. Tests and builds now run before their dependency audits so their
+results remain visible during an audit-service outage. An audit failure still
+fails the job and workflow. No audit is skipped, downgraded or allowed to fail.
+
+After npm recovers, rerun the failed workflow jobs, inspect the exact PR head's
+checks and preview, and merge only after every required check passes. Recheck
+the current target branch before merging, then verify its resulting workflows.
 
 ## Scope
 

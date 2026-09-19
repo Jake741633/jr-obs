@@ -9,9 +9,12 @@ acceptance checks before cloud cutover; green application CI alone does not prov
 that the database is current.
 
 The [existing-data SQL rehearsal](./security/supabase-upgrade-rehearsal-2026-09-19.md)
-checks the pending upgrade and a synthetic backup restore in CI. Its local-only
-platform fixtures are not setup scripts for a hosted project; production backup
-review, full Supabase rehearsal and migration authorization remain required.
+checks the pending upgrade and a synthetic backup restore in CI. The companion
+[full service rehearsal](./security/supabase-full-stack-rehearsal-2026-09-19.md)
+also passed native database restoration plus real Auth, Data API and Storage
+checks. Its current PR remains unmerged while npm maintenance blocks the required
+audit checks. These fixture scripts are never hosted setup scripts. A protected
+production backup, its restore review and migration authorization remain required.
 
 ## 1. Create the Supabase project
 
