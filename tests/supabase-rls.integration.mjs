@@ -291,7 +291,6 @@ async function expectDeniedWithCode(result, code, message) {
   assert.equal(result.payload?.code, code, `${message}: expected PostgreSQL ${code}, received ${JSON.stringify(result.payload)}`);
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Called by scenarios injected by run-supabase-rls.integration.mjs.
 async function expectFilteredUpdateUnchanged({ account, reader, table, filter, body, message }) {
   const before = await listRecords(reader, table, `select=*&${filter}`);
   await expectAllowed(before, `${message}: canonical read before update`);
@@ -307,7 +306,8 @@ async function expectFilteredUpdateUnchanged({ account, reader, table, filter, b
 
 const integrationTest = enabled ? test : test.skip;
 
-integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role boundaries", { timeout: 180_000 }, async () => {
+// The full suite makes hundreds of sequential Auth, database and Storage requests.
+integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role boundaries", { timeout: 300_000 }, async () => {
   const context = { users: [], organisations: [], objectPaths: [], legacyObjectPaths: [] };
   try {
     await expectDenied(
@@ -1428,13 +1428,21 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
       await expectAllowed(electricianFieldRead, `Electrician field ${collectionKey} query should execute`);
       assert.equal(electricianFieldRead.payload.length, 1, `Electrician should retain field collection reads: ${collectionKey}`);
     }
-    await expectDenied(
+    const surveyBindingFilter = `collection_key=eq.${encodeURIComponent("jr-os-surveys")}&source_id=eq.${source("survey-a")}`;
+    const mismatchedSurveyBindings = { customer_source_id: otherCustomerA, job_source_id: otherCustomerJobA };
+    await expectFilteredUpdateUnchanged({
+      account: accounts.A.electrician, reader: accounts.A.office, table: "cloud_collections",
+      filter: surveyBindingFilter, body: mismatchedSurveyBindings,
+      message: "Electrician must not rewrite canonical survey bindings",
+    });
+    await expectDeniedWithCode(
       await patchRecords(
-        accounts.A.electrician,
+        accounts.A.office,
         "cloud_collections",
-        `collection_key=eq.${encodeURIComponent("jr-os-surveys")}&source_id=eq.${source("survey-a")}`,
-        { customer_source_id: otherCustomerA, job_source_id: otherCustomerJobA },
+        surveyBindingFilter,
+        mismatchedSurveyBindings,
       ),
+      "42501",
       "RLS metadata must match the stored business payload",
     );
     await expectDenied(
@@ -1488,10 +1496,11 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     assert.equal(officeMemoryRead.payload.length, 1, "Office should retain sensitive generic reads");
 
     // Soft delete/tombstone and conflict-safe versioning assumptions.
-    await expectDenied(
-      await patchRecords(accounts.A.electrician, "jobs", `source_id=eq.${jobA}`, { deleted_at: new Date().toISOString() }),
-      "Electrician must not create a soft-delete tombstone",
-    );
+    await expectFilteredUpdateUnchanged({
+      account: accounts.A.electrician, reader: accounts.A.office, table: "jobs",
+      filter: `source_id=eq.${jobA}`, body: { deleted_at: new Date().toISOString() },
+      message: "Electrician must not create a soft-delete tombstone",
+    });
     const tombstone = await patchRecords(accounts.A.owner, "jobs", `source_id=eq.${jobA}`, { deleted_at: new Date().toISOString() });
     await expectAllowed(tombstone, "Owner should create a soft-delete tombstone");
     assert.equal(tombstone.payload[0].version >= 2, true);
@@ -1587,7 +1596,10 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     });
     await expectAllowed(recoverySession, "Recovery token should create an Auth-only session");
     const recoveryAccount = { ...accounts.B.electrician, accessToken: recoverySession.payload.access_token };
-    const recoveryRead = await listRecords(recoveryAccount, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    // Use the assigned job seeded by field builder coverage; canonical jobs
+    // are hidden from electricians even when their regular session is active.
+    const sessionJobB = source("field-builder-job-b");
+    const recoveryRead = await listRecords(recoveryAccount, "field_jobs", `select=source_id&source_id=eq.${sessionJobB}`);
     await expectAllowed(recoveryRead, "Recovery-only tenant query should fail closed");
     assert.deepEqual(recoveryRead.payload, [], "Recovery-only sessions must not read tenant data");
     const recoveryProfileRead = await listRecords(recoveryAccount, "profiles", `select=id&id=eq.${accounts.B.electrician.id}`);
@@ -1604,12 +1616,12 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
 
     // Session revocation: active access works, then stale access and refresh
     // tokens both lose tenant authorization immediately after admin logout.
-    const activeSessionRead = await listRecords(accounts.B.electrician, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    const activeSessionRead = await listRecords(accounts.B.electrician, "field_jobs", `select=source_id&source_id=eq.${sessionJobB}`);
     await expectAllowed(activeSessionRead, "Active same-tenant session should read its job");
-    assert.deepEqual(activeSessionRead.payload.map((row) => row.source_id), [jobB]);
+    assert.deepEqual(activeSessionRead.payload.map((row) => row.source_id), [sessionJobB]);
     const revokeResult = await service(`/auth/v1/admin/users/${accounts.B.electrician.id}/logout`, { method: "POST", body: { scope: "global" } });
     await expectAllowed(revokeResult, "Admin should revoke a user session");
-    const revokedSessionRead = await listRecords(accounts.B.electrician, "jobs", `select=source_id&source_id=eq.${jobB}`);
+    const revokedSessionRead = await listRecords(accounts.B.electrician, "field_jobs", `select=source_id&source_id=eq.${sessionJobB}`);
     await expectAllowed(revokedSessionRead, "Revoked access token query should fail closed");
     assert.deepEqual(revokedSessionRead.payload, [], "Revoked access tokens must not retain tenant reads");
     const revokedProfileRead = await listRecords(accounts.B.electrician, "profiles", `select=id&id=eq.${accounts.B.electrician.id}`);
