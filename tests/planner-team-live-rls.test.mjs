@@ -226,6 +226,22 @@ const plannerLines = [
   '    const crossTenantPlannerRead = await listRecords(accounts.B.electrician, "planner_entries", \\`select=source_id&source_id=eq.\\${assignedPlannerA}\\`);',
   '    await expectAllowed(crossTenantPlannerRead, "Cross-tenant planner query should execute safely");',
   '    assert.deepEqual(crossTenantPlannerRead.payload, [], "Another organisation must not read the planner entry");',
+  "",
+  "    const archivedAssignedPlannerA = source(\"planner-assigned-tombstone-a\");",
+  "    const archivedAssignedPlannerSeed = { ...typedRecord(organisationA, archivedAssignedPlannerA, customerA, jobA, { id: archivedAssignedPlannerA, customerId: customerA, jobId: jobA, teamMemberIds: [plannerTeamA], status: \"Complete\" }), deleted_at: new Date().toISOString() };",
+  "    await expectAllowed(await insertRecord(accounts.A.owner, \"planner_entries\", archivedAssignedPlannerSeed), \"Owner should create and receive an assigned planner tombstone\");",
+  "    for (const account of [accounts.A.owner, accounts.A.admin]) {",
+  "      const archivedPlannerRead = await listRecords(account, \"planner_entries\", \"select=source_id,deleted_at&source_id=eq.\" + archivedAssignedPlannerA);",
+  "      await expectAllowed(archivedPlannerRead, \"Management planner tombstone read should execute\");",
+  "      assert.equal(archivedPlannerRead.payload.length, 1, \"Owner and admin should retain same-tenant planner tombstone acknowledgements\");",
+  "      assert.equal(archivedPlannerRead.payload[0].source_id, archivedAssignedPlannerA);",
+  "      assert.ok(archivedPlannerRead.payload[0].deleted_at);",
+  "    }",
+  "    for (const [label, account] of [[\"Office\", accounts.A.office], [\"Assigned electrician\", accounts.A.electrician], [\"Customer\", accounts.A.customer], [\"Cross-tenant owner\", accounts.B.owner]]) {",
+  "      const archivedPlannerRead = await listRecords(account, \"planner_entries\", \"select=source_id,deleted_at&source_id=eq.\" + archivedAssignedPlannerA);",
+  "      await expectAllowed(archivedPlannerRead, label + \" planner tombstone query should execute safely\");",
+  "      assert.deepEqual(archivedPlannerRead.payload, [], label + \" must not read planner tombstones\");",
+  "    }",
 ];
 
 const plannerCoverage = `${anchor}\\n\\n${plannerLines.join("\\n")}`;
