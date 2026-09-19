@@ -35,6 +35,7 @@ function command(binary,args,input) {
 }
 const supabase = (...args)=>command(cli,[...args,"--workdir",workspace]);
 const docker = (...args)=>command("docker",args);
+const sameData = (actual,expected,message)=>assert.equal(hash(JSON.stringify(actual)),hash(JSON.stringify(expected)),message);
 
 function assertLocal(status) {
   const database = new URL(status.DB_URL);
@@ -143,6 +144,16 @@ async function checkHttp(client,actors) {
     const response = await client.request(`/storage/v1/object/authenticated/jr-os-private/${path(source)}`,{actor:actors[name]});
     assert([400,401,403,404].includes(response.status),`${name ?? "anonymous"}: unauthorized Storage download returned ${response.status}`);
   }
+  const replacement = Buffer.from("%PDF-1.4\nSynthetic replacement after upgrade\n%%EOF\n");
+  const replaced = await client.request(`/storage/v1/object/jr-os-private/${path("document")}`,{method:"POST",actor:actors.owner,body:replacement,
+    headers:{"Content-Type":"application/pdf","x-upsert":"true"}});
+  assert(replaced.ok,`Existing-file upsert failed after restore/upgrade: HTTP ${replaced.status}`);
+  const replacedDownload = await client.request(`/storage/v1/object/authenticated/jr-os-private/${path("document")}`,{actor:actors.field});
+  assert(replacedDownload.ok);
+  assert.equal(hash(Buffer.from(await replacedDownload.arrayBuffer())),hash(replacement));
+  await client.json("/storage/v1/object/jr-os-private",{method:"DELETE",actor:actors.owner,body:{prefixes:[path("unknown-file")]}});
+  const removed = await client.request(`/storage/v1/object/authenticated/jr-os-private/${path("unknown-file")}`,{actor:actors.owner});
+  assert([400,404].includes(removed.status),"Deleted synthetic object remains downloadable");
   for(const name of ["owner","field","customer"]) {
     const fresh = await client.signIn(actors[name]);
     const user = await client.json("/auth/v1/user",{actor:fresh});
@@ -156,7 +167,7 @@ async function checkHttp(client,actors) {
   assert.equal((await jobs({...actors.office,token:refreshed.access_token})).length,1,"Restored refresh token lost office access");
   const revoked = await client.request("/auth/v1/token?grant_type=refresh_token",{method:"POST",body:JSON.stringify({refresh_token:actors.revoked.refreshToken}),headers:{"Content-Type":"application/json"}});
   assert([400,401,403].includes(revoked.status),"Revoked refresh token became usable after restore");
-  console.log("HTTP checks passed: existing and fresh sessions, refresh/revocation, tenant/role projections, eight file hashes and denied downloads");
+  console.log("HTTP checks passed: existing and fresh sessions, refresh/revocation, tenant/role projections, eight file hashes, denied downloads, upsert and delete");
 }
 
 try {
@@ -179,8 +190,10 @@ try {
   const actors = await seedBaseline(db,client);
   assert.equal((await db.query("select count(*)::int as count from auth.sessions")).rows[0].count,8);
   // Preserve a synthetic history row for the reviewed baseline, not fabricated per-file production history.
-  await db.query("insert into supabase_migrations.schema_migrations(version,name) values($1,$2)",[manifest.baseline.history_version,manifest.baseline.history_name]);
+  supabase("migration","repair",manifest.baseline.history_version,"--status","applied","--local");
+  await db.query("update supabase_migrations.schema_migrations set name=$2 where version=$1",[manifest.baseline.history_version,manifest.baseline.history_name]);
   const historyBefore = (await db.query("select to_jsonb(m) as data from supabase_migrations.schema_migrations m order by version")).rows;
+  assert.equal(historyBefore.length,1);
   console.log("Baseline ready: nine real Auth identities, eight active sessions, two populated tenants and eight uploaded objects");
 
   const containers = docker("ps","--filter",`label=com.supabase.cli.project=${project}`,"--format","{{.Names}}").toString().trim().split("\n");
@@ -199,7 +212,9 @@ try {
   // --create also restores database-level settings/ACLs. Creating a database cannot be wrapped in one transaction.
   command("docker",["exec","-i",databaseContainer,"pg_restore","-U","supabase_admin","-d","template1","--create","--exit-on-error"],backup);
   db = await connect(status.DB_URL);
-  assert.deepEqual(await snapshot(db),before,"Restored full-platform database changed records");
+  const restored = await snapshot(db);
+  for(const [name,rows] of Object.entries(before)) sameData(restored[name],rows,`${name}: restored platform records changed`);
+  assert.deepEqual(Object.keys(restored),Object.keys(before),"Restored table inventory changed");
   assert.deepEqual(await catalog(db),beforeCatalog,"Restored full-platform database changed catalog/ACLs");
   assert.deepEqual((await db.query("select to_jsonb(m) as data from supabase_migrations.schema_migrations m order by version")).rows,historyBefore,"Restored migration history changed");
   console.log(`Full-platform logical database restore passed: ${backup.length} bytes; SHA-256 ${hash(backup)}`);
@@ -207,13 +222,13 @@ try {
   const after = await snapshot(db);
   const publicOnly = data=>Object.fromEntries(Object.entries(data).filter(([name])=>name.startsWith("public.")));
   const preserved = checkPreservation(publicOnly(before),publicOnly(after),actors);
-  for(const [name,rows] of Object.entries(before)) if(!name.startsWith("public.")) assert.deepEqual(after[name],rows,`${name}: upgrade changed platform records`);
+  for(const [name,rows] of Object.entries(before)) if(!name.startsWith("public.")) sameData(after[name],rows,`${name}: upgrade changed platform records`);
   assert.equal((await db.query("select public.jr_os_deployed_migration() as marker")).rows[0].marker.migration,manifest.target_migration);
   assert.deepEqual((await db.query("select tablename from pg_tables where schemaname='public' and not rowsecurity")).rows,[]);
   await checkAccess(db,actors);
   for(const probe of ["supabase/tests/planner_tombstone_management.sql","supabase/tests/private_storage_upserts.sql"]) {
     await db.exec(await read(probe));
-    assert.deepEqual(await snapshot(db),after,`${probe}: rollback changed existing records`);
+    sameData(await snapshot(db),after,`${probe}: rollback changed existing records`);
   }
   console.log(`All ${manifest.pending_count} migrations passed; ${preserved.unchanged} public rows unchanged, nine reviewed transformations; platform records preserved`);
   docker("start",...services);
