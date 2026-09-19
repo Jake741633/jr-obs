@@ -392,4 +392,9 @@ begin;
 \ir ../migrations/20260919082600_allow_management_storage_delete_returns.sql
 commit;
 
+\echo 'Allowing authenticated private Storage download checks'
+begin;
+\ir ../migrations/20260919084500_allow_authenticated_storage_download_checks.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

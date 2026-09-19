@@ -13,6 +13,7 @@ declare
   customer_id text := 'upsert-customer-' || run_id;
   job_id text := 'upsert-job-' || run_id;
   document_id text := 'upsert-document-' || run_id;
+  field_team_id text := 'upsert-team-' || run_id;
   object_path text;
   orphan_path text;
   claims text;
@@ -46,9 +47,13 @@ begin
   end loop;
   delete from auth.sessions where id = session_ids[7];
 
+  insert into public.team_members(organisation_id, source_id, payload)
+  values (organisation_a, field_team_id, jsonb_build_object('id', field_team_id,
+    'name', 'Assigned reader', 'email', 'upsert-' || actors[4] || '@example.com',
+    'role', 'Electrician', 'status', 'Active'));
   insert into public.jobs(organisation_id, source_id, customer_source_id, payload)
   values (organisation_a, job_id, customer_id,
-    jsonb_build_object('id', job_id, 'customerId', customer_id));
+    jsonb_build_object('id', job_id, 'customerId', customer_id, 'assignedTo', jsonb_build_array(field_team_id)));
   insert into public.job_documents(organisation_id, source_id, customer_source_id, job_source_id, payload)
   values (organisation_a, document_id, customer_id, job_id,
     jsonb_build_object('id', document_id, 'customerId', customer_id, 'jobId', job_id));
@@ -150,6 +155,29 @@ begin
     and name = orphan_path and version = 'original') then
     raise exception 'Denied orphan retry changed the stored object';
   end if;
+  -- Hosted GET uses get_authenticated_info before returning object bytes.
+  -- Both read operations must retain exact metadata and assigned-field scope.
+  for i in 1..8 loop
+    perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated',
+      'sub', actors[i], 'session_id', session_ids[i],
+      'email', 'upsert-' || actors[i] || '@example.com',
+      'amr', jsonb_build_array(jsonb_build_object('method', 'password')))::text, true);
+    set local role authenticated;
+    foreach operation_name in array array[
+      'storage.object.get_authenticated', 'object.get_authenticated_info'
+    ] loop
+      perform set_config('storage.operation', operation_name, true);
+      select count(*) into visible from storage.objects
+      where bucket_id = 'jr-os-private' and name = object_path;
+      if visible <> (case when i <= 4 then 1 else 0 end) then
+        raise exception 'Read operation % has incorrect visibility for actor %: %', operation_name, i, visible;
+      end if;
+      select count(*) into visible from storage.objects
+      where bucket_id = 'jr-os-private' and name = orphan_path;
+      if visible <> 0 then raise exception 'Read operation % exposed unregistered bytes', operation_name; end if;
+    end loop;
+    reset role;
+  end loop;
   -- Storage's DELETE API must first see the target under the same operation.
   -- Probe that policy prerequisite without disabling Storage's direct-SQL
   -- deletion protection. Actual deletion is covered by the HTTP suite.
