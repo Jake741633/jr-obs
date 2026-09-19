@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, readdir, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -190,6 +190,12 @@ try {
   const actors = await seedBaseline(db,client);
   assert.equal((await db.query("select count(*)::int as count from auth.sessions")).rows[0].count,8);
   // Preserve a synthetic history row for the reviewed baseline, not fabricated per-file production history.
+  // The CLI requires a matching local file even when recording an already-applied version.
+  supabase("migration","new",manifest.baseline.history_name);
+  const migrationsDirectory = join(workspace,"supabase/migrations");
+  const generated = await readdir(migrationsDirectory);
+  assert.equal(generated.length,1);
+  await rename(join(migrationsDirectory,generated[0]),join(migrationsDirectory,`${manifest.baseline.history_version}_${manifest.baseline.history_name}.sql`));
   supabase("migration","repair",manifest.baseline.history_version,"--status","applied","--local");
   await db.query("update supabase_migrations.schema_migrations set name=$2 where version=$1",[manifest.baseline.history_version,manifest.baseline.history_name]);
   const historyBefore = (await db.query("select to_jsonb(m) as data from supabase_migrations.schema_migrations m order by version")).rows;
@@ -200,12 +206,14 @@ try {
   assert(containers.includes(databaseContainer),"Database container must belong to this newly created project");
   const services = containers.filter(name=>name!==databaseContainer);
   assert(services.length>=3,"Need the actual Auth, Data API and Storage containers");
+  console.log(`Container images:\n${docker("inspect","--format","{{.Name}} {{.Config.Image}} {{.Image}}",...containers).toString().trim()}`);
   docker("stop",...services);
   const before = await snapshot(db);
   const beforeCatalog = await catalog(db);
   const backup = docker("exec",databaseContainer,"pg_dump","-U","supabase_admin","-d","postgres","--format=custom");
   assert(backup.length>1000);
   await writeFile(join(workspace,"synthetic-baseline.dump"),backup,{mode:0o600});
+  console.log("Replacing the stopped synthetic database from its native logical archive");
   await db.close(); db = undefined;
   // Replace only the database in the freshly owned local container. Cluster roles and object volume remain.
   docker("exec",databaseContainer,"psql","-U","supabase_admin","-d","template1","-v","ON_ERROR_STOP=1","-c","drop database postgres with (force)");
