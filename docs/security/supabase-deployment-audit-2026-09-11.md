@@ -255,6 +255,14 @@ role checks and four rejected invalid baselines. It runs in CI. This completes
 the local SQL stage; its minimal platform contracts do not establish a full
 hosted Supabase restore or the availability of a production backup.
 
+The subsequent [authenticated backup review](./supabase-upgrade-rehearsal-2026-09-19.md#production-backup-review)
+confirmed that the linked project's Free plan has no managed scheduled backups
+or available point-in-time restore point. No production backup was exported and
+no paid setting was changed. The project remains healthy at the same baseline;
+the production backup gate is still unmet. The report records the required
+logical export and full restore evidence, including Auth/Storage customizations
+and migration history that need separate handling in the standard CLI procedure.
+
 1. Use the committed upgrade manifest to prepare the incremental upgrade from
    the verified live baseline. Rehearse it in an isolated environment with
    representative existing Auth memberships, records, file bindings and audit
