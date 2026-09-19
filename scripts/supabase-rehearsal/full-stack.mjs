@@ -65,8 +65,11 @@ function platformClient(status) {
   }
   async function json(path,options={}) {
     const response = await request(path,{...options,body:options.body === undefined ? undefined : JSON.stringify(options.body),
-      headers:{"Content-Type":"application/json",...options.headers}});
-    assert(response.ok,`${options.method ?? "GET"} ${path}: HTTP ${response.status}`);
+      headers:{...(options.body === undefined ? {} : {"Content-Type":"application/json"}),...options.headers}});
+    if(!response.ok) {
+      const failure = await response.json().catch(()=>({}));
+      assert.fail(`${options.method ?? "GET"} ${path}: HTTP ${response.status}; ${String(failure.message ?? failure.error ?? "request failed").slice(0,300)}`);
+    }
     return response.status === 204 ? null : response.json();
   }
   async function signIn(actor) {
