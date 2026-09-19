@@ -387,4 +387,9 @@ begin;
 \ir ../migrations/20260919080101_allow_metadata_bound_storage_upserts.sql
 commit;
 
+\echo 'Allowing management private Storage delete acknowledgements'
+begin;
+\ir ../migrations/20260919082600_allow_management_storage_delete_returns.sql
+commit;
+
 \echo 'JR OS schema-only recovery completed successfully'

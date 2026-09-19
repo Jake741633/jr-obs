@@ -4,7 +4,7 @@
 begin;
 do $$
 declare
-  actor_roles text[] := array['owner','admin','office','electrician','customer','office','office','office'];
+  actor_roles text[] := array['owner','admin','office','electrician','customer','admin','office','office'];
   actors uuid[] := array[]::uuid[];
   session_ids uuid[] := array[]::uuid[];
   organisation_a uuid;
@@ -150,7 +150,36 @@ begin
     and name = orphan_path and version = 'original') then
     raise exception 'Denied orphan retry changed the stored object';
   end if;
+  -- Storage's DELETE API must first see the target under the same operation.
+  -- Probe that policy prerequisite without disabling Storage's direct-SQL
+  -- deletion protection. Actual deletion is covered by the HTTP suite.
+  for i in 1..8 loop
+    perform set_config('request.jwt.claims', jsonb_build_object('role', 'authenticated',
+      'sub', actors[i], 'session_id', session_ids[i],
+      'amr', jsonb_build_array(jsonb_build_object('method', 'password')))::text, true);
+    set local role authenticated;
+    perform set_config('storage.operation', 'storage.object.delete', true);
+    select count(*) into visible from storage.objects
+    where bucket_id = 'jr-os-private' and name in (object_path, orphan_path);
+    if visible <> (case when i <= 2 then 2 else 0 end) then
+      raise exception 'DELETE target visibility incorrect for actor %: %', i, visible;
+    end if;
+    foreach operation_name in array array[
+      'storage.object.list', 'storage.object.list_v2', 'storage.object.sign',
+      'storage.object.sign_many', 'storage.object.sign_upload_url',
+      'storage.object.upload_signed', 'storage.object.get_public',
+      'storage.object.delete_many', 'unknown', ''
+    ] loop
+      perform set_config('storage.operation', operation_name, true);
+      select count(*) into visible from storage.objects
+      where bucket_id = 'jr-os-private' and name in (object_path, orphan_path);
+      if visible <> 0 then
+        raise exception 'Operation % exposed private objects for actor %', operation_name, i;
+      end if;
+    end loop;
+    reset role;
+  end loop;
 end;
 $$;
 rollback;
-select 'Storage upsert, exact metadata, role, session and operation checks passed; fixtures rolled back' as result;
+select 'Storage upsert, delete-target, metadata, role, session and operation checks passed; fixtures rolled back' as result;
