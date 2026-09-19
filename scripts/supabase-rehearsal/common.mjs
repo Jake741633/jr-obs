@@ -39,8 +39,10 @@ async function snapshot(connection) {
 }
 
 async function catalog(connection) {
+  // A logical restore compacts attnum holes left by dropped platform columns.
+  // The ordered array preserves visible column order; physical ordinal/dtd IDs do not.
   return (await connection.query(`select jsonb_build_object(
-    'columns',(select jsonb_agg(to_jsonb(c) order by table_schema,table_name,ordinal_position)
+    'columns',(select jsonb_agg(to_jsonb(c)-'ordinal_position'-'dtd_identifier' order by table_schema,table_name,ordinal_position)
       from information_schema.columns c where table_schema in ('public','auth','storage','private')),
     'constraints',(select jsonb_agg(jsonb_build_object('schema',n.nspname,'table',c.relname,
       'name',con.conname,'definition',pg_get_constraintdef(con.oid)) order by n.nspname,c.relname,con.conname)
