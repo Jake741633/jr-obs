@@ -97,15 +97,23 @@ function platformClient(status) {
   };
 }
 
-async function ready(client) {
+async function ready(client,owner) {
+  let last = "connection unavailable";
   for(let attempt=0;attempt<60;attempt++) {
     try {
-      const response = await client.request("/auth/v1/health");
-      if(response.ok) return;
+      const responses = await Promise.all([
+        client.request("/auth/v1/health"),
+        client.request("/storage/v1/status"),
+        client.request("/rest/v1/jobs?select=id&limit=0",{actor:owner}),
+      ]);
+      last = responses.map(response=>response.status).join("/");
+      const healthy = responses.every(response=>response.ok);
+      await Promise.all(responses.map(response=>response.arrayBuffer()));
+      if(healthy) return;
     } catch { /* Containers reconnect after restoring the local database. */ }
     await delay(1000);
   }
-  throw new Error("Restored Auth service did not become ready");
+  throw new Error(`Restored Auth/Storage/Data API did not become ready: ${last}`);
 }
 
 async function checkHttp(client,actors) {
@@ -240,7 +248,7 @@ try {
   }
   console.log(`All ${manifest.pending_count} migrations passed; ${preserved.unchanged} public rows unchanged, nine reviewed transformations; platform records preserved`);
   docker("start",...services);
-  await ready(client);
+  await ready(client,actors.owner);
   await checkHttp(client,actors);
   console.log(JSON.stringify({status:"passed",engine:version,pendingMigrations:manifest.pending_count,
     authUsers:before["auth.users"].length,baselineSessions:before["auth.sessions"].length,
