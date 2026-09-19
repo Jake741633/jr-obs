@@ -1,0 +1,12 @@
+{
+  "name": "jr-os-supabase-upgrade-rehearsal",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node rehearse.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.4.6",
+    "@electric-sql/pglite-tools": "0.3.6"
+  }
+}

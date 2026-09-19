@@ -1,0 +1,249 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CalendarDays, CheckCircle2, Download, FileText, Image as ImageIcon, MessageSquare, Receipt, Send, ShieldCheck, XCircle } from "lucide-react";
+import { Button } from "../../components/ui/Button";
+import { Card } from "../../components/ui/Card";
+import { InputField, TextareaField } from "../../components/ui/FormField";
+import { PageHeader } from "../../components/ui/PageHeader";
+import { strictHttpsCertificateUrl } from "../../lib/cloud/customerCertificateCapability-core.mjs";
+import { openLiveCustomerCertificateUrl } from "../../lib/cloud/customerCertificateCapability";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
+import { openLiveCustomerPaymentUrl } from "../../lib/cloud/portalPaymentLinkCapability";
+import { activeSyncAuthorizationMatches, getSyncQueue, type SyncAuthorizationContext } from "../../lib/cloud/repository";
+import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { customerDocuments, effectivePortalPricingStatus, jobProgress, portalAppointments, portalApprovalForCurrentDocument, portalApprovalQueueBlocksDocument, portalApprovalQueueState, portalPaymentLinkForInvoice, portalRequestTargetMatchesJob, sharedPhotos, type PortalAccessRecord, type PortalActivity, type PortalApprovalRecord, type PortalPaymentLink, type PortalPhotoShare, type PortalRequest, type PortalRequestType } from "../../lib/customerPortal";
+import { calculatedInvoiceState, depositAmount, effectiveInvoicePaid, invoiceHasOutstandingBalance, type DepositRequirement, type PaymentRecord } from "../../lib/payments";
+import type { Customer, ElectricalCertificate, Invoice, Job, JobDocument, JobTimelineEntry, PlannerEntry, PricingDocument, PricingDocumentStatus } from "../../lib/models";
+
+const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
+const total = (document: PricingDocument | Invoice) => { const subtotal = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0); return document.vatEnabled ? subtotal * (1 + document.vatRate / 100) : subtotal; };
+const dateTime = (value: string) => new Date(value).toLocaleString("en-GB");
+
+export default function CustomerPortalPage() {
+  const { identity, mode } = useCloudIdentity();
+  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
+  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
+  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
+  const planner = useLocalStorageCollection<PlannerEntry>("jr-os-planner");
+  const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
+  const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
+  const access = useLocalStorageCollection<PortalAccessRecord>("jr-os-portal-access");
+  const approvals = useLocalStorageCollection<PortalApprovalRecord>("jr-os-portal-approvals");
+  const requests = useLocalStorageCollection<PortalRequest>("jr-os-portal-requests");
+  const paymentLinks = useLocalStorageCollection<PortalPaymentLink>("jr-os-portal-payment-links");
+  const photoShares = useLocalStorageCollection<PortalPhotoShare>("jr-os-portal-photo-shares");
+  const activity = useLocalStorageCollection<PortalActivity>("jr-os-portal-activity");
+  const payments = useLocalStorageCollection<PaymentRecord>("jr-os-payments");
+  const deposits = useLocalStorageCollection<DepositRequirement>("jr-os-deposit-requirements");
+  const [selectedCustomerId, setSelectedCustomerId] = useState("");
+  const [accessCode, setAccessCode] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const [decisionId, setDecisionId] = useState("");
+  const [approvalName, setApprovalName] = useState("");
+  const [approvalComments, setApprovalComments] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [requestType, setRequestType] = useState<PortalRequestType>("Question");
+  const [requestJobId, setRequestJobId] = useState("");
+  const [requestPlannerId, setRequestPlannerId] = useState("");
+  const [requestDate, setRequestDate] = useState("");
+  const [requestMessage, setRequestMessage] = useState("");
+  const [notice, setNotice] = useState("");
+  const [syncQueueRevision, setSyncQueueRevision] = useState(0);
+  const [openingCertificateId, setOpeningCertificateId] = useState("");
+  const [openingPaymentInvoiceId, setOpeningPaymentInvoiceId] = useState("");
+  const mountedRef = useRef(true);
+  const certificateOperationGenerationRef = useRef(0);
+  const certificateOpeningRef = useRef(false);
+  const paymentOperationGenerationRef = useRef(0);
+  const paymentOpeningRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      certificateOperationGenerationRef.current += 1;
+      certificateOpeningRef.current = false;
+      paymentOperationGenerationRef.current += 1;
+      paymentOpeningRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    certificateOperationGenerationRef.current += 1;
+    certificateOpeningRef.current = false;
+    paymentOperationGenerationRef.current += 1;
+    paymentOpeningRef.current = false;
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        setOpeningCertificateId("");
+        setOpeningPaymentInvoiceId("");
+      }
+    });
+    return () => { active = false; };
+  }, [identity?.customerSourceId, identity?.organisationId, identity?.role, identity?.userId, mode]);
+
+  useEffect(() => {
+    const refreshQueueState = () => setSyncQueueRevision((current) => current + 1);
+    window.addEventListener("jr-os-sync-status", refreshQueueState);
+    return () => window.removeEventListener("jr-os-sync-status", refreshQueueState);
+  }, []);
+
+  const customerSession = identity?.role === "customer";
+  const authenticatedCustomerId = customerSession ? identity.customerSourceId ?? "" : "";
+  const activeCustomerId = customerSession ? authenticatedCustomerId : selectedCustomerId;
+  const portalUnlocked = customerSession ? Boolean(authenticatedCustomerId) : unlocked;
+  const selectedCustomer = customers.items.find((customer) => customer.id === activeCustomerId);
+  const customerJobs = useMemo(() => jobs.items.filter((job) => job.customerId === activeCustomerId), [activeCustomerId, jobs.items]);
+  const jobIds = useMemo(() => new Set(customerJobs.map((job) => job.id)), [customerJobs]);
+  const customerPricing = useMemo(() => customerDocuments(documents.items, activeCustomerId, jobIds), [activeCustomerId, documents.items, jobIds]);
+  const customerInvoices = useMemo(() => customerDocuments(invoices.items, activeCustomerId, jobIds), [activeCustomerId, invoices.items, jobIds]);
+  const customerCertificates = useMemo(() => customerDocuments(certificates.items, activeCustomerId, jobIds).filter((certificate) => certificate.status === "Issued"), [activeCustomerId, certificates.items, jobIds]);
+  const appointments = useMemo(() => portalAppointments(planner.items, customerJobs, activeCustomerId), [activeCustomerId, planner.items, customerJobs]);
+  const progress = useMemo(() => timeline.items.filter((entry) => jobIds.has(entry.jobId)).sort((a, b) => b.completedAt.localeCompare(a.completedAt)), [timeline.items, jobIds]);
+  const photos = useMemo(() => sharedPhotos(jobDocuments.items, jobIds, photoShares.items), [jobDocuments.items, jobIds, photoShares.items]);
+  const portalApprovalQueue = useMemo(() => {
+    void syncQueueRevision;
+    return getSyncQueue().filter((item) => item.table === "portal_approvals" && item.operation === "upsert");
+  }, [syncQueueRevision]);
+  const customerApprovals = approvals.items.filter((item) => item.customerId === activeCustomerId && !["Failed", "Conflict"].includes(portalApprovalQueueState(portalApprovalQueue, item.id))).sort((a, b) => b.decidedAt.localeCompare(a.decidedAt));
+  const hasFailedApproval = portalApprovalQueue.some((item) => item.state === "Failed" || item.state === "Conflict");
+  const accessRecord = access.items.find((item) => item.customerId === activeCustomerId && item.enabled);
+  const ready = [customers,jobs,documents,invoices,certificates,planner,timeline,jobDocuments,access,approvals,requests,paymentLinks,photoShares,activity,payments,deposits].every((store) => store.isReady);
+
+  function enterPortal(event: FormEvent) { event.preventDefault(); if (!selectedCustomerId) return setNotice("Select a customer."); if (accessRecord && accessCode !== accessRecord.accessCode) return setNotice("The demo access code is incorrect."); setUnlocked(true); setNotice(""); }
+  function recordDecision(document: PricingDocument, decision: "Accepted" | "Declined") { if (!activeCustomerId || !customerPricing.some((item) => item.id === document.id)) return setNotice("That document is not available to this customer account."); if (portalApprovalQueueBlocksDocument(portalApprovalQueue, document)) return setNotice("Your previous decision was not recorded. Refresh this document before trying again."); if (effectivePortalPricingStatus(document, customerApprovals) !== "Sent") return setNotice("That document is no longer awaiting a decision."); if (customerSession && !Number.isInteger(document.documentVersion)) return setNotice("This document version is not ready for approval. Refresh and try again."); if (!approvalName.trim()) return setNotice("Enter the approving customer name."); if (document.type === "Quote" && decision === "Accepted" && document.terms && !termsAccepted) return setNotice("Accept the terms and conditions before approving this quote."); const now = new Date().toISOString(); approvals.setItems((current) => [{ id: makeId("portal-approval"), customerId: activeCustomerId, documentId: document.id, documentVersion: document.documentVersion, documentType: document.type, decision, approvalName: approvalName.trim(), comments: approvalComments.trim(), termsAccepted: document.type === "Quote" ? termsAccepted : false, termsSnapshot: document.terms || "", decidedAt: now }, ...current]); if (!customerSession) { documents.setItems((current) => current.map((item) => item.id === document.id ? { ...item, status: (decision === "Accepted" ? "Accepted" : "Declined") as PricingDocumentStatus, updatedAt: now } : item)); activity.setItems((current) => [{ id: makeId("portal-activity"), customerId: activeCustomerId, jobId: document.jobId, action: `${document.type} ${decision.toLowerCase()}`, detail: `${document.number} decided by ${approvalName.trim()}`, createdAt: now }, ...current]); } setDecisionId(""); setApprovalName(""); setApprovalComments(""); setTermsAccepted(false); setNotice(customerSession ? `${document.number} ${decision.toLowerCase()} decision queued. It will be confirmed after secure sync.` : `${document.number} ${decision.toLowerCase()}. An audit entry was preserved.`); }
+  function submitRequest(event: FormEvent) { event.preventDefault(); if (!activeCustomerId) return setNotice("This customer account is not linked to a portal record."); if (requestJobId && !jobIds.has(requestJobId)) return setNotice("That job is not available to this customer account."); if (!portalRequestTargetMatchesJob(appointments, requestPlannerId, requestJobId)) return setNotice("That appointment is not available for the selected job."); if (!requestMessage.trim()) return setNotice("Enter the request or message."); const now = new Date().toISOString(); requests.setItems((current) => [{ id: makeId("portal-request"), customerId: activeCustomerId, jobId: requestJobId || undefined, plannerEntryId: requestPlannerId || undefined, type: requestType, message: requestMessage.trim(), requestedDate: requestDate || undefined, status: "Open", createdAt: now, updatedAt: now }, ...current]); if (!customerSession) activity.setItems((current) => [{ id: makeId("portal-activity"), customerId: activeCustomerId, jobId: requestJobId || undefined, action: requestType, detail: requestMessage.trim(), createdAt: now }, ...current]); setRequestMessage(""); setRequestDate(""); setRequestPlannerId(""); setNotice("Request sent to the office. The diary has not been changed automatically."); }
+  function portalAuthorization(): SyncAuthorizationContext | null {
+    if (!identity) return null;
+    return {
+      organisationId: identity.organisationId,
+      userId: identity.userId,
+      role: identity.role,
+      customerSourceId: identity.customerSourceId,
+    };
+  }
+  function paymentOperationIsCurrent(authorization: SyncAuthorizationContext, generation: number) {
+    return mountedRef.current
+      && paymentOperationGenerationRef.current === generation
+      && activeSyncAuthorizationMatches(authorization);
+  }
+  async function openLivePaymentLink(invoice: Invoice, sourceId: string) {
+    if (paymentOpeningRef.current) return;
+    const authorization = portalAuthorization();
+    if (!authorization || authorization.role !== "customer" || !authorization.customerSourceId) {
+      setNotice("This customer account cannot open that payment link.");
+      return;
+    }
+    if (!navigator.onLine) {
+      setNotice("Payment links must be verified online. Check your connection and try again.");
+      return;
+    }
+
+    paymentOpeningRef.current = true;
+    const generation = paymentOperationGenerationRef.current + 1;
+    paymentOperationGenerationRef.current = generation;
+    setOpeningPaymentInvoiceId(invoice.id);
+    setNotice("");
+    try {
+      const opened = await openLiveCustomerPaymentUrl(
+        { authorization, invoice, sourceId },
+        () => paymentOperationIsCurrent(authorization, generation),
+        (paymentUrl) => window.location.assign(paymentUrl),
+      );
+      if (!paymentOperationIsCurrent(authorization, generation)) return;
+      if (!opened) {
+        setNotice("This payment link is no longer available. Refresh the invoice or contact the office.");
+      }
+    } catch {
+      if (paymentOperationIsCurrent(authorization, generation)) {
+        setNotice("We could not verify this payment link. Check your connection and try again.");
+      }
+    } finally {
+      if (mountedRef.current && paymentOperationGenerationRef.current === generation) {
+        paymentOpeningRef.current = false;
+        setOpeningPaymentInvoiceId("");
+      }
+    }
+  }
+  function certificateOperationIsCurrent(authorization: SyncAuthorizationContext, generation: number) {
+    return mountedRef.current
+      && certificateOperationGenerationRef.current === generation
+      && activeSyncAuthorizationMatches(authorization);
+  }
+  async function openLiveCertificate(certificate: Pick<ElectricalCertificate, "id" | "customerId" | "jobId" | "status">) {
+    if (certificateOpeningRef.current) return;
+    const authorization = portalAuthorization();
+    if (!authorization || authorization.role !== "customer" || !authorization.customerSourceId) {
+      setNotice("This customer account cannot open that certificate.");
+      return;
+    }
+    if (!navigator.onLine) {
+      setNotice("Certificates must be verified online. Check your connection and try again.");
+      return;
+    }
+
+    certificateOpeningRef.current = true;
+    const generation = certificateOperationGenerationRef.current + 1;
+    certificateOperationGenerationRef.current = generation;
+    setOpeningCertificateId(certificate.id);
+    setNotice("");
+    try {
+      const opened = await openLiveCustomerCertificateUrl(
+        { authorization, certificate },
+        () => certificateOperationIsCurrent(authorization, generation),
+        (certificateUrl) => window.location.assign(certificateUrl),
+      );
+      if (!certificateOperationIsCurrent(authorization, generation)) return;
+      if (!opened) {
+        setNotice("This certificate is no longer available. Refresh the page or contact the office.");
+      }
+    } catch {
+      if (certificateOperationIsCurrent(authorization, generation)) {
+        setNotice("We could not verify this certificate. Check your connection and try again.");
+      }
+    } finally {
+      if (mountedRef.current && certificateOperationGenerationRef.current === generation) {
+        certificateOpeningRef.current = false;
+        setOpeningCertificateId("");
+      }
+    }
+  }
+  function printDocument() { window.print(); }
+  if (!ready) return <Card>Loading customer portal…</Card>;
+  if (customerSession && !authenticatedCustomerId) return <Card>This customer account is not linked to a customer record. Ask the business to correct the portal membership.</Card>;
+  if (!portalUnlocked) return <main className="space-y-6"><PageHeader title="Customer Portal 2.0" description="Local/demo customer access for approvals, documents and job tracking." /><Card><form onSubmit={enterPortal} className="space-y-4"><label className="grid gap-2 text-sm"><span>Customer</span><select className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3" value={selectedCustomerId} onChange={(event) => { setSelectedCustomerId(event.target.value); setUnlocked(false); setAccessCode(""); }}><option value="">Select customer</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>{accessRecord ? <InputField label="Demo access code" type="password" value={accessCode} onChange={(event) => setAccessCode(event.target.value)} /> : <p className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 text-sm text-amber-200">No demo access code is configured for this customer. This local preview is not production authentication.</p>}<Button type="submit">Open customer portal</Button>{notice ? <p className="text-sm text-amber-300">{notice}</p> : null}</form></Card></main>;
+
+  return <main className="space-y-6">
+    <PageHeader title={`Welcome, ${selectedCustomer?.name ?? "customer"}`} description="Track your work, appointments, approvals, deposits, payments and JR Electrical documents." />
+    {notice ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{notice}</div> : null}
+    {customerSession && hasFailedApproval ? <div className="rounded-xl border border-rose-500/30 bg-rose-500/5 px-4 py-3 text-sm text-rose-200">A decision was not recorded. Refresh the page to load the current document before trying again.</div> : null}
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Card><p className="text-sm text-slate-400">Active jobs</p><p className="mt-2 text-3xl font-bold">{customerJobs.filter((job) => job.status !== "Complete").length}</p></Card><Card><p className="text-sm text-slate-400">Upcoming appointments</p><p className="mt-2 text-3xl font-bold">{appointments.length}</p></Card><Card><p className="text-sm text-slate-400">Decisions required</p><p className="mt-2 text-3xl font-bold">{customerPricing.filter((item) => effectivePortalPricingStatus(item, customerApprovals) === "Sent").length}</p></Card><Card><p className="text-sm text-slate-400">Invoices due</p><p className="mt-2 text-3xl font-bold">{customerInvoices.filter((item) => calculatedInvoiceState(item, payments.items) !== "Paid").length}</p></Card></section>
+    <section className="grid gap-6 xl:grid-cols-2"><Card><h2 className="text-xl font-bold">Jobs and progress</h2><div className="mt-4 space-y-4">{customerJobs.map((job) => { const updates = progress.filter((entry) => entry.jobId === job.id); const percent = jobProgress(job, updates.length); return <div key={job.id} className="rounded-xl bg-slate-950 p-4"><div className="flex justify-between gap-4"><div><p className="font-semibold">{job.title}</p><p className="text-sm text-slate-400">{job.siteAddress}</p></div><span className="text-sm">{job.status}</span></div><div className="mt-4 h-2 overflow-hidden rounded bg-slate-800"><div className="h-full bg-cyan-400" style={{ width: `${percent}%` }} /></div><p className="mt-2 text-xs text-slate-500">Progress indication {percent}% · based on job status and saved completion updates</p>{updates.slice(0,2).map((entry) => <p key={entry.id} className="mt-2 text-sm text-slate-300">{entry.milestone}: {entry.note}</p>)}</div>; })}</div></Card><Card><h2 className="text-xl font-bold">Upcoming appointments</h2><div className="mt-4 space-y-3">{appointments.length ? appointments.map((entry) => <div key={entry.id} className="rounded-xl bg-slate-950 p-4"><p className="font-semibold">{entry.title}</p><p className="text-sm text-slate-400">{entry.date} · {entry.startTime || "Time TBC"}{entry.endTime ? `–${entry.endTime}` : ""}</p><p className="mt-1 text-sm text-slate-400">{entry.location || customerJobs.find((job) => job.id === entry.jobId)?.siteAddress}</p><button className="mt-3 text-sm font-semibold text-cyan-300" onClick={() => { setRequestType("Appointment change"); setRequestPlannerId(entry.id); setRequestJobId(entry.jobId || ""); }}>Request a change</button></div>) : <p className="text-slate-400">No upcoming appointments.</p>}</div></Card></section>
+    <Card><h2 className="flex items-center gap-2 text-xl font-bold"><FileText className="size-5" />Quotes and estimates</h2><div className="mt-4 grid gap-4 lg:grid-cols-2">{customerPricing.map((document) => { const currentApproval = portalApprovalForCurrentDocument(customerApprovals, document); const approvalState = currentApproval ? portalApprovalQueueState(portalApprovalQueue, currentApproval.id) : "Synced"; const approvalPending = approvalState === "Pending" || approvalState === "Offline"; const approvalFailed = portalApprovalQueueBlocksDocument(portalApprovalQueue, document); const effectiveStatus = currentApproval?.decision ?? document.status; const requirement = deposits.items.find((item) => item.pricingDocumentId === document.id); return <div key={document.id} className="rounded-xl bg-slate-950 p-4"><div className="flex justify-between gap-3"><div><p className="text-sm text-slate-400">{document.type} · {document.number}</p><p className="font-semibold">{document.title}</p></div><span className="text-sm">{approvalPending ? `${effectiveStatus} · pending sync` : effectiveStatus}</span></div><p className="mt-3 text-2xl font-bold">{money.format(total(document))}</p>{requirement ? <p className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-sm text-cyan-200">Deposit required: {money.format(depositAmount(document, requirement))} · {requirement.dueRule === "Specified date" ? `due ${requirement.dueDate || "date TBC"}` : "due on acceptance"}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><Button variant="secondary" onClick={printDocument}><Download className="size-4" />Print / save PDF</Button>{effectiveStatus === "Sent" && !approvalFailed ? <Button onClick={() => setDecisionId(document.id)}>Review decision</Button> : null}{approvalFailed ? <Button variant="secondary" onClick={() => window.location.reload()}>Refresh to retry</Button> : null}</div>{currentApproval ? <p className="mt-3 text-xs text-slate-500">{approvalPending ? "Decision queued for secure sync" : "Current decision"}: {currentApproval.decision} by {currentApproval.approvalName} on {dateTime(currentApproval.decidedAt)}.{approvalPending ? " Evidence is not recorded until sync succeeds." : " Full history is retained."}</p> : null}{decisionId === document.id ? <div className="mt-4 space-y-3 border-t border-slate-800 pt-4"><InputField label="Approval name" value={approvalName} onChange={(event) => setApprovalName(event.target.value)} /><TextareaField label="Optional comments" value={approvalComments} onChange={(event) => setApprovalComments(event.target.value)} />{document.type === "Quote" && document.terms ? <label className="flex gap-3 text-sm"><input type="checkbox" checked={termsAccepted} onChange={(event) => setTermsAccepted(event.target.checked)} /><span>I accept the quote terms and conditions shown on the document.</span></label> : null}<div className="flex gap-2"><Button onClick={() => recordDecision(document,"Accepted")}><CheckCircle2 className="size-4" />Approve</Button><Button variant="secondary" onClick={() => recordDecision(document,"Declined")}><XCircle className="size-4" />Reject</Button></div></div> : null}</div>; })}</div></Card>
+    <section className="grid gap-6 xl:grid-cols-2">
+      <Card><h2 className="flex items-center gap-2 text-xl font-bold"><Receipt className="size-5" />Invoices</h2><div className="mt-4 space-y-3">{customerInvoices.map((invoice) => { const status = calculatedInvoiceState(invoice, payments.items); const link = invoiceHasOutstandingBalance(invoice, payments.items) ? portalPaymentLinkForInvoice(paymentLinks.items, invoice, activeCustomerId) : undefined; const paid = effectiveInvoicePaid(invoice, payments.items); const liveCustomerPayment = mode !== "local" && (customerSession || !identity); return <div key={invoice.id} className="rounded-xl bg-slate-950 p-4"><div className="flex justify-between gap-3"><div><p className="font-semibold">{invoice.number} · {invoice.title}</p><p className="text-sm text-slate-400">Due {invoice.dueDate || "not set"}</p></div><span className="text-sm">{status}</span></div><p className="mt-3 text-xl font-bold">{money.format(total(invoice))}</p><p className="mt-1 text-sm text-slate-400">Paid {money.format(paid)} · Outstanding {money.format(Math.max(0, total(invoice) - paid))}</p><div className="mt-3 flex flex-wrap gap-2"><Button variant="secondary" onClick={printDocument}>Print / save PDF</Button>{status === "Paid" ? <span className="rounded-xl border border-emerald-500/20 px-3 py-2 text-xs text-emerald-200">Invoice paid</span> : link?.paymentUrl && link.providerConfigured ? liveCustomerPayment ? <Button disabled={Boolean(openingPaymentInvoiceId)} onClick={() => openLivePaymentLink(invoice, link.id)}>{openingPaymentInvoiceId === invoice.id ? "Verifying payment link…" : "Pay invoice"}</Button> : <a href={link.paymentUrl} target="_blank" rel="noreferrer" className="rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950">Pay invoice</a> : <span className="rounded-xl border border-amber-500/20 px-3 py-2 text-xs text-amber-200">Online payment not configured</span>}</div></div>; })}</div></Card>
+      <Card>
+        <h2 className="flex items-center gap-2 text-xl font-bold"><ShieldCheck className="size-5" />Issued certificates</h2>
+        <div className="mt-4 space-y-3">{customerCertificates.map((certificate) => {
+          const liveCustomerCertificate = mode !== "local" && (customerSession || !identity);
+          const safeCertificateUrl = strictHttpsCertificateUrl(certificate.externalPdfUrl);
+          return <div key={certificate.id} className="rounded-xl bg-slate-950 p-4">
+            <p className="font-semibold">{certificate.number}</p>
+            <p className="text-sm text-slate-400">{certificate.type} · {certificate.installationAddress}</p>
+            <div className="mt-3 flex gap-2">{safeCertificateUrl
+              ? liveCustomerCertificate
+                ? <Button disabled={Boolean(openingCertificateId)} onClick={() => openLiveCertificate({ id: certificate.id, customerId: certificate.customerId, jobId: certificate.jobId, status: certificate.status })}>{openingCertificateId === certificate.id ? "Verifying certificate…" : "Download certificate"}</Button>
+                : <a href={safeCertificateUrl} target="_blank" rel="noreferrer" className="text-sm font-semibold text-cyan-300">Download certificate</a>
+              : <button onClick={printDocument} className="text-sm font-semibold text-cyan-300">Print certificate record</button>}</div>
+          </div>;
+        })}</div>
+      </Card>
+    </section>
+    {photos.length ? <Card><h2 className="flex items-center gap-2 text-xl font-bold"><ImageIcon className="size-5" />Photo updates</h2><div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{photos.map(({document,share}) => <div key={document.id} className="overflow-hidden rounded-xl bg-slate-950">{document.dataUrl ? <img src={document.dataUrl} alt={share.caption || document.name} className="h-48 w-full object-cover" /> : null}<div className="p-3"><p className="font-medium">{share.caption || document.name}</p></div></div>)}</div></Card> : null}
+    <Card><h2 className="flex items-center gap-2 text-xl font-bold"><MessageSquare className="size-5" />Contact JR Electrical</h2><form onSubmit={submitRequest} className="mt-4 grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm"><span>Request type</span><select className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3" value={requestType} onChange={(event) => setRequestType(event.target.value as PortalRequestType)}>{["Appointment change","Question","Additional work","General message"].map((type) => <option key={type}>{type}</option>)}</select></label><label className="grid gap-2 text-sm"><span>Related job</span><select className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3" value={requestJobId} onChange={(event) => { const nextJobId = event.target.value; setRequestJobId(nextJobId); if (!portalRequestTargetMatchesJob(appointments, requestPlannerId, nextJobId)) setRequestPlannerId(""); }}><option value="">General</option>{customerJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>{requestType === "Appointment change" ? <InputField label="Preferred new date" type="date" value={requestDate} onChange={(event) => setRequestDate(event.target.value)} /> : null}<div className="md:col-span-2"><TextareaField label="Message or request" value={requestMessage} onChange={(event) => setRequestMessage(event.target.value)} /></div><div className="md:col-span-2"><Button type="submit"><Send className="size-4" />Send to office</Button></div></form></Card>
+  </main>;
+}

@@ -1,0 +1,493 @@
+"use client";
+
+import Link from "next/link";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "next/navigation";
+import {
+  ArrowLeft,
+  Building2,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  Download,
+  ExternalLink,
+  FileText,
+  FolderOpen,
+  MapPin,
+  Plus,
+  ReceiptText,
+  Trash2,
+  User,
+  WalletCards,
+} from "lucide-react";
+import { Button } from "../../../components/ui/Button";
+import { Card } from "../../../components/ui/Card";
+import { InputField, TextareaField } from "../../../components/ui/FormField";
+import { StatusBadge } from "../../../components/ui/StatusBadge";
+import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
+import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
+import { useJobVariationsCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
+import { strictHttpsJobDocumentUrl } from "../../../lib/cloud/fieldJobDocumentCapability-core.mjs";
+import { openLiveFieldJobDocumentUrl } from "../../../lib/cloud/fieldJobDocumentCapability";
+import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../../lib/cloud/fieldMutationPolicy-core.mjs";
+import { canAccessPath, canEditFinance } from "../../../lib/cloud/permissions";
+import { activeSyncAuthorizationMatches, type SyncAuthorizationContext } from "../../../lib/cloud/repository";
+import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
+import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../../lib/jobManagement-core.mjs";
+import { fieldOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
+import { makeId, useLocalStorageCollection } from "../../../lib/storage";
+import { createInvoiceFromCompletedJob } from "../../../lib/workflow";
+import type {
+  Builder,
+  BusinessBankDetails,
+  Customer,
+  Invoice,
+  Job,
+  JobDocument,
+  JobDocumentCategory,
+  JobMilestoneType,
+  JobTimelineEntry,
+  PaymentTermsTemplate,
+  PricingDocument,
+} from "../../../lib/models";
+
+const milestones: JobMilestoneType[] = [
+  "Enquiry received",
+  "Site survey booked",
+  "Quote prepared",
+  "Quote sent",
+  "Quote accepted",
+  "Job created",
+  "Deposit received",
+  "Materials ordered",
+  "Materials delivered",
+  "First fix complete",
+  "Second fix complete",
+  "Testing complete",
+  "Job completed",
+  "Certificate uploaded",
+  "Invoice created",
+  "Invoice sent",
+  "Payment received",
+  "Review requested",
+  "Custom update",
+];
+
+const documentCategories: JobDocumentCategory[] = [
+  "Certificate",
+  "Photo",
+  "Drawing",
+  "RAMS",
+  "Site note",
+  "Material order",
+  "Handover",
+  "Other",
+];
+
+const blankEntry = {
+  milestone: "Enquiry received" as JobMilestoneType,
+  note: "",
+  completedBy: "Jake",
+  completedAt: "",
+};
+
+const blankDocument = {
+  name: "",
+  category: "Certificate" as JobDocumentCategory,
+  externalUrl: "",
+  notes: "",
+  uploadedBy: "Jake",
+};
+
+const financeHandoffMessage = "Job completion is ready for office review. Final invoice creation is restricted to office roles.";
+const documentHandoffMessage = "Assigned job documents remain available to review. Contact the office to arrange new files, links or removals until a dedicated secure field document route is available.";
+const timelineHandoffMessage = "Field job timeline changes are limited to plain site notes. Milestone completion and removals are unavailable in this field workflow.";
+const timelineReadOnlyMessage = "This job timeline is read-only for your cloud role.";
+
+function documentTotal(document: PricingDocument | Invoice) {
+  const subtotal = document.items.reduce((total, item) => total + item.quantity * item.unitPrice, 0);
+  return subtotal + (document.vatEnabled ? subtotal * (document.vatRate / 100) : 0);
+}
+
+export default function JobDetailPage() {
+  const params = useParams<{ id: string }>();
+  const jobId = params.id;
+  const identityState = useCloudIdentity();
+  const fieldJobRecord = identityState.mode !== "local" && identityState.identity?.role === "electrician";
+  const timelineMutationRoute = collectionCloudMutationRoute("cloud_collections", identityState.identity?.role, "jr-os-job-timeline");
+  const fieldTimelineMode = identityState.mode !== "local"
+    && fieldMutationRouteAllows(timelineMutationRoute, "upsert", "create");
+  const timelineMutationRestricted = identityState.mode !== "local"
+    && !fieldTimelineMode
+    && !canEditFinance(identityState.identity?.role);
+  const financeRestricted = identityState.mode !== "local" && !canEditFinance(identityState.identity?.role);
+  const documentMutationRestricted = identityState.mode !== "local" && (
+    !canEditFinance(identityState.identity?.role)
+    || collectionCloudMutationRoute("job_documents", identityState.identity?.role, "jr-os-job-documents").kind !== "direct"
+  );
+  const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const customers = useLocalStorageCollection<Customer>("jr-os-customers");
+  const builders = useLocalStorageCollection<Builder>("jr-os-builders");
+  const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
+  const documents = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
+  const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
+  const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const variations = useJobVariationsCollection();
+  const team = useTeamCollection();
+  const bankDetailsStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
+  const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
+  const [showTimelineForm, setShowTimelineForm] = useState(false);
+  const [showDocumentForm, setShowDocumentForm] = useState(false);
+  const [timelineForm, setTimelineForm] = useState(blankEntry);
+  const [documentForm, setDocumentForm] = useState(blankDocument);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [timelineError, setTimelineError] = useState("");
+  const [documentError, setDocumentError] = useState("");
+  const [documentNotice, setDocumentNotice] = useState("");
+  const [openingDocumentId, setOpeningDocumentId] = useState("");
+  const [invoiceMessage, setInvoiceMessage] = useState("");
+  const mountedRef = useRef(true);
+  const documentOperationGenerationRef = useRef(0);
+  const documentOpeningRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      documentOperationGenerationRef.current += 1;
+      documentOpeningRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    documentOperationGenerationRef.current += 1;
+    documentOpeningRef.current = false;
+    let active = true;
+    queueMicrotask(() => {
+      if (active) {
+        setOpeningDocumentId("");
+        setDocumentNotice("");
+      }
+    });
+    return () => { active = false; };
+  }, [identityState.identity?.customerSourceId, identityState.identity?.organisationId, identityState.identity?.role, identityState.identity?.userId, identityState.mode, jobId]);
+
+  const job = jobs.items.find((item) => item.id === jobId);
+  const customer = customers.items.find((item) => item.id === job?.customerId);
+  const builder = builders.items.find((item) => item.id === job?.builderId);
+  const customerHref = customer ? `/customers/${customer.id}` : "";
+  const builderHref = builder ? `/builders/${builder.id}` : "";
+  const canOpenCustomer = Boolean(customerHref) && (
+    identityState.mode === "local"
+    || canAccessPath(identityState.identity?.role, customerHref, identityState.identity?.email)
+  );
+  const canOpenBuilder = Boolean(builderHref) && (
+    identityState.mode === "local"
+    || canAccessPath(identityState.identity?.role, builderHref, identityState.identity?.email)
+  );
+  const entries = timeline.items
+    .filter((item) => item.jobId === jobId)
+    .toSorted((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
+  const jobDocuments = documents.items
+    .filter((item) => item.jobId === jobId)
+    .toSorted((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+  const linkedQuotes = quotes.items.filter((item) => item.jobId === jobId);
+  const linkedInvoices = invoices.items.filter((item) => item.jobId === jobId);
+  const linkedVariations = variations.items.filter((item) => item.jobId === jobId);
+  const fieldTimelineOperatorName = useMemo(() => fieldOperatorName({
+    identity: identityState.identity,
+    teamMembers: team.items,
+    mode: identityState.mode,
+  }), [identityState.identity, identityState.mode, team.items]);
+
+  const isReady = identityState.isReady && jobs.isReady && customers.isReady && builders.isReady && timeline.isReady && documents.isReady && quotes.isReady && invoices.isReady && variations.isReady && team.isReady && bankDetailsStore.isReady && paymentTermsStore.isReady;
+  if (!isReady) return <Card>Loading job…</Card>;
+
+  if (!job) {
+    return <div className="space-y-6"><Link href={fieldJobRecord ? "/field/jobs" : "/jobs"} className="inline-flex min-h-12 items-center gap-2 text-sm font-semibold text-cyan-300 hover:text-cyan-200"><ArrowLeft className="size-4" />{fieldJobRecord ? "Back to field jobs" : "Back to jobs"}</Link><Card><h1 className="text-xl font-bold">Job not found</h1><p className="mt-2 text-sm text-slate-400">This job may have been deleted or the link is no longer valid.</p></Card></div>;
+  }
+
+  const formattedDate = job.startDate ? new Date(`${job.startDate}T12:00:00`).toLocaleDateString("en-GB") : "Not scheduled";
+  const completedMilestones = new Set(entries.map((entry) => entry.milestone));
+  const nextMilestone = milestones.find((milestone) => milestone !== "Custom update" && !completedMilestones.has(milestone));
+  const sourceQuote = linkedQuotes.find((quote) => quote.id === job.sourceQuoteId)
+    ?? quotes.items.find((quote) => quote.id === job.sourceQuoteId)
+    ?? linkedQuotes[0];
+
+  function addTimelineEntry(event: FormEvent) {
+    event.preventDefault();
+    if (timelineMutationRestricted) { setTimelineError(timelineReadOnlyMessage); return; }
+    if (fieldTimelineMode) {
+      if (!fieldTimelineOperatorName) { setTimelineError("Your active team identity could not be resolved. Refresh your account before saving."); return; }
+      const note = timelineForm.note.trim().slice(0, 2000);
+      if (!note) { setTimelineError("Enter a site note before saving."); return; }
+      const now = new Date().toISOString();
+      const entry: JobTimelineEntry = {
+        id: makeId("timeline"),
+        jobId,
+        milestone: "Custom update",
+        eventType: "Note",
+        note,
+        completedBy: fieldTimelineOperatorName,
+        completedAt: now,
+        createdAt: now,
+      };
+      timeline.setItems((current) => [entry, ...current]);
+      setTimelineForm(blankEntry);
+      setTimelineError("");
+      setShowTimelineForm(false);
+      return;
+    }
+    if (!timelineForm.completedAt) { setTimelineError("Choose the date and time this milestone was completed."); return; }
+    const now = new Date().toISOString();
+    const entry: JobTimelineEntry = {
+      id: makeId("timeline"),
+      jobId,
+      milestone: timelineForm.milestone,
+      note: timelineForm.note.trim(),
+      completedBy: timelineForm.completedBy.trim() || "Jake",
+      completedAt: new Date(timelineForm.completedAt).toISOString(),
+      createdAt: now,
+    };
+    timeline.setItems((current) => [entry, ...current]);
+    setTimelineForm(blankEntry);
+    setTimelineError("");
+    setShowTimelineForm(false);
+  }
+
+  function addMilestoneNow(milestone: JobMilestoneType) {
+    if (fieldTimelineMode) { setTimelineError(timelineHandoffMessage); return; }
+    if (timelineMutationRestricted) { setTimelineError(timelineReadOnlyMessage); return; }
+    const now = new Date().toISOString();
+    timeline.setItems((current) => [{ id: makeId("timeline"), jobId, milestone, note: "", completedBy: "Jake", completedAt: now, createdAt: now }, ...current]);
+  }
+
+  function deleteEntry(entry: JobTimelineEntry) {
+    if (fieldTimelineMode) { setTimelineError(timelineHandoffMessage); return; }
+    if (timelineMutationRestricted) { setTimelineError(timelineReadOnlyMessage); return; }
+    if (window.confirm(`Delete ${entry.milestone} from this job timeline?`)) timeline.remove((item) => item.id === entry.id);
+  }
+
+  function chooseFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null;
+    setSelectedFile(file);
+    if (file && !documentForm.name) setDocumentForm((current) => ({ ...current, name: file.name.replace(/\.[^/.]+$/, "") }));
+  }
+
+  async function addDocument(event: FormEvent) {
+    event.preventDefault();
+    if (documentMutationRestricted) { setDocumentError(documentHandoffMessage); return; }
+    const name = documentForm.name.trim();
+    const externalUrl = documentForm.externalUrl.trim();
+    const safeExternalUrl = externalUrl ? strictHttpsJobDocumentUrl(externalUrl) : undefined;
+    if (!name) { setDocumentError("Enter a document name."); return; }
+    if (!selectedFile && !externalUrl) { setDocumentError("Choose a file or add an external document link."); return; }
+    if (externalUrl && !safeExternalUrl) { setDocumentError("Enter a valid HTTPS document link without embedded credentials."); return; }
+    if (selectedFile && selectedFile.size > 2_000_000) { setDocumentError("For local storage, choose a file smaller than 2 MB. Larger cloud uploads will be added later."); return; }
+
+    let dataUrl = "";
+    if (selectedFile) {
+      dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(new Error("Unable to read file"));
+        reader.readAsDataURL(selectedFile);
+      }).catch(() => "");
+      if (!dataUrl) { setDocumentError("The selected file could not be read."); return; }
+    }
+
+    const now = new Date().toISOString();
+    const record: JobDocument = {
+      id: makeId("document"),
+      jobId,
+      name,
+      category: documentForm.category,
+      fileName: selectedFile?.name ?? "",
+      mimeType: selectedFile?.type ?? "",
+      dataUrl,
+      externalUrl: safeExternalUrl ?? "",
+      notes: documentForm.notes.trim(),
+      uploadedBy: documentForm.uploadedBy.trim() || "Jake",
+      uploadedAt: now,
+      createdAt: now,
+    };
+    documents.setItems((current) => [record, ...current]);
+    setDocumentForm(blankDocument);
+    setSelectedFile(null);
+    setDocumentError("");
+    setShowDocumentForm(false);
+  }
+
+  function deleteDocument(document: JobDocument) {
+    if (documentMutationRestricted) return;
+    if (window.confirm(`Delete ${document.name} from this job?`)) documents.remove((item) => item.id === document.id);
+  }
+
+  function fieldAuthorization(): SyncAuthorizationContext | null {
+    const identity = identityState.identity;
+    if (!identity) return null;
+    return {
+      organisationId: identity.organisationId,
+      userId: identity.userId,
+      role: identity.role,
+      customerSourceId: identity.customerSourceId,
+    };
+  }
+
+  function documentOperationIsCurrent(authorization: SyncAuthorizationContext, generation: number) {
+    return mountedRef.current
+      && documentOperationGenerationRef.current === generation
+      && activeSyncAuthorizationMatches(authorization);
+  }
+
+  async function openLiveDocument(document: Pick<JobDocument, "id" | "jobId">) {
+    if (documentOpeningRef.current) return;
+    const authorization = fieldAuthorization();
+    if (!authorization || authorization.role !== "electrician" || document.jobId !== jobId) {
+      setDocumentNotice("This field account cannot open that document link.");
+      return;
+    }
+    if (!navigator.onLine) {
+      setDocumentNotice("Document links must be verified online. Check your connection and try again.");
+      return;
+    }
+
+    documentOpeningRef.current = true;
+    const generation = documentOperationGenerationRef.current + 1;
+    documentOperationGenerationRef.current = generation;
+    setOpeningDocumentId(document.id);
+    setDocumentNotice("");
+    try {
+      const opened = await openLiveFieldJobDocumentUrl(
+        { authorization, document },
+        () => documentOperationIsCurrent(authorization, generation),
+        (documentUrl) => window.location.assign(documentUrl),
+      );
+      if (!documentOperationIsCurrent(authorization, generation)) return;
+      if (!opened) {
+        setDocumentNotice("This document link is no longer available. Refresh the job or contact the office.");
+      }
+    } catch {
+      if (documentOperationIsCurrent(authorization, generation)) {
+        setDocumentNotice("We could not verify this document link. Check your connection and try again.");
+      }
+    } finally {
+      if (mountedRef.current && documentOperationGenerationRef.current === generation) {
+        documentOpeningRef.current = false;
+        setOpeningDocumentId("");
+      }
+    }
+  }
+
+  function documentExternalLink(document: JobDocument) {
+    const safeDocumentUrl = strictHttpsJobDocumentUrl(document.externalUrl);
+    if (!safeDocumentUrl) return null;
+    if (fieldJobRecord) {
+      return <Button type="button" disabled={Boolean(openingDocumentId)} onClick={() => openLiveDocument({ id: document.id, jobId: document.jobId })}>
+        <ExternalLink className="size-4" />{openingDocumentId === document.id ? "Verifying link…" : "Open link"}
+      </Button>;
+    }
+    return <a href={safeDocumentUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><ExternalLink className="size-4" />Open link</a>;
+  }
+
+  function generateInvoice() {
+    if (!job) return;
+    if (financeRestricted) { setInvoiceMessage(financeHandoffMessage); return; }
+    if (job.status !== "Complete") { setInvoiceMessage("Mark the job as Complete before generating its final invoice."); return; }
+    if (linkedInvoices.length) { setInvoiceMessage(`${linkedInvoices[0].number} is already linked to this job.`); return; }
+    const now = new Date().toISOString();
+    const generated = createInvoiceFromCompletedJob({
+      job,
+      quote: sourceQuote,
+      variations: linkedVariations,
+      invoices: invoices.items,
+      invoiceId: makeId("invoice"),
+      now,
+      createId: makeId,
+      bankDetails: bankDetailsStore.items[0] ?? defaultBankDetails,
+      defaultPaymentTerms: paymentTermsStore.items.find((item) => item.active && item.isDefault),
+    });
+    invoices.setItems((current) => [generated.invoice, ...current]);
+    const includedVariationIds = new Set(generated.invoice.items.map((item) => item.variationId).filter(Boolean));
+    const includedVariations = linkedVariations.filter((variation) => includedVariationIds.has(variation.id) && isAcceptedVariationStatus(variation.status));
+    variations.setItems((current) => current.map((variation) => {
+      if (!includedVariationIds.has(variation.id)) return variation;
+      return transitionVariation({ variation, nextStatus: "Invoiced", now, auditId: makeId("variation-audit"), completedBy: "JR OS", invoiceId: generated.invoice.id, detail: `${variation.number} included on ${generated.invoice.number}.` });
+    }));
+    timeline.setItems((current) => {
+      const additions: JobTimelineEntry[] = [generated.timelineEntry, ...includedVariations.map((variation) => variationTimelineEntry({ variation, fromStatus: variation.status, toStatus: "Invoiced", timelineId: makeId("timeline"), completedBy: "JR OS", now }))];
+      if (!current.some((entry) => entry.jobId === jobId && entry.milestone === "Job completed")) {
+        additions.push({ id: makeId("timeline"), jobId, milestone: "Job completed", note: "Job marked complete before final invoice generation.", completedBy: "JR OS", completedAt: now, createdAt: now });
+      }
+      return [...additions, ...current];
+    });
+    setInvoiceMessage(`${generated.invoice.number} created as a draft and linked to this job and its source quote.`);
+  }
+
+  return <div className="space-y-6">
+    <Link href={fieldJobRecord ? "/field/jobs" : "/jobs"} className="inline-flex min-h-12 items-center gap-2 text-sm font-semibold text-cyan-300 hover:text-cyan-200"><ArrowLeft className="size-4" />{fieldJobRecord ? "Back to field jobs" : "Back to jobs"}</Link>
+
+    <Card className="border-cyan-400/30">
+      <div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job record</p><h1 className="mt-2 text-3xl font-bold">{job.title}</h1></div><StatusBadge status={job.status} /></div>
+      <div className="mt-6 grid gap-4 text-sm text-slate-300 md:grid-cols-2">
+        <p className="flex items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" />{job.siteAddress}</p>
+        <p className="flex items-center gap-2"><CalendarDays className="size-4 text-cyan-400" />{formattedDate}</p>
+        {!financeRestricted ? <p className="flex items-center gap-2"><WalletCards className="size-4 text-cyan-400" />{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.value || 0)}</p> : null}
+        {!financeRestricted ? <p className="md:col-span-2 whitespace-pre-wrap"><span className="font-semibold text-slate-200">Notes:</span> {job.notes || "No notes"}</p> : null}
+      </div>
+    </Card>
+
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Project workflow</p><h2 className="mt-1 text-2xl font-bold">Quote → Job → Invoice → Payment</h2><p className="mt-1 text-sm text-slate-400">A live view built from the linked records, with no duplicate data entry.</p></div>{financeRestricted ? <p className="max-w-md text-sm text-amber-200">{financeHandoffMessage}</p> : linkedInvoices.length ? <Link href="/invoices" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ReceiptText className="mr-2 size-4" />View invoice</Link> : <Button type="button" disabled={job.status !== "Complete"} onClick={generateInvoice}><ReceiptText className="mr-2 size-4" />Generate invoice</Button>}</div>
+      {invoiceMessage ? <div className={`rounded-xl border px-4 py-3 text-sm ${financeRestricted ? "border-amber-500/20 bg-amber-500/5 text-amber-200" : "border-emerald-500/20 bg-emerald-500/5 text-emerald-300"}`}>{invoiceMessage}</div> : null}
+      {!financeRestricted && job.status !== "Complete" && !linkedInvoices.length ? <p className="text-sm text-amber-300">Invoice generation unlocks when the job status is Complete.</p> : null}
+      {!financeRestricted ? <>
+        <ProjectTimeline job={job} quote={sourceQuote} invoices={linkedInvoices} />
+        {job.quoteSnapshot ? <Card><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-violet-300">Accepted pricing snapshot</p><h3 className="mt-1 text-lg font-bold">{job.quoteSnapshot.quoteNumber}</h3><p className="mt-1 text-sm text-slate-500">{job.quoteSnapshot.items.length} copied labour, material and allowance line{job.quoteSnapshot.items.length === 1 ? "" : "s"}</p></div>{sourceQuote ? <Link href={`/quotes/${sourceQuote.id}`} className="text-sm font-semibold text-cyan-300 hover:text-cyan-200">Open source quote</Link> : null}</div>{job.quoteSnapshot.profitability ? <div className="mt-4 grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-slate-950/60 p-3"><p className="text-xs text-slate-500">Cost price</p><p className="mt-1 font-bold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.costPrice)}</p></div><div className="rounded-xl bg-slate-950/60 p-3"><p className="text-xs text-slate-500">Selling price</p><p className="mt-1 font-bold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.sellingPrice)}</p></div><div className="rounded-xl bg-emerald-500/5 p-3"><p className="text-xs text-slate-500">Expected profit</p><p className="mt-1 font-bold text-emerald-300">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.quoteSnapshot.profitability.expectedProfit)}</p></div></div> : null}</Card> : null}
+      </> : null}
+    </section>
+
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job folder</p><h2 className="mt-1 text-2xl font-bold">Documents and records</h2><p className="mt-1 text-sm text-slate-400">Keep certificates, photos, drawings, RAMS, handover documents and site records together.</p></div>{documentMutationRestricted ? <p className="max-w-xl text-sm text-amber-200">{documentHandoffMessage}</p> : <Button onClick={() => setShowDocumentForm((current) => !current)}><Plus className="mr-2 size-4" />{showDocumentForm ? "Close document" : "Add document"}</Button>}</div>
+
+      <div className={financeRestricted ? "grid gap-4" : "grid gap-4 sm:grid-cols-3"}>
+        <Card><p className="text-sm text-slate-400">Uploaded documents</p><p className="mt-2 text-3xl font-bold">{jobDocuments.length}</p></Card>
+        {!financeRestricted ? <>
+          <Card><p className="text-sm text-slate-400">Linked quotes</p><p className="mt-2 text-3xl font-bold">{linkedQuotes.length}</p></Card>
+          <Card><p className="text-sm text-slate-400">Linked invoices</p><p className="mt-2 text-3xl font-bold">{linkedInvoices.length}</p></Card>
+        </> : null}
+      </div>
+
+      {!documentMutationRestricted && showDocumentForm ? <Card><form onSubmit={addDocument} className="grid gap-4 md:grid-cols-2">
+        <InputField required label="Document name" value={documentForm.name} onChange={(event) => setDocumentForm({ ...documentForm, name: event.target.value })} />
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={documentForm.category} onChange={(event) => setDocumentForm({ ...documentForm, category: event.target.value as JobDocumentCategory })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{documentCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Upload file</span><input type="file" onChange={chooseFile} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1 file:text-slate-200" /><span className="text-xs font-normal text-slate-500">Local files must be under 2 MB.</span></label>
+        <InputField label="External link" type="url" placeholder="https://..." value={documentForm.externalUrl} onChange={(event) => setDocumentForm({ ...documentForm, externalUrl: event.target.value })} />
+        <InputField label="Added by" value={documentForm.uploadedBy} onChange={(event) => setDocumentForm({ ...documentForm, uploadedBy: event.target.value })} />
+        <div className="md:col-span-2"><TextareaField label="Notes" value={documentForm.notes} onChange={(event) => setDocumentForm({ ...documentForm, notes: event.target.value })} /></div>
+        {documentError ? <p className="md:col-span-2 text-sm text-red-300">{documentError}</p> : null}
+        <div className="md:col-span-2 flex justify-end"><Button type="submit">Save document</Button></div>
+      </form></Card> : null}
+
+      {documentNotice ? <p className="text-sm text-amber-200">{documentNotice}</p> : null}
+      {jobDocuments.length === 0 ? <Card><div className="flex items-start gap-3"><FolderOpen className="mt-0.5 size-5 text-slate-500" /><div><h3 className="font-semibold">No uploaded documents yet</h3><p className="mt-1 text-sm text-slate-400">{documentMutationRestricted ? "No assigned job documents are currently available to review." : "Add certificates, site photos, drawings, RAMS or external cloud links to build this job folder."}</p></div></div></Card> : <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((document) => <Card key={document.id}><div className="flex items-start gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p><h3 className="mt-1 truncate font-bold">{document.name}</h3><p className="mt-1 text-xs text-slate-500">{new Date(document.uploadedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} · {document.uploadedBy}</p></div>{!documentMutationRestricted ? <button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div>{document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{document.dataUrl ? <a href={document.dataUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}{documentExternalLink(document)}</div></div></div></Card>)}</div>}
+
+      {!financeRestricted && (linkedQuotes.length > 0 || linkedInvoices.length > 0) ? <div className="grid gap-4 md:grid-cols-2">
+        <Card><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Commercial documents</p><h3 className="mt-1 text-lg font-bold">Quotes and estimates</h3></div><Link href="/quotes" className="text-sm text-cyan-300 hover:text-cyan-200">Open all</Link></div><div className="mt-4 space-y-2">{linkedQuotes.map((quote) => <Link key={quote.id} href={`/quotes/${quote.id}`} className="flex items-center justify-between rounded-xl bg-slate-950/60 px-3 py-3 hover:bg-slate-950"><span><span className="block font-semibold">{quote.number}</span><span className="text-xs text-slate-500">{quote.type} · {quote.status}</span></span><span className="font-semibold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(documentTotal(quote))}</span></Link>)}</div></Card>
+        <Card><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Billing</p><h3 className="mt-1 text-lg font-bold">Invoices</h3></div><Link href="/invoices" className="text-sm text-cyan-300 hover:text-cyan-200">Open all</Link></div><div className="mt-4 space-y-2">{linkedInvoices.map((invoice) => <div key={invoice.id} className="flex items-center justify-between rounded-xl bg-slate-950/60 px-3 py-3"><span><span className="block font-semibold">{invoice.number}</span><span className="text-xs text-slate-500">{invoice.status}</span></span><span className="font-semibold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(documentTotal(invoice))}</span></div>)}{linkedInvoices.length === 0 ? <p className="text-sm text-slate-500">No invoice created yet.</p> : null}</div></Card>
+      </div> : null}
+    </section>
+
+    <div className="grid gap-6 xl:grid-cols-[0.9fr,1.1fr]">
+      <div className="space-y-6">
+        <Card><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Contacts</p><h2 className="mt-1 text-xl font-bold">Customer and builder</h2></div><User className="size-5 text-cyan-400" /></div><div className="mt-5 space-y-4 text-sm">{customer ? <div className="rounded-xl bg-slate-950/60 p-4"><p className="font-semibold">{customer.name}</p><p className="mt-1 text-slate-400">{customer.phone || "No phone"} · {customer.email || "No email"}</p>{canOpenCustomer ? <Link href={customerHref} className="mt-3 inline-block text-cyan-300 hover:text-cyan-200">Open customer</Link> : null}</div> : <p className="text-slate-400">No customer linked.</p>}{builder ? <div className="rounded-xl bg-slate-950/60 p-4"><p className="font-semibold">{builder.companyName}</p><p className="mt-1 text-slate-400">{builder.contactName} · {builder.phone || "No phone"}</p>{canOpenBuilder ? <Link href={builderHref} className="mt-3 inline-block text-cyan-300 hover:text-cyan-200">Open builder</Link> : null}</div> : null}</div></Card>
+
+        <Card><div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Next step</p><h2 className="mt-1 text-xl font-bold">Suggested milestone</h2></div><CheckCircle2 className="size-5 text-cyan-400" /></div>{nextMilestone ? <div className="mt-5"><p className="text-sm text-slate-400">The next incomplete standard milestone is:</p><p className="mt-2 font-semibold">{nextMilestone}</p>{fieldTimelineMode ? <p className="mt-4 text-sm text-amber-200">{timelineHandoffMessage}</p> : timelineMutationRestricted ? <p className="mt-4 text-sm text-amber-200">{timelineReadOnlyMessage}</p> : <Button className="mt-4" type="button" onClick={() => addMilestoneNow(nextMilestone)}>Mark complete now</Button>}</div> : <p className="mt-5 text-sm text-emerald-300">All standard workflow milestones are recorded.</p>}</Card>
+      </div>
+
+      <Card><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Project timeline</p><h2 className="mt-1 text-xl font-bold">Milestones and activity</h2></div>{timelineMutationRestricted ? <p className="max-w-md text-sm text-amber-200">{timelineReadOnlyMessage}</p> : <Button type="button" onClick={() => { setTimelineError(""); setShowTimelineForm((current) => !current); }}><Plus className="mr-2 size-4" />{fieldTimelineMode ? "Add site note" : "Add milestone"}</Button>}</div>{timelineError ? <p className="mt-4 text-sm text-red-300">{timelineError}</p> : null}{showTimelineForm && !timelineMutationRestricted ? <form className="mt-5 space-y-4" onSubmit={addTimelineEntry}>{fieldTimelineMode ? <div className="space-y-4"><TextareaField required maxLength={2000} label="Site note" value={timelineForm.note} onChange={(event) => setTimelineForm((current) => ({ ...current, note: event.target.value }))} /><div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4 text-sm"><p className="font-semibold text-slate-200">Recorded by {fieldTimelineOperatorName || "Active team identity unavailable"}</p><p className="mt-1 text-slate-400">Your active team identity and completion time are set securely when the note is saved.</p></div></div> : <div className="grid gap-4 sm:grid-cols-2"><label className="block text-sm text-slate-300"><span className="mb-2 block font-semibold">Milestone</span><select className="min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3" value={timelineForm.milestone} onChange={(event) => setTimelineForm((current) => ({ ...current, milestone: event.target.value as JobMilestoneType }))}>{milestones.map((milestone) => <option key={milestone}>{milestone}</option>)}</select></label><InputField label="Completed by" value={timelineForm.completedBy} onChange={(event) => setTimelineForm((current) => ({ ...current, completedBy: event.target.value }))} /><InputField label="Completed at" type="datetime-local" value={timelineForm.completedAt} onChange={(event) => setTimelineForm((current) => ({ ...current, completedAt: event.target.value }))} required /><TextareaField label="Note" value={timelineForm.note} onChange={(event) => setTimelineForm((current) => ({ ...current, note: event.target.value }))} /></div>}<div className="flex gap-3"><Button type="submit" disabled={fieldTimelineMode && !fieldTimelineOperatorName}>{fieldTimelineMode ? "Save site note" : "Save milestone"}</Button><Button type="button" variant="secondary" onClick={() => { setTimelineError(""); setShowTimelineForm(false); }}>Cancel</Button></div></form> : null}<div className="mt-5 space-y-3">{entries.length ? entries.map((entry) => <div key={entry.id} className="flex items-start justify-between gap-4 rounded-xl border border-slate-800 bg-slate-950/60 p-4"><div className="flex gap-3"><div className="mt-1 rounded-full bg-cyan-500/10 p-2 text-cyan-300"><Clock3 className="size-4" /></div><div><p className="font-semibold">{entry.milestone}</p><p className="mt-1 text-xs text-slate-500">{new Date(entry.completedAt).toLocaleString("en-GB")} · {entry.completedBy}</p>{entry.note ? <p className="mt-2 text-sm text-slate-400">{entry.note}</p> : null}</div></div>{!fieldTimelineMode && !timelineMutationRestricted ? <button type="button" onClick={() => deleteEntry(entry)} className="text-slate-500 hover:text-red-300" aria-label={`Delete ${entry.milestone}`}><Trash2 className="size-4" /></button> : null}</div>) : <p className="text-sm text-slate-400">No milestones recorded yet.</p>}</div></Card>
+    </div>
+
+    <Card><div className="flex items-start gap-3"><Building2 className="mt-0.5 size-5 text-cyan-400" /><div><h2 className="font-semibold">Operational record</h2><p className="mt-1 text-sm text-slate-400">This page links the commercial source, customer, builder, timeline, documents and invoice lifecycle for one job.</p></div></div></Card>
+  </div>;
+}
