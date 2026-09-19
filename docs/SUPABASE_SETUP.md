@@ -8,6 +8,11 @@ database and the repository's security migrations. Use its staged repair and
 acceptance checks before cloud cutover; green application CI alone does not prove
 that the database is current.
 
+The [existing-data SQL rehearsal](./security/supabase-upgrade-rehearsal-2026-09-19.md)
+checks the pending upgrade and a synthetic backup restore in CI. Its local-only
+platform fixtures are not setup scripts for a hosted project; production backup
+review, full Supabase rehearsal and migration authorization remain required.
+
 ## 1. Create the Supabase project
 
 1. Create a Supabase project in the region appropriate for the business.
