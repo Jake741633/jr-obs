@@ -248,6 +248,13 @@ remains `ACTIVE_HEALTHY`, and its migration history still ends at
 
 ## Production upgrade and mobile acceptance still pending
 
+The [19 September existing-data SQL rehearsal](./supabase-upgrade-rehearsal-2026-09-19.md)
+now verifies the exact 70-file suffix against a restored synthetic PostgreSQL
+baseline: 134 existing rows, nine reviewed transformations, preserved history,
+role checks and four rejected invalid baselines. It runs in CI. This completes
+the local SQL stage; its minimal platform contracts do not establish a full
+hosted Supabase restore or the availability of a production backup.
+
 1. Use the committed upgrade manifest to prepare the incremental upgrade from
    the verified live baseline. Rehearse it in an isolated environment with
    representative existing Auth memberships, records, file bindings and audit
