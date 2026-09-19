@@ -15,7 +15,7 @@ const bucket = "jr-os-private";
 const legacyBucket = "jr-os-files";
 
 const typedTables = [
-  "customers", "jobs", "pricing_documents", "invoices", "payments", "expenses", "materials",
+  "customers", "jobs", "builders", "pricing_documents", "invoices", "payments", "expenses", "materials",
   "stock_items", "stock_movements", "purchase_lists", "planner_entries", "team_members", "timesheets",
   "certificates", "electrical_testing_records", "job_documents", "portal_approvals", "portal_requests",
   "ai_recommendation_evidence",

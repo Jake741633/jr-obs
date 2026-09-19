@@ -9,6 +9,7 @@ const targetOrganisation = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 function fixture({ failInsert = false, failDelete = false } = {}) {
   const requests = [];
   const profiles = new Map();
+  const builders = new Map();
   const organisations = new Map([[targetOrganisation, { id: targetOrganisation, name: "Target test business" }]]);
   let sequence = 0;
   const uuid = () => `00000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`;
@@ -62,8 +63,18 @@ function fixture({ failInsert = false, failDelete = false } = {}) {
       }
     }
     if (pathname.startsWith("/auth/v1/admin/users/") && method === "DELETE") {
-      profiles.delete(pathname.split("/").at(-1));
+      const userId = pathname.split("/").at(-1);
+      if ([...builders.values()].some((builder) => builder.created_by === userId || builder.updated_by === userId)) {
+        return response({ message: "Builder still references this user" }, false);
+      }
+      profiles.delete(userId);
       return response({});
+    }
+    if (pathname === "/rest/v1/builders" && method === "DELETE") {
+      for (const [sourceId, builder] of builders) {
+        if (builder.organisation_id === organisationId) builders.delete(sourceId);
+      }
+      return response([]);
     }
     if (pathname.startsWith("/rest/v1/") && method === "DELETE") return response([]);
     throw new Error(`Unexpected fixture request: ${method} ${pathname}`);
@@ -80,7 +91,7 @@ function fixture({ failInsert = false, failDelete = false } = {}) {
     } },
     fetch,
   }, { timeout: 1000 });
-  return { ...api, requests, profiles, organisations };
+  return { ...api, requests, profiles, builders, organisations };
 }
 
 test("RLS fixtures provision every role without moving an immutable signup profile", async () => {
@@ -145,4 +156,19 @@ test("profile restoration inserts a missing row and rejects an established membe
   await assert.rejects(state.createProfile(user, targetOrganisation, "owner"), /Unable to create owner profile/);
   assert.equal(state.profiles.get(user.id).role, "customer");
   assert.equal(state.requests.some((request) => request.method === "DELETE"), false);
+});
+
+test("cleanup removes builder references before deleting their fixture accounts", async () => {
+  const state = fixture();
+  const user = await state.createUser("a-office");
+  await state.createProfile(user, targetOrganisation, "office");
+  state.builders.set("assigned-builder", {
+    organisation_id: targetOrganisation,
+    created_by: user.id,
+    updated_by: user.id,
+  });
+  await state.cleanup({ users: [user], organisations: [targetOrganisation], objectPaths: [], legacyObjectPaths: [] });
+  assert.equal(state.builders.size, 0);
+  assert.equal(state.profiles.has(user.id), false, "Auth deletion must not be blocked by a builder foreign key");
+  assert.equal(state.organisations.size, 0);
 });

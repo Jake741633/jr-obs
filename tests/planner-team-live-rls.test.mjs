@@ -39,7 +39,7 @@ const plannerLines = [
   '      "Office should create another planner team identity",',
   "    );",
   "    await expectAllowed(",
-  '      await insertRecord(accounts.B.office, "team_members", typedRecord(organisationB, crossTenantPlannerTeamB, null, null, { name: "Tenant B planner worker", email: accounts.B.electrician.email, role: "Electrician", status: "Active" })),',
+  '      await insertRecord(accounts.B.office, "team_members", typedRecord(organisationB, crossTenantPlannerTeamB, null, null, { name: "Tenant B planner worker", email: "other-tenant-planner@example.com", role: "Electrician", status: "Active" })),',
   '      "Tenant B office should create its planner team identity",',
   "    );",
   "    await expectAllowed(",
