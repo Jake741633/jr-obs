@@ -7,6 +7,8 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.4.6",
-    "@electric-sql/pglite-tools": "0.3.6"
+    "@electric-sql/pglite-tools": "0.3.6",
+    "pg": "8.23.0",
+    "supabase": "2.117.0"
   }
 }
