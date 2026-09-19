@@ -77,6 +77,47 @@ migrations contain their own transaction boundaries. Production recovery
 must use a reviewed backup or an explicit forward repair, not an assumed outer
 transaction or an automatic retry.
 
+## Production backup review
+
+The authenticated Supabase dashboard was reviewed on 19 September after
+[PR #239](https://github.com/Jake741633/jr-obs/pull/239) merged as
+`bc5946e32bbc6e2514efc5d379f3bb038f9e2e43`. Its five resulting workflows and
+the preview passed, including the rehearsal on both CI events.
+
+For the linked project `kavyemkgasrtkqjgrpgw`:
+
+- The project overview reported no backups.
+- [Scheduled backups](https://supabase.com/dashboard/project/kavyemkgasrtkqjgrpgw/database/backups/scheduled)
+  confirmed that the current Free plan does not include project backups.
+- [Point-in-time recovery](https://supabase.com/dashboard/project/kavyemkgasrtkqjgrpgw/database/backups/pitr)
+  showed the Pro-plan add-on offer, with no restore point available.
+- The project is `ACTIVE_HEALTHY`; a fresh read-only database check still found
+  three Auth users, three organisations, zero Storage objects and the unchanged
+  `20260809134430` / `private_file_object_path_uniqueness` migration baseline.
+
+No managed restore point was available to review. This does not determine whether
+an independent backup exists elsewhere. No production backup was exported in
+this session, and no paid plan, add-on, project, password or security setting was
+changed. **The production backup gate remains unmet.**
+
+The next backup deliverable is a protected logical export from a trusted
+environment with database access, following the current
+[Supabase backup/restore procedure](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
+It must cover the JR OS `public`/`private` schema and data, Auth identities,
+Storage metadata, migration history, grants, the custom Auth signup trigger and
+Storage policies. The documented default dump requires separate handling of
+custom `auth`/`storage` schema changes and `supabase_migrations` history. Review
+any platform encryption requirements before restoring into another project.
+
+Keep the actual dump and credentials outside GitHub and application artifacts.
+Record capture time, source baseline, file hashes and restore results without
+publishing credentials or Auth records. Restore into an isolated full Supabase
+environment and verify identities, memberships, canonical rows, private-file
+bindings, audit history, grants, RLS and application flows before applying the
+pending upgrade there. A successful export alone is not a restore test. Recheck
+Storage object count at capture time and separately preserve object bytes if
+any exist. Creating a paid recovery option would require a separate decision.
+
 ## Limits and remaining release evidence
 
 [platform.sql](../../supabase/rehearsal/platform.sql) models only the Auth and
