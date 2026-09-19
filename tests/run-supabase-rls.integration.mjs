@@ -203,7 +203,7 @@ const fieldBuilderReadCoverage = [
   '    await expectAllowed(officeUnassignedBuilder, "Office unassigned builder query should execute");',
   '    assert.equal(officeUnassignedBuilder.payload.length, 1, "Office should retain unassigned builder access");',
   '    await expectDenied(await patchRecords(accounts.A.electrician, "field_builders", "source_id=eq." + assignedBuilderA, { payload: { id: assignedBuilderA, companyName: "Forged field builder" } }), "Electrician must not write the field builder projection");',
-  '    await expectDenied(await patchRecords(accounts.A.electrician, "builders", "source_id=eq." + assignedBuilderA, { payload: { id: assignedBuilderA, companyName: "Forged complete builder" } }), "Electrician must not write complete builder CRM records");',
+  '    await expectFilteredUpdateUnchanged({ account: accounts.A.electrician, reader: accounts.A.office, table: "builders", filter: "source_id=eq." + assignedBuilderA, body: { payload: { id: assignedBuilderA, companyName: "Forged complete builder" } }, message: "Electrician must not write complete builder CRM records" });',
   '',
 ].join("\n");
 const fieldTimelineCoverage = [
@@ -1525,10 +1525,12 @@ const secureGenericReadSnippet = `      const electricianCompleteFieldRead = awa
       if (collectionKey === "jr-os-job-packs") {
         assert.equal(fieldPayload.labourRate, undefined, "Field job pack projection must omit labour rates");
         assert.equal(fieldPayload.materials[0].unitPrice, undefined, "Field job pack projection must omit material prices");
-        await expectDenied(
-          await patchRecords(accounts.A.electrician, "cloud_collections", \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`, { payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 9 } }),
-          "Electrician direct job-pack updates must fail closed",
-        );
+        await expectFilteredUpdateUnchanged({
+          account: accounts.A.electrician, reader: accounts.A.office, table: "cloud_collections",
+          filter: \`collection_key=eq.\${encodeURIComponent(collectionKey)}&source_id=eq.\${sourceId}\`,
+          body: { payload: { id: sourceId, customerId: customerA, jobId: jobA, labourHours: 9 } },
+          message: "Electrician direct job-pack updates must fail closed",
+        });
       }
       if (collectionKey === "jr-os-job-variations") {
         assert.equal(fieldPayload.labourRate, undefined, "Field variation projection must omit labour rates");

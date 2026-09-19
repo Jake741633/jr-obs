@@ -291,6 +291,20 @@ async function expectDeniedWithCode(result, code, message) {
   assert.equal(result.payload?.code, code, `${message}: expected PostgreSQL ${code}, received ${JSON.stringify(result.payload)}`);
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- Called by scenarios injected by run-supabase-rls.integration.mjs.
+async function expectFilteredUpdateUnchanged({ account, reader, table, filter, body, message }) {
+  const before = await listRecords(reader, table, `select=*&${filter}`);
+  await expectAllowed(before, `${message}: canonical read before update`);
+  assert.equal(before.payload.length, 1, `${message}: requires an existing canonical record`);
+  const result = await patchRecords(account, table, filter, body);
+  // RLS USING can deny an UPDATE by matching zero rows without an HTTP error.
+  await expectAllowed(result, `${message}: filtered update should execute without matching rows`);
+  assert.deepEqual(result.payload, [], `${message}: must return zero rows`);
+  const after = await listRecords(reader, table, `select=*&${filter}`);
+  await expectAllowed(after, `${message}: canonical read after update`);
+  assert.deepEqual(after.payload, before.payload, `${message}: entire canonical record must remain unchanged`);
+}
+
 const integrationTest = enabled ? test : test.skip;
 
 integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role boundaries", { timeout: 180_000 }, async () => {
