@@ -1177,11 +1177,12 @@ integrationTest("Supabase RLS and private Storage enforce JR OS tenant and role 
     assert.equal(viewedStaleDocumentVersion, 1, "Customer pricing projection must expose its server-authored document version");
     await expectAllowed(
       await patchRecords(accounts.A.office, "pricing_documents", `source_id=eq.${staleRevisionQuoteA}`, {
-        payload: {
+        // PATCH replaces the JSON payload; retain its canonical identity bindings.
+        payload: typedRecord(organisationA, staleRevisionQuoteA, customerA, jobA, {
           ...staleRevisionQuotePayload,
           title: "Unseen revised commercial offer",
           items: [{ id: source("stale-revision-line"), description: "Revised scope", quantity: 1, unitPrice: 999 }],
-        },
+        }).payload,
       }),
       "Office should revise and re-send the quote after the customer viewed it",
     );
