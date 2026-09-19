@@ -31,7 +31,19 @@ baselines independently.
    must remain identical. Check SQL access, RLS and both rollback probes.
 6. Restart services. Exercise existing JWTs, fresh password logins, a restored
    refresh token, revoked-token denial, tenant and role API boundaries, and
-   private downloads with byte hashes and negative access cases.
+   private downloads with byte hashes and negative access cases. Replace an
+   existing drawing, verify the new bytes as its assigned field reader, and
+   confirm bulk deletion leaves the object untouched, then delete that existing
+   unbound file through the permitted single-object owner Storage API. Verify
+   its metadata is removed and its bytes cannot be downloaded.
+
+The restart waits for Auth, Storage and the Data API to become ready before
+running access assertions. The catalog comparison retains visible column order
+and every column definition while excluding internal ordinal/descriptor numbers:
+PostgreSQL leaves physical gaps after dropped columns, and a logical restore
+compacts those gaps. A focused native-dump regression check accepted that
+renumbering and still detected a visible column reorder. The full-platform run
+also covers this case in existing Auth tables.
 
 ## Scope
 
@@ -57,4 +69,5 @@ remain required. Physical mobile installation checks remain separate.
 
 References: [Supabase CLI](https://supabase.com/docs/guides/local-development/cli/getting-started),
 [CI testing](https://supabase.com/docs/guides/deployment/ci/testing), and
-[backup/restore guidance](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore).
+[backup/restore guidance](https://supabase.com/docs/guides/platform/migrating-within-supabase/backup-restore),
+plus [PostgreSQL dropped-column catalog behavior](https://www.postgresql.org/docs/17/catalog-pg-attribute.html).

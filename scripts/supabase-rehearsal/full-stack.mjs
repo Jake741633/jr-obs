@@ -116,7 +116,7 @@ async function ready(client,owner) {
   throw new Error(`Restored Auth/Storage/Data API did not become ready: ${last}`);
 }
 
-async function checkHttp(client,actors) {
+async function checkHttp(client,actors,connection) {
   const jobs = actor=>client.json("/rest/v1/jobs?select=organisation_id,source_id,payload&deleted_at=is.null",{actor});
   for(const name of ["owner","admin","office","other"]) {
     const rows = await jobs(actors[name]);
@@ -159,9 +159,14 @@ async function checkHttp(client,actors) {
   const replacedDownload = await client.request(`/storage/v1/object/authenticated/jr-os-private/${path("document")}`,{actor:actors.field});
   assert(replacedDownload.ok);
   assert.equal(hash(Buffer.from(await replacedDownload.arrayBuffer())),hash(replacement));
-  await client.json("/storage/v1/object/jr-os-private",{method:"DELETE",actor:actors.owner,body:{prefixes:[path("unknown-file")]}});
+  const stored = async()=>Number((await connection.query("select count(*) from storage.objects where bucket_id='jr-os-private' and name=$1",[path("unknown-file")])).rows[0].count);
+  const bulk = await client.json("/storage/v1/object/jr-os-private",{method:"DELETE",actor:actors.owner,body:{prefixes:[path("unknown-file")]}});
+  assert.deepEqual(bulk,[],"Bulk deletion must remain denied by its separate operation policy");
+  assert.equal(await stored(),1,"Denied bulk deletion changed object metadata");
+  await client.json(`/storage/v1/object/jr-os-private/${path("unknown-file")}`,{method:"DELETE",actor:actors.owner});
+  assert.equal(await stored(),0,"Permitted single-object deletion did not remove metadata");
   const removed = await client.request(`/storage/v1/object/authenticated/jr-os-private/${path("unknown-file")}`,{actor:actors.owner});
-  assert([400,404].includes(removed.status),"Deleted synthetic object remains downloadable");
+  assert([400,404].includes(removed.status),`Deleted synthetic object request returned HTTP ${removed.status}`);
   for(const name of ["owner","field","customer"]) {
     const fresh = await client.signIn(actors[name]);
     const user = await client.json("/auth/v1/user",{actor:fresh});
@@ -249,7 +254,7 @@ try {
   console.log(`All ${manifest.pending_count} migrations passed; ${preserved.unchanged} public rows unchanged, nine reviewed transformations; platform records preserved`);
   docker("start",...services);
   await ready(client,actors.owner);
-  await checkHttp(client,actors);
+  await checkHttp(client,actors,db);
   console.log(JSON.stringify({status:"passed",engine:version,pendingMigrations:manifest.pending_count,
     authUsers:before["auth.users"].length,baselineSessions:before["auth.sessions"].length,
     uploadedObjects:client.objects.size,publicTables:Object.keys(after).filter(name=>name.startsWith("public.")).length,
