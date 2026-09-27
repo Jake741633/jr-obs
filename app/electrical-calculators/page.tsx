@@ -117,6 +117,9 @@ export default function ElectricalCalculatorsPage() {
           </span>
           <ArrowRight className="size-5 shrink-0" />
         </Link>
+        <Link href="/electrical-calculators/protective-device" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100 transition hover:border-cyan-300">
+          <span className="flex items-center gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-300/15"><ShieldCheck className="size-5" /></span><span><span className="block font-bold">Open Protective Device Checks</span><span className="block text-sm text-cyan-100/70">Check load, cable capacity, conventional overload operation and device breaking capacity.</span></span></span><ArrowRight className="size-5 shrink-0" />
+        </Link>
       </div>
 
       <Card className="border-amber-400/20 bg-amber-400/5">

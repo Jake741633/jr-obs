@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import * as adiabatic from "../lib/adiabaticCalculator-core.mjs";
 import * as earthFault from "../lib/earthFaultLoopCalculator-core.mjs";
+import * as protectiveDevice from "../lib/protectiveDeviceCalculator-core.mjs";
 import * as numbers from "../lib/electricalCalculatorNumbers-core.mjs";
 
 function nodes(tree) {
@@ -38,6 +39,7 @@ function harness(route) {
     "../../../components/ui/PageHeader": { PageHeader: "PageHeader" },
     "../../../components/ui/FormField": { InputField: "InputField" },
     "../../../lib/adiabaticCalculator-core.mjs": adiabatic,
+    "../../../lib/protectiveDeviceCalculator-core.mjs": protectiveDevice,
     "../../../lib/earthFaultLoopCalculator-core.mjs": earthFault,
     "../../../lib/electricalCalculatorNumbers-core.mjs": numbers,
   };
@@ -146,4 +148,58 @@ test("calculator hub links the new CPC route", () => {
   const source = readFileSync(new URL("../app/electrical-calculators/page.tsx", import.meta.url), "utf8");
   assert.match(source, /href="\/electrical-calculators\/adiabatic"/);
   assert.match(source, /Open Adiabatic CPC Sizing/);
+});
+
+function fillDevice(h) {
+  for (const [label, value] of [
+    ["Device identification and standard", "Example device / verified standard"],
+    ["Manufacturer and circuit evidence references", "Data sheet / 230 V circuit evidence"],
+    ["Design current Ib (A)", "20"], ["Device rating or overload setting In/Ir (A)", "25"],
+    ["Verified corrected cable capacity Iz (A)", "32"], ["Conventional overload operating current I2 (A)", "36.25"],
+    ["Verified device breaking capacity (kA)", "6"], ["Maximum prospective fault current (kA)", "5"],
+  ]) h.fill(label, value);
+}
+
+test("protective device page starts blank without invented device data", () => {
+  const h = harness("protective-device");
+  assert.equal(h.status(), "Assessment unavailable");
+  assert.ok(nodes(h.render()).filter((node) => node.type === "InputField").every((node) => node.props.value === ""));
+  assert.match(text(h.render()), /Design aid only/);
+  assert.match(text(h.render()), /Overload: — A/);
+  assert.doesNotMatch(text(h.render()), /Meets entered check/);
+});
+
+test("protective device page recomputes individual overload and fault-capacity failures", () => {
+  const h = harness("protective-device"); fillDevice(h);
+  assert.equal(h.status(), "Meets entered checks");
+  assert.match(text(h.render()), /36.25 A ≤ 46.4 A/);
+  assert.match(text(h.render()), /Breaking capacity: 1 kA/);
+  h.fill("Maximum prospective fault current (kA)", "7");
+  assert.equal(h.status(), "Review required");
+  assert.match(text(h.render()), /stand-alone breaking capacity is below/);
+  assert.match(text(h.render()), /Breaking capacity: -1 kA/);
+  h.fill("Maximum prospective fault current (kA)", "5");
+  h.fill("Conventional overload operating current I2 (A)", "50");
+  assert.equal(h.status(), "Review required");
+  assert.match(text(h.render()), /overload operating current exceeds/);
+});
+
+test("missing device evidence or numeric values remove all positive assessments", () => {
+  const h = harness("protective-device"); fillDevice(h);
+  h.fill("Manufacturer and circuit evidence references", "");
+  assert.equal(h.status(), "Assessment unavailable");
+  assert.doesNotMatch(text(h.render()), /Meets entered check/);
+  h.fill("Manufacturer and circuit evidence references", "Verified data");
+  h.fill("Verified device breaking capacity (kA)", "");
+  assert.equal(h.status(), "Assessment unavailable");
+  assert.match(text(h.render()), /Breaking capacity: — kA/);
+});
+
+test("clearing device checks removes all entered evidence and computed results", () => {
+  const h = harness("protective-device"); fillDevice(h); h.click("Clear inputs");
+  assert.equal(h.status(), "Assessment unavailable");
+  assert.ok(nodes(h.render()).filter((node) => node.type === "InputField").every((node) => node.props.value === ""));
+  assert.doesNotMatch(text(h.render()), /46.4 A/);
+  const hub = readFileSync(new URL("../app/electrical-calculators/page.tsx", import.meta.url), "utf8");
+  assert.match(hub, /href="\/electrical-calculators\/protective-device"/);
 });
