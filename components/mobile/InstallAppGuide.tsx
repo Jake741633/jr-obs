@@ -3,7 +3,7 @@ import { Card } from "../ui/Card";
 
 export function InstallAppGuide() {
   return (
-    <Card className="app-install-guide border-cyan-500/20">
+    <Card id="install-app" className="app-install-guide scroll-mt-20 border-cyan-500/20">
       <details>
         <summary className="flex min-h-12 cursor-pointer items-center gap-3 rounded-lg text-sm font-semibold text-cyan-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-400">
           <Smartphone aria-hidden="true" className="size-5 shrink-0" />
