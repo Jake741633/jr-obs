@@ -6,6 +6,7 @@ import { ArrowLeft, CircleAlert, RotateCcw, ShieldCheck } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
+import { SaveCalculation } from "../../../components/calculators/CalculationRecords";
 import { protectiveDeviceSummary } from "../../../lib/protectiveDeviceCalculator-core.mjs";
 import { formatCalculatorNumber as format } from "../../../lib/electricalCalculatorNumbers-core.mjs";
 
@@ -78,6 +79,7 @@ export default function ProtectiveDevicePage() {
         </div>
       </div>
       <Card><h2 className="font-semibold">Assumptions and remaining checks</h2><div className="mt-3 space-y-2">{result.assumptions.map((assumption: string) => <p key={assumption} className="text-sm text-slate-400">{assumption}</p>)}</div><div className="mt-4 flex flex-wrap gap-3"><Link href="/electrical-calculators/earth-fault-loop" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 px-3 text-sm text-cyan-200">Earth Fault Loop</Link><Link href="/electrical-calculators/adiabatic" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 px-3 text-sm text-cyan-200">Adiabatic CPC Sizing</Link></div></Card>
+      <SaveCalculation kind="protective-device" label="Protective device checks" input={inputs} />
     </main>
   );
 }

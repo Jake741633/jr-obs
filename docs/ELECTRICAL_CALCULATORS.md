@@ -1,6 +1,6 @@
 # Electrical calculator scope and validation
 
-The calculator suite is tracked in [issue #2](https://github.com/Jake741633/jr-obs/issues/2). This increment adds `/electrical-calculators/adiabatic` and hardens `/electrical-calculators/earth-fault-loop`. Saved job/quote/survey design records and full manufacturer device selection remain separate roadmap work.
+The calculator suite is tracked in [issue #2](https://github.com/Jake741633/jr-obs/issues/2). It covers load/current, voltage drop, cable current capacity, earth-fault loop, adiabatic CPC sizing, protective-device checks and maximum demand. Complete calculations can be saved as job records or standalone design notes. Direct quote/survey links and full manufacturer device selection remain separate roadmap work.
 
 ## Adiabatic CPC sizing
 
@@ -13,7 +13,7 @@ The result shows required thermal area, proposed conductor withstand `k²S²`, a
 
 The 0.1-second lower bound is a conservative limit of the app's simple current/time mode, not a statement that the general adiabatic relation is unavailable below that duration. Manufacturer I²t mode supports shorter durations. The five-second upper limit applies to both modes.
 
-All initial design inputs are blank. Missing, malformed, non-positive, non-finite and unsupported-duration inputs leave the assessment unavailable. Overflow/underflow in any required intermediate also prevents an assessment. Changing methods uses only the chosen method's fault input; clearing the form clears both methods. Nothing is saved, queued or sent to a service by these pages. Existing route and account permissions remain in force.
+All initial design inputs are blank. Missing, malformed, non-positive, non-finite and unsupported-duration inputs leave the assessment unavailable. Overflow/underflow in any required intermediate also prevents an assessment. Changing methods uses only the chosen method's fault input; clearing the form clears both methods. Calculation inputs remain in the form until the operator explicitly saves a record. Existing route and account permissions remain in force.
 
 A successful thermal comparison is one design check. Mechanical minimums, conductor temperature limits, automatic disconnection, earth-fault loop, device coordination and actual site conditions still require a qualified designer's verification. One operating point does not assess the worst thermal stress across the full relevant fault-current range.
 
@@ -45,7 +45,7 @@ The dedicated page's basic device check covers only `Ib ≤ In ≤ Iz`. It does 
 
 The designer supplies verified operating data and checks its applicability to the installation and device standard. There is no device catalogue, automatic trip-curve multiplier, inferred fuse factor, upstream backup credit or selectivity claim. This tool takes corrected Iz, not tabulated capacity, and overload setting rather than breaker frame rating where applicable. I2 at or below the normal rating/setting is outside the supported overload-input scope and must be corrected. Maximum PFC must come from appropriate circuit evidence, not the simple earth-loop estimate.
 
-Each comparison and its unrounded margin is visible. Missing/malformed inputs, absent references or numeric overflow suppress every assessment. A failed comparison is reported individually, while the overall result requires all four. Evidence stays in the form; this increment adds no persistence or account permission changes.
+Each comparison and its unrounded margin is visible. Missing/malformed inputs, absent references or numeric overflow suppress every assessment. A failed comparison is reported individually, while the overall result requires all four. Saving retains all four comparisons and the evidence references; it does not approve the design.
 
 ## Maximum demand and diversity
 
@@ -54,6 +54,18 @@ The previous page treated an empty diversity field as 0%. Clearing the example t
 Each load now requires a positive finite per-item current, an explicit whole-number quantity, a supported phase and an explicit demand factor from 0% to 100%. A deliberately entered 0% is retained as an exclusion requiring designer justification. Missing or malformed data makes the row and aggregate assessment unavailable; it never removes the load from a partial total. Empty schedules are unassessed. Example loads and diversity factors have been removed, and new rows start with blank current and demand factor.
 
 The page retains visible results for complete individual rows while withholding schedule totals until every row is valid. It rejects intermediate or aggregate overflow and nonzero values that underflow to zero. Three-phase entries represent balanced line current, applied to each phase. Schedule sums count each load once and are labelled separately from per-phase supply demand; they are not supply current.
+
+## Saved calculation records
+
+The save controls on each calculator create versioned snapshots with labelled inputs and units, unrounded numeric results, the assessment, assumptions, timestamp, title, evidence source/revision and an optional design note. Inputs must be complete and metadata valid. Failed comparisons can be recorded for review. Inactive adiabatic method fields are omitted. Cable capacity and voltage drop are saved separately; the evidence reference should identify the installation method, conductor specification and source tables. Existing five-item personal cable history is unchanged.
+
+`/electrical-calculators/records` provides searchable, read-only historical records. Linked calculations also appear on the job detail page. Later form edits or calculator releases do not recalculate stored results. Unsupported record formats are retained and visibly reported instead of being overwritten. Saved records are design aids, not certification or final approval.
+
+The registered `jr-os-electrical-calculations` collection uses existing account-scoped storage, durable record creation, offline sync/conflict handling and account backup rules. Saving requires a signed-in account with access to the calculator route (currently owner/admin). It waits for job/record collections and checks the active organisation, user, role and customer scope again in the handler. Changing accounts remounts the draft. A selected job must still be available; customer/job bindings are copied from that record. Existing database triggers enforce tenant-local references and matching payload/envelope bindings.
+
+The UI confirms device persistence and queueing rather than claiming a completed cloud upload. Operators check Cloud status for pending uploads and conflicts. The existing database office-data policy remains in force, including office service access; the feature does not expand route permissions or add field/customer projections. No schema migration or production DDL is needed.
+
+Quote and survey linking remain the next integration increment. Production recovery evidence and physical-phone acceptance remain separate release gates.
 
 ## Technical references
 
@@ -80,3 +92,5 @@ These automated tests verify software behavior. They are not installation certif
 `tests/protective-device-calculator.test.mjs` checks known answers, each independent failed criterion, exact boundaries, malformed data, absent evidence and numeric extremes. Rendered-page tests exercise filling, correcting, clearing and removing evidence through the actual handlers.
 
 Maximum-demand core and page-handler tests cover mixed-phase known answers, every required field, explicit zero diversity, fractional quantities, unknown phases, empty schedules, adding/removing rows, and row/aggregate numeric extremes. The shared decimal parser also rejects nonzero decimal strings that underflow to zero.
+
+Saved-record tests execute snapshot creation and real UI handlers, covering all seven calculation types, unit conversion, incomplete inputs, historical independence, failed comparisons, account changes, unavailable jobs, storage failures, search and job filters. The SQL and full Supabase upgrade rehearsals both exercise real database reads/writes for owner/admin/office, field/customer, other-tenant, revoked/inactive and anonymous identities, as well as job-binding rejection and projection isolation. All rehearsal records and audit entries are rolled back.

@@ -6,6 +6,7 @@ import { ArrowLeft, CircleAlert, Gauge, ShieldCheck, Zap } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
+import { SaveCalculation } from "../../../components/calculators/CalculationRecords";
 import { earthFaultLoopSummary } from "../../../lib/earthFaultLoopCalculator-core.mjs";
 import { formatCalculatorNumber as format } from "../../../lib/electricalCalculatorNumbers-core.mjs";
 
@@ -132,6 +133,7 @@ export default function EarthFaultLoopCalculatorPage() {
           ))}
         </div>
       </Card>
+      <SaveCalculation kind="earth-fault-loop" label="Earth fault loop" input={{ nominalVoltage, externalEarthFaultLoopOhms: ze, lineConductorResistanceOhms: r1, cpcResistanceOhms: r2, tabulatedMaximumZsOhms: tabulatedMaximumZs, permittedPercentage }} />
     </main>
   );
 }

@@ -7,6 +7,7 @@ import * as load from "../lib/electricalCalculators-core.mjs";
 import * as cable from "../lib/cableSizingCalculator-core.mjs";
 import * as drop from "../lib/voltageDropCalculator-core.mjs";
 import * as numbers from "../lib/electricalCalculatorNumbers-core.mjs";
+import { buildCalculationSnapshot } from "../lib/calculationRecords-core.mjs";
 
 function nodes(tree) {
   if (Array.isArray(tree)) return tree.flatMap(nodes);
@@ -42,6 +43,7 @@ function harness(route = "", initialRows = []) {
       },
     },
     "next/link": { default: "Link" }, "lucide-react": {},
+    "components/calculators/CalculationRecords": { SaveCalculation: "SaveCalculation" },
     "components/ui/Card": { Card: "Card" }, "components/ui/PageHeader": { PageHeader: "PageHeader" }, "components/ui/FormField": { InputField: "InputField" },
     "lib/electricalCalculators-core.mjs": load, "lib/voltageDropCalculator-core.mjs": drop, "lib/cableSizingCalculator-core.mjs": cable, "lib/electricalCalculatorNumbers-core.mjs": numbers,
     "lib/cloud/adapter": { accountStorageKey: () => historyKey },
@@ -66,6 +68,7 @@ function harness(route = "", initialRows = []) {
   const button = (label) => nodes(render()).find((node) => node.type === "button" && text(node) === label);
   return {
     render, button, text: () => text(render()),
+    snapshots: () => nodes(render()).filter((node) => node.type === "SaveCalculation").map((node) => buildCalculationSnapshot(node.props.kind, node.props.input)),
     statuses: () => nodes(render()).filter((node) => node.props?.role === "status").map(text),
     fill(label, value) {
       const field = nodes(render()).find((node) => node.type === "InputField" && node.props.label === label);
@@ -82,6 +85,23 @@ function fillCable(h) {
 function fillHub(h) {
   for (const [label, value] of [["Load power (kW)", "4.6"], ["Route length (m)", "20"], ["Conductor value (mV/A/m)", "18"], ["Verified cable size (mm²)", "2.5"], ["Verified tabulated rating (A)", "27"], ["Selected maximum drop (%)", "5"]]) h.fill(label, value);
 }
+
+test("hub passes current form values and units into all three saved snapshots", () => {
+  const h = harness(); fillHub(h);
+  const [load, drop, cable] = h.snapshots();
+  assert.equal(load.outputs.find((row) => row.label === "Design current").value, 20);
+  assert.equal(drop.outputs.find((row) => row.label === "Voltage drop" && row.unit === "V").value, 7.2);
+  assert.equal(cable.outputs.find((row) => row.label === "Required tabulated capacity").value, 20);
+  h.fill("Load power (kW)", "");
+  assert.ok(h.snapshots().every((snapshot) => snapshot === null));
+});
+
+test("dedicated cable record snapshots use the entered correction factors and route", () => {
+  const h = harness("cable-sizing"); fillCable(h); h.fill("Verified ambient factor", "0.8");
+  const [cable, drop] = h.snapshots();
+  assert.equal(cable.outputs.find((row) => row.label === "Required tabulated capacity").value, 25);
+  assert.equal(drop.outputs.find((row) => row.label === "Voltage drop" && row.unit === "V").value, 7.2);
+});
 
 test("hub starts unassessed and clearing load inputs invalidates every connected result", () => {
   const h = harness();

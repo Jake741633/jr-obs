@@ -40,9 +40,9 @@ function organisationKey(storageKey, organisationId) {
 
 test("migration registry is exact, complete and deny-by-default", () => {
   assert.equal(Object.keys(typedCollectionTables).length, 20);
-  assert.equal(genericCloudCollectionStorageKeys.length, 48);
-  assert.equal(cloudCollectionStorageKeys.length, 68);
-  assert.equal(legacyAggregateStorageKeys.length, 69);
+  assert.equal(genericCloudCollectionStorageKeys.length, 49);
+  assert.equal(cloudCollectionStorageKeys.length, 69);
+  assert.equal(legacyAggregateStorageKeys.length, 70);
   assert.equal(isCloudCollectionStorageKey("jr-os-customers"), true);
   assert.equal(isCloudCollectionStorageKey("jr-os-site-diary"), true);
   assert.equal(isCloudCollectionStorageKey("jr-os-electrical-testing"), true);

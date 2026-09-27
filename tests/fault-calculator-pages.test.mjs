@@ -9,6 +9,7 @@ import * as earthFault from "../lib/earthFaultLoopCalculator-core.mjs";
 import * as maximumDemand from "../lib/maximumDemandCalculator-core.mjs";
 import * as protectiveDevice from "../lib/protectiveDeviceCalculator-core.mjs";
 import * as numbers from "../lib/electricalCalculatorNumbers-core.mjs";
+import { buildCalculationSnapshot } from "../lib/calculationRecords-core.mjs";
 
 function nodes(tree) {
   if (Array.isArray(tree)) return tree.flatMap(nodes);
@@ -37,6 +38,7 @@ function harness(route) {
     },
     "next/link": { default: "Link" },
     "lucide-react": {},
+    "../../../components/calculators/CalculationRecords": { SaveCalculation: "SaveCalculation" },
     "../../../components/ui/Card": { Card: "Card" },
     "../../../components/ui/PageHeader": { PageHeader: "PageHeader" },
     "../../../components/ui/FormField": { InputField: "InputField" },
@@ -54,6 +56,7 @@ function harness(route) {
   function render() { cursor = 0; return commonJsModule.exports.default(); }
   return {
     render,
+    snapshot: () => { const node = nodes(render()).find((node) => node.type === "SaveCalculation"); return buildCalculationSnapshot(node.props.kind, node.props.input); },
     status: () => text(nodes(render()).find((node) => node.props?.role === "status")),
     fill(label, value, index = 0) {
       const field = nodes(render()).filter((node) => node.type === "InputField" && node.props.label === label)[index];
@@ -78,6 +81,21 @@ const fillCpc = (h) => {
 const fillLoop = (h) => {
   for (const [label, value] of [["External earth fault loop Ze (Ω)", "0.35"], ["Line conductor resistance R1 (Ω)", "0.18"], ["CPC resistance R2 (Ω)", "0.3"], ["Verified tabulated maximum Zs (Ω)", "1.37"]]) h.fill(label, value);
 };
+
+test("fault, device and demand save controls retain the actual page inputs and units", () => {
+  const cpc = harness("adiabatic"); fillCpc(cpc);
+  assert.equal(cpc.snapshot().outputs.find((row) => row.label === "Fault energy").value, 400000);
+  cpc.fill("Fault current (A)", ""); assert.equal(cpc.snapshot(), null);
+  const loop = harness("earth-fault-loop"); fillLoop(loop);
+  assert.ok(Math.abs(loop.snapshot().outputs.find((row) => row.label === "Calculated Zs").value - 0.83) < 1e-12);
+  loop.fill("CPC resistance R2 (Ω)", ""); assert.equal(loop.snapshot(), null);
+  const device = harness("protective-device"); fillDevice(device);
+  assert.equal(device.snapshot().outputs.find((row) => row.label === "Breaking-capacity margin").value, 1);
+  device.fill("Maximum prospective fault current (kA)", "7"); assert.equal(device.snapshot().assessment, "Review required");
+  const demand = harness("maximum-demand"); fillDemand(demand, 0, "32", "40", "L2");
+  assert.equal(demand.snapshot().outputs.find((row) => row.label === "Highest phase demand").value, 12.8);
+  demand.fill("Demand factor (%)", ""); assert.equal(demand.snapshot(), null);
+});
 
 test("CPC page starts unassessed with no assumed k-factor or circuit values", () => {
   const h = harness("adiabatic");

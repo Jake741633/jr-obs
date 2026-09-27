@@ -6,6 +6,7 @@ import { ArrowLeft, CircleAlert, Plus, Trash2, Zap } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
+import { SaveCalculation } from "../../../components/calculators/CalculationRecords";
 import { maximumDemandSummary, maximumDemandFactorFromPercent } from "../../../lib/maximumDemandCalculator-core.mjs";
 
 import { formatCalculatorNumber as format } from "../../../lib/electricalCalculatorNumbers-core.mjs";
@@ -177,6 +178,7 @@ export default function MaximumDemandPage() {
           {result.assumptions.map((assumption: string) => <p key={assumption} className="text-sm text-slate-400">• {assumption}</p>)}
         </div>
       </Card>
+      <SaveCalculation kind="maximum-demand" label="Maximum demand" input={{ loads: loads.map((load) => ({ ...load, demandFactor: maximumDemandFactorFromPercent(load.demandPercent) })) }} />
     </main>
   );
 }
