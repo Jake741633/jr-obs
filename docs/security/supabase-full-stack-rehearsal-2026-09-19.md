@@ -78,6 +78,16 @@ or credential artifact was uploaded.
 
 ## CI audit blocker
 
+**Resolved on 27 September 2026:** the failed jobs in
+[run 35457753597, attempt 2](https://github.com/Jake741633/jr-obs/actions/runs/35457753597/attempts/2)
+passed on the unchanged PR head `f0d2dd761f185ef22c8c65ed6fcdc8e41f3e5dfb`,
+including both dependency audits and both upgrade rehearsals. PR #241 merged as
+`e8ffd082d8d94dfda58aa9365c86fedf5b06967d`; its resulting JR OS CI and
+Phase 1 checks passed. No audit was bypassed or lockfile regenerated. The
+production recovery and authorisation gates below remain separate.
+
+Historical outage:
+
 The same lockfiles passed the moderate-or-higher audit before the outage. Fresh
 local audits subsequently received HTTP 503 from npm's bulk advisory endpoint,
 with npm explicitly reporting maintenance. GitHub's bundled npm 10.9.8 falls
