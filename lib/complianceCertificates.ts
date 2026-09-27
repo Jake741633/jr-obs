@@ -106,8 +106,8 @@ export function createCertificateDraft(input: {
 
 export function saveCertificateRevision(certificate: ComplianceCertificate, savedBy: string): ComplianceCertificate {
   const now = new Date().toISOString();
-  const { revisionHistory: _history, ...snapshot } = certificate;
-  const history = certificate.revisionHistory ?? [];
+  const { revisionHistory, ...snapshot } = certificate;
+  const history = revisionHistory ?? [];
   const revision: CertificateRevision = {
     id: `certificate-revision-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     revisionNumber: history.length + 1,

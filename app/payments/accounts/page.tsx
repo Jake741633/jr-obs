@@ -10,7 +10,7 @@ import { PageHeader } from "../../../components/ui/PageHeader";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import type { Customer, Invoice } from "../../../lib/models";
 import type { PaymentRecord, ScheduledCashFlow } from "../../../lib/payments";
-import { allocatedPaid, invoiceBalance, invoiceGross, paymentEffect } from "../../../lib/payments";
+import { invoiceBalance, invoiceGross, paymentEffect } from "../../../lib/payments";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const blank = { description: "", dueDate: "", amount: "", direction: "In" as "In" | "Out", sourceType: "Stage payment" as ScheduledCashFlow["sourceType"], customerId: "", invoiceId: "" };

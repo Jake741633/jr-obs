@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useMemo, useState } from "react";
-import { Archive, FileCheck2, FileDown, History, PenLine, Plus, Save, Search, ShieldCheck, Sparkles, Trash2 } from "lucide-react";
+import { Archive, FileCheck2, FileDown, History, PenLine, Plus, Save, Search, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { businessStorageKeys, defaultCertificateDefaults } from "../../lib/businessSettings";
@@ -24,7 +24,6 @@ import type { CertificateDefaults, CertificateObservation, Customer, Invoice, Jo
 
 const observationCodes: ObservationCode[] = ["C1", "C2", "C3", "FI", "No code"];
 const fieldClass = "min-h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-white outline-none transition focus:border-cyan-400";
-const today = () => new Date().toISOString().slice(0, 10);
 
 export default function CertificatesPage() {
   const certificates = useCertificatesCollection();

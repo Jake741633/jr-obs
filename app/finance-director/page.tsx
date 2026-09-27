@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { AlertTriangle, ArrowRight, BrainCircuit, BriefcaseBusiness, CalendarDays, CircleDollarSign, Gauge, LineChart, Users } from "lucide-react";
+import { AlertTriangle, ArrowRight, BrainCircuit, BriefcaseBusiness, CalendarDays, CircleDollarSign, Gauge } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useLocalStorageCollection } from "../../lib/storage";
