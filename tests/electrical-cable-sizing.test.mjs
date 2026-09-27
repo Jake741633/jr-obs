@@ -18,13 +18,13 @@ test("correction factors multiply deterministically", () => {
   assert.ok(Math.abs(factor - 0.376) < 1e-12);
 });
 
-test("invalid correction factors fall back safely to unity", () => {
+test("invalid correction factors prevent calculation", () => {
   assert.equal(combinedCorrectionFactor({
     ambientTemperatureFactor: 0,
     groupingFactor: -1,
     insulationFactor: "bad",
     otherFactor: 2,
-  }), 1);
+  }), null);
 });
 
 test("required tabulated current divides design current by combined factors", () => {
@@ -32,15 +32,17 @@ test("required tabulated current divides design current by combined factors", ()
     designCurrentAmps: 32,
     ambientTemperatureFactor: 0.94,
     groupingFactor: 0.8,
+    insulationFactor: 1,
+    otherFactor: 1,
   });
 
   assert.ok(Math.abs(required - (32 / 0.752)) < 1e-12);
 });
 
 test("invalid design current fails safely", () => {
-  assert.equal(requiredTabulatedCurrent({ designCurrentAmps: 0 }), 0);
-  assert.equal(requiredTabulatedCurrent({ designCurrentAmps: -10 }), 0);
-  assert.equal(requiredTabulatedCurrent({ designCurrentAmps: "bad" }), 0);
+  assert.equal(requiredTabulatedCurrent({ designCurrentAmps: 0 }), null);
+  assert.equal(requiredTabulatedCurrent({ designCurrentAmps: -10 }), null);
+  assert.equal(requiredTabulatedCurrent({ designCurrentAmps: "bad" }), null);
 });
 
 test("minimum cable selection returns the smallest verified suitable option", () => {
@@ -74,6 +76,8 @@ test("cable sizing summary exposes calculation evidence and warnings", () => {
     designCurrentAmps: 20,
     ambientTemperatureFactor: 0.94,
     groupingFactor: 0.8,
+    insulationFactor: 1,
+    otherFactor: 1,
     cableOptions: [
       { sizeMm2: 2.5, tabulatedCurrentAmps: 27 },
       { sizeMm2: 4, tabulatedCurrentAmps: 32 },

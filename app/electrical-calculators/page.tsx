@@ -10,58 +10,57 @@ import { cableSizingSummary } from "../../lib/cableSizingCalculator-core.mjs";
 import { electricalLoadSummary } from "../../lib/electricalCalculators-core.mjs";
 import { voltageDropSummary } from "../../lib/voltageDropCalculator-core.mjs";
 
-type Phase = "Single phase" | "Three phase";
-type CableOption = {
-  sizeMm2: number;
-  tabulatedCurrentAmps: number;
-};
+import { formatCalculatorNumber, positiveCalculatorNumber } from "../../lib/electricalCalculatorNumbers-core.mjs";
 
-const number = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
+type Phase = "Single phase" | "Three phase";
+type CableOption = { sizeMm2: string; tabulatedCurrentAmps: string };
+
+const number = { format: formatCalculatorNumber };
 
 export default function ElectricalCalculatorsPage() {
   const [phase, setPhase] = useState<Phase>("Single phase");
-  const [powerKw, setPowerKw] = useState("3");
+  const [powerKw, setPowerKw] = useState("");
   const [voltage, setVoltage] = useState("230");
   const [powerFactor, setPowerFactor] = useState("1");
   const [efficiency, setEfficiency] = useState("1");
-  const [routeLength, setRouteLength] = useState("20");
-  const [millivoltsPerAmpMetre, setMillivoltsPerAmpMetre] = useState("18");
+  const [routeLength, setRouteLength] = useState("");
+  const [millivoltsPerAmpMetre, setMillivoltsPerAmpMetre] = useState("");
   const [maximumPercent, setMaximumPercent] = useState("3");
   const [ambientTemperatureFactor, setAmbientTemperatureFactor] = useState("1");
   const [groupingFactor, setGroupingFactor] = useState("1");
   const [insulationFactor, setInsulationFactor] = useState("1");
   const [otherFactor, setOtherFactor] = useState("1");
-  const [cableSizeMm2, setCableSizeMm2] = useState("2.5");
-  const [tabulatedCurrentAmps, setTabulatedCurrentAmps] = useState("27");
+  const [cableSizeMm2, setCableSizeMm2] = useState("");
+  const [tabulatedCurrentAmps, setTabulatedCurrentAmps] = useState("");
 
   const result = useMemo(() => electricalLoadSummary({
     phase,
-    powerWatts: Number(powerKw) * 1000,
-    voltage: Number(voltage),
-    powerFactor: Number(powerFactor),
-    efficiency: Number(efficiency),
+    powerWatts: positiveCalculatorNumber(powerKw) === null ? null : positiveCalculatorNumber(powerKw)! * 1000,
+    voltage: voltage,
+    powerFactor: powerFactor,
+    efficiency: efficiency,
   }), [efficiency, phase, powerFactor, powerKw, voltage]);
 
   const voltageDrop = useMemo(() => voltageDropSummary({
     phase,
-    nominalVoltage: Number(voltage),
+    nominalVoltage: voltage,
     designCurrentAmps: result.currentAmps,
-    routeLengthMetres: Number(routeLength),
-    millivoltsPerAmpMetre: Number(millivoltsPerAmpMetre),
-    maximumPercent: Number(maximumPercent),
+    routeLengthMetres: routeLength,
+    millivoltsPerAmpMetre: millivoltsPerAmpMetre,
+    maximumPercent: maximumPercent,
   }), [maximumPercent, millivoltsPerAmpMetre, phase, result.currentAmps, routeLength, voltage]);
 
   const cableOptions = useMemo<CableOption[]>(() => [{
-    sizeMm2: Number(cableSizeMm2),
-    tabulatedCurrentAmps: Number(tabulatedCurrentAmps),
+    sizeMm2: cableSizeMm2,
+    tabulatedCurrentAmps: tabulatedCurrentAmps,
   }], [cableSizeMm2, tabulatedCurrentAmps]);
 
   const cableSizing = useMemo(() => cableSizingSummary({
     designCurrentAmps: result.currentAmps,
-    ambientTemperatureFactor: Number(ambientTemperatureFactor),
-    groupingFactor: Number(groupingFactor),
-    insulationFactor: Number(insulationFactor),
-    otherFactor: Number(otherFactor),
+    ambientTemperatureFactor: ambientTemperatureFactor,
+    groupingFactor: groupingFactor,
+    insulationFactor: insulationFactor,
+    otherFactor: otherFactor,
     cableOptions,
   }), [ambientTemperatureFactor, cableOptions, groupingFactor, insulationFactor, otherFactor, result.currentAmps]);
 
@@ -134,7 +133,7 @@ export default function ElectricalCalculatorsPage() {
         <Card>
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-xl bg-cyan-400/10 text-cyan-300"><Calculator className="size-5" /></span>
-            <div><h2 className="font-semibold">Load details</h2><p className="text-sm text-slate-500">Enter the known electrical load values.</p></div>
+            <div><h2 className="font-semibold">Load details</h2><p className="text-sm text-slate-500">Enter load power and verified supply values. For motor output power, enter efficiency. For known electrical input power, use efficiency 1.</p></div>
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
@@ -148,7 +147,7 @@ export default function ElectricalCalculatorsPage() {
                 ))}
               </span>
             </label>
-            <InputField label="Active power (kW)" type="number" inputMode="decimal" min="0" step="0.1" value={powerKw} onChange={(event) => setPowerKw(event.target.value)} />
+            <InputField label="Load power (kW)" type="number" inputMode="decimal" min="0" step="0.1" value={powerKw} onChange={(event) => setPowerKw(event.target.value)} />
             <InputField label="Voltage (V)" type="number" inputMode="decimal" min="0" step="1" value={voltage} onChange={(event) => setVoltage(event.target.value)} />
             <InputField label="Power factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={powerFactor} onChange={(event) => setPowerFactor(event.target.value)} />
             <InputField label="Efficiency" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={efficiency} onChange={(event) => setEfficiency(event.target.value)} />
@@ -159,12 +158,14 @@ export default function ElectricalCalculatorsPage() {
           <Card className="border-cyan-400/30">
             <div className="flex items-center justify-between"><Gauge className="size-6 text-cyan-300" /><span className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-400">Calculated current</span></div>
             <p className="mt-5 text-5xl font-black text-cyan-100">{number.format(result.currentAmps)} A</p>
-            <p className="mt-2 text-sm text-slate-500">Based on {result.phase.toLowerCase()} supply at {number.format(result.voltage)} V.</p>
+            <p role="status" className="mt-3 text-sm">{result.hasCompleteInputs ? "Current calculated" : "Assessment unavailable"}</p>
+            {result.errors.map((error: string) => <p key={error} className="mt-1 text-sm text-amber-200">{error}</p>)}
+            <p className="mt-2 text-sm text-slate-500">Based on {result.phase?.toLowerCase() ?? "unselected"} supply at {number.format(result.voltage)} V.</p>
           </Card>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <Card><Zap className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Active power</p><p className="mt-1 text-2xl font-bold">{number.format(result.powerWatts / 1000)} kW</p></Card>
-            <Card><Zap className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Apparent power</p><p className="mt-1 text-2xl font-bold">{number.format(result.apparentPowerVa / 1000)} kVA</p></Card>
+            <Card><Zap className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Input active power</p><p className="mt-1 text-2xl font-bold">{number.format(result.inputPowerWatts === null ? null : result.inputPowerWatts / 1000)} kW</p></Card>
+            <Card><Zap className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Apparent power</p><p className="mt-1 text-2xl font-bold">{number.format(result.apparentPowerVa === null ? null : result.apparentPowerVa / 1000)} kVA</p></Card>
           </div>
         </div>
       </div>
@@ -180,18 +181,19 @@ export default function ElectricalCalculatorsPage() {
             <InputField label="Route length (m)" type="number" inputMode="decimal" min="0" step="0.1" value={routeLength} onChange={(event) => setRouteLength(event.target.value)} />
             <InputField label="Conductor value (mV/A/m)" type="number" inputMode="decimal" min="0" step="0.1" value={millivoltsPerAmpMetre} onChange={(event) => setMillivoltsPerAmpMetre(event.target.value)} />
             <InputField label="Selected maximum drop (%)" type="number" inputMode="decimal" min="0" step="0.1" value={maximumPercent} onChange={(event) => setMaximumPercent(event.target.value)} />
-            <InputField label="Design current (A)" type="number" value={number.format(result.currentAmps)} readOnly />
+            <InputField label="Design current (A)" type="text" value={number.format(result.currentAmps)} readOnly />
           </div>
         </Card>
 
         <div className="space-y-4">
-          <Card className={voltageDrop.withinSelectedLimit ? "border-emerald-400/30" : "border-rose-400/30"}>
+          <Card className={!voltageDrop.hasCompleteInputs ? "border-slate-700" : voltageDrop.withinSelectedLimit ? "border-emerald-400/30" : "border-rose-400/30"}>
             <div className="flex items-center justify-between"><Route className="size-6 text-violet-300" /><span className="text-xs font-semibold uppercase tracking-[0.18em] text-violet-300">Calculated voltage drop</span></div>
             <p className="mt-5 text-5xl font-black">{number.format(voltageDrop.voltageDropVolts)} V</p>
             <p className="mt-2 text-sm text-slate-400">{number.format(voltageDrop.voltageDropPercent)}% of {number.format(voltageDrop.nominalVoltage)} V.</p>
-            <p className={`mt-4 text-sm font-semibold ${voltageDrop.withinSelectedLimit ? "text-emerald-300" : "text-rose-300"}`}>
-              {voltageDrop.withinSelectedLimit ? "Within selected limit" : "Exceeds selected limit"}
+            <p role="status" className={`mt-4 text-sm font-semibold ${!voltageDrop.hasCompleteInputs ? "text-slate-300" : voltageDrop.withinSelectedLimit ? "text-emerald-300" : "text-rose-300"}`}>
+              {!voltageDrop.hasCompleteInputs ? "Assessment unavailable" : voltageDrop.withinSelectedLimit ? "Within selected limit" : "Exceeds selected limit"}
             </p>
+            {voltageDrop.errors.map((error: string) => <p key={error} className="mt-1 text-sm text-amber-200">{error}</p>)}
           </Card>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -209,28 +211,29 @@ export default function ElectricalCalculatorsPage() {
           </div>
 
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
-            <InputField label="Ambient temperature factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={ambientTemperatureFactor} onChange={(event) => setAmbientTemperatureFactor(event.target.value)} />
-            <InputField label="Grouping factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={groupingFactor} onChange={(event) => setGroupingFactor(event.target.value)} />
-            <InputField label="Thermal insulation factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={insulationFactor} onChange={(event) => setInsulationFactor(event.target.value)} />
-            <InputField label="Other correction factor" type="number" inputMode="decimal" min="0.01" max="1" step="0.01" value={otherFactor} onChange={(event) => setOtherFactor(event.target.value)} />
+            <InputField label="Ambient temperature factor" type="number" inputMode="decimal" min="0.01" step="0.01" value={ambientTemperatureFactor} onChange={(event) => setAmbientTemperatureFactor(event.target.value)} />
+            <InputField label="Grouping factor" type="number" inputMode="decimal" min="0.01" step="0.01" value={groupingFactor} onChange={(event) => setGroupingFactor(event.target.value)} />
+            <InputField label="Thermal insulation factor" type="number" inputMode="decimal" min="0.01" step="0.01" value={insulationFactor} onChange={(event) => setInsulationFactor(event.target.value)} />
+            <InputField label="Other correction factor" type="number" inputMode="decimal" min="0.01" step="0.01" value={otherFactor} onChange={(event) => setOtherFactor(event.target.value)} />
             <InputField label="Verified cable size (mm²)" type="number" inputMode="decimal" min="0" step="0.5" value={cableSizeMm2} onChange={(event) => setCableSizeMm2(event.target.value)} />
             <InputField label="Verified tabulated rating (A)" type="number" inputMode="decimal" min="0" step="0.1" value={tabulatedCurrentAmps} onChange={(event) => setTabulatedCurrentAmps(event.target.value)} />
           </div>
         </Card>
 
         <div className="space-y-4">
-          <Card className={cableSizing.selectedCable ? "border-emerald-400/30" : "border-rose-400/30"}>
+          <Card className={!cableSizing.hasCompleteInputs ? "border-slate-700" : cableSizing.selectedCable ? "border-emerald-400/30" : "border-rose-400/30"}>
             <div className="flex items-center justify-between"><Cable className="size-6 text-emerald-300" /><span className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-300">Cable rating check</span></div>
-            <p className="mt-5 text-4xl font-black">{cableSizing.selectedCable ? `${number.format(cableSizing.selectedCable.sizeMm2)} mm²` : "Not suitable"}</p>
+            <p className="mt-5 text-4xl font-black">{cableSizing.selectedCable ? `${number.format(cableSizing.selectedCable.sizeMm2)} mm²` : cableSizing.hasCompleteInputs ? "Not suitable" : "—"}</p>
             <p className="mt-2 text-sm text-slate-400">Required tabulated capacity: {number.format(cableSizing.requiredTabulatedCurrentAmps)} A.</p>
-            <p className={`mt-4 text-sm font-semibold ${cableSizing.selectedCable ? "text-emerald-300" : "text-rose-300"}`}>
-              {cableSizing.selectedCable ? "Verified option meets current-capacity check" : "Verified option does not meet current-capacity check"}
+            <p role="status" className={`mt-4 text-sm font-semibold ${!cableSizing.hasCompleteInputs ? "text-slate-300" : cableSizing.selectedCable ? "text-emerald-300" : "text-rose-300"}`}>
+              {!cableSizing.hasCompleteInputs ? "Assessment unavailable" : cableSizing.selectedCable ? "Verified option meets current-capacity check" : "Verified option does not meet current-capacity check"}
             </p>
+            {cableSizing.errors.map((error: string) => <p key={error} className="mt-1 text-sm text-amber-200">{error}</p>)}
           </Card>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Card><p className="text-sm text-slate-400">Combined correction factor</p><p className="mt-1 text-2xl font-bold">{number.format(cableSizing.combinedCorrectionFactor)}</p></Card>
-            <Card><p className="text-sm text-slate-400">Entered tabulated rating</p><p className="mt-1 text-2xl font-bold">{number.format(Number(tabulatedCurrentAmps))} A</p></Card>
+            <Card><p className="text-sm text-slate-400">Entered tabulated rating</p><p className="mt-1 text-2xl font-bold">{number.format(positiveCalculatorNumber(tabulatedCurrentAmps))} A</p></Card>
           </div>
         </div>
       </div>

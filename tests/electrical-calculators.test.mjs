@@ -25,9 +25,9 @@ test("apparent power is derived from active power and power factor", () => {
 });
 
 test("invalid and negative inputs fail safely without inventing load", () => {
-  assert.equal(singlePhaseCurrent({ powerWatts: -1000, voltage: 230 }), 0);
-  assert.equal(threePhaseCurrent({ powerWatts: "invalid", voltage: 400 }), 0);
-  assert.equal(apparentPowerVa({ activePowerWatts: -1, powerFactor: 0.8 }), 0);
+  assert.equal(singlePhaseCurrent({ powerWatts: -1000, voltage: 230, powerFactor: 1, efficiency: 1 }), null);
+  assert.equal(threePhaseCurrent({ powerWatts: "invalid", voltage: 400, powerFactor: 1, efficiency: 1 }), null);
+  assert.equal(apparentPowerVa({ activePowerWatts: -1, powerFactor: 0.8 }), null);
 });
 
 test("electrical load summary normalises assumptions and keeps design warning explicit", () => {
@@ -45,14 +45,15 @@ test("electrical load summary normalises assumptions and keeps design warning ex
   assert.equal(summary.powerFactor, 0.85);
   assert.equal(summary.efficiency, 0.92);
   assert.ok(summary.currentAmps > 27 && summary.currentAmps < 28);
-  assert.ok(summary.apparentPowerVa > 17647 && summary.apparentPowerVa < 17648);
+  assert.ok(Math.abs(summary.apparentPowerVa - 15000 / 0.92 / 0.85) < 1e-9);
   assert.match(summary.assumptions.join(" "), /design aid only/);
   assert.match(summary.assumptions.join(" "), /does not select a cable or protective device/);
 });
 
-test("power factor and efficiency are clamped to safe usable values", () => {
+test("invalid power factor and efficiency prevent a calculation", () => {
   const summary = electricalLoadSummary({ phase: "Single phase", powerWatts: 2300, voltage: 230, powerFactor: 5, efficiency: 0 });
-  assert.equal(summary.powerFactor, 1);
-  assert.equal(summary.efficiency, 1);
-  assert.equal(summary.currentAmps, 10);
+  assert.equal(summary.powerFactor, null);
+  assert.equal(summary.efficiency, null);
+  assert.equal(summary.currentAmps, null);
+  assert.equal(summary.hasCompleteInputs, false);
 });

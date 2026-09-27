@@ -17,10 +17,10 @@ test("voltage drop uses design current route length and mV per amp metre", () =>
 });
 
 test("invalid and negative voltage-drop inputs fail safely", () => {
-  assert.equal(voltageDropVolts({ designCurrentAmps: -10, routeLengthMetres: 30, millivoltsPerAmpMetre: 18 }), 0);
-  assert.equal(voltageDropVolts({ designCurrentAmps: 10, routeLengthMetres: "bad", millivoltsPerAmpMetre: 18 }), 0);
-  assert.equal(voltageDropVolts({ designCurrentAmps: 10, routeLengthMetres: 30, millivoltsPerAmpMetre: 0 }), 0);
-  assert.equal(voltageDropPercent({ voltageDrop: 10, nominalVoltage: 0 }), 0);
+  assert.equal(voltageDropVolts({ designCurrentAmps: -10, routeLengthMetres: 30, millivoltsPerAmpMetre: 18 }), null);
+  assert.equal(voltageDropVolts({ designCurrentAmps: 10, routeLengthMetres: "bad", millivoltsPerAmpMetre: 18 }), null);
+  assert.equal(voltageDropVolts({ designCurrentAmps: 10, routeLengthMetres: 30, millivoltsPerAmpMetre: 0 }), null);
+  assert.equal(voltageDropPercent({ voltageDrop: 10, nominalVoltage: 0 }), null);
 });
 
 test("voltage-drop summary reports percentage allowance and pass state", () => {
