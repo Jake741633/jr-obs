@@ -28,6 +28,25 @@ function writeLocal<T>(storageKey: string, records: T[]) {
   window.localStorage.setItem(storageKey, JSON.stringify(records));
 }
 
+function writeLocalAndQueue<T>(storageKey: string, records: T[], enqueue: () => void) {
+  const previous = window.localStorage.getItem(storageKey);
+  const next = JSON.stringify(records);
+  window.localStorage.setItem(storageKey, next);
+  try {
+    enqueue();
+  } catch (queueError) {
+    try {
+      // Never roll another tab's intervening edit back to our older snapshot.
+      if (window.localStorage.getItem(storageKey) !== next) throw new Error("The local collection changed during the failed save.");
+      if (previous === null) window.localStorage.removeItem(storageKey);
+      else window.localStorage.setItem(storageKey, previous);
+    } catch (recoveryError) {
+      throw new Error("The sync queue could not be saved and local recovery is incomplete. Keep this draft open and check Cloud before retrying.", { cause: new AggregateError([queueError, recoveryError]) });
+    }
+    throw queueError;
+  }
+}
+
 function versionKey(storageKey: string) { return `jr-os-cloud-versions:${storageKey}`; }
 function projectionGenerationKey(storageKey: string) { return `jr-os-cloud-projection-generation:${storageKey}`; }
 export function recordCreatorStorageKey(storageKey: string) { return `jr-os-cloud-created-by:${storageKey}`; }
@@ -130,14 +149,18 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         currentRecordCreators = {};
         return;
       }
-      writeLocal(scopedStorageKey, local);
-      if (mode === "local") return;
+      if (mode === "local") {
+        writeLocal(scopedStorageKey, local);
+        return;
+      }
       const version = expectedVersion ?? readVersions(scopedStorageKey)[record.id];
       const baseIntent = version === 0 ? "create" : version !== undefined ? "update" : index < 0 ? "create" : "unknown";
+      writeLocalAndQueue(scopedStorageKey, local, () => {
+        queueChange({ table, storageKey: scopedStorageKey, operation: "upsert", organisationId, sourceId: record.id, payload: record, expectedVersion: version, baseIntent, baseVersion: baseIntent === "update" ? version : undefined, collectionKey, userId, role: cacheRole, customerSourceId: cacheCustomerSourceId });
+      });
       if (!networkOnly && expectedVersion === 0 && userId) {
         replaceRecordCreators({ ...currentRecordCreators, [record.id]: userId });
       }
-      queueChange({ table, storageKey: scopedStorageKey, operation: "upsert", organisationId, sourceId: record.id, payload: record, expectedVersion: version, baseIntent, baseVersion: baseIntent === "update" ? version : undefined, collectionKey, userId, role: cacheRole, customerSourceId: cacheCustomerSourceId });
     },
     remove(sourceId: string, expectedVersion?: number) {
       const mode = effectiveCloudMode();
@@ -148,14 +171,18 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         currentRecordCreators = {};
         return;
       }
-      writeLocal(scopedStorageKey, readLocal<T>(scopedStorageKey).filter((record) => record.id !== sourceId));
+      const remaining = readLocal<T>(scopedStorageKey).filter((record) => record.id !== sourceId);
+      if (mode === "local") writeLocal(scopedStorageKey, remaining);
+      else {
+        const version = expectedVersion ?? readVersions(scopedStorageKey)[sourceId];
+        const baseIntent = version !== undefined ? "update" : "unknown";
+        writeLocalAndQueue(scopedStorageKey, remaining, () => {
+          queueChange({ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId, expectedVersion: version, baseIntent, baseVersion: version, collectionKey, userId, role: cacheRole, customerSourceId: cacheCustomerSourceId });
+        });
+      }
       const creators = { ...currentRecordCreators };
       delete creators[sourceId];
       replaceRecordCreators(creators);
-      if (mode === "local") return;
-      const version = expectedVersion ?? readVersions(scopedStorageKey)[sourceId];
-      const baseIntent = version !== undefined ? "update" : "unknown";
-      queueChange({ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId, expectedVersion: version, baseIntent, baseVersion: version, collectionKey, userId, role: cacheRole, customerSourceId: cacheCustomerSourceId });
     },
   };
 }

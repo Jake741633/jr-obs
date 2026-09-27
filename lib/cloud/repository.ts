@@ -173,10 +173,16 @@ export const syncStatus = {
   get(): SyncState {
     const derived = navigator.onLine ? statusForQueue(getSyncQueue()) : "Offline";
     const stored = read<SyncState>(STATUS_KEY, derived);
-    if (stored !== derived) write(STATUS_KEY, derived);
+    try { if (stored !== derived) write(STATUS_KEY, derived); }
+    catch { /* The badge cache is optional; the durable queue is authoritative. */ }
     return derived;
   },
-  set(value: SyncState) { write(STATUS_KEY, value); window.dispatchEvent(new CustomEvent("jr-os-sync-status", { detail: value })); },
+  set(value: SyncState) {
+    try { write(STATUS_KEY, value); }
+    catch { /* A status-cache failure must not invalidate a persisted mutation. */ }
+    try { window.dispatchEvent(new CustomEvent("jr-os-sync-status", { detail: value })); }
+    catch { /* Notification failure must not turn a committed queue write into an error. */ }
+  },
 };
 
 export function getSyncQueue() {
@@ -198,8 +204,8 @@ export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "mutationId" 
   const mutationId = crypto.randomUUID();
   const next: SyncQueueItem<T> = { ...safeItem, id: syncQueueItemId(safeItem.organisationId, safeItem.userId, safeItem.role, safeItem.customerSourceId, safeItem.table, safeItem.collectionKey, safeItem.sourceId, queuedAt, mutationId), mutationId, queuedAt: new Date(queuedAt).toISOString(), attempts: 0, state: navigator.onLine ? "Pending" : "Offline" };
   const coalesced = coalesceQueue(queue, next);
-  write(QUEUE_KEY, coalesced);
   const authorization = currentSyncAuthorization();
+  write(QUEUE_KEY, coalesced);
   if (authorization && queueItemMatchesAuthorization(next, authorization)) {
     const activeQueue = coalesced.filter((entry) => queueItemMatchesAuthorization(entry, authorization));
     syncStatus.set(navigator.onLine ? statusForQueue(activeQueue) : "Offline");

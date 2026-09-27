@@ -65,6 +65,8 @@ The registered `jr-os-electrical-calculations` collection uses existing account-
 
 The UI confirms device persistence and queueing rather than claiming a completed cloud upload. Operators check Cloud status for pending uploads and conflicts. The existing database office-data policy remains in force, including office service access; the feature does not expand route permissions or add field/customer projections. No schema migration or production DDL is needed.
 
+Collection writes restore the previous local records if the sync queue cannot be persisted, including failed creates, updates and removals. Creator metadata changes only after persistence succeeds. The derived status badge has an optional cache: a badge-cache failure does not invalidate a durable queued record. If local recovery itself fails or another tab has changed the collection, the error explicitly reports incomplete recovery and the newer cache is not overwritten. This is failure recovery for separate browser-storage writes, not a cross-tab database transaction.
+
 Quote and survey linking remain the next integration increment. Production recovery evidence and physical-phone acceptance remain separate release gates.
 
 ## Technical references
@@ -94,3 +96,5 @@ These automated tests verify software behavior. They are not installation certif
 Maximum-demand core and page-handler tests cover mixed-phase known answers, every required field, explicit zero diversity, fractional quantities, unknown phases, empty schedules, adding/removing rows, and row/aggregate numeric extremes. The shared decimal parser also rejects nonzero decimal strings that underflow to zero.
 
 Saved-record tests execute snapshot creation and real UI handlers, covering all seven calculation types, unit conversion, incomplete inputs, historical independence, failed comparisons, account changes, unavailable jobs, storage failures, search and job filters. The SQL and full Supabase upgrade rehearsals both exercise real database reads/writes for owner/admin/office, field/customer, other-tenant, revoked/inactive and anonymous identities, as well as job-binding rejection and projection isolation. All rehearsal records and audit entries are rolled back.
+
+`tests/collection-write-failures.test.mjs` runs the actual TypeScript storage hook, collection adapter and sync repository together. It injects cache, queue, badge-cache and recovery failures; checks retry behavior, creator/version preservation and other-account isolation; and verifies successful updates, removals, file-safe ordering and local-only behavior. Cloud collection effects enqueue changed records before mirroring the resulting list order into the cache.

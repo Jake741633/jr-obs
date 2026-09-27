@@ -107,9 +107,8 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       previousRef.current = items;
       return;
     }
-    window.localStorage.setItem(activeStorageKey, JSON.stringify(items));
-
     if (suppressSyncRef.current || !target || !organisationId || !userId || mode === "local") {
+      window.localStorage.setItem(activeStorageKey, JSON.stringify(items));
       previousRef.current = items;
       return;
     }
@@ -146,6 +145,11 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       }
     }
     if (creatorMetadataChanged) setCreatedBySourceId(repository.recordCreators());
+    // Each changed record is already durable. Mirror render ordering only after
+    // every required queue write succeeds, using the same file-safe payloads.
+    try {
+      window.localStorage.setItem(activeStorageKey, JSON.stringify(items.map((item) => cloudSafeFileRecord(key, item as unknown as object))));
+    } catch { /* Keep the repository's persisted records if this ordering write fails. */ }
     previousRef.current = items;
   }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, items, key, mode, networkOnly, organisationId, target, userId]);
 
