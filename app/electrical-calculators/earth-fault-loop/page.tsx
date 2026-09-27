@@ -7,39 +7,38 @@ import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { earthFaultLoopSummary } from "../../../lib/earthFaultLoopCalculator-core.mjs";
-
-const number = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 3 });
+import { formatCalculatorNumber as format } from "../../../lib/electricalCalculatorNumbers-core.mjs";
 
 export default function EarthFaultLoopCalculatorPage() {
   const [nominalVoltage, setNominalVoltage] = useState("230");
-  const [ze, setZe] = useState("0.35");
-  const [r1, setR1] = useState("0.18");
-  const [r2, setR2] = useState("0.30");
-  const [tabulatedMaximumZs, setTabulatedMaximumZs] = useState("1.37");
+  const [ze, setZe] = useState("");
+  const [r1, setR1] = useState("");
+  const [r2, setR2] = useState("");
+  const [tabulatedMaximumZs, setTabulatedMaximumZs] = useState("");
   const [permittedPercentage, setPermittedPercentage] = useState("80");
 
   const result = useMemo(() => earthFaultLoopSummary({
-    nominalVoltage: Number(nominalVoltage),
-    externalEarthFaultLoopOhms: Number(ze),
-    lineConductorResistanceOhms: Number(r1),
-    cpcResistanceOhms: Number(r2),
-    tabulatedMaximumZsOhms: Number(tabulatedMaximumZs),
-    permittedPercentage: Number(permittedPercentage),
+    nominalVoltage,
+    externalEarthFaultLoopOhms: ze,
+    lineConductorResistanceOhms: r1,
+    cpcResistanceOhms: r2,
+    tabulatedMaximumZsOhms: tabulatedMaximumZs,
+    permittedPercentage,
   }), [nominalVoltage, permittedPercentage, r1, r2, tabulatedMaximumZs, ze]);
 
-  const statusLabel = !result.hasVerifiedLimit
-    ? "Verified limit required"
+  const statusLabel = !result.hasCompleteInputs
+    ? "Assessment unavailable"
     : result.withinSelectedLimit
       ? "Within selected limit"
       : "Exceeds selected limit";
 
-  const statusClass = !result.hasVerifiedLimit
+  const statusClass = !result.hasCompleteInputs
     ? "border-amber-400/30"
     : result.withinSelectedLimit
       ? "border-emerald-400/30"
       : "border-rose-400/30";
 
-  const statusTextClass = !result.hasVerifiedLimit
+  const statusTextClass = !result.hasCompleteInputs
     ? "text-amber-300"
     : result.withinSelectedLimit
       ? "text-emerald-300"
@@ -86,6 +85,7 @@ export default function EarthFaultLoopCalculatorPage() {
             <InputField label="Verified tabulated maximum Zs (Ω)" type="number" inputMode="decimal" min="0" step="0.01" value={tabulatedMaximumZs} onChange={(event) => setTabulatedMaximumZs(event.target.value)} />
             <InputField label="Permitted percentage (%)" type="number" inputMode="decimal" min="0" max="100" step="1" value={permittedPercentage} onChange={(event) => setPermittedPercentage(event.target.value)} />
           </div>
+          {result.errors.length > 0 ? <ul className="mt-4 list-disc space-y-1 pl-5 text-sm text-amber-200">{result.errors.map((error: string) => <li key={error}>{error}</li>)}</ul> : null}
         </Card>
 
         <div className="space-y-4">
@@ -94,21 +94,21 @@ export default function EarthFaultLoopCalculatorPage() {
               <ShieldCheck className="size-6 text-cyan-300" />
               <span className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Calculated Zs</span>
             </div>
-            <p className="mt-5 text-5xl font-black">{number.format(result.calculatedZsOhms)} Ω</p>
-            <p className={`mt-4 text-sm font-semibold ${statusTextClass}`}>{statusLabel}</p>
-            <p className="mt-2 text-sm text-slate-400">Selected maximum: {number.format(result.permittedMaximumZsOhms)} Ω</p>
+            <p className="mt-5 break-words text-5xl font-black">{format(result.calculatedZsOhms)} Ω</p>
+            <p role="status" aria-live="polite" className={`mt-4 text-sm font-semibold ${statusTextClass}`}>{statusLabel}</p>
+            <p className="mt-2 text-sm text-slate-400">Selected maximum: {format(result.permittedMaximumZsOhms)} Ω</p>
           </Card>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Card>
               <p className="text-sm text-slate-400">Margin</p>
-              <p className="mt-1 text-2xl font-bold">{number.format(result.marginOhms)} Ω</p>
+              <p className="mt-1 text-2xl font-bold">{format(result.marginOhms)} Ω</p>
               <p className="mt-1 text-xs text-slate-500">Positive values remain below the selected limit.</p>
             </Card>
             <Card>
               <Zap className="size-5 text-amber-300" />
               <p className="mt-3 text-sm text-slate-400">Prospective earth fault current</p>
-              <p className="mt-1 text-2xl font-bold">{number.format(result.prospectiveEarthFaultCurrentAmps)} A</p>
+              <p className="mt-1 text-2xl font-bold">{format(result.prospectiveEarthFaultCurrentAmps)} A</p>
             </Card>
           </div>
         </div>
@@ -117,10 +117,10 @@ export default function EarthFaultLoopCalculatorPage() {
       <Card>
         <h2 className="font-semibold">Calculation evidence</h2>
         <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs uppercase tracking-wide text-slate-500">Ze</p><p className="mt-1 text-xl font-bold">{number.format(result.externalEarthFaultLoopOhms)} Ω</p></div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs uppercase tracking-wide text-slate-500">R1</p><p className="mt-1 text-xl font-bold">{number.format(result.lineConductorResistanceOhms)} Ω</p></div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs uppercase tracking-wide text-slate-500">R2</p><p className="mt-1 text-xl font-bold">{number.format(result.cpcResistanceOhms)} Ω</p></div>
-          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs uppercase tracking-wide text-slate-500">Applied limit</p><p className="mt-1 text-xl font-bold">{number.format(result.permittedPercentage)}%</p></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs uppercase tracking-wide text-slate-500">Ze</p><p className="mt-1 text-xl font-bold">{format(result.externalEarthFaultLoopOhms)} Ω</p></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs uppercase tracking-wide text-slate-500">R1</p><p className="mt-1 text-xl font-bold">{format(result.lineConductorResistanceOhms)} Ω</p></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs uppercase tracking-wide text-slate-500">R2</p><p className="mt-1 text-xl font-bold">{format(result.cpcResistanceOhms)} Ω</p></div>
+          <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs uppercase tracking-wide text-slate-500">Applied limit</p><p className="mt-1 text-xl font-bold">{format(result.permittedPercentage)}%</p></div>
         </div>
       </Card>
 

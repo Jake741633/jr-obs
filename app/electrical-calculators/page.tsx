@@ -78,7 +78,7 @@ export default function ElectricalCalculatorsPage() {
         description="Calculate design current, assess voltage drop and check a verified cable option against correction factors."
       />
 
-      <div className="grid gap-3 lg:grid-cols-3">
+      <div className="grid gap-3 lg:grid-cols-2">
         <Link href="/electrical-calculators/cable-sizing" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-400/15">
           <span className="flex items-center gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-300/15"><Cable className="size-5" /></span>
@@ -108,6 +108,13 @@ export default function ElectricalCalculatorsPage() {
               <span className="block font-bold">Open Earth Fault Loop</span>
               <span className="block text-sm text-emerald-100/70">Assess Ze + R1 + R2 against a verified maximum Zs and review fault-current evidence.</span>
             </span>
+          </span>
+          <ArrowRight className="size-5 shrink-0" />
+        </Link>
+        <Link href="/electrical-calculators/adiabatic" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-amber-100 transition hover:border-amber-300 hover:bg-amber-400/15">
+          <span className="flex items-center gap-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-amber-300/15"><ShieldCheck className="size-5" /></span>
+            <span><span className="block font-bold">Open Adiabatic CPC Sizing</span><span className="block text-sm text-amber-100/70">Check CPC thermal withstand using verified fault data, manufacturer I²t and k-factor.</span></span>
           </span>
           <ArrowRight className="size-5 shrink-0" />
         </Link>
