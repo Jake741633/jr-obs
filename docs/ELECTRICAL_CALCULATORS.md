@@ -1,6 +1,6 @@
 # Electrical calculator scope and validation
 
-The calculator suite is tracked in [issue #2](https://github.com/Jake741633/jr-obs/issues/2). This increment adds `/electrical-calculators/adiabatic` and hardens `/electrical-calculators/earth-fault-loop`. Other calculator modules and saved job/quote/survey design records remain separate roadmap work.
+The calculator suite is tracked in [issue #2](https://github.com/Jake741633/jr-obs/issues/2). This increment adds `/electrical-calculators/adiabatic` and hardens `/electrical-calculators/earth-fault-loop`. Saved job/quote/survey design records and full manufacturer device selection remain separate roadmap work.
 
 ## Adiabatic CPC sizing
 
@@ -39,6 +39,14 @@ Recent cable calculations retain the existing full-account storage key and five-
 
 The dedicated page's basic device check covers only `Ib ≤ In ≤ Iz`. It does not establish conventional overload operation, breaking capacity, disconnection time or selectivity.
 
+## Protective device checks
+
+`/electrical-calculators/protective-device` adds four explicit comparisons: load against rating/setting, rating/setting against corrected cable capacity, conventional overload operating current against `1.45 × Iz`, and stand-alone breaking capacity against maximum prospective fault current. Device identification and evidence references are required alongside all six numeric inputs. The page starts blank and clearing resets everything.
+
+The designer supplies verified operating data and checks its applicability to the installation and device standard. There is no device catalogue, automatic trip-curve multiplier, inferred fuse factor, upstream backup credit or selectivity claim. This tool takes corrected Iz, not tabulated capacity, and overload setting rather than breaker frame rating where applicable. I2 at or below the normal rating/setting is outside the supported overload-input scope and must be corrected. Maximum PFC must come from appropriate circuit evidence, not the simple earth-loop estimate.
+
+Each comparison and its unrounded margin is visible. Missing/malformed inputs, absent references or numeric overflow suppress every assessment. A failed comparison is reported individually, while the overall result requires all four. Evidence stays in the form; this increment adds no persistence or account permission changes.
+
 ## Technical references
 
 Reviewed 27 September 2026; these explain the calculation principles and do not replace the current project-specific BS 7671 and manufacturer documents:
@@ -50,6 +58,9 @@ Reviewed 27 September 2026; these explain the calculation principles and do not 
 - [Schneider Electric Electrical Installation Guide: induction motors](https://www.electrical-installation.org/enwiki/Induction_motors) — consistent output-power, efficiency and apparent-input-power relationship.
 - [Schneider Electric Electrical Installation Guide: general cable sizing](https://www.electrical-installation.org/enwiki/General_method_for_cable_sizing) — installation correction factors, including ambient adjustments above unity.
 
+- [Schneider Electric Electrical Installation Guide: practical protective schemes](https://www.electrical-installation.org/enwiki/Practical_values_for_a_protective_scheme) — load, overload and breaking-capacity principles; manufacturer evidence for backup coordination.
+- [IET Wiring Matters, Autumn 2012](https://electrical.theiet.org/media/1057/2012_44_autumn_wiring_matters__complete_adverts.pdf) — explanation of conventional overload operation. This historical explanation is not the current project standard.
+
 ## Verification
 
 `tests/adiabatic-calculator-core.test.mjs`, `tests/earth-fault-loop-calculator-core.test.mjs` and `tests/electrical-calculator-numbers.test.mjs` cover known answers, exact boundaries, malformed and missing values, numeric extremes and unrounded comparisons. `tests/fault-calculator-pages.test.mjs` executes the rendered pages' real change/click handlers against the actual calculation modules, covering the missing-R2 regression, method switching and clearing stale results.
@@ -57,3 +68,5 @@ Reviewed 27 September 2026; these explain the calculation principles and do not 
 These automated tests verify software behavior. They are not installation certification or physical-phone acceptance evidence.
 
 `tests/connected-calculator-validation.test.mjs` covers every required field, invalid factors, numeric extremes and exact comparison boundaries. `tests/connected-calculator-pages.test.mjs` executes page input and save/load handlers, including propagation of missing load data, storage failures and legacy records. Existing tenant-boundary tests remain in the full gate.
+
+`tests/protective-device-calculator.test.mjs` checks known answers, each independent failed criterion, exact boundaries, malformed data, absent evidence and numeric extremes. Rendered-page tests exercise filling, correcting, clearing and removing evidence through the actual handlers.
