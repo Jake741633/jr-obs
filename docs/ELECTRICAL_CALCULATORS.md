@@ -47,6 +47,14 @@ The designer supplies verified operating data and checks its applicability to th
 
 Each comparison and its unrounded margin is visible. Missing/malformed inputs, absent references or numeric overflow suppress every assessment. A failed comparison is reported individually, while the overall result requires all four. Evidence stays in the form; this increment adds no persistence or account permission changes.
 
+## Maximum demand and diversity
+
+The previous page treated an empty diversity field as 0%. Clearing the example three-phase row reduced maximum demand from 28.8 A to 12.8 A. It also rounded fractional quantities down and substituted a phase for invalid data.
+
+Each load now requires a positive finite per-item current, an explicit whole-number quantity, a supported phase and an explicit demand factor from 0% to 100%. A deliberately entered 0% is retained as an exclusion requiring designer justification. Missing or malformed data makes the row and aggregate assessment unavailable; it never removes the load from a partial total. Empty schedules are unassessed. Example loads and diversity factors have been removed, and new rows start with blank current and demand factor.
+
+The page retains visible results for complete individual rows while withholding schedule totals until every row is valid. It rejects intermediate or aggregate overflow and nonzero values that underflow to zero. Three-phase entries represent balanced line current, applied to each phase. Schedule sums count each load once and are labelled separately from per-phase supply demand; they are not supply current.
+
 ## Technical references
 
 Reviewed 27 September 2026; these explain the calculation principles and do not replace the current project-specific BS 7671 and manufacturer documents:
@@ -70,3 +78,5 @@ These automated tests verify software behavior. They are not installation certif
 `tests/connected-calculator-validation.test.mjs` covers every required field, invalid factors, numeric extremes and exact comparison boundaries. `tests/connected-calculator-pages.test.mjs` executes page input and save/load handlers, including propagation of missing load data, storage failures and legacy records. Existing tenant-boundary tests remain in the full gate.
 
 `tests/protective-device-calculator.test.mjs` checks known answers, each independent failed criterion, exact boundaries, malformed data, absent evidence and numeric extremes. Rendered-page tests exercise filling, correcting, clearing and removing evidence through the actual handlers.
+
+Maximum-demand core and page-handler tests cover mixed-phase known answers, every required field, explicit zero diversity, fractional quantities, unknown phases, empty schedules, adding/removing rows, and row/aggregate numeric extremes. The shared decimal parser also rejects nonzero decimal strings that underflow to zero.

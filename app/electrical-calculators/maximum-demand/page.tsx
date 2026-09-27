@@ -6,7 +6,9 @@ import { ArrowLeft, CircleAlert, Plus, Trash2, Zap } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
-import { maximumDemandSummary } from "../../../lib/maximumDemandCalculator-core.mjs";
+import { maximumDemandSummary, maximumDemandFactorFromPercent } from "../../../lib/maximumDemandCalculator-core.mjs";
+
+import { formatCalculatorNumber as format } from "../../../lib/electricalCalculatorNumbers-core.mjs";
 
 type LoadPhase = "L1" | "L2" | "L3" | "Three phase";
 type LoadDraft = {
@@ -18,33 +20,31 @@ type LoadDraft = {
   phase: LoadPhase;
 };
 
-const number = new Intl.NumberFormat("en-GB", { maximumFractionDigits: 2 });
+const number = { format };
 
 function newLoad(index: number): LoadDraft {
   return {
-    id: `load-${Date.now()}-${index}`,
+    id: crypto.randomUUID(),
     description: `Load ${index}`,
     quantity: "1",
-    connectedCurrentAmps: "0",
-    demandPercent: "100",
+    connectedCurrentAmps: "",
+    demandPercent: "",
     phase: "L1",
   };
 }
 
 export default function MaximumDemandPage() {
   const [loads, setLoads] = useState<LoadDraft[]>([
-    { id: "load-1", description: "Lighting", quantity: "1", connectedCurrentAmps: "10", demandPercent: "66", phase: "L1" },
-    { id: "load-2", description: "Socket outlets", quantity: "1", connectedCurrentAmps: "32", demandPercent: "40", phase: "L2" },
-    { id: "load-3", description: "Three-phase equipment", quantity: "1", connectedCurrentAmps: "16", demandPercent: "100", phase: "Three phase" },
+    { id: "load-1", description: "Load 1", quantity: "1", connectedCurrentAmps: "", demandPercent: "", phase: "L1" },
   ]);
 
   const result = useMemo(() => maximumDemandSummary({
     loads: loads.map((load) => ({
       id: load.id,
       description: load.description,
-      quantity: Number(load.quantity),
-      connectedCurrentAmps: Number(load.connectedCurrentAmps),
-      demandFactor: Number(load.demandPercent) / 100,
+      quantity: load.quantity,
+      connectedCurrentAmps: load.connectedCurrentAmps,
+      demandFactor: maximumDemandFactorFromPercent(load.demandPercent),
       phase: load.phase,
     })),
   }), [loads]);
@@ -78,7 +78,7 @@ export default function MaximumDemandPage() {
           <CircleAlert className="mt-0.5 size-5 shrink-0 text-amber-300" />
           <div>
             <h2 className="font-semibold text-amber-100">Designer-selected diversity</h2>
-            <p className="mt-1 text-sm text-amber-100/70">Demand factors must be selected and justified for the actual installation. This calculator does not supply fixed BS 7671 diversity values.</p>
+            <p className="mt-1 text-sm text-amber-100/70">Demand factors must be selected and justified for the actual installation. This calculator does not supply fixed BS 7671 diversity values. Enter every factor explicitly; 0% excludes a load and needs a design justification.</p>
           </div>
         </div>
       </Card>
@@ -87,7 +87,7 @@ export default function MaximumDemandPage() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-xl font-bold">Load schedule</h2>
-            <p className="text-sm text-slate-500">Add each known load and assign it to L1, L2, L3 or all three phases.</p>
+            <p className="text-sm text-slate-500">Add each known load and assign it to L1, L2, L3 or all three phases. Three-phase entries use line current for a balanced load.</p>
           </div>
           <button type="button" onClick={addLoad} className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-cyan-400 px-4 font-bold text-slate-950 transition hover:bg-cyan-300">
             <Plus className="size-5" /> Add load
@@ -110,7 +110,7 @@ export default function MaximumDemandPage() {
               <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
                 <InputField label="Description" value={load.description} onChange={(event) => updateLoad(load.id, { description: event.target.value })} />
                 <InputField label="Quantity" type="number" inputMode="numeric" min="1" step="1" value={load.quantity} onChange={(event) => updateLoad(load.id, { quantity: event.target.value })} />
-                <InputField label="Connected current (A)" type="number" inputMode="decimal" min="0" step="0.1" value={load.connectedCurrentAmps} onChange={(event) => updateLoad(load.id, { connectedCurrentAmps: event.target.value })} />
+                <InputField label="Connected current per item (A)" type="number" inputMode="decimal" min="0" step="0.1" value={load.connectedCurrentAmps} onChange={(event) => updateLoad(load.id, { connectedCurrentAmps: event.target.value })} />
                 <InputField label="Demand factor (%)" type="number" inputMode="decimal" min="0" max="100" step="1" value={load.demandPercent} onChange={(event) => updateLoad(load.id, { demandPercent: event.target.value })} />
                 <label className="grid min-w-0 gap-2 text-sm font-medium text-slate-300">
                   <span>Phase</span>
@@ -123,14 +123,15 @@ export default function MaximumDemandPage() {
                 </label>
               </div>
 
+              {result.loads[index]?.errors.map((error: string) => <p key={error} className="mt-2 text-sm text-amber-200">{error}</p>)}
               <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                   <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Connected total</p>
-                  <p className="mt-1 text-lg font-bold">{number.format(result.loads[index]?.connectedTotalAmps ?? 0)} A</p>
+                  <p className="mt-1 text-lg font-bold">{number.format(result.loads[index]?.connectedTotalAmps)} A</p>
                 </div>
                 <div className="rounded-xl border border-slate-800 bg-slate-950/70 p-3">
                   <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Diversified current</p>
-                  <p className="mt-1 text-lg font-bold text-cyan-200">{number.format(result.loads[index]?.diversifiedCurrentAmps ?? 0)} A</p>
+                  <p className="mt-1 text-lg font-bold text-cyan-200">{number.format(result.loads[index]?.diversifiedCurrentAmps)} A</p>
                 </div>
               </div>
             </Card>
@@ -150,7 +151,10 @@ export default function MaximumDemandPage() {
         <Card className="border-cyan-400/30 lg:col-span-2">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-400">Maximum phase demand</p>
           <p className="mt-4 text-5xl font-black text-cyan-100">{number.format(result.maximumPhaseDemandAmps)} A</p>
-          <p className="mt-2 text-sm text-slate-500">Highest diversified current across L1, L2 and L3.</p>
+          <p role="status" className="mt-3 font-semibold">{result.hasCompleteInputs ? "Demand calculated" : "Assessment unavailable"}</p>
+          <p className="mt-2 text-sm text-slate-500">Highest diversified current across L1, L2 and L3. Every load must be complete before schedule totals are shown.</p>
+          {!result.hasCompleteInputs ? <p className="mt-2 text-sm text-amber-200">{loads.length === 0 ? "Add a load to begin." : "Complete or correct the highlighted load inputs."}</p> : null}
+          {result.errors.filter((error: string) => error.startsWith("The schedule")).map((error: string) => <p key={error} className="mt-2 text-sm text-amber-200">{error}</p>)}
         </Card>
         <Card>
           <p className="text-sm text-slate-400">Phase imbalance</p>
@@ -160,9 +164,9 @@ export default function MaximumDemandPage() {
       </section>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <Card><p className="text-sm text-slate-400">Connected current</p><p className="mt-2 text-2xl font-bold">{number.format(result.totalConnectedCurrentAmps)} A</p></Card>
-        <Card><p className="text-sm text-slate-400">Diversified current</p><p className="mt-2 text-2xl font-bold">{number.format(result.totalDiversifiedCurrentAmps)} A</p></Card>
-        <Card><p className="text-sm text-slate-400">Overall demand factor</p><p className="mt-2 text-2xl font-bold">{number.format(result.overallDemandFactor * 100)}%</p></Card>
+        <Card><p className="text-sm text-slate-400">Sum of load currents</p><p className="mt-2 text-2xl font-bold">{number.format(result.totalConnectedCurrentAmps)} A</p></Card>
+        <Card><p className="text-sm text-slate-400">Sum of diversified currents</p><p className="mt-2 text-2xl font-bold">{number.format(result.totalDiversifiedCurrentAmps)} A</p></Card>
+        <Card><p className="text-sm text-slate-400">Schedule demand factor</p><p className="mt-2 text-2xl font-bold">{number.format(result.overallDemandFactor === null ? null : result.overallDemandFactor * 100)}%</p></Card>
         <Card><p className="text-sm text-slate-400">L1 demand</p><p className="mt-2 text-2xl font-bold">{number.format(result.phaseDemandAmps.L1)} A</p></Card>
         <Card><p className="text-sm text-slate-400">L2 / L3 demand</p><p className="mt-2 text-xl font-bold">{number.format(result.phaseDemandAmps.L2)} A / {number.format(result.phaseDemandAmps.L3)} A</p></Card>
       </section>
