@@ -58,7 +58,7 @@ test("authenticated backup exports recognise encoded organisation and account su
 });
 
 test("runtime backup registry separates active-account data from organisation settings", () => {
-  assert.equal(accountBackupStorageKeys.length, 68);
+  assert.equal(accountBackupStorageKeys.length, 69);
   assert.equal(organisationBackupStorageKeys.length, 1);
   assert.deepEqual(accountBackupStorageKeys, cloudCollectionStorageKeys);
   assert.deepEqual(accountBackupStorageKeys.filter((key) => organisationBackupStorageKeys.includes(key)), []);

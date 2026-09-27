@@ -6,6 +6,7 @@ import { ArrowLeft, CircleAlert, ShieldCheck } from "lucide-react";
 import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
+import { SaveCalculation } from "../../../components/calculators/CalculationRecords";
 import { adiabaticSummary } from "../../../lib/adiabaticCalculator-core.mjs";
 import { formatCalculatorNumber as format } from "../../../lib/electricalCalculatorNumbers-core.mjs";
 
@@ -73,5 +74,6 @@ export default function AdiabaticCalculatorPage() {
     </div>
 
     <Card><h2 className="font-semibold">Assumptions and limits</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-slate-400">{result.assumptions.map((assumption: string) => <li key={assumption}>{assumption}</li>)}</ul></Card>
+    <SaveCalculation kind="adiabatic" label="Adiabatic CPC sizing" input={{ ...inputs, method }} />
   </main>;
 }

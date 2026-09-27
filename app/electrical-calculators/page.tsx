@@ -6,6 +6,7 @@ import { ArrowRight, Calculator, Cable, CircleAlert, Gauge, Route, Scale, Shield
 import { Card } from "../../components/ui/Card";
 import { InputField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
+import { SaveCalculation } from "../../components/calculators/CalculationRecords";
 import { cableSizingSummary } from "../../lib/cableSizingCalculator-core.mjs";
 import { electricalLoadSummary } from "../../lib/electricalCalculators-core.mjs";
 import { voltageDropSummary } from "../../lib/voltageDropCalculator-core.mjs";
@@ -78,6 +79,7 @@ export default function ElectricalCalculatorsPage() {
       />
 
       <div className="grid gap-3 lg:grid-cols-2">
+        <Link href="/electrical-calculators/records" className="flex min-h-14 items-center justify-between rounded-2xl border border-slate-700 px-4 py-3 font-semibold text-cyan-200">Saved calculation records<ArrowRight className="size-5 shrink-0" /></Link>
         <Link href="/electrical-calculators/cable-sizing" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-400/15">
           <span className="flex items-center gap-3">
             <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-cyan-300/15"><Cable className="size-5" /></span>
@@ -247,6 +249,9 @@ export default function ElectricalCalculatorsPage() {
           {[...result.assumptions, ...voltageDrop.assumptions, ...cableSizing.assumptions].map((assumption: string, index: number) => <p key={`${index}-${assumption}`} className="rounded-xl bg-slate-950/70 px-3 py-2 text-sm text-slate-400">{assumption}</p>)}
         </div>
       </Card>
+      <SaveCalculation kind="load" label="Load and design current" input={{ phase, powerWatts: positiveCalculatorNumber(powerKw) === null ? null : positiveCalculatorNumber(powerKw)! * 1000, voltage, powerFactor, efficiency }} />
+      <SaveCalculation kind="voltage-drop" label="Voltage drop" input={{ phase, nominalVoltage: voltage, designCurrentAmps: result.currentAmps, routeLengthMetres: routeLength, millivoltsPerAmpMetre, maximumPercent }} />
+      <SaveCalculation kind="cable-sizing" label="Cable current capacity" input={{ designCurrentAmps: result.currentAmps, ambientTemperatureFactor, groupingFactor, insulationFactor, otherFactor, cableOptions }} />
     </main>
   );
 }

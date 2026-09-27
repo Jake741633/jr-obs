@@ -25,6 +25,7 @@ import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
+import { SavedCalculationRecords } from "../../../components/calculators/CalculationRecords";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
 import { useJobVariationsCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { strictHttpsJobDocumentUrl } from "../../../lib/cloud/fieldJobDocumentCapability-core.mjs";
@@ -437,6 +438,7 @@ export default function JobDetailPage() {
       </div>
     </Card>
 
+    <SavedCalculationRecords jobId={job.id} />
     <section className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Project workflow</p><h2 className="mt-1 text-2xl font-bold">Quote → Job → Invoice → Payment</h2><p className="mt-1 text-sm text-slate-400">A live view built from the linked records, with no duplicate data entry.</p></div>{financeRestricted ? <p className="max-w-md text-sm text-amber-200">{financeHandoffMessage}</p> : linkedInvoices.length ? <Link href="/invoices" className="inline-flex min-h-11 items-center rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ReceiptText className="mr-2 size-4" />View invoice</Link> : <Button type="button" disabled={job.status !== "Complete"} onClick={generateInvoice}><ReceiptText className="mr-2 size-4" />Generate invoice</Button>}</div>
       {invoiceMessage ? <div className={`rounded-xl border px-4 py-3 text-sm ${financeRestricted ? "border-amber-500/20 bg-amber-500/5 text-amber-200" : "border-emerald-500/20 bg-emerald-500/5 text-emerald-300"}`}>{invoiceMessage}</div> : null}

@@ -146,6 +146,8 @@ async function checkAccess(connection,actors) {
   assert.deepEqual(files.map(row=>row.source_id),["document","survey-photo"],"Assigned field private-file scope");
   const other = await asActor(connection,actors.other,"select distinct organisation_id from public.jobs");
   assert.deepEqual(other,[{organisation_id:actors.other.org}],"Second tenant scope");
+  const { checkSavedCalculationAccess } = await import("./calculation-access.mjs");
+  await checkSavedCalculationAccess(connection, actors);
 }
 
 

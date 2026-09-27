@@ -6,6 +6,7 @@ import { ArrowLeft, Cable, CircleAlert, RotateCcw, Save, Trash2 } from "lucide-r
 import { Card } from "../../../components/ui/Card";
 import { InputField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
+import { SaveCalculation } from "../../../components/calculators/CalculationRecords";
 import { cableSizingSummary } from "../../../lib/cableSizingCalculator-core.mjs";
 import { accountStorageKey } from "../../../lib/cloud/adapter";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
@@ -304,6 +305,8 @@ export default function CableSizingPage() {
         </div>
         {!historyReady ? <p className="mt-2 text-sm text-slate-500">{identityReady && !identity ? "Sign in to use account-scoped saved calculations." : "Loading saved calculations…"}</p> : visibleRecent.length === 0 ? <p className="mt-2 text-sm text-slate-500">No locally saved calculations yet.</p> : <div className="mt-3 grid gap-3">{visibleRecent.map((item) => <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950 p-3 text-sm"><div className="flex flex-wrap justify-between gap-2"><span className="font-semibold">{item.phase} · {number.format(item.designCurrentAmps)} A</span><span className="text-slate-500">{new Date(item.savedAt).toLocaleString("en-GB")}</span></div><p className="mt-1 text-slate-400">Saved snapshot — verify inputs before reuse. {number.format(item.cableSizeMm2)} mm² · corrected {number.format(item.requiredTabulatedCurrentAmps)} A · drop {number.format(item.voltageDropVolts)} V</p><button type="button" onClick={() => loadCalculation(item)} disabled={!historyReady} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 px-3 font-semibold text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"><RotateCcw className="size-4" />Load into calculator</button></div>)}</div>}
       </Card>
+      <SaveCalculation kind="cable-sizing" label="Cable current capacity" input={{ designCurrentAmps, ambientTemperatureFactor: ambientFactor, groupingFactor, insulationFactor, otherFactor, cableOptions }} />
+      <SaveCalculation kind="voltage-drop" label="Voltage drop" input={{ phase, nominalVoltage: voltage, designCurrentAmps, routeLengthMetres: cableLength, millivoltsPerAmpMetre, maximumPercent: 3 }} />
     </main>
   );
 }
