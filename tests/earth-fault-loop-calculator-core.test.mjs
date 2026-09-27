@@ -1,140 +1,88 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { calculateEarthFaultLoopImpedance, earthFaultLoopSummary, maximumPermittedEarthFaultLoop, prospectiveEarthFaultCurrent } from "../lib/earthFaultLoopCalculator-core.mjs";
 
-import {
-  calculateEarthFaultLoopImpedance,
-  earthFaultLoopSummary,
-  maximumPermittedEarthFaultLoop,
-  prospectiveEarthFaultCurrent,
-} from "../lib/earthFaultLoopCalculator-core.mjs";
+const valid = { nominalVoltage: 230, externalEarthFaultLoopOhms: 0.35, lineConductorResistanceOhms: 0.18, cpcResistanceOhms: 0.3, tabulatedMaximumZsOhms: 1.37, permittedPercentage: 80 };
+const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-10, `${actual} != ${expected}`);
 
-test("calculates earth fault loop impedance from Ze plus R1 plus R2", () => {
-  const result = calculateEarthFaultLoopImpedance({
-    externalEarthFaultLoopOhms: 0.35,
-    lineConductorResistanceOhms: 0.18,
-    cpcResistanceOhms: 0.3,
-  });
-
-  assert.ok(Math.abs(result - 0.83) < 1e-12);
-});
-
-test("invalid and negative impedance inputs fall back safely", () => {
-  assert.equal(calculateEarthFaultLoopImpedance({
-    externalEarthFaultLoopOhms: -1,
-    lineConductorResistanceOhms: "invalid",
-    cpcResistanceOhms: 0.25,
-  }), 0.25);
-});
-
-test("applies the designer-selected permitted percentage", () => {
-  assert.equal(maximumPermittedEarthFaultLoop({
-    tabulatedMaximumZsOhms: 1.37,
-    permittedPercentage: 80,
-  }), 1.096);
-});
-
-test("clamps permitted percentages and requires a positive verified limit", () => {
-  assert.equal(maximumPermittedEarthFaultLoop({
-    tabulatedMaximumZsOhms: 2,
-    permittedPercentage: 120,
-  }), 2);
-  assert.equal(maximumPermittedEarthFaultLoop({
-    tabulatedMaximumZsOhms: 2,
-    permittedPercentage: -20,
-  }), 0);
-  assert.equal(maximumPermittedEarthFaultLoop({
-    tabulatedMaximumZsOhms: 0,
-    permittedPercentage: 80,
-  }), 0);
-});
-
-test("calculates simplified prospective earth fault current", () => {
-  assert.equal(prospectiveEarthFaultCurrent({
-    nominalVoltage: 230,
-    earthFaultLoopImpedanceOhms: 0.5,
-  }), 460);
-});
-
-test("prospective earth fault current returns zero without positive impedance", () => {
-  assert.equal(prospectiveEarthFaultCurrent({
-    nominalVoltage: 230,
-    earthFaultLoopImpedanceOhms: 0,
-  }), 0);
-});
-
-test("summary passes when calculated Zs is below the selected limit", () => {
-  const result = earthFaultLoopSummary({
-    nominalVoltage: 230,
-    externalEarthFaultLoopOhms: 0.35,
-    lineConductorResistanceOhms: 0.18,
-    cpcResistanceOhms: 0.3,
-    tabulatedMaximumZsOhms: 1.37,
-    permittedPercentage: 80,
-  });
-
-  assert.ok(Math.abs(result.calculatedZsOhms - 0.83) < 1e-12);
+test("earth fault calculation preserves the known Ze + R1 + R2 assessment", () => {
+  const result = earthFaultLoopSummary(valid);
+  close(calculateEarthFaultLoopImpedance(valid), 0.83);
+  close(result.calculatedZsOhms, 0.83);
   assert.equal(result.permittedMaximumZsOhms, 1.096);
-  assert.equal(result.hasVerifiedLimit, true);
+  close(result.marginOhms, 0.266);
+  close(result.prospectiveEarthFaultCurrentAmps, 230 / 0.83);
+  assert.equal(result.hasCompleteInputs, true);
   assert.equal(result.withinSelectedLimit, true);
-  assert.ok(Math.abs(result.marginOhms - 0.266) < 1e-12);
-  assert.ok(Math.abs(result.prospectiveEarthFaultCurrentAmps - (230 / 0.83)) < 1e-12);
+  assert.deepEqual(result.errors, []);
 });
 
-test("summary fails with a negative margin when calculated Zs exceeds the limit", () => {
-  const result = earthFaultLoopSummary({
-    externalEarthFaultLoopOhms: 0.5,
-    lineConductorResistanceOhms: 0.4,
-    cpcResistanceOhms: 0.3,
-    tabulatedMaximumZsOhms: 1,
-    permittedPercentage: 100,
-  });
-
-  assert.equal(result.calculatedZsOhms, 1.2);
-  assert.equal(result.withinSelectedLimit, false);
-  assert.ok(Math.abs(result.marginOhms + 0.2) < 1e-12);
+test("earth fault comparison distinguishes below, equal and above the selected limit without rounding", () => {
+  const equal = { ...valid, externalEarthFaultLoopOhms: 0.4, lineConductorResistanceOhms: 0.3, cpcResistanceOhms: 0.3, tabulatedMaximumZsOhms: 1, permittedPercentage: 100 };
+  assert.equal(earthFaultLoopSummary(equal).withinSelectedLimit, true);
+  assert.equal(earthFaultLoopSummary(equal).marginOhms, 0);
+  const over = earthFaultLoopSummary({ ...equal, cpcResistanceOhms: 0.3000001 });
+  assert.equal(over.withinSelectedLimit, false);
+  assert.ok(over.marginOhms < 0);
 });
 
-test("summary treats equality with the selected limit as compliant", () => {
-  const result = earthFaultLoopSummary({
-    externalEarthFaultLoopOhms: 0.4,
-    lineConductorResistanceOhms: 0.3,
-    cpcResistanceOhms: 0.3,
-    tabulatedMaximumZsOhms: 1,
+for (const key of Object.keys(valid)) {
+  test(`earth fault ${key} must be an explicit valid number before assessment`, () => {
+    for (const value of [undefined, null, "", "  ", "invalid", true, false, [], {}, Infinity, NaN, -1, "0x10"]) {
+      const result = earthFaultLoopSummary({ ...valid, [key]: value });
+      assert.equal(result.hasCompleteInputs, false, `${key}: ${String(value)}`);
+      assert.equal(result.withinSelectedLimit, false);
+      assert.equal(result.marginOhms, null);
+      assert.ok(result.errors.length > 0);
+    }
   });
+}
 
-  assert.equal(result.calculatedZsOhms, 1);
-  assert.equal(result.permittedMaximumZsOhms, 1);
-  assert.equal(result.withinSelectedLimit, true);
-  assert.equal(result.marginOhms, 0);
+test("explicit zero resistance is allowed only when the total impedance remains positive", () => {
+  assert.equal(earthFaultLoopSummary({ ...valid, cpcResistanceOhms: "0" }).hasCompleteInputs, true);
+  const zero = earthFaultLoopSummary({ ...valid, externalEarthFaultLoopOhms: 0, lineConductorResistanceOhms: 0, cpcResistanceOhms: 0 });
+  assert.equal(zero.withinSelectedLimit, false);
+  assert.equal(zero.calculatedZsOhms, null);
+  assert.equal(zero.prospectiveEarthFaultCurrentAmps, null);
 });
 
-test("summary reports no assessment when a verified limit is missing", () => {
-  const result = earthFaultLoopSummary({
-    externalEarthFaultLoopOhms: 0.35,
-    lineConductorResistanceOhms: 0.18,
-    cpcResistanceOhms: 0.3,
-  });
-
-  assert.equal(result.hasVerifiedLimit, false);
-  assert.equal(result.withinSelectedLimit, false);
-  assert.equal(result.marginOhms, 0);
-  assert.equal(result.permittedMaximumZsOhms, 0);
-  assert.ok(result.assumptions.some((assumption) => assumption.includes("verified tabulated maximum Zs")));
+test("invalid resistance cannot produce a partial calculated impedance", () => {
+  assert.equal(calculateEarthFaultLoopImpedance({ ...valid, cpcResistanceOhms: "" }), null);
+  assert.equal(calculateEarthFaultLoopImpedance({ externalEarthFaultLoopOhms: -1, lineConductorResistanceOhms: "invalid", cpcResistanceOhms: 0.25 }), null);
 });
 
-test("summary normalises malformed inputs to deterministic defaults", () => {
-  const result = earthFaultLoopSummary({
-    nominalVoltage: "invalid",
-    externalEarthFaultLoopOhms: -1,
-    lineConductorResistanceOhms: "invalid",
-    cpcResistanceOhms: null,
-    tabulatedMaximumZsOhms: -2,
-    permittedPercentage: "invalid",
-  });
+test("earth fault limits reject invalid percentages instead of clamping or defaulting them", () => {
+  for (const value of [0, -20, 120, "", "invalid", null, Infinity]) {
+    assert.equal(maximumPermittedEarthFaultLoop({ tabulatedMaximumZsOhms: 2, permittedPercentage: value }), null);
+    assert.equal(earthFaultLoopSummary({ ...valid, permittedPercentage: value }).withinSelectedLimit, false);
+  }
+  assert.equal(maximumPermittedEarthFaultLoop({ tabulatedMaximumZsOhms: 2 }), 2);
+  assert.equal(earthFaultLoopSummary({ ...valid, permittedPercentage: undefined }).withinSelectedLimit, false);
+});
 
-  assert.equal(result.nominalVoltage, 230);
-  assert.equal(result.calculatedZsOhms, 0);
-  assert.equal(result.permittedPercentage, 100);
-  assert.equal(result.hasVerifiedLimit, false);
-  assert.equal(result.prospectiveEarthFaultCurrentAmps, 0);
+test("prospective current never substitutes a default for an explicitly invalid voltage", () => {
+  assert.equal(prospectiveEarthFaultCurrent({ nominalVoltage: 230, earthFaultLoopImpedanceOhms: 0.5 }), 460);
+  for (const value of [0, "", "invalid", null, Infinity]) assert.equal(prospectiveEarthFaultCurrent({ nominalVoltage: value, earthFaultLoopImpedanceOhms: 0.5 }), null);
+  assert.equal(prospectiveEarthFaultCurrent({ nominalVoltage: 230, earthFaultLoopImpedanceOhms: 0 }), null);
+});
+
+test("earth fault overflow and underflow cannot yield an apparently valid assessment", () => {
+  for (const changes of [
+    { externalEarthFaultLoopOhms: 1e308, lineConductorResistanceOhms: 1e308 },
+    { externalEarthFaultLoopOhms: Number.MIN_VALUE, lineConductorResistanceOhms: 0, cpcResistanceOhms: 0 },
+    { tabulatedMaximumZsOhms: Number.MIN_VALUE, permittedPercentage: Number.MIN_VALUE },
+    { nominalVoltage: Number.MIN_VALUE, externalEarthFaultLoopOhms: 1e308 },
+  ]) {
+    const result = earthFaultLoopSummary({ ...valid, ...changes });
+    assert.equal(result.hasCompleteInputs, false);
+    assert.equal(result.withinSelectedLimit, false);
+    assert.equal(result.marginOhms, null);
+    assert.ok(result.errors.length);
+  }
+});
+
+test("earth fault missing input is unassessed and numeric strings remain supported", () => {
+  assert.equal(earthFaultLoopSummary().withinSelectedLimit, false);
+  assert.equal(earthFaultLoopSummary({ ...valid, tabulatedMaximumZsOhms: undefined }).hasVerifiedLimit, false);
+  assert.equal(earthFaultLoopSummary(Object.fromEntries(Object.entries(valid).map(([key, value]) => [key, String(value)]))).withinSelectedLimit, true);
 });
