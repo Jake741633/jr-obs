@@ -9,13 +9,6 @@ const identityHook = await readFile(new URL("../lib/cloud/useCloudIdentity.ts", 
 const cloudSync = await readFile(new URL("../lib/cloudSync.ts", import.meta.url), "utf8");
 const repository = await readFile(new URL("../lib/cloud/repository.ts", import.meta.url), "utf8");
 
-function functionBody(source, name) {
-  const start = source.indexOf(`export function ${name}`);
-  assert.notEqual(start, -1, `${name} must exist`);
-  const nextExport = source.indexOf("\nexport ", start + 1);
-  return source.slice(start, nextExport === -1 ? source.length : nextExport);
-}
-
 test("cutover check reads Supabase directly while preserving local data", () => {
   assert.match(helper, /cloudSelect/);
   assert.match(helper, /organisation_id=eq\./);
@@ -52,7 +45,7 @@ test("cutover page refreshes and exposes the authenticated organisation", () => 
 test("cutover page can retry the queue and immediately rerun readiness", () => {
   assert.match(page, /repairPendingQueue/);
   assert.match(page, /flushSyncQueue/);
-  assert.match(page, /Retry and clear pending changes/);
+  assert.match(page, /Retry pending changes/);
   assert.match(page, /runCloudCutoverCheck\(identity\.organisationId\)/);
 });
 
@@ -64,30 +57,13 @@ test("queue repair clears already-synchronised operations without rewriting clou
   assert.match(repository, /getSyncQueue/);
 });
 
-test("failed queue items show their exact record and error before any marker is cleared", () => {
+test("failed queue items show their exact record and error without offering a discard shortcut", () => {
   assert.match(page, /queueItemLabel/);
   assert.match(page, /item\.sourceId/);
   assert.match(page, /item\.table/);
   assert.match(page, /item\.error/);
-  assert.match(page, /Clear stale marker/);
-  assert.match(page, /No local or cloud business record was deleted/);
-});
-
-test("stale marker removal updates only the active identity queue and recalculates sync status", () => {
-  const discardBody = functionBody(repository, "discardSyncQueueItem");
-  assert.match(discardBody, /queue\.filter\(\(entry\) => entry\.id !== itemId\)/);
-  assert.match(discardBody, /activeRemaining = next\.filter\(\(entry\) => queueItemMatchesAuthorization\(entry, authorization\)\)/);
-  assert.match(discardBody, /statusForQueue\(activeRemaining\)/);
-  assert.doesNotMatch(discardBody, /cloudPatch/);
-  assert.doesNotMatch(discardBody, /cloudUpsert/);
-  assert.doesNotMatch(discardBody, /cloudSelect/);
-});
-
-test("failed marker can only be cleared after readiness confirms the record exists in cloud", () => {
-  assert.match(page, /cloudContainsRecord/);
-  assert.match(page, /collection\.cloudCount > 0/);
-  assert.match(page, /!collection\.localOnlyIds\.includes\(item\.sourceId\)/);
-  assert.match(page, /cannot be cleared safely/);
+  assert.doesNotMatch(page, /Clear stale marker|clearFailedQueueItem|discardSyncQueueItem|cloudContainsRecord/);
+  assert.doesNotMatch(repository, /export function discardSyncQueueItem/);
 });
 
 test("shared identity reloads a persisted session and observes account changes", () => {

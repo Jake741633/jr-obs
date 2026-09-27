@@ -30,7 +30,7 @@ test("audit collections inherit organisation and account cache scope", () => {
 
 test("audit sync queue operations remain bound to the originating authorisation context", () => {
   assert.match(repository, /organisationId: item\.organisationId/);
-  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
+  assert.match(repository, /const queue = allQueue\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)/);
   assert.match(repository, /const nextQueue = mergeProcessedQueue\(liveQueue, queue, remaining\)/);
   assert.match(repository, /const activeRemaining = nextQueue\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)/);
 });

@@ -189,19 +189,6 @@ export function getOrganisationSyncQueue(organisationId: string) {
   return readAllSyncQueue().filter((item) => item.organisationId === organisationId);
 }
 
-export function discardSyncQueueItem(itemId: string) {
-  const authorization = currentSyncAuthorization();
-  if (!authorization) return { removed: false, remaining: 0 };
-  const queue = readAllSyncQueue();
-  const item = queue.find((entry) => entry.id === itemId && queueItemMatchesAuthorization(entry, authorization));
-  if (!item) return { removed: false, remaining: getSyncQueue().length };
-  const next = queue.filter((entry) => entry.id !== itemId);
-  write(QUEUE_KEY, next);
-  const activeRemaining = next.filter((entry) => queueItemMatchesAuthorization(entry, authorization));
-  syncStatus.set(statusForQueue(activeRemaining));
-  return { removed: true, remaining: activeRemaining.length, item };
-}
-
 export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "mutationId" | "sentAt" | "queuedAt" | "attempts" | "state">) {
   const queue = readAllSyncQueue();
   const safeItem = sanitizeQueuedFieldMutationProjection(item) as typeof item | undefined;
