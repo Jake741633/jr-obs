@@ -1,7 +1,8 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, CheckCircle2, Download, FileText, Image as ImageIcon, MessageSquare, Receipt, Send, ShieldCheck, XCircle } from "lucide-react";
+import { CheckCircle2, Download, FileText, Image as ImageIcon, MessageSquare, Receipt, Send, ShieldCheck, XCircle } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
@@ -243,7 +244,7 @@ export default function CustomerPortalPage() {
         })}</div>
       </Card>
     </section>
-    {photos.length ? <Card><h2 className="flex items-center gap-2 text-xl font-bold"><ImageIcon className="size-5" />Photo updates</h2><div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{photos.map(({document,share}) => <div key={document.id} className="overflow-hidden rounded-xl bg-slate-950">{document.dataUrl ? <img src={document.dataUrl} alt={share.caption || document.name} className="h-48 w-full object-cover" /> : null}<div className="p-3"><p className="font-medium">{share.caption || document.name}</p></div></div>)}</div></Card> : null}
+    {photos.length ? <Card><h2 className="flex items-center gap-2 text-xl font-bold"><ImageIcon className="size-5" />Photo updates</h2><div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{photos.map(({document,share}) => <div key={document.id} className="overflow-hidden rounded-xl bg-slate-950">{document.dataUrl ? <Image src={document.dataUrl} alt={share.caption || document.name} width={768} height={192} unoptimized className="h-48 w-full object-cover" /> : null}<div className="p-3"><p className="font-medium">{share.caption || document.name}</p></div></div>)}</div></Card> : null}
     <Card><h2 className="flex items-center gap-2 text-xl font-bold"><MessageSquare className="size-5" />Contact JR Electrical</h2><form onSubmit={submitRequest} className="mt-4 grid gap-4 md:grid-cols-2"><label className="grid gap-2 text-sm"><span>Request type</span><select className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3" value={requestType} onChange={(event) => setRequestType(event.target.value as PortalRequestType)}>{["Appointment change","Question","Additional work","General message"].map((type) => <option key={type}>{type}</option>)}</select></label><label className="grid gap-2 text-sm"><span>Related job</span><select className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3" value={requestJobId} onChange={(event) => { const nextJobId = event.target.value; setRequestJobId(nextJobId); if (!portalRequestTargetMatchesJob(appointments, requestPlannerId, nextJobId)) setRequestPlannerId(""); }}><option value="">General</option>{customerJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>{requestType === "Appointment change" ? <InputField label="Preferred new date" type="date" value={requestDate} onChange={(event) => setRequestDate(event.target.value)} /> : null}<div className="md:col-span-2"><TextareaField label="Message or request" value={requestMessage} onChange={(event) => setRequestMessage(event.target.value)} /></div><div className="md:col-span-2"><Button type="submit"><Send className="size-4" />Send to office</Button></div></form></Card>
   </main>;
 }

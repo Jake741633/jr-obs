@@ -9,7 +9,7 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { useStockItemsCollection, useStockLocationsCollection, useStockMovementsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
-import type { FleetVehicle, Job, Material, MaterialUnit, StockItem, StockLocationType, StockMovementType } from "../../lib/models";
+import type { FleetVehicle, Job, Material, MaterialUnit, StockLocationType, StockMovementType } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const locationTypes: StockLocationType[] = ["Van", "Store", "Site", "Other"];

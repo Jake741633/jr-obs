@@ -6,7 +6,7 @@
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings=0",
     "test": "node --test tests/*.test.mjs",
     "verify:supabase-schema": "node scripts/verify-supabase-deployed-migration.mjs",
     "test:rls": "node scripts/run-supabase-rls.mjs"
