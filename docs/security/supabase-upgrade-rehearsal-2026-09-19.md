@@ -7,8 +7,11 @@ baseline: `42793af2d24a987aab622e89dc64a211b7cab103` on `jr-os-v2`.
 
 This is an embedded PostgreSQL rehearsal, not a hosted Supabase restore or a
 production backup. No production schema, records, credentials or configuration
-were changed. Production execution still requires backup review, a full Supabase
-rehearsal and separate authorization.
+were changed. A subsequent
+[full service rehearsal](./supabase-full-stack-rehearsal-2026-09-19.md) passed
+native restoration and real Auth, Data API and Storage checks with synthetic data.
+Its PR is awaiting npm audit recovery. Production execution still requires a
+protected backup and restore review plus separate authorization.
 
 ## Run it
 
@@ -132,8 +135,9 @@ not replace it, model production locking/downtime, or establish that production
 has a usable backup.
 
 Before a production change, verify the live baseline again, review an actual
-restorable backup and its recovery procedure, and run the frozen sequence in a
-full isolated Supabase environment with representative existing data. Database
+restorable backup and its recovery procedure, and assess the completed full
+service synthetic rehearsal alongside a restore of the protected production
+export. Database
 backups contain Storage metadata, not stored object bytes; include an object
 backup if objects exist at the final review. Review the resulting evidence and
 obtain production migration authorization before execution. Physical iPhone and

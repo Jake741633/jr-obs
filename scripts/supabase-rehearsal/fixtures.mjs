@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-export async function seedBaseline(db) {
+export async function seedBaseline(db, platform = {}) {
   const actors = {};
   const roles = {
     owner: "owner", other: "owner", admin: "admin", office: "office",
@@ -9,10 +9,12 @@ export async function seedBaseline(db) {
   };
   await db.exec("select set_config('request.jwt.claims', '{\"role\":\"service_role\"}', false)");
   for (const [name, role] of Object.entries(roles)) {
-    const id = randomUUID();
-    const session = randomUUID();
     const email = `${name}@rehearsal.invalid`;
-    await db.query(`insert into auth.users(id,aud,role,email,raw_user_meta_data)
+    const identity = platform.createIdentity ? await platform.createIdentity(name,email) : {
+      id:randomUUID(),session:randomUUID(),
+    };
+    const {id,session} = identity;
+    if (!platform.createIdentity) await db.query(`insert into auth.users(id,aud,role,email,raw_user_meta_data)
       values($1,'authenticated','authenticated',$2,'{"business_name":"Synthetic upgrade rehearsal"}')`, [id,email]);
     const signup = (await db.query("select organisation_id from public.profiles where id=$1", [id])).rows[0].organisation_id;
     const org = name === "owner" || name === "other" ? signup : actors.owner.org;
@@ -22,8 +24,8 @@ export async function seedBaseline(db) {
       await db.query(`insert into public.profiles(id,organisation_id,full_name,role,active,customer_source_id)
         values($1,$2,$3,$4,$5,$6)`, [id,org,name,role,name !== "inactive",role === "customer" ? (name === "stale" ? "deleted-customer" : "customer") : null]);
     }
-    if (name !== "revoked") await db.query("insert into auth.sessions(id,user_id) values($1,$2)", [session,id]);
-    actors[name] = { id, session, email, org, role };
+    if (!platform.createIdentity && name !== "revoked") await db.query("insert into auth.sessions(id,user_id) values($1,$2)", [session,id]);
+    actors[name] = { ...identity, email, org, role };
   }
 
   async function record(table, actor, source, extra = {}, options = {}) {
@@ -84,7 +86,8 @@ export async function seedBaseline(db) {
       await db.query(`insert into public.private_files(organisation_id,source_id,customer_source_id,job_source_id,
         bucket,object_path,file_name,mime_type,created_by,updated_by,created_at,updated_at)
         values($1,$2,'customer','job','jr-os-private',$3,'file.pdf','application/pdf',$4,$4,'2026-08-01','2026-08-01')`,[actor.org,source,path,actor.id]);
-      await db.query(`insert into storage.objects(bucket_id,name,owner,owner_id,version,metadata)
+      if (platform.uploadObject) await platform.uploadObject(actor,path);
+      else await db.query(`insert into storage.objects(bucket_id,name,owner,owner_id,version,metadata)
         values('jr-os-private',$1,$2,$3,'existing-object-version','{"size":123,"mimetype":"application/pdf"}')`,[path,actor.id,actor.id]);
     }
     await db.query(`insert into public.app_records(id,organisation_id,collection,payload,created_by,updated_by)

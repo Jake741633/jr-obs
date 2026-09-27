@@ -255,6 +255,14 @@ role checks and four rejected invalid baselines. It runs in CI. This completes
 the local SQL stage; its minimal platform contracts do not establish a full
 hosted Supabase restore or the availability of a production backup.
 
+The companion [full Supabase service rehearsal](./supabase-full-stack-rehearsal-2026-09-19.md)
+has now passed a native database restore and the same frozen upgrade with real
+Auth identities/sessions, the Data API and eight stored files. It preserved all
+107 existing public rows under the nine reviewed transformation rules and
+preserved Auth/Storage rows, then passed existing/fresh login, refresh/revocation,
+tenant/role access and file read/write checks. PR #241 remains unmerged while
+npm maintenance prevents the required dependency audits from completing.
+
 The subsequent [authenticated backup review](./supabase-upgrade-rehearsal-2026-09-19.md#production-backup-review)
 confirmed that the linked project's Free plan has no managed scheduled backups
 or available point-in-time restore point. No production backup was exported and
@@ -263,12 +271,11 @@ the production backup gate is still unmet. The report records the required
 logical export and full restore evidence, including Auth/Storage customizations
 and migration history that need separate handling in the standard CLI procedure.
 
-1. Use the committed upgrade manifest to prepare the incremental upgrade from
-   the verified live baseline. Rehearse it in an isolated environment with
-   representative existing Auth memberships, records, file bindings and audit
-   history. The completed empty-test-project upgrade and HTTP run do not prove
-   preservation of that existing data. Do not replay initial schema setup over
-   the live database or apply only selected hardening files.
+1. Recheck the live baseline against the committed upgrade manifest. The SQL
+   and full service rehearsals now verify representative synthetic existing
+   data; review an isolated restore of the actual protected production export
+   before execution. Do not replay initial schema setup over the live database
+   or apply only selected hardening files.
 2. Review the exact upgrade, a restorable backup and rehearsal results before
    scheduling the live change. Authorization covers restoration and the
    dedicated test project; production migrations require a separate reviewed
