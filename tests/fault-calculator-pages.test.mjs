@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 import vm from "node:vm";
 import ts from "typescript";
 import * as adiabatic from "../lib/adiabaticCalculator-core.mjs";
 import * as earthFault from "../lib/earthFaultLoopCalculator-core.mjs";
+import * as maximumDemand from "../lib/maximumDemandCalculator-core.mjs";
 import * as protectiveDevice from "../lib/protectiveDeviceCalculator-core.mjs";
 import * as numbers from "../lib/electricalCalculatorNumbers-core.mjs";
 
@@ -40,25 +42,31 @@ function harness(route) {
     "../../../components/ui/FormField": { InputField: "InputField" },
     "../../../lib/adiabaticCalculator-core.mjs": adiabatic,
     "../../../lib/protectiveDeviceCalculator-core.mjs": protectiveDevice,
+    "../../../lib/maximumDemandCalculator-core.mjs": maximumDemand,
     "../../../lib/earthFaultLoopCalculator-core.mjs": earthFault,
     "../../../lib/electricalCalculatorNumbers-core.mjs": numbers,
   };
   const source = readFileSync(new URL(`../app/electrical-calculators/${route}/page.tsx`, import.meta.url), "utf8");
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
-    exports: commonJsModule.exports, module: commonJsModule,
+    exports: commonJsModule.exports, module: commonJsModule, crypto: { randomUUID },
     require(name) { assert.ok(name in dependencies, `Unexpected page dependency: ${name}`); return dependencies[name]; },
   });
   function render() { cursor = 0; return commonJsModule.exports.default(); }
   return {
     render,
     status: () => text(nodes(render()).find((node) => node.props?.role === "status")),
-    fill(label, value) {
-      const field = nodes(render()).find((node) => node.type === "InputField" && node.props.label === label);
+    fill(label, value, index = 0) {
+      const field = nodes(render()).filter((node) => node.type === "InputField" && node.props.label === label)[index];
       assert.ok(field, label);
       field.props.onChange({ target: { value } });
     },
+    selectPhase(value, index = 0) {
+      const select = nodes(render()).filter((node) => node.type === "select")[index];
+      assert.ok(select);
+      select.props.onChange({ target: { value } });
+    },
     click(label) {
-      const button = nodes(render()).find((node) => node.type === "button" && text(node) === label);
+      const button = nodes(render()).find((node) => node.type === "button" && (text(node).trim() === label || node.props["aria-label"] === label));
       assert.ok(button, label);
       button.props.onClick();
     },
@@ -202,4 +210,65 @@ test("clearing device checks removes all entered evidence and computed results",
   assert.doesNotMatch(text(h.render()), /46.4 A/);
   const hub = readFileSync(new URL("../app/electrical-calculators/page.tsx", import.meta.url), "utf8");
   assert.match(hub, /href="\/electrical-calculators\/protective-device"/);
+});
+
+function fillDemand(h, index, current, percent, phase = "L1") {
+  h.fill("Connected current per item (A)", current, index);
+  h.fill("Demand factor (%)", percent, index);
+  h.selectPhase(phase, index);
+}
+
+test("maximum-demand page starts with a blank design and no example diversity", () => {
+  const h = harness("maximum-demand");
+  assert.equal(h.status(), "Assessment unavailable");
+  const fields = nodes(h.render()).filter((node) => node.type === "InputField");
+  assert.equal(fields.filter((node) => node.props.label === "Demand factor (%)").length, 1);
+  assert.equal(fields.find((node) => node.props.label === "Demand factor (%)").props.value, "");
+  assert.equal(fields.find((node) => node.props.label === "Connected current per item (A)").props.value, "");
+  assert.match(text(h.render()), /— A/);
+});
+
+test("clearing a three-phase diversity factor removes schedule totals instead of understating demand", () => {
+  const h = harness("maximum-demand");
+  fillDemand(h, 0, "16", "100", "Three phase");
+  h.click("Add load");
+  assert.equal(h.status(), "Assessment unavailable");
+  fillDemand(h, 1, "32", "40", "L2");
+  assert.equal(h.status(), "Demand calculated");
+  assert.match(text(h.render()), /Maximum phase demand28.8 A/);
+  h.fill("Demand factor (%)", "", 0);
+  assert.equal(h.status(), "Assessment unavailable");
+  assert.match(text(h.render()), /Maximum phase demand— A/);
+  assert.match(text(h.render()), /L2 \/ L3 demand— A \/ — A/);
+  h.fill("Demand factor (%)", "0", 0);
+  assert.equal(h.status(), "Demand calculated");
+  assert.match(text(h.render()), /Maximum phase demand12.8 A/);
+});
+
+test("fractional quantities and invalid demand percentages never become smaller valid loads", () => {
+  const h = harness("maximum-demand"); fillDemand(h, 0, "20", "50");
+  h.fill("Quantity", "2.9");
+  assert.equal(h.status(), "Assessment unavailable");
+  assert.match(text(h.render()), /whole-number quantity/);
+  h.fill("Quantity", "2");
+  assert.equal(h.status(), "Demand calculated");
+  assert.match(text(h.render()), /Maximum phase demand20 A/);
+  h.fill("Demand factor (%)", "101");
+  assert.equal(h.status(), "Assessment unavailable");
+  h.fill("Demand factor (%)", "5e-324");
+  assert.equal(h.status(), "Assessment unavailable");
+});
+
+test("removing invalid rows restores complete totals and removing all rows is unassessed", () => {
+  const h = harness("maximum-demand"); fillDemand(h, 0, "20", "100");
+  h.click("Add load");
+  assert.equal(h.status(), "Assessment unavailable");
+  h.click("Remove Load 2");
+  assert.equal(h.status(), "Demand calculated");
+  h.click("Remove Load 1");
+  assert.equal(h.status(), "Assessment unavailable");
+  assert.match(text(h.render()), /No loads added/);
+  assert.match(text(h.render()), /Maximum phase demand— A/);
+  h.click("Add load");
+  assert.equal(h.status(), "Assessment unavailable");
 });
