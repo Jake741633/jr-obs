@@ -35,7 +35,7 @@ test("offline queue replay cannot process another authorisation context after a 
   assert.match(repository, /return readAllSyncQueue\(\)\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)/);
   assert.match(repository, /if \(!activeSyncAuthorizationMatches\(authorization\)\)/);
   assert.match(repository, /const nextQueue = mergeProcessedQueue\(liveQueue, queue, remaining\)/);
-  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
+  assert.match(repository, /const queue = allQueue\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)/);
   assert.match(repository, /await revalidateSyncAuthorization\(authorization\)/);
   assert.doesNotMatch(repository, /readAllSyncQueue\(\)\.forEach/);
 });

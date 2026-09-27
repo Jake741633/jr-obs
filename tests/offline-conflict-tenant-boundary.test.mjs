@@ -156,7 +156,7 @@ test("background sync merges results into the live queue without crossing tenant
   assert.ok(writeMerged > mergedQueue);
   assert.ok(activeRemaining > writeMerged);
   assert.match(repository, /tenantRecordQuery\(\{ organisationId: item\.organisationId/);
-  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
+  assert.match(repository, /const queue = allQueue\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)/);
 });
 
 test("existing edits preselect through role projections and patch exactly one canonical row", () => {

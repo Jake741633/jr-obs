@@ -68,7 +68,7 @@ test("sync queue visibility and retries are restricted to live authorisation", (
   assert.match(repository, /const liveQueue = readAllSyncQueue\(\)/);
   assert.match(repository, /const nextQueue = mergeProcessedQueue\(liveQueue, queue, remaining\)/);
   assert.match(repository, /write\(QUEUE_KEY, nextQueue\)/);
-  assert.match(repository, /entry\.id === itemId && queueItemMatchesAuthorization\(entry, authorization\)/);
+  assert.match(repository, /const queue = allQueue\.filter\(\(item\) => queueItemMatchesAuthorization\(item, authorization\)\)/);
   assert.match(repository, /!activeSyncAuthorizationMatches\(authorization\)/);
 });
 

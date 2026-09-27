@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, CheckCircle2, CloudCog, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CloudCog, RefreshCw } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { runCloudCutoverCheck, type CloudCutoverReport } from "../../../lib/cloud/cutover";
-import { discardSyncQueueItem, flushSyncQueue, getOrganisationSyncQueue, getSyncQueue, type SyncQueueItem } from "../../../lib/cloud/repository";
+import { flushSyncQueue, getOrganisationSyncQueue, getSyncQueue, type SyncQueueItem } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 
 function statusClass(status: string) {
@@ -74,7 +74,7 @@ export default function CloudCutoverPage() {
       refreshQueueItems(identity.organisationId);
       setRepairMessage(
         result.remaining === 0
-          ? `Sync repair complete. ${result.cleared} of ${before} queued changes were safely cleared and the queue is now empty.`
+          ? `Sync repair complete for this account. ${result.cleared} of ${before} queued changes were confirmed in Supabase. Check the organisation readiness report below for any remaining blockers.`
           : `Sync repair processed ${result.processed} changes. ${result.remaining} remain (${result.conflicts} conflicts, ${result.failed} failed).`,
       );
     } catch (reason) {
@@ -82,27 +82,6 @@ export default function CloudCutoverPage() {
     } finally {
       setRepairBusy(false);
     }
-  }
-
-  async function clearFailedQueueItem(item: SyncQueueItem) {
-    if (!identity?.organisationId || item.state !== "Failed") return;
-    const collection = report?.collections.find((entry) => entry.storageKey === item.storageKey || (entry.table === item.table && entry.collectionKey === item.collectionKey));
-    const cloudContainsRecord = Boolean(collection && collection.cloudCount > 0 && !collection.localOnlyIds.includes(item.sourceId));
-    if (!cloudContainsRecord) {
-      setError("This failed queue item cannot be cleared safely because the readiness check does not confirm its record exists in Supabase.");
-      return;
-    }
-    setError("");
-    setRepairMessage("");
-    const result = discardSyncQueueItem(item.id);
-    if (!result.removed) {
-      setError("The failed queue item was no longer present.");
-      return;
-    }
-    const refreshedReport = await runCloudCutoverCheck(identity.organisationId);
-    setReport(refreshedReport);
-    refreshQueueItems(identity.organisationId);
-    setRepairMessage(`Removed the stale failed queue marker for ${queueItemLabel(item)}. No local or cloud business record was deleted.`);
   }
 
   return <div className="space-y-6">
@@ -150,8 +129,8 @@ export default function CloudCutoverPage() {
 
       <Card>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div><h2 className="text-xl font-bold">Queue and file checks</h2><p className="mt-2 text-sm text-slate-400">Retry queued changes safely. Entries already identical in Supabase are cleared without creating another version.</p></div>
-          <Button type="button" disabled={repairBusy || report.pendingQueueCount + report.failedQueueCount === 0} onClick={() => void repairPendingQueue()}><RefreshCw className={`mr-2 size-4 ${repairBusy ? "animate-spin" : ""}`} />{repairBusy ? "Repairing queue…" : "Retry and clear pending changes"}</Button>
+          <div><h2 className="text-xl font-bold">Queue and file checks</h2><p className="mt-2 text-sm text-slate-400">Retry this account’s queued changes against their exact Supabase records. Confirmed changes leave the queue; failed changes and conflicts stay recoverable. Changes belonging to another account must be retried by that account.</p></div>
+          <Button type="button" disabled={busy || identityBusy || repairBusy || !identity?.organisationId || report.pendingQueueCount + report.failedQueueCount === 0} onClick={() => void repairPendingQueue()}><RefreshCw className={`mr-2 size-4 ${repairBusy ? "animate-spin" : ""}`} />{repairBusy ? "Repairing queue…" : "Retry pending changes"}</Button>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-4 text-sm">
           <div className="rounded-xl border border-slate-800 p-3"><p className="text-slate-400">Pending/offline</p><p className="mt-1 text-xl font-bold">{report.pendingQueueCount}</p></div>
@@ -169,7 +148,6 @@ export default function CloudCutoverPage() {
                 <p className="mt-1 break-all text-xs text-slate-500">Table: {item.table}{item.collectionKey ? ` · ${item.collectionKey}` : ""}</p>
                 {item.error ? <p className="mt-2 whitespace-pre-wrap text-red-300">{item.error}</p> : null}
               </div>
-              {item.state === "Failed" ? <Button type="button" variant="secondary" onClick={() => void clearFailedQueueItem(item)}><Trash2 className="mr-2 size-4" />Clear stale marker</Button> : null}
             </div>
           </div>)}
         </div> : null}
