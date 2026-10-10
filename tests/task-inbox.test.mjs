@@ -11,7 +11,7 @@ const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && type
 const text = (tree) => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 function compile(path, deps, globals = {}) {
   const mod = { exports: {} };
-  vm.runInNewContext(ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { exports: mod.exports, module: mod, Date, URLSearchParams, ...globals, require(name) { assert.ok(name in deps, name); return deps[name]; } });
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { exports: mod.exports, module: mod, Date, Error, URLSearchParams, ...globals, require(name) { assert.ok(name in deps, name); return deps[name]; } });
   return mod.exports;
 }
 const inbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
@@ -65,21 +65,36 @@ test("deep links resolve exact authorized records and reject mismatched or missi
   assert.equal(inbox.resolveTaskInboxLink([task()], [], "?task=t1&job=j1").taskId, "t1");
 });
 
-function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", ready: initialReady = true } = {}) {
+function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", ready: initialReady = true, writable = false, failTasks = 0, failTimeline = 0 } = {}) {
   const state = [], effects = [], frames = [], listeners = {};
-  let cursor = 0, tasks = initialTasks, ready = initialReady, writes = 0;
+  let cursor = 0, tasks = initialTasks, timeline = [], ready = initialReady, writes = 0, ids = 0;
+  const attempts = [];
+  function create(kind, item) {
+    if (!writable) return noWrite();
+    writes++; attempts.push({ kind, item });
+    if ((kind === "task" && failTasks-- > 0) || (kind === "timeline" && failTimeline-- > 0)) throw new Error(`${kind} storage failed`);
+    const current = kind === "task" ? tasks : timeline;
+    if (current.some((record) => record.id === item.id)) throw new Error("Duplicate record id");
+    if (kind === "task") tasks = [item, ...tasks]; else timeline = [item, ...timeline];
+    return item;
+  }
   const useState = (initial) => { const index = cursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial; return [state[index], (value) => { state[index] = typeof value === "function" ? value(state[index]) : value; }]; };
   const noWrite = () => { writes++; throw new Error("Inbox navigation must not write records"); };
   const store = (items) => ({ items, isReady: ready, setItems: noWrite, remove: noWrite });
   const page = compile("../app/job-tasks/page.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState, useRef: (value) => useState({ current: value })[0], useMemo: (fn) => fn(), useEffect: (fn) => effects.push(fn) }, "lucide-react": {},
     "../../components/ui/Card": { Card: "Card" }, "../../components/ui/Button": { Button: "Button" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" },
-    "../../lib/cloud/coreBusinessCollections": { useJobsCollection: () => store(jobs), useJobTasksCollection: () => store(tasks), useJobTimelineCollection: () => store([]), useTeamCollection: () => store([]) },
-    "../../lib/storage": { makeId: noWrite }, "../../lib/jobTasks-core.mjs": taskCore, "../../lib/assistantSignals-core.mjs": signals, "../../lib/taskInbox": inbox,
+    "../../lib/cloud/coreBusinessCollections": { useJobsCollection: () => store(jobs), useJobTasksCollection: () => ({ ...store(tasks), createItem: (item) => create("task", item) }), useJobTimelineCollection: () => ({ ...store(timeline), createItem: (item) => create("timeline", item) }), useTeamCollection: () => store([]) },
+    "../../lib/storage": { makeId: () => writable ? `new-${++ids}` : noWrite() }, "../../lib/jobTasks-core.mjs": taskCore, "../../lib/assistantSignals-core.mjs": signals, "../../lib/taskInbox": inbox,
   }, { window: { location: { search }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, setInterval() { return 1; }, clearInterval() {}, addEventListener(type, fn) { listeners[type] = fn; }, removeEventListener() {} } });
   const render = () => { cursor = 0; effects.length = 0; return page.default(); };
   const flush = () => { render(); effects.splice(0).forEach((fn) => fn()); frames.splice(0).forEach((fn) => fn()); };
-  return { render, flush, writes: () => writes, replaceTasks(value) { tasks = value; }, setReady(value) { ready = value; }, fill(value) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
+  return { render, flush, writes: () => writes, attempts, tasks: () => tasks, timeline: () => timeline,
+    replaceTimeline(value) { timeline = value; },
+    field(label, value) { const form = nodes(render()).find((n) => n.type === "form"); const all = nodes(form); let input = all.find((n) => n.props.label === label); if (!input) input = nodes(all.find((n) => n.type === "label" && text(n).startsWith(label))).find((n) => n.type === "select"); assert.ok(input, label); input.props.onChange({ target: { value } }); },
+    submitHandler() { const form = nodes(render()).find((n) => n.type === "form"); assert.ok(form); return () => form.props.onSubmit({ preventDefault() {} }); },
+    retryHandler() { const button = nodes(render()).find((n) => n.type === "button" && text(n) === "Retry timeline note"); assert.ok(button); return button.props.onClick; },
+    replaceTasks(value) { tasks = value; }, setReady(value) { ready = value; }, fill(value) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
 }
 const cards = (view) => nodes(view).filter((n) => n.type === "Card" && n.props["aria-label"]);
 
@@ -113,4 +128,81 @@ test("task links wait for all sources and cannot manufacture a job or open a cre
   assert.match(text(h.render()), /task link is unavailable/);
   assert.equal(nodes(h.render()).some((n) => n.type === "form"), false);
   assert.equal(h.writes(), 0);
+});
+
+function draftTask(h, title = "Fit labels", type = "Task") {
+  h.flush(); h.click(type); h.field("Job", "j1"); h.field("Title", title); h.field("Description", "Site draft details");
+}
+
+test("failed durable task creation retains the editable draft and stable id for a successful retry", () => {
+  const h = pageHarness({ writable: true, failTasks: 1 }); draftTask(h);
+  h.submitHandler()();
+  assert.match(text(h.render()), /Task save could not be confirmed.*Your draft is still here.*task storage failed/);
+  assert.equal(h.tasks().length, 0); assert.equal(h.timeline().length, 0);
+  assert.equal(nodes(h.render()).find((n) => n.props.label === "Title").props.value, "Fit labels");
+  h.field("Title", "Fit circuit labels"); h.submitHandler()();
+  assert.equal(h.tasks().length, 1); assert.equal(h.timeline().length, 1);
+  assert.equal(h.tasks()[0].title, "Fit circuit labels");
+  assert.equal(h.attempts[0].item.id, h.attempts[1].item.id);
+  assert.equal(nodes(h.render()).some((n) => n.type === "form"), false);
+  assert.match(text(h.render()), /saved on this device.*Check sync status/);
+});
+
+test("a repeated submit cannot create the same task twice after the first durable save", () => {
+  const h = pageHarness({ writable: true }); draftTask(h, "Fix faceplate", "Snag");
+  const submit = h.submitHandler(); submit(); submit();
+  assert.equal(h.tasks().length, 1); assert.equal(h.timeline().length, 1);
+  assert.equal(h.tasks()[0].type, "Snag"); assert.equal(h.timeline()[0].eventType, "Snag");
+  assert.equal(h.timeline()[0].sourceId, h.tasks()[0].id);
+});
+
+test("partial timeline failure offers a note-only retry and never recreates the saved task", () => {
+  const h = pageHarness({ writable: true, failTimeline: 2 }); draftTask(h); h.submitHandler()();
+  assert.equal(h.tasks().length, 1); assert.equal(h.timeline().length, 0);
+  assert.equal(nodes(h.render()).some((n) => n.type === "form"), false);
+  assert.match(text(h.render()), /Retry the note below; do not recreate the task/);
+  h.retryHandler()(); assert.equal(h.timeline().length, 0); assert.match(text(h.render()), /task remains saved/);
+  const retry = h.retryHandler(); retry(); retry();
+  assert.equal(h.tasks().length, 1); assert.equal(h.timeline().length, 1);
+  assert.equal(new Set(h.attempts.filter((a) => a.kind === "timeline").map((a) => a.item.id)).size, 1);
+  assert.equal(h.attempts.filter((a) => a.kind === "task").length, 1);
+  assert.doesNotMatch(text(h.render()), /Retry timeline note/);
+});
+
+test("timeline retry recognises an already saved matching note and refuses a conflicting identity", () => {
+  for (const conflict of [false, true]) {
+    const h = pageHarness({ writable: true, failTimeline: 1 }); draftTask(h); h.submitHandler()();
+    const note = h.attempts.find((a) => a.kind === "timeline").item;
+    h.replaceTimeline([{ ...note, ...(conflict ? { jobId: "other-job" } : {}) }]);
+    const before = h.writes(); h.retryHandler()(); assert.equal(h.writes(), before);
+    if (conflict) assert.match(text(h.render()), /ID is already used by a different record/);
+    else assert.doesNotMatch(text(h.render()), /Retry timeline note/);
+  }
+});
+
+test("timeline retry will not write a note for a task that was removed or moved to another job", () => {
+  for (const moved of [false, true]) {
+    const h = pageHarness({ writable: true, failTimeline: 1 }); draftTask(h); h.submitHandler()();
+    h.replaceTasks(moved ? [{ ...h.tasks()[0], jobId: "other-job" }] : []);
+    const before = h.writes(); h.retryHandler()(); assert.equal(h.writes(), before);
+    assert.match(text(h.render()), /no longer available on this job/);
+    assert.equal(h.timeline().length, 0);
+  }
+});
+
+test("separate failed timeline notes remain available when another task is created", () => {
+  const h = pageHarness({ writable: true, failTimeline: 2 }); draftTask(h, "First task"); h.submitHandler()();
+  h.click("Task"); h.field("Title", "Second task"); h.submitHandler()();
+  assert.equal(h.tasks().length, 2);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "button" && text(n) === "Retry timeline note").length, 2);
+  h.retryHandler()(); h.retryHandler()(); assert.equal(h.timeline().length, 2);
+  assert.equal(new Set(h.timeline().map((n) => n.sourceId)).size, 2);
+});
+
+test("invalid job and due-date fields retain the draft and never write a task", () => {
+  for (const [label, value, expected] of [["Job", "missing", /Choose an available job/], ["Due date", "2026-02-30", /Choose a valid due date/]]) {
+    const h = pageHarness({ writable: true }); draftTask(h); h.field(label, value); h.submitHandler()();
+    assert.equal(h.writes(), 0); assert.match(text(h.render()), expected);
+    assert.equal(nodes(h.render()).find((n) => n.props.label === "Title").props.value, "Fit labels");
+  }
 });
