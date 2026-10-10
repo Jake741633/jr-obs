@@ -10,8 +10,8 @@ const fieldMaterialsPage = readFileSync(new URL("../app/field/materials/page.tsx
 test("stock and purchase pages expose mutation-heavy procurement controls", () => {
   assert.match(stockPage, /stock\.setItems/);
   assert.match(stockPage, /movements\.setItems/);
-  assert.match(purchasesPage, /purchaseLists\.setItems/);
-  assert.match(purchasesPage, /updateItem\(/);
+  assert.match(purchasesPage, /purchaseLists\.updateItem\(/);
+  assert.match(purchasesPage, /purchaseLists\.removeItem\(/);
 });
 
 test("electricians use the field materials workspace instead of office procurement pages", () => {
