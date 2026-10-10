@@ -18,7 +18,7 @@ test("electricians use the dedicated field day planner instead of the office dis
 test("office planner exposes assignment controls that exceed the electrician planner contract", () => {
   assert.match(plannerPage, /teamMemberIds: \[\] as string\[\]/);
   assert.match(plannerPage, /function toggleMember\(id: string\)/);
-  assert.match(plannerPage, /teamMemberIds: form\.teamMemberIds/);
+  assert.match(plannerPage, /teamMemberIds: \[\.\.\.form\.teamMemberIds\]/);
   assert.match(plannerPage, /Add diary entry/);
   assert.match(plannerGuard, /Electricians may create planner entries assigned only to themselves/);
   assert.match(plannerGuard, /Electricians cannot change planner team assignments/);

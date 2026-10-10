@@ -49,6 +49,12 @@ If a status change saves but its timeline note fails, the same note-only retry r
 
 The page distinguishes a device save from cloud confirmation. Unsaved timeline retries exist only while the page is open, and the failure notice explains that leaving retains the saved task change but loses the unsaved note. Account changes retain the existing page-remount boundary.
 
+## Diary booking saves
+
+New bookings persist each visit through the existing durable creation method before clearing the form. Failed first saves keep editable details and reuse the original record identities on retry. Success says saved on this device and asks the user to check sync status before switching devices.
+
+A recurring series can be partly saved: its confirmed count and remaining dates are shown, the original details are locked, and Retry remaining visits saves only the unsaved tail with its original ids and recurrence group. Repeated callbacks cannot duplicate a completed booking. Keep saved visits only stops the remaining draft without deleting or changing any saved visit. Partial retries exist only while the page is open; the notice explains that leaving retains saved visits but loses the unsaved tail. Review the diary before creating the remaining visits later. Existing queue, conflict, account and access rules remain unchanged.
+
 ## Diary dates and touch controls
 
 Week views run Monday through Sunday, including month/year boundaries. Previous/next month navigation clamps the displayed day to the last day in a shorter month. Today uses the device’s local date; date-only shifts avoid timezone offsets and daylight-saving drift. Calendar navigation and visit move actions have distinct labels and 48px touch targets.
@@ -59,7 +65,7 @@ Moving a planned/confirmed visit now uses the durable update method before repor
 
 Start job applies only to a linked scheduled Job visit and saves the canonical First fix status before confirming the visit. Existing First fix, Second fix, Testing, Snagging and other on-site stages are preserved. Closed, held, unscheduled or missing jobs cannot be started here. Other appointment types and unlinked visits use Confirm visit without changing a job. The cards show visit and job statuses separately, and unallocated jobs exclude closed/held records.
 
-Job and visit writes remain separate. A job-save failure stops visit confirmation; a subsequent visit-save failure explicitly reports the saved job and offers the existing Confirm visit action for retry. That retry keeps the later job stage and does not repeat a saved start. These actions distinguish device persistence from cloud confirmation and retain existing queue/conflict/access rules. Creating new diary bookings retains its existing save flow; this increment hardens moves and dispatch.
+Job and visit writes remain separate. A job-save failure stops visit confirmation; a subsequent visit-save failure explicitly reports the saved job and offers the existing Confirm visit action for retry. That retry keeps the later job stage and does not repeat a saved start. These actions distinguish device persistence from cloud confirmation and retain existing queue/conflict/access rules.
 
 ## Install
 
