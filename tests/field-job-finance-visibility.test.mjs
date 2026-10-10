@@ -141,7 +141,7 @@ test("workspace computes and renders commercial totals only with positive financ
   const metrics = section(
     workspace,
     '<div className={`mt-5 grid grid-cols-2 gap-3',
-    "\n      </div>\n    </Card>",
+    "\n      </div>",
   );
   assert.match(metrics, /showOfficeFinance \? "sm:grid-cols-4" : "sm:grid-cols-2"/);
   const financeBranchEnd = metrics.indexOf("</> : null}");

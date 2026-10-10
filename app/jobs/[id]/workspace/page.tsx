@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { JobAssistantLink } from "../../../../components/ai/JobAssistantLink";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -448,6 +449,7 @@ export default function JobWorkspacePage() {
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Outstanding</p><p className="mt-1 font-bold text-amber-300">{counts.outstanding}</p></div>
         <div className="rounded-xl bg-slate-950/70 p-3"><p className="text-xs text-slate-500">Progress</p><p className="mt-1 font-bold text-cyan-200">{progressValue.overall}%</p></div>
       </div>
+      <JobAssistantLink jobId={job.id} />
     </Card>
 
     <Card>
