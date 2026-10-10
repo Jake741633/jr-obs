@@ -59,6 +59,10 @@ A recurring series can be partly saved: its confirmed count and remaining dates 
 
 ## Diary dates and touch controls
 
+Next visit planning lists active jobs without an ongoing or future planned/confirmed Job visit, together with work bookings whose dates or status need review. Completed, cancelled and past visits cannot hide the need for another visit; surveys, deliveries and other appointments are kept separate from work bookings. Uncertain records remain visible, including alongside a valid booking, and their one-tap booking action stays disabled until reviewed. The list searches job name, address and status, starts with four cards and reveals four more at a time. Review links retain the exact saved job id.
+
+Book next visit prepares an unsaved form using that job. Old, invalid or reversed job dates cannot prefill a booking in the past; valid future dates remain available for review. It cannot replace a partially saved recurring series. The list follows the phone's local date and refreshes each minute and on app focus. These checks describe loaded records and do not confirm availability, assignment, sync or site readiness.
+
 Week views run Monday through Sunday, including month/year boundaries. Previous/next month navigation clamps the displayed day to the last day in a shorter month. Today uses the device’s local date; date-only shifts avoid timezone offsets and daylight-saving drift. Calendar navigation and visit move actions have distinct labels and 48px touch targets.
 
 Monthly repeats stay anchored to the original day, using month end when necessary (31 January → 28 February → 31 March in a non-leap year). The form explains this rule; each occurrence preserves its calendar-day duration. No repeat always creates one booking, even if an earlier repeat count remains in the form. Invalid/reversed dates and ranges outside the supported calendar are rejected before any booking is written. Existing bookings are not rewritten.

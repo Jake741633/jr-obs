@@ -52,6 +52,24 @@ export function entryEndDate(entry: ScheduledPlannerEntry) {
   return entry.endDate || entry.date;
 }
 
+/** Saved work visits only; history and other appointment types cannot book a next job visit. */
+export function jobVisitPlan(jobId: string, entries: ScheduledPlannerEntry[], today = plannerDateKey()) {
+  const upcoming: ScheduledPlannerEntry[] = [];
+  const uncertain: ScheduledPlannerEntry[] = [];
+  if (!jobId.trim()) return { upcoming, uncertain };
+  for (const entry of entries) {
+    if (entry.jobId !== jobId || entry.type !== "Job" || ["Complete", "Cancelled"].includes(entry.status)) continue;
+    const end = entryEndDate(entry);
+    if (!plannerViewDate(today) || !plannerViewDate(entry.date) || !plannerViewDate(end) || end < entry.date) {
+      uncertain.push(entry);
+    } else if (end >= today) {
+      if (["Planned", "Confirmed"].includes(entry.status)) upcoming.push(entry);
+      else uncertain.push(entry);
+    }
+  }
+  return { upcoming, uncertain };
+}
+
 export function dateRangeOverlaps(a: ScheduledPlannerEntry, b: ScheduledPlannerEntry) {
   return a.date <= entryEndDate(b) && b.date <= entryEndDate(a);
 }
