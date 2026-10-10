@@ -20,6 +20,7 @@ const recurrences: RecurrenceFrequency[] = ["None", "Weekly", "Monthly"];
 const today = () => plannerDateKey();
 const fieldClass = "min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm";
 const blankForm = { title: "", type: "Job" as PlannerEntryType, date: today(), endDate: today(), startTime: "08:00", endTime: "16:30", estimatedDurationMinutes: "510", customerId: "", jobId: "", teamMemberIds: [] as string[], vehicleId: "", visitPhase: "General" as VisitPhase, recurrence: "None" as RecurrenceFrequency, recurrenceCount: "1", location: "", notes: "", status: "Planned" as ScheduledPlannerEntry["status"] };
+type BookingDraft = { records: ScheduledPlannerEntry[]; saved: number; complete: boolean; createdAt: string; groupId?: string };
 
 function displayDate(value: string) { return new Date(`${value}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }); }
 function freshForm() { return { ...blankForm, date: today(), endDate: today() }; }
@@ -37,6 +38,10 @@ export default function PlannerPage() {
   const [form, setForm] = useState(freshForm);
   const [showForm, setShowForm] = useState(false);
   const [message, setMessage] = useState("");
+  const bookingDraft = useRef<BookingDraft | null>(null);
+  const bookingGeneration = useRef(0);
+  const [generation, setGeneration] = useState(0);
+  const [bookingProgress, setBookingProgress] = useState<{ saved: number; total: number; remaining: { id: string; date: string }[] } | null>(null);
   const ready = [entries, jobs, customers, team, vehicles].every((store) => store.isReady);
 
   const clashes = useMemo(() => detectScheduleClashes(entries.items, team.items, vehicles.items), [entries.items, team.items, vehicles.items]);
@@ -81,25 +86,67 @@ export default function PlannerPage() {
   }, [customers.isReady, customers.items, jobs.isReady, jobs.items]);
 
   function toggleMember(id: string) { setForm((current) => ({ ...current, teamMemberIds: current.teamMemberIds.includes(id) ? current.teamMemberIds.filter((value) => value !== id) : [...current.teamMemberIds, id] })); }
+  function nextBookingGeneration() { bookingGeneration.current++; setGeneration(bookingGeneration.current); }
   function selectCustomer(customerId: string) { const customer = customers.items.find((item) => item.id === customerId); setForm((current) => ({ ...current, customerId, title: current.title || (customer ? `${current.type} · ${customer.name}` : ""), location: current.location || customer?.address || "" })); }
   function selectJob(jobId: string) { const job = jobs.items.find((item) => item.id === jobId); setForm((current) => ({ ...current, customerId: job?.customerId || current.customerId, jobId, title: current.title || job?.title || "", location: current.location || job?.siteAddress || "", date: current.date || job?.startDate || today(), endDate: current.endDate || job?.targetCompletionDate || current.date })); }
-  function addUnallocated(job: Job) { setForm({ ...freshForm(), customerId: job.customerId || "", jobId: job.id, title: job.title, location: job.siteAddress, date: job.startDate || today(), endDate: job.targetCompletionDate || job.startDate || today() }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  function toggleBookingForm() {
+    if (bookingDraft.current?.saved && !bookingDraft.current.complete) { setShowForm(true); return; }
+    nextBookingGeneration();
+    if (!showForm && bookingDraft.current?.complete) { bookingDraft.current = null; setForm(freshForm()); }
+    setShowForm(!showForm);
+  }
+  function addUnallocated(job: Job) {
+    if (bookingDraft.current?.saved && !bookingDraft.current.complete) return;
+    nextBookingGeneration();
+    bookingDraft.current = null;
+    setForm({ ...freshForm(), customerId: job.customerId || "", jobId: job.id, title: job.title, location: job.siteAddress, date: job.startDate || today(), endDate: job.targetCompletionDate || job.startDate || today() }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+  function keepSavedVisits() {
+    const draft = bookingDraft.current;
+    if (generation !== bookingGeneration.current || !draft?.saved || draft.complete) return;
+    draft.complete = true;
+    nextBookingGeneration();
+    setBookingProgress(null); setForm(freshForm()); setShowForm(false);
+    setMessage(`${draft.saved} of ${draft.records.length} visits saved on this device. The remaining visits were not booked. Check sync status and the diary before creating more.`);
+  }
 
   function saveEntry(event: FormEvent) {
     event.preventDefault();
-    if (!form.title.trim()) return setMessage("Enter an entry title.");
-    if (!plannerViewDate(form.date) || !plannerViewDate(form.endDate) || form.endDate < form.date) return setMessage("Choose valid start and end dates, with the end on or after the start.");
-    const now = new Date().toISOString();
-    const groupId = form.recurrence === "None" ? undefined : makeId("recurrence");
-    const dates = recurringDates(form.date, form.recurrence, Number(form.recurrenceCount));
-    const durationDays = (Date.parse(`${form.endDate}T00:00:00Z`) - Date.parse(`${form.date}T00:00:00Z`)) / 86400000;
-    const endDates = dates.map((date) => shiftPlannerDate(date, durationDays));
-    if (!dates.length || endDates.some((date) => date === null)) return setMessage("These dates fall outside the supported diary range. Review the dates and recurrence.");
-    const records: ScheduledPlannerEntry[] = dates.map((date, index) => {
-      return { id: makeId("planner"), title: form.title.trim(), type: form.type, date, endDate: endDates[index]!, startTime: form.startTime, endTime: form.endTime, estimatedDurationMinutes: Math.max(0, Number(form.estimatedDurationMinutes || 0)), customerId: form.customerId || undefined, jobId: form.jobId || undefined, teamMemberIds: form.teamMemberIds, vehicleId: form.vehicleId || undefined, visitPhase: form.visitPhase, recurrence: form.recurrence, recurrenceCount: dates.length, recurrenceGroupId: groupId, location: form.location.trim(), notes: form.notes.trim(), status: form.status, createdAt: now, updatedAt: now };
-    });
-    entries.setItems((current) => [...current, ...records]);
-    setForm(freshForm()); setShowForm(false); setMessage(`${records.length} diary entr${records.length === 1 ? "y" : "ies"} saved. Any clashes remain visible below.`);
+    if (generation !== bookingGeneration.current || bookingDraft.current?.complete) return;
+    if (!ready) return setMessage("Wait for scheduling records to finish loading before saving a booking.");
+    // Once any visit is saved, retain the original series and retry only its unsaved tail.
+    let draft = bookingDraft.current;
+    if (!draft?.saved) {
+      if (!form.title.trim()) return setMessage("Enter an entry title.");
+      if (!plannerViewDate(form.date) || !plannerViewDate(form.endDate) || form.endDate < form.date) return setMessage("Choose valid start and end dates, with the end on or after the start.");
+      const dates = recurringDates(form.date, form.recurrence, Number(form.recurrenceCount));
+      const durationDays = (Date.parse(`${form.endDate}T00:00:00Z`) - Date.parse(`${form.date}T00:00:00Z`)) / 86400000;
+      const endDates = dates.map((date) => shiftPlannerDate(date, durationDays));
+      if (!dates.length || endDates.some((date) => date === null)) return setMessage("These dates fall outside the supported diary range. Review the dates and recurrence.");
+      const duration = Number(form.estimatedDurationMinutes || 0);
+      if (!Number.isFinite(duration) || duration < 0) return setMessage("Enter a valid estimated duration of zero or more minutes.");
+      const now = draft?.createdAt || new Date().toISOString();
+      const groupId = form.recurrence === "None" ? undefined : draft?.groupId || makeId("recurrence");
+      const records: ScheduledPlannerEntry[] = dates.map((date, index) => {
+        return { id: draft?.records[index]?.id || makeId("planner"), title: form.title.trim(), type: form.type, date, endDate: endDates[index]!, startTime: form.startTime, endTime: form.endTime, estimatedDurationMinutes: duration, customerId: form.customerId || undefined, jobId: form.jobId || undefined, teamMemberIds: [...form.teamMemberIds], vehicleId: form.vehicleId || undefined, visitPhase: form.visitPhase, recurrence: form.recurrence, recurrenceCount: dates.length, recurrenceGroupId: groupId, location: form.location.trim(), notes: form.notes.trim(), status: form.status, createdAt: now, updatedAt: now };
+      });
+      draft = { records, saved: 0, complete: false, createdAt: now, groupId };
+      bookingDraft.current = draft;
+    }
+    try {
+      while (draft.saved < draft.records.length) {
+        entries.createItem(draft.records[draft.saved]);
+        draft.saved++;
+      }
+    } catch (error) {
+      setBookingProgress(draft.saved ? { saved: draft.saved, total: draft.records.length, remaining: draft.records.slice(draft.saved).map(({ id, date }) => ({ id, date })) } : null);
+      setMessage(`${draft.saved} of ${draft.records.length} visits saved on this device. ${draft.saved ? "The remaining visits could not be confirmed. Retry only the remaining visits, or keep the saved visits only." : "Booking save could not be confirmed. Your form is retained; review and retry."} ${error instanceof Error ? error.message : ""}`);
+      return;
+    }
+    draft.complete = true;
+    setBookingProgress(null);
+    setAnchor(draft.records[0].date);
+    setForm(freshForm()); setShowForm(false); setMessage(`${draft.records.length} diary entr${draft.records.length === 1 ? "y" : "ies"} saved on this device. Check sync status before switching devices. Any clashes remain visible below.`);
   }
 
   function moveEntry(entry: ScheduledPlannerEntry, days: number) {
@@ -157,7 +204,7 @@ export default function PlannerPage() {
   if (!ready) return <Card>Loading scheduling centre…</Card>;
 
   return <div className="space-y-6">
-    <PageHeader eyebrow="Operations" title="Scheduling, Diary & Dispatch Centre" description="Plan jobs and visits, assign staff and vehicles, spot clashes and dispatch today’s work." action={<Button onClick={() => setShowForm((value) => !value)}><Plus className="mr-2 size-4" />Add diary entry</Button>} />
+    <PageHeader eyebrow="Operations" title="Scheduling, Diary & Dispatch Centre" description="Plan jobs and visits, assign staff and vehicles, spot clashes and dispatch today’s work." action={<Button onClick={toggleBookingForm}><Plus className="mr-2 size-4" />{bookingProgress ? "Review booking save" : "Add diary entry"}</Button>} />
     {message ? <div role="status" className="break-words rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -169,7 +216,9 @@ export default function PlannerPage() {
 
     {clashes.length ? <Card className="border-amber-400/30"><div className="flex gap-3"><AlertTriangle className="mt-0.5 size-5 text-amber-300" /><div><h2 className="font-bold">Clashes need review</h2><p className="mt-1 text-sm text-slate-400">Saving is allowed, but staff, vehicles or jobs overlap.</p><div className="mt-3 space-y-1 text-sm text-amber-200">{clashes.slice(0, 8).map((clash, index) => <p key={`${clash.entryId}-${clash.otherEntryId}-${index}`}>{clash.kind}: {clash.label}</p>)}</div></div></div></Card> : null}
 
-    {showForm ? <Card><form onSubmit={saveEntry} className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    {showForm ? <Card><form onSubmit={saveEntry} className="space-y-4">
+      {bookingProgress ? <div role="status" className="space-y-2 break-words text-sm text-amber-200"><p>{bookingProgress.saved} of {bookingProgress.total} visits saved. The original booking details are locked while you finish this series.</p><p>Retry only the remaining visits. Leaving this page keeps the saved visits but loses the remaining draft; review the diary before booking again.</p><ul className="list-inside list-disc">{bookingProgress.remaining.map((entry) => <li key={entry.id}>Not confirmed: {displayDate(entry.date)}</li>)}</ul></div> : null}
+      <fieldset disabled={Boolean(bookingProgress)} className="grid min-w-0 gap-4 disabled:opacity-60 md:grid-cols-2 xl:grid-cols-4">
       <InputField required label="Entry title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} />
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Customer</span><select className={fieldClass} value={form.customerId} onChange={(event) => selectCustomer(event.target.value)}><option value="">No linked customer</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select className={fieldClass} value={form.jobId} onChange={(event) => selectJob(event.target.value)}><option value="">Appointment only</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
@@ -188,11 +237,12 @@ export default function PlannerPage() {
       <div className="md:col-span-2 xl:col-span-4"><p className="mb-2 text-sm font-medium text-slate-300">Assign electricians or staff</p><div className="flex flex-wrap gap-2">{team.items.filter((member) => member.status === "Active").map((member) => <button type="button" key={member.id} onClick={() => toggleMember(member.id)} className={`rounded-full border px-3 py-2 text-sm ${form.teamMemberIds.includes(member.id) ? "border-cyan-400 bg-cyan-500/10 text-cyan-200" : "border-slate-700 text-slate-400"}`}>{member.name}</button>)}</div></div>
       {form.recurrence === "Monthly" ? <p className="text-sm text-slate-400 md:col-span-2 xl:col-span-4">Monthly visits keep the original day of the month, using the last day in shorter months. Each visit keeps the same number of calendar days.</p> : null}
       <div className="md:col-span-2 xl:col-span-4"><TextareaField label="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></div>
-      <div className="md:col-span-2 xl:col-span-4 flex justify-end"><Button type="submit">Save without blocking clashes</Button></div>
+      </fieldset>
+      <div className="flex flex-wrap justify-end gap-3">{bookingProgress ? <button type="button" onClick={keepSavedVisits} className="min-h-12 rounded-xl border border-slate-700 px-4 text-sm">Keep saved visits only</button> : null}<Button type="submit">{bookingProgress ? "Retry remaining visits" : "Save without blocking clashes"}</Button></div>
     </form></Card> : null}
 
     <section className="grid gap-6 xl:grid-cols-[1fr_2fr]">
-      <Card><div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">Unallocated jobs</h2><p className="text-sm text-slate-500">Assign these into the diary.</p></div><span className="rounded-full bg-slate-800 px-3 py-1 text-sm">{unallocatedJobs.length}</span></div><div className="mt-4 space-y-3">{unallocatedJobs.length ? unallocatedJobs.map((job) => <button key={job.id} onClick={() => addUnallocated(job)} className="w-full rounded-xl border border-slate-800 p-4 text-left hover:border-cyan-400/40"><p className="font-semibold">{job.title}</p><p className="mt-1 text-sm text-slate-500">{job.siteAddress || "No address"}</p><p className="mt-2 text-xs text-cyan-300">Assign to diary</p></button>) : <p className="text-sm text-slate-500">All active jobs are allocated.</p>}</div></Card>
+      <Card><div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">Unallocated jobs</h2><p className="text-sm text-slate-500">Assign these into the diary.</p></div><span className="rounded-full bg-slate-800 px-3 py-1 text-sm">{unallocatedJobs.length}</span></div><div className="mt-4 space-y-3">{unallocatedJobs.length ? unallocatedJobs.map((job) => <button key={job.id} disabled={Boolean(bookingProgress)} onClick={() => addUnallocated(job)} className="disabled:opacity-40 w-full rounded-xl border border-slate-800 p-4 text-left hover:border-cyan-400/40"><p className="font-semibold">{job.title}</p><p className="mt-1 text-sm text-slate-500">{job.siteAddress || "No address"}</p><p className="mt-2 text-xs text-cyan-300">Assign to diary</p></button>) : <p className="text-sm text-slate-500">All active jobs are allocated.</p>}</div></Card>
 
       <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-xl border border-slate-800 p-1">{(["day", "week", "month"] as DiaryView[]).map((item) => <button key={item} onClick={() => setView(item)} className={`min-h-12 rounded-lg px-4 py-2 text-sm font-semibold capitalize ${view === item ? "bg-cyan-400 text-slate-950" : "text-slate-400"}`}>{item}</button>)}</div><div className="flex items-center gap-2"><button aria-label={`Previous ${view}`} onClick={() => setAnchor(shiftPlannerDate(anchor, -1, view) || anchor)} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronLeft className="size-4" /></button><button onClick={() => setAnchor(today())} className="min-h-12 rounded-xl border border-slate-800 px-3 py-2 text-sm">Today</button><button aria-label={`Next ${view}`} onClick={() => setAnchor(shiftPlannerDate(anchor, 1, view) || anchor)} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronRight className="size-4" /></button></div></div>
         <Card><p className="text-sm text-slate-400">{view[0].toUpperCase() + view.slice(1)} diary centred on</p><p className="mt-1 text-xl font-bold">{displayDate(anchor)}</p></Card>

@@ -52,10 +52,19 @@ const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && type
 const text = (tree) => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 const entry = (patch = {}) => ({ id: "e1", title: "Site visit", type: "Job", date: "2026-01-31", endDate: "2026-02-01", startTime: "09:00", endTime: "12:00", teamMemberIds: [], location: "", status: "Planned", ...patch });
 const job = (patch = {}) => ({ id: "j1", title: "Workshop", status: "Scheduled", siteAddress: "Site", notes: "Saved job notes", updatedAt: "2026-01-01T10:00:00Z", ...patch });
-function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: initialJobs = [], failEntries = 0, failJobs = 0, ready: initialReady = true } = {}) {
+function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: initialJobs = [], failEntries = 0, failJobs = 0, failCreateAt = [], ready: initialReady = true } = {}) {
   const state = [], effects = [];
   let cursor = 0, entries = initial, jobs = initialJobs, writes = 0, ids = 0, ready = initialReady;
   const attempts = [];
+  const creations = [];
+  function createItem(item) {
+    if (!ready) throw new Error("Scheduling records are not ready");
+    if (entries.some((record) => record.id === item.id)) throw new Error("A collection record with this id already exists");
+    writes++; creations.push(item);
+    if (failCreateAt.includes(creations.length)) throw new Error("visit storage failed");
+    entries = [item, ...entries];
+    return item;
+  }
   function updateItem(kind, id, update) {
     if (!ready) throw new Error("Scheduling records are not ready");
     const records = kind === "visit" ? entries : jobs;
@@ -75,18 +84,19 @@ function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: ini
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState, useRef: (value) => useState({ current: value })[0], useMemo: (fn) => fn(), useEffect: (fn) => effects.push(fn) }, "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
     "../../lib/scheduling": scheduling, "../../lib/jobManagement-core.mjs": jobCore, "../../lib/storage": { makeId: () => `id-${++ids}`, useCloudLocalCollection: () => store() },
-    "../../lib/cloud/coreBusinessCollections": { useCustomersCollection: () => store(), useJobsCollection: () => ({ ...store(jobs), updateItem: (id, update) => updateItem("job", id, update), setItems() { throw new Error("Dispatch must use durable job writes"); } }), usePlannerCollection: () => ({ ...store(entries), updateItem: (id, update) => updateItem("visit", id, update), setItems(fn) { writes++; entries = fn(entries); } }) },
+    "../../lib/cloud/coreBusinessCollections": { useCustomersCollection: () => store(), useJobsCollection: () => ({ ...store(jobs), updateItem: (id, update) => updateItem("job", id, update), setItems() { throw new Error("Dispatch must use durable job writes"); } }), usePlannerCollection: () => ({ ...store(entries), createItem, updateItem: (id, update) => updateItem("visit", id, update), setItems() { throw new Error("Bookings must use durable creation"); } }) },
   };
   const mod = { exports: {} };
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/planner/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Date, Error, URLSearchParams, window: { location: { search }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {} }, require(name) { assert.ok(name in deps, name); return deps[name]; } });
   const render = () => { cursor = 0; effects.length = 0; return mod.exports.default(); };
   render(); effects.splice(0).forEach((fn) => fn());
-  return { render, writes: () => writes, entries: () => entries, jobs: () => jobs, attempts, replaceEntries(value) { entries = value; }, replaceJobs(value) { jobs = value; }, setReady(value) { ready = value; },
+  return { render, writes: () => writes, entries: () => entries, jobs: () => jobs, attempts, creations, replaceEntries(value) { entries = value; }, replaceJobs(value) { jobs = value; }, setReady(value) { ready = value; },
     handler(label) { const node = nodes(render()).find((n) => ["button", "Button"].includes(n.type) && text(n) === label); assert.ok(node, label); return node.props.onClick; },
     click(label) { const node = nodes(render()).find((n) => ["button", "Button"].includes(n.type) && (n.props["aria-label"] === label || text(n) === label)); assert.ok(node, label); node.props.onClick(); },
     add() { nodes(render()).find((n) => n.type === "PageHeader").props.action.props.onClick(); },
     fill(label, value) { const all = nodes(render()); let field = all.find((n) => n.props?.label === label); if (!field) field = nodes(all.find((n) => n.type === "label" && text(n).startsWith(label))).find((n) => n.type === "select"); assert.ok(field, label); field.props.onChange({ target: { value } }); },
-    submit() { nodes(render()).find((n) => n.type === "form").props.onSubmit({ preventDefault() {} }); },
+    saveHandler() { return nodes(render()).find((n) => n.type === "form").props.onSubmit; },
+    submit() { this.saveHandler()({ preventDefault() {} }); },
   };
 }
 
@@ -99,12 +109,81 @@ test("planner month buttons reach February and week view hides distant bookings 
 test("planner saves monthly spans without drift and None creates only one booking", () => {
   const h = harness(); h.add();
   for (const [label, value] of [["Entry title", "Monthly visit"], ["Start date", "2026-01-31"], ["End date", "2026-02-01"], ["Repeat", "Monthly"], ["Number of visits", "3"]]) h.fill(label, value);
-  h.submit(); assert.equal(h.writes(), 1);
-  assert.deepEqual(Array.from(h.entries(), (e) => [e.date, e.endDate]), [["2026-01-31", "2026-02-01"], ["2026-02-28", "2026-03-01"], ["2026-03-31", "2026-04-01"]]);
+  h.submit(); assert.equal(h.writes(), 3);
+  assert.deepEqual(Array.from(h.entries().toSorted((a, b) => a.date.localeCompare(b.date)), (e) => [e.date, e.endDate]), [["2026-01-31", "2026-02-01"], ["2026-02-28", "2026-03-01"], ["2026-03-31", "2026-04-01"]]);
   assert.equal(new Set(h.entries().map((e) => e.recurrenceGroupId)).size, 1);
   const single = harness(); single.add();
   for (const [label, value] of [["Entry title", "One visit"], ["Start date", "2026-01-31"], ["End date", "2026-02-01"], ["Number of visits", "3"]]) single.fill(label, value);
   single.submit(); assert.equal(single.entries().length, 1);
+});
+
+function prepareBooking(h, count = "3") {
+  h.add();
+  for (const [label, value] of [["Entry title", "Monthly visit"], ["Start date", "2026-01-31"], ["End date", "2026-02-01"], ["Repeat", "Monthly"], ["Number of visits", count], ["Notes", "Original series"]]) h.fill(label, value);
+}
+
+test("a failed first booking save retains its form and stable identities through edits and retry", () => {
+  const h = harness({ failCreateAt: [1, 2] }); prepareBooking(h); h.submit();
+  assert.equal(h.entries().length, 0); assert.match(text(h.render()), /0 of 3 visits saved.*form is retained/);
+  assert.equal(nodes(h.render()).find((n) => n.props?.label === "Entry title").props.value, "Monthly visit");
+  assert.equal(nodes(h.render()).find((n) => n.type === "fieldset").props.disabled, false);
+  h.fill("Entry title", "Reviewed visit"); h.fill("Start date", "2026-03-31"); h.fill("End date", "2026-04-01"); h.submit(); h.submit();
+  assert.equal(h.entries().length, 3);
+  assert.equal(h.creations[0].id, h.creations[1].id); assert.equal(h.creations[1].id, h.creations[2].id);
+  assert.equal(h.creations[0].recurrenceGroupId, h.creations[2].recurrenceGroupId);
+  assert.equal(h.creations[0].createdAt, h.creations[2].createdAt);
+  assert.ok(h.entries().every((e) => e.title === "Reviewed visit"));
+  assert.match(text(h.render()), /3 diary entries saved on this device.*Check sync status/);
+  assert.equal(nodes(h.render()).some((n) => n.type === "form"), false);
+});
+
+test("partially saved repeats lock the series and retry only the missing visits with their original ids", () => {
+  const other = entry({ id: "other" }); const h = harness({ entries: [other], failCreateAt: [2, 4] }); prepareBooking(h);
+  const captured = h.saveHandler(); captured({ preventDefault() {} });
+  assert.equal(h.entries().length, 2); assert.match(text(h.render()), /1 of 3 visits saved.*remaining visits could not be confirmed/);
+  assert.equal(nodes(h.render()).find((n) => n.type === "fieldset").props.disabled, true);
+  assert.match(text(h.render()), /Not confirmed: Sat, 28 Feb 2026.*Not confirmed: Tue, 31 Mar 2026/);
+  assert.match(text(h.render()), /Leaving this page keeps the saved visits but loses the remaining draft/);
+  h.add(); assert.equal(nodes(h.render()).some((n) => n.type === "form"), true);
+  // A callback captured before the partial save must still use the frozen original series.
+  h.fill("Entry title", "Stale edited draft"); captured({ preventDefault() {} });
+  assert.equal(h.entries().length, 3); assert.match(text(h.render()), /2 of 3 visits saved/);
+  h.submit(); assert.equal(h.entries().length, 4);
+  assert.equal(h.creations[1].id, h.creations[2].id); assert.equal(h.creations[3].id, h.creations[4].id);
+  assert.equal(h.creations.filter((e) => e.id === h.creations[0].id).length, 1);
+  assert.ok(h.entries().filter((e) => e.id !== "other").every((e) => e.title === "Monthly visit" && e.notes === "Original series"));
+  assert.deepEqual(h.entries().find((e) => e.id === "other"), other);
+  assert.equal(new Set(h.entries().map((e) => e.id)).size, 4);
+});
+
+test("repeated submit callbacks cannot duplicate a completed booking or save an older draft after reopening", () => {
+  const h = harness(); prepareBooking(h, "1"); const save = h.saveHandler(); save({ preventDefault() {} }); save({ preventDefault() {} });
+  assert.equal(h.entries().length, 1); assert.equal(h.writes(), 1);
+  h.add(); h.fill("Entry title", "Next booking"); save({ preventDefault() {} }); assert.equal(h.writes(), 1);
+  h.submit(); assert.equal(h.entries().length, 2); assert.notEqual(h.entries()[0].id, h.entries()[1].id);
+});
+
+test("keeping saved visits stops only the unsaved tail and prevents old retries", () => {
+  const h = harness({ failCreateAt: [2] }); prepareBooking(h); const save = h.saveHandler(); save({ preventDefault() {} });
+  const saved = h.entries()[0]; const retry = h.saveHandler(); const keep = h.handler("Keep saved visits only"); keep(); keep(); retry({ preventDefault() {} });
+  assert.deepEqual(h.entries(), [saved]); assert.equal(h.writes(), 2);
+  assert.match(text(h.render()), /1 of 3 visits saved.*remaining visits were not booked/);
+  assert.equal(nodes(h.render()).some((n) => n.type === "form"), false);
+  h.add(); h.fill("Entry title", "New visit"); h.submit(); assert.equal(h.entries().length, 2); assert.notEqual(h.entries()[0].id, saved.id);
+});
+
+test("a pending booking id collision is not overwritten or treated as a successful retry", () => {
+  const h = harness({ failCreateAt: [1] }); prepareBooking(h); h.submit();
+  const other = entry({ id: h.creations[0].id, title: "Different saved visit" }); h.replaceEntries([other]); h.submit();
+  assert.deepEqual(h.entries(), [other]); assert.match(text(h.render()), /0 of 3 visits saved.*already exists/);
+  assert.equal(nodes(h.render()).some((n) => n.type === "form"), true);
+});
+
+test("booking readiness and invalid duration failures retain the draft without creating records", () => {
+  const h = harness(); prepareBooking(h); const save = h.saveHandler(); h.setReady(false); save({ preventDefault() {} });
+  assert.equal(h.writes(), 0); h.setReady(true); assert.match(text(h.render()), /could not be confirmed/);
+  for (const duration of ["Infinity", "NaN", "-1"]) { h.fill("Estimated duration (minutes)", duration); h.submit(); assert.equal(h.writes(), 0); assert.match(text(h.render()), /valid estimated duration/); }
+  h.fill("Estimated duration (minutes)", "90"); h.submit(); assert.equal(h.entries().length, 3);
 });
 
 test("invalid or reversed planner dates never create a partial recurrence", () => {
