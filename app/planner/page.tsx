@@ -9,7 +9,7 @@ import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useCustomersCollection, useJobsCollection, usePlannerCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
-import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, jobVisitPlan, plannerViewDate, plannerDateKey, shiftPlannerDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
+import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, jobVisitPlan, plannerEntryDatesValid, plannerVisitReviewIssues, plannerViewDate, plannerDateKey, shiftPlannerDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
 import type { FleetVehicle, Job, PlannerEntryType, TeamMember } from "../../lib/models";
 import { isJobInactiveStatus, isJobOnSiteStatus, normaliseJobStatus } from "../../lib/jobManagement-core.mjs";
 
@@ -45,9 +45,12 @@ export default function PlannerPage() {
   const [currentDay, setCurrentDay] = useState(today);
   const [visitQuery, setVisitQuery] = useState("");
   const [visitLimit, setVisitLimit] = useState(4);
+  const [reviewLimit, setReviewLimit] = useState(4);
   const ready = [entries, jobs, customers, team, vehicles].every((store) => store.isReady);
 
-  const clashes = useMemo(() => detectScheduleClashes(entries.items, team.items, vehicles.items), [entries.items, team.items, vehicles.items]);
+  const currentEntries = useMemo(() => entries.items.filter((entry) => !["Complete", "Cancelled"].includes(entry.status) && (!plannerEntryDatesValid(entry) || entryEndDate(entry) >= currentDay)), [entries.items, currentDay]);
+  const visitReviews = useMemo(() => currentEntries.map((entry) => ({ entry, issues: plannerVisitReviewIssues(entry) })).filter(({ issues }) => issues.length), [currentEntries]);
+  const clashes = useMemo(() => detectScheduleClashes(currentEntries, team.items, vehicles.items), [currentEntries, team.items, vehicles.items]);
   const visible = useMemo(() => entries.items.filter((entry) => dateWithinView(entry.date, anchor, view, entryEndDate(entry))).toSorted((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)), [entries.items, anchor, view]);
   const visitChecks = useMemo(() => jobs.items.filter((job) => !isJobInactiveStatus(job.status)).map((job) => ({ job, plan: jobVisitPlan(job.id, entries.items, currentDay) })).filter(({ plan }) => !plan.upcoming.length || plan.uncertain.length), [jobs.items, entries.items, currentDay]);
   const visitWords = visitQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
@@ -229,10 +232,21 @@ export default function PlannerPage() {
       <Card><CalendarDays className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Visible diary entries</p><p className="mt-2 text-3xl font-bold">{visible.length}</p></Card>
       <Card><Users className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Jobs needing visit review</p><p className="mt-2 text-3xl font-bold">{visitChecks.length}</p></Card>
       <Card><CarFront className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Active vehicles</p><p className="mt-2 text-3xl font-bold">{vehicles.items.filter((item) => item.status === "Active").length}</p></Card>
-      <Card><AlertTriangle className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Scheduling clashes</p><p className="mt-2 text-3xl font-bold">{clashes.length}</p></Card>
+      <Card><AlertTriangle className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Upcoming clash signals</p><p className="mt-2 text-3xl font-bold">{clashes.length}</p><p className="mt-2 text-sm text-slate-400">{visitReviews.length} diary record(s) need a separate details review.</p></Card>
     </section>
 
-    {clashes.length ? <Card className="border-amber-400/30"><div className="flex gap-3"><AlertTriangle className="mt-0.5 size-5 text-amber-300" /><div><h2 className="font-bold">Clashes need review</h2><p className="mt-1 text-sm text-slate-400">Saving is allowed, but staff, vehicles or jobs overlap.</p><div className="mt-3 space-y-1 text-sm text-amber-200">{clashes.slice(0, 8).map((clash, index) => <p key={`${clash.entryId}-${clash.otherEntryId}-${index}`}>{clash.kind}: {clash.label}</p>)}</div></div></div></Card> : null}
+    {clashes.length ? <Card className="border-amber-400/30"><div className="flex gap-3"><AlertTriangle className="mt-0.5 size-5 text-amber-300" /><div><h2 className="font-bold">Clashes need review</h2><p className="mt-1 text-sm text-slate-400">Upcoming planned/confirmed visits share staff, vehicles or jobs at overlapping recorded times. Saving remains allowed; review the affected visits.</p><div className="mt-3 space-y-1 break-words text-sm text-amber-200">{clashes.slice(0, 8).map((clash, index) => <p key={`${clash.entryId}-${clash.otherEntryId}-${index}`}>{entries.items.find((entry) => entry.id === clash.entryId)?.title} / {entries.items.find((entry) => entry.id === clash.otherEntryId)?.title} · {clash.kind}: {clash.label}</p>)}</div></div></div></Card> : null}
+
+    {visitReviews.length ? <Card className="border-amber-400/30">
+      <h2 className="font-bold">Diary details need review</h2><p className="mt-2 text-sm text-slate-400">{visitReviews.length} current/future or unplaceable record(s) cannot confirm a timed clash. Review their dates, times and status before planning more work.</p>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">{visitReviews.slice(0, reviewLimit).map(({ entry, issues }) => <article key={entry.id} aria-label={`Diary review · ${entry.title}`} className="min-w-0 break-words rounded-xl border border-slate-700 p-3">
+        <h3 className="font-semibold">{entry.title}</h3><p className="mt-2 text-sm text-slate-400">{entry.type} · {entry.status} · {entry.date || "Start missing"} to {entryEndDate(entry) || "End missing"} · {entry.startTime || "Start time missing"}–{entry.endTime || "End time missing"}</p>
+        <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-amber-200">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
+        <div className="mt-3 flex flex-wrap gap-2">{plannerEntryDatesValid(entry) ? <button onClick={() => { setAnchor(entry.date < currentDay ? currentDay : entry.date); setView("day"); }} className="min-h-12 rounded-xl border border-slate-700 px-3 text-sm">Show visit day</button> : null}{jobs.items.some((job) => job.id === entry.jobId) ? <Link href={`/jobs/${encodeURIComponent(entry.jobId!)}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 text-sm">Review linked job</Link> : null}</div>
+      </article>)}</div>
+      {visitReviews.length > reviewLimit ? <button onClick={() => setReviewLimit((value) => value + 4)} className="mt-4 min-h-12 w-full rounded-xl border border-slate-700 px-3 text-sm">Show more diary reviews ({visitReviews.length - reviewLimit} remaining)</button> : null}
+    </Card> : null}
+    <p className="text-sm text-slate-400">Clash checks use loaded upcoming planned/confirmed visits with valid dates and explicit times. No warning does not confirm availability or site readiness.</p>
 
     {showForm ? <Card><form onSubmit={saveEntry} className="space-y-4">
       {bookingProgress ? <div role="status" className="space-y-2 break-words text-sm text-amber-200"><p>{bookingProgress.saved} of {bookingProgress.total} visits saved. The original booking details are locked while you finish this series.</p><p>Retry only the remaining visits. Leaving this page keeps the saved visits but loses the remaining draft; review the diary before booking again.</p><ul className="list-inside list-disc">{bookingProgress.remaining.map((entry) => <li key={entry.id}>Not confirmed: {displayDate(entry.date)}</li>)}</ul></div> : null}

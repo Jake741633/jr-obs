@@ -52,6 +52,10 @@ export function entryEndDate(entry: ScheduledPlannerEntry) {
   return entry.endDate || entry.date;
 }
 
+export function plannerEntryDatesValid(entry: ScheduledPlannerEntry) {
+  return Boolean(plannerViewDate(entry.date) && plannerViewDate(entryEndDate(entry)) && entry.date <= entryEndDate(entry));
+}
+
 /** Saved work visits only; history and other appointment types cannot book a next job visit. */
 export function jobVisitPlan(jobId: string, entries: ScheduledPlannerEntry[], today = plannerDateKey()) {
   const upcoming: ScheduledPlannerEntry[] = [];
@@ -60,7 +64,7 @@ export function jobVisitPlan(jobId: string, entries: ScheduledPlannerEntry[], to
   for (const entry of entries) {
     if (entry.jobId !== jobId || entry.type !== "Job" || ["Complete", "Cancelled"].includes(entry.status)) continue;
     const end = entryEndDate(entry);
-    if (!plannerViewDate(today) || !plannerViewDate(entry.date) || !plannerViewDate(end) || end < entry.date) {
+    if (!plannerViewDate(today) || !plannerEntryDatesValid(entry)) {
       uncertain.push(entry);
     } else if (end >= today) {
       if (["Planned", "Confirmed"].includes(entry.status)) upcoming.push(entry);
@@ -71,33 +75,43 @@ export function jobVisitPlan(jobId: string, entries: ScheduledPlannerEntry[], to
 }
 
 export function dateRangeOverlaps(a: ScheduledPlannerEntry, b: ScheduledPlannerEntry) {
-  return a.date <= entryEndDate(b) && b.date <= entryEndDate(a);
+  return plannerEntryDatesValid(a) && plannerEntryDatesValid(b) && a.date <= entryEndDate(b) && b.date <= entryEndDate(a);
 }
 
-function minutes(value: string, fallback: number) {
-  if (!value) return fallback;
+function minutes(value: string) {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
   const [hours, mins] = value.split(":").map(Number);
   return hours * 60 + mins;
 }
 
+/** Uncertain timing needs review, never an inferred time interval or clash. */
+export function plannerVisitReviewIssues(entry: ScheduledPlannerEntry) {
+  const issues: string[] = [];
+  if (!plannerEntryDatesValid(entry)) issues.push("Start/end dates are missing, invalid or reversed.");
+  const start = minutes(entry.startTime), end = minutes(entry.endTime);
+  if (start === null || end === null) issues.push("Start/end times are missing or invalid; no timed clash can be confirmed.");
+  else if (start >= end) issues.push("End time must be after start time; overnight timing needs a separate review.");
+  if (!["Planned", "Confirmed", "Complete", "Cancelled"].includes(entry.status)) issues.push(`Unsupported visit status: ${entry.status || "Missing"}.`);
+  return issues;
+}
+
 export function timeRangeOverlaps(a: ScheduledPlannerEntry, b: ScheduledPlannerEntry) {
   if (!dateRangeOverlaps(a, b)) return false;
-  const aStart = minutes(a.startTime, 0);
-  const aEnd = minutes(a.endTime, aStart + (a.estimatedDurationMinutes || 60));
-  const bStart = minutes(b.startTime, 0);
-  const bEnd = minutes(b.endTime, bStart + (b.estimatedDurationMinutes || 60));
+  const aStart = minutes(a.startTime), aEnd = minutes(a.endTime);
+  const bStart = minutes(b.startTime), bEnd = minutes(b.endTime);
+  if (aStart === null || aEnd === null || bStart === null || bEnd === null || aStart >= aEnd || bStart >= bEnd) return false;
   return aStart < bEnd && bStart < aEnd;
 }
 
 export function detectScheduleClashes(entries: ScheduledPlannerEntry[], team: TeamMember[], vehicles: FleetVehicle[]) {
   const clashes: ScheduleClash[] = [];
-  const active = entries.filter((entry) => entry.status !== "Cancelled");
+  const active = entries.filter((entry) => ["Planned", "Confirmed"].includes(entry.status) && !plannerVisitReviewIssues(entry).length);
   for (let i = 0; i < active.length; i += 1) {
     for (let j = i + 1; j < active.length; j += 1) {
       const a = active[i];
       const b = active[j];
       if (!timeRangeOverlaps(a, b)) continue;
-      for (const memberId of a.teamMemberIds.filter((id) => b.teamMemberIds.includes(id))) {
+      for (const memberId of new Set(a.teamMemberIds.filter((id) => b.teamMemberIds.includes(id)))) {
         clashes.push({ entryId: a.id, otherEntryId: b.id, kind: "Staff", label: team.find((item) => item.id === memberId)?.name || "Assigned worker" });
       }
       if (a.vehicleId && a.vehicleId === b.vehicleId) {
