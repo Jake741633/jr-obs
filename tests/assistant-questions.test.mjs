@@ -328,3 +328,124 @@ test("office task answers and priorities use permitted job pages while owner/adm
     assert.equal(result.items[0].href.startsWith("/job-tasks?"), true);
   }
 });
+
+const dueQuote = (patch = {}) => ({ id: "q1", number: "Q-1", title: "Workshop quote", type: "Quote", status: "Sent", updatedAt: "2026-10-01T10:00:00Z", validUntil: "2026-10-20", nextFollowUpDate: "2026-10-10", ...patch });
+const idsOf = (result) => Array.from(result.items, (item) => item.id);
+
+test("a job briefing joins saved relationships once and excludes same-named unrelated records", () => {
+  const data = records({ jobs: [job({ siteAddress: "", assignedTo: [], sourceQuoteId: "q1" }), job({ id: "other", title: "Other job" })],
+    invoices: [invoice({ jobId: "j1" }), invoice({ id: "unrelated-invoice", jobId: "other", title: "Workshop" })],
+    documents: [dueQuote(), dueQuote({ id: "unrelated-quote", jobId: "other", title: "Workshop" })],
+    tasks: [siteTask({ dueDate: "2026-10-09" }), siteTask({ id: "future", dueDate: "2027-01-01" }), siteTask({ id: "other-task", jobId: "other", title: "Workshop", priority: "Urgent" }), siteTask({ id: "done", status: "Completed" })],
+    planner: [visit({ jobId: "j1" })], purchases: [{ id: "p1", jobId: "j1", number: "P-1", title: "Site materials", items: [{ status: "Needed" }] }],
+    reminders: [{ id: "r1", title: "Workshop", dueDate: "2026-10-09", completed: false, priority: "Urgent" }] });
+  const before = JSON.stringify(data); const result = answer("Show job briefing for Workshop", data);
+  assert.equal(result.resolvedJobId, "j1"); assert.match(result.title, /Job briefing · Workshop/);
+  for (const id of ["invoice:i1", "follow-up:q1", "readiness:j1", "task:t1", "task:future", "visit:v1", "job:j1"]) assert.ok(idsOf(result).includes(id), id);
+  assert.equal(new Set(idsOf(result)).size, result.items.length);
+  assert.ok(idsOf(result).every((id) => !id.includes("unrelated") && id !== "task:other-task" && id !== "task:done" && id !== "reminder:r1"));
+  assert.match(result.items.find((i) => i.id === "readiness:j1").evidence.join(" "), /1 material line still marked Needed/);
+  assert.match(result.scope, /not a site inspection/); assert.equal(JSON.stringify(data), before);
+});
+
+test("job briefings retain clashes with another job without leaking that job's unrelated tasks or invoices", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Other job" })], tasks: [siteTask({ jobId: "other", priority: "Urgent" })],
+    invoices: [invoice({ jobId: "other" })], planner: [visit({ jobId: "j1" }), visit({ id: "v2", jobId: "other", title: "Other visit" })] });
+  const result = answer("What needs attention for Workshop?", data);
+  const clash = result.items.find((i) => i.id.startsWith("clash:")); assert.ok(clash);
+  assert.match(clash.evidence.join(" "), /First fix.*Other visit/); assert.equal(clash.href, "/planner?date=2026-10-11");
+  assert.ok(!idsOf(result).includes("task:t1")); assert.ok(!idsOf(result).includes("invoice:i1")); assert.ok(!idsOf(result).includes("visit:v2"));
+  const full = briefing.buildAssistantBriefing(data, now).actions.find((a) => a.id.startsWith("clash:"));
+  assert.deepEqual(Array.from(full.jobIds), ["j1", "other"]);
+});
+
+test("job briefing money checks use the ledger without double counting and include not-yet-due debt", () => {
+  const data = { jobs: [job()], tasks: [], invoices: [invoice({ jobId: "j1", amountPaid: 100 }), invoice({ id: "future", jobId: "j1", dueDate: "2026-11-01" }), invoice({ id: "draft", jobId: "j1", status: "Draft" }), invoice({ id: "cancelled", jobId: "j1", status: "Cancelled" })], payments: [{ invoiceId: "i1", type: "Payment", amount: 150 }, { invoiceId: "future", type: "Payment", amount: 20 }] };
+  const result = answer("Job briefing for Workshop", data);
+  assert.match(result.items.find((i) => i.id === "invoice:i1").detail, /£90\.00/);
+  assert.match(result.items.find((i) => i.id === "invoice:future").detail, /£220\.00/);
+  assert.equal(result.items.filter((i) => i.id.startsWith("invoice:")).length, 2);
+  const settled = answer("Job briefing for Workshop", { ...data, payments: [{ invoiceId: "i1", type: "Payment", amount: 240 }, { invoiceId: "future", type: "Payment", amount: 240 }] });
+  assert.equal(settled.items.filter((i) => i.id.startsWith("invoice:")).length, 0);
+  const invalid = answer("Job briefing for Workshop", { jobs: [job()], invoices: [invoice({ jobId: "j1", amountPaid: NaN }), invoice({ id: "date", jobId: "j1", dueDate: "invalid" })] });
+  assert.match(invalid.warnings.join(" "), /invalid or unsupported amounts/);
+});
+
+test("job quote checks support quote-side, job-side and snapshot links without overriding explicit quote ownership", () => {
+  for (const saved of [job({ sourceQuoteId: "q1" }), job({ quoteSnapshot: { quoteId: "q1" } })]) {
+    assert.ok(idsOf(answer("Job briefing for Workshop", { jobs: [saved], documents: [dueQuote()] })).includes("follow-up:q1"));
+  }
+  assert.ok(idsOf(answer("Job briefing for Workshop", { jobs: [job()], documents: [dueQuote({ jobId: "j1" })] })).includes("follow-up:q1"));
+  assert.ok(!idsOf(answer("Job briefing for Workshop", { jobs: [job({ sourceQuoteId: "q1" })], documents: [dueQuote({ jobId: "other" })] })).includes("follow-up:q1"));
+  assert.ok(!idsOf(answer("Job briefing for Workshop", { jobs: [job()], documents: [dueQuote({ title: "Workshop" })] })).includes("follow-up:q1"));
+});
+
+test("job briefing keeps ongoing and distant visits, flags bad dates/times and excludes finished history", () => {
+  const result = answer("Show job briefing at 1 High Street", { jobs: [job()], tasks: [], planner: [
+    visit({ jobId: "j1", date: "2026-10-08", endDate: "2026-10-12" }), visit({ id: "far", jobId: "j1", date: "2027-01-01", startTime: "" }),
+    visit({ id: "invalid", jobId: "j1", date: "2026-02-30" }), visit({ id: "reversed", jobId: "j1", endDate: "2026-10-09" }),
+    visit({ id: "past", jobId: "j1", date: "2026-10-01" }), visit({ id: "done", jobId: "j1", status: "Complete" }), visit({ id: "cancelled", jobId: "j1", status: "Cancelled" })] });
+  assert.match(result.summary, /2 upcoming or ongoing visits/); assert.match(result.warnings.join(" "), /2 linked visits with invalid or reversed dates/);
+  assert.equal(result.items.find((i) => i.id === "visit:v1").href, "/planner?date=2026-10-10");
+  assert.equal(result.items.find((i) => i.id === "visit:far").href, "/planner?date=2027-01-01");
+  assert.match(result.items.find((i) => i.id === "visit:far").detail, /Time needs review/);
+  assert.equal(result.items.filter((i) => i.id.startsWith("visit:")).length, 2);
+});
+
+test("closed job briefings preserve recorded status and review missing billing and certificates without site clearance", () => {
+  const result = answer("Job briefing for Workshop", { jobs: [job({ status: "Complete" })], tasks: [siteTask({ priority: "High" })] });
+  assert.ok(idsOf(result).includes("invoice-job:j1")); assert.ok(idsOf(result).includes("certificate:j1")); assert.ok(idsOf(result).includes("task:t1"));
+  assert.ok(!idsOf(result).includes("readiness:j1")); assert.match(result.items.find((i) => i.id === "job:j1").detail, /Job status: Complete/);
+  assert.match(result.scope, /not a site inspection.*electrical compliance/);
+  const missing = answer("Job briefing for Workshop", { jobs: [job()] });
+  assert.match(missing.summary, /Task records not ready/); assert.match(missing.warnings.join(" "), /absence does not mean no work remains/);
+  const loaded = answer("Job briefing for Workshop", { jobs: [job()], tasks: [] });
+  assert.match(loaded.summary, /0 open tasks and snags/); assert.ok(!loaded.warnings.some((w) => w.includes("Task records")));
+});
+
+test("job briefings require a current exact job choice and never broaden a missing or ambiguous selection", () => {
+  assert.equal(questions.assistantQuestionIntent("Show job briefing"), "job");
+  const data = { jobs: [job(), job({ id: "other", siteAddress: "Other address" })], tasks: [siteTask()] };
+  const ambiguous = answer("Job briefing for Workshop", data); assert.equal(ambiguous.title, "Choose a job"); assert.equal(ambiguous.items.length, 0); assert.equal(ambiguous.jobChoices.length, 2);
+  const chosen = answerFor("Show job briefing", data, "j1"); assert.equal(chosen.resolvedJobId, "j1");
+  const all = answer("Show job briefing", data); assert.equal(all.title, "Choose a job"); assert.equal(all.items.length, 0);
+  const absent = answerFor("Show job briefing", data, "missing"); assert.equal(absent.title, "Job unavailable"); assert.equal(absent.items.length, 0);
+  for (const q of ["Job briefing for Work", "Job briefing for unknown"]) assert.equal(answer(q, data).items.length, 0);
+  for (const q of ["Delete job briefing for Workshop", "Job briefing for Workshop " + "x".repeat(181)]) assert.equal(answer(q, data).recognized, false);
+  assert.equal(answer("Job briefing for Workshop and overdue invoices", data).items.length, 0, "a combined request must not guess Workshop");
+});
+
+test("phone job briefing choices, progressive reveal, typed scope and record refresh use actual handlers", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Elsewhere", siteAddress: "Other address" })], tasks: Array.from({ length: 6 }, (_, i) => siteTask({ id: `t${i}` })) }); const h = ui(data);
+  h.click("Job briefing"); assert.match(text(h.render()), /Choose one loaded job/); h.choose();
+  assert.match(text(h.render()), /Job briefing · Elsewhere/);
+  h.scope("j1"); h.click("Job briefing"); assert.match(text(h.render()), /Job briefing · Workshop/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 4);
+  h.click("Show more records"); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 7);
+  h.fill("Job briefing for Elsewhere"); h.submit(); assert.match(text(h.render()), /Job briefing · Elsewhere/);
+  h.replaceRecords({ ...data, jobs: [job(), job({ id: "replacement", title: "Elsewhere", siteAddress: "Other address" })] });
+  assert.match(text(h.render()), /previous selection is unavailable/); assert.ok(!nodes(h.render()).some((n) => n.type === "Link" && n.props.href === "/jobs/other"));
+  h.choose(); assert.match(text(h.render()), /Job briefing · Elsewhere/);
+  assert.ok(nodes(h.render()).some((n) => n.type === "Link" && n.props.href === "/jobs/replacement"));
+  h.click("Clear answer"); assert.ok(!text(h.render()).includes("Job briefing ·")); assert.ok(h.blurred() >= 3);
+});
+
+test("job briefing source links encode identities and remain usable by the account's route permissions", () => {
+  const data = records({ jobs: [job({ id: "j /?#" })], tasks: [siteTask({ jobId: "j /?#", id: "t /?#", priority: "High" })], invoices: [invoice({ jobId: "j /?#" })] });
+  for (const role of ["owner", "admin", "office"]) {
+    const result = questions.answerAssistantQuestion(data, "Job briefing for Workshop", now, undefined, "", permissions.canAccessPath(role, "/job-tasks"));
+    assert.ok(result.items.every((item) => permissions.canAccessPath(role, permissions.internalPathForAccess(item.href))));
+    assert.equal(result.items.find((i) => i.id === "job:j /?#").href, "/jobs/j%20%2F%3F%23");
+    assert.equal(result.items.find((i) => i.id === "task:t /?#").href, role === "office" ? "/jobs/j%20%2F%3F%23" : "/job-tasks?job=j%20%2F%3F%23&task=t%20%2F%3F%23");
+  }
+});
+
+
+test("a phone job briefing refreshes saved task, payment and visit status without retaining stale actions", () => {
+  const data = records({ jobs: [job()], tasks: [siteTask({ priority: "High" })], invoices: [invoice({ jobId: "j1" })], planner: [visit({ jobId: "j1" })] }); const h = ui(data);
+  h.scope("j1"); h.click("Job briefing"); assert.match(text(h.render()), /Chase INV-1/); assert.match(text(h.render()), /Task: Fit labels/);
+  h.replaceRecords({ ...data, tasks: [siteTask({ priority: "High", status: "Completed" })], payments: [{ invoiceId: "i1", type: "Payment", amount: 240 }], planner: [visit({ jobId: "j1", status: "Complete" })] });
+  assert.doesNotMatch(text(h.render()), /Chase INV-1|Task: Fit labels|Review visit day/);
+  assert.match(text(h.render()), /0 open tasks and snags.*0 upcoming or ongoing visits/);
+  assert.match(text(h.render()), /Job briefing · Workshop/);
+});
