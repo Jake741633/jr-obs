@@ -11,6 +11,7 @@ const shortcuts = [
   ["Today", "What is booked today?"], ["Tomorrow", "What is booked tomorrow?"], ["Overdue money", "How much is overdue?"],
   ["Quote follow-ups", "Which quotes need chasing?"], ["Site preparation", "Am I ready for site?"], ["Next seven days", "Show my diary next 7 days"],
   ["Job briefing", "Show job briefing"], ["Open tasks", "Show my open tasks"], ["Open snags", "Show my open snags"],
+  ["Next visit checks", "Which jobs need another visit?"],
 ];
 
 export function AssistantQuestions({ records, now, briefing, canOpenTaskWorkspace }: { records: AssistantRecords; now: Date; briefing: { today: string; actions: AssistantAction[] }; canOpenTaskWorkspace: boolean }) {
@@ -36,16 +37,16 @@ export function AssistantQuestions({ records, now, briefing, canOpenTaskWorkspac
   function ask(value: string) {
     setLinkNotice("");
     const intent = assistantQuestionIntent(value);
-    const requestedJobId = intent === "tasks" || intent === "snags" || intent === "job" ? scopeJobId : "";
+    const requestedJobId = intent === "tasks" || intent === "snags" || intent === "job" || intent === "visits" ? scopeJobId : "";
     const initialAnswer = answerAssistantQuestion(records, value, now, briefing, requestedJobId, canOpenTaskWorkspace);
     setAskedJobId(initialAnswer?.resolvedJobId || requestedJobId);
     setQuestion(value); setAsked(value.trim()); setLimit(4); inputRef.current?.blur();
   }
   return <Card className="border-cyan-400/20">
     <h2 className="text-lg font-bold">Ask JR AI</h2>
-    <p className="mt-1 text-sm text-slate-400">Quick answers from your loaded records. Choose a question or ask about your diary, unpaid invoices, quote follow-ups, tasks, a job briefing or site preparation.</p>
+    <p className="mt-1 text-sm text-slate-400">Quick answers from your loaded records. Choose a question or ask about your diary, unpaid invoices, quote follow-ups, tasks, a job briefing, next visits or site preparation.</p>
     <label className="mt-4 block text-sm font-semibold">Job scope<select value={scopeJobId} onChange={(event) => { setLinkNotice(""); setScopeJobId(event.target.value); setAsked(""); setAskedJobId(""); setLimit(4); }} className="mt-2 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">All loaded jobs</option>{scopeJobId && !records.jobs.some((job) => job.id === scopeJobId) ? <option value={scopeJobId}>Selected job unavailable</option> : null}{records.jobs.toSorted((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"} · {job.status}</option>)}</select></label>
-    <p className="mt-2 text-xs leading-5 text-slate-400">Choose a job for Job briefing, Open tasks or Open snags. You can also ask “Show tasks for” followed by its full saved name or site address. A job briefing connects its saved tasks, visits, material checks and billing. Other shortcuts keep their normal scope.</p>
+    <p className="mt-2 text-xs leading-5 text-slate-400">Choose a job for Job briefing, Open tasks, Open snags or Next visit checks. You can also ask “Show tasks for” or “Show next visit checks for” followed by its full saved name or site address. A job briefing connects its saved tasks, visits, material checks and billing. Other shortcuts keep their normal scope.</p>
     <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{shortcuts.map(([label, value]) => <button key={label} type="button" aria-pressed={asked === value} onClick={() => ask(value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-left text-sm font-semibold text-cyan-100 focus-visible:outline-2 focus-visible:outline-cyan-400">{label}</button>)}</div>
     <form className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); ask(question); }}>
       <label className="min-w-0 flex-1 text-sm font-semibold"><span>Your question</span><input ref={inputRef} type="text" maxLength={180} autoComplete="off" enterKeyHint="send" value={question} onChange={(event) => { setLinkNotice(""); setQuestion(event.target.value); setAsked(""); setLimit(4); }} placeholder="For example: How much am I owed?" className="mt-2 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base focus:border-cyan-400 focus:outline-none" /></label>

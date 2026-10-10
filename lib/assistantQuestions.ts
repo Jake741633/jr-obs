@@ -4,8 +4,9 @@ import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import { effectiveInvoicePaid, invoiceGross } from "./payments";
 import { entryEndDate } from "./scheduling";
 import { assistantTaskActions } from "./assistantTasks";
+import { assistantVisitActions } from "./assistantVisits";
 
-export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags" | "job";
+export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags" | "job" | "visits";
 export interface AssistantAnswerItem { id: string; title: string; detail: string; evidence: string[]; href: string; actionLabel: string }
 export interface AssistantJobChoice { id: string; title: string; address: string; status: string }
 export interface AssistantAnswer { recognized: boolean; title: string; summary: string; scope: string; warnings: string[]; items: AssistantAnswerItem[]; jobChoices?: AssistantJobChoice[]; resolvedJobId?: string }
@@ -22,6 +23,7 @@ export function assistantQuestionIntent(question: string): AssistantQuestionInte
   if (/^(?:am i ready for site|what needs preparing for site|show(?: me)? site readiness)$/.test(query)) return "site";
   if (/^(?:what should i do(?: next| today)?|what needs(?: my)? attention(?: today)?|show(?: me)?(?: my)? priorities)$/.test(query)) return "priorities";
   if (/^(?:(?:show(?: me)? )?(?:a |the |my )?job briefing|brief this job)$/.test(query)) return "job";
+  if (/^(?:(?:which|what) jobs need (?:booking|(?:another|a) (?:work )?visit)|show(?: me)? (?:next visit checks|work visit checks|jobs needing (?:a |another )?visit))$/.test(query)) return "visits";
   if (/^(?:(?:show(?: me)?|list)(?: my)? (?:open |outstanding )?tasks|what tasks (?:are open|are outstanding|need doing))$/.test(query)) return "tasks";
   if (/^(?:(?:show(?: me)?|list)(?: my)? (?:open |outstanding )?snags|what snags (?:are open|are outstanding|need fixing))$/.test(query)) return "snags";
   return null;
@@ -41,7 +43,7 @@ function namedJobQuestion(question: string) {
   if (!match) return null;
   const parsedIntent = assistantQuestionIntent(match[1]);
   const intent = parsedIntent === "priorities" ? "job" : parsedIntent;
-  if (intent !== "tasks" && intent !== "snags" && intent !== "job") return null;
+  if (intent !== "tasks" && intent !== "snags" && intent !== "job" && intent !== "visits") return null;
   const raw = match[2].trim();
   const quoted = raw.match(/^["“](.+)["”][?.!]*$/);
   const label = quoted ? quoted[1].trim() : raw.replace(/[?.!]+$/, "").trim();
@@ -59,7 +61,7 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
   const day = assistantDay(today);
   if (!intent || day === null) return { recognized: false, title: "Try a supported question", summary: "I could not reliably match that question. Try “What is booked tomorrow?”, “How much is overdue?” or “Which quotes need chasing?”.", scope: "Quick answers use local rules and your loaded records. Use the record search below for a particular job, quote or invoice.", warnings: [], items: [] };
 
-  if (intent === "tasks" || intent === "snags" || intent === "job") {
+  if (intent === "tasks" || intent === "snags" || intent === "job" || intent === "visits") {
     const matchingJobs = namedJob ? records.jobs.filter((job) => namedJob.keys.has(jobKey(job.title)) || (job.siteAddress.trim() && namedJob.keys.has(jobKey(job.siteAddress)))) : records.jobs;
     const selectedJob = selectedJobId ? matchingJobs.find((job) => job.id === selectedJobId) : namedJob && matchingJobs.length === 1 ? matchingJobs[0] : undefined;
     const needsChoice = Boolean((namedJob || intent === "job") && !selectedJob);
@@ -73,7 +75,9 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
     }
     if (intent === "job" && selectedJob) {
       const jobId = selectedJob.id;
-      const actions = (briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => action.jobIds?.includes(jobId));
+      const priorityRank = { Now: 0, Today: 1, Next: 2 };
+      const actions = [...(briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => action.jobIds?.includes(jobId)),
+        ...assistantVisitActions([selectedJob], records.planner, today)].toSorted((a, b) => priorityRank[a.priority] - priorityRank[b.priority] || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.id.localeCompare(b.id));
       const scopedInvoices = records.invoices.filter((invoice) => invoice.jobId === jobId);
       const unpaid = answerAssistantQuestion({ ...records, invoices: scopedInvoices }, "Show unpaid invoices", now)!;
       const openTasks = assistantTaskActions((records.tasks || []).filter((task) => task.jobId === jobId), records.jobs, now, false, canOpenTaskWorkspace);
@@ -94,6 +98,12 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
       return { recognized: true, title: `Job briefing · ${selectedJob.title}`, resolvedJobId: jobId,
         summary: `${plural(actions.length, "priority check")} · ${records.tasks === undefined ? "Task records not ready" : plural(openTasks.length, "open task or snag", "open tasks and snags")} · ${plural(visits.length, "upcoming or ongoing visit")} in the loaded records.`,
         scope: `Only records explicitly linked to ${selectedJob.title} · ${selectedJob.siteAddress || "Address not recorded"} · Job status: ${selectedJob.status}. Diary clash checks retain the other affected visit. Priorities check site visits through ${dateAt(day + 6)}; later bookings and future or undated tasks are also listed. Billing includes loaded unpaid invoices after recorded payments. This is not a site inspection, confirmation of electrical compliance, or clearance to travel.`, warnings, items: [...items.values()] };
+    }
+    if (intent === "visits") {
+      const actions = assistantVisitActions(selectedJob ? [selectedJob] : records.jobs, records.planner, today);
+      return { recognized: true, title: `Next work visit checks${selectedJob ? ` · ${selectedJob.title}` : ""}`,
+        summary: `${plural(actions.length, "job")} with missing or uncertain work bookings in the loaded records.`,
+        scope: `${selectedJob ? `Only ${selectedJob.title} · ${selectedJob.siteAddress || "Address not recorded"} · Job status: ${selectedJob.status}. ` : "All loaded jobs. "}Accepted, awaiting-deposit, scheduled and on-site work only; enquiries, unaccepted quotes, closed and held jobs are excluded. Planned/confirmed Job visits ending on or after ${today} count, including distant future bookings. Surveys, deliveries and history do not book the next work visit. Review uncertain dates or statuses before creating another visit. This does not confirm availability, payment, access or site readiness.`, warnings: [], items: actions.map(actionItem), ...(selectedJob ? { resolvedJobId: selectedJob.id } : {}) };
     }
     const tasks = (records.tasks || []).filter((task) => (!selectedJob || task.jobId === selectedJob.id) && (intent !== "snags" || task.type === "Snag"));
     const actions = assistantTaskActions(tasks, records.jobs, now, false, canOpenTaskWorkspace);

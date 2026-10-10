@@ -18,6 +18,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Task-aware JR AI priorities and open-task/snag answers linked to the exact record
 - [x] One-tap job-to-JR-AI briefing links with exact saved identity and invalid-link handling
 - [x] Job-specific JR AI briefing joining tasks, visits, materials, quote links and payment-aware billing
+- [x] JR AI next-work-visit checks with named-job questions, phone scope and uncertain-booking evidence
 - [x] Ask for tasks/snags on a named job or site, with a phone job selector and explicit duplicate choices
 - [x] Phone task inbox with job/search/status filters and progressive loading
 - [x] Retain failed task drafts and retry creation notes without duplicating saved tasks
