@@ -3,8 +3,9 @@ import { assistantDateKey, assistantDay, assistantInvoiceBalance, assistantQuote
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import { effectiveInvoicePaid, invoiceGross } from "./payments";
 import { entryEndDate } from "./scheduling";
+import { assistantTaskActions } from "./assistantTasks";
 
-export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities";
+export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags";
 export interface AssistantAnswerItem { id: string; title: string; detail: string; evidence: string[]; href: string; actionLabel: string }
 export interface AssistantAnswer { recognized: boolean; title: string; summary: string; scope: string; warnings: string[]; items: AssistantAnswerItem[] }
 
@@ -19,6 +20,8 @@ export function assistantQuestionIntent(question: string): AssistantQuestionInte
   if (/^(?:(?:which|what) quotes need (?:chasing|following up)|show(?: me)? quote follow ups)$/.test(query)) return "quotes";
   if (/^(?:am i ready for site|what needs preparing for site|show(?: me)? site readiness)$/.test(query)) return "site";
   if (/^(?:what should i do(?: next| today)?|what needs(?: my)? attention(?: today)?|show(?: me)?(?: my)? priorities)$/.test(query)) return "priorities";
+  if (/^(?:(?:show(?: me)?|list)(?: my)? (?:open |outstanding )?tasks|what tasks (?:are open|are outstanding|need doing))$/.test(query)) return "tasks";
+  if (/^(?:(?:show(?: me)?|list)(?: my)? (?:open |outstanding )?snags|what snags (?:are open|are outstanding|need fixing))$/.test(query)) return "snags";
   return null;
 }
 
@@ -34,6 +37,12 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
   const today = assistantDateKey(now);
   const day = assistantDay(today);
   if (!intent || day === null) return { recognized: false, title: "Try a supported question", summary: "I could not reliably match that question. Try “What is booked tomorrow?”, “How much is overdue?” or “Which quotes need chasing?”.", scope: "Quick answers use local rules and your loaded records. Use the record search below for a particular job, quote or invoice.", warnings: [], items: [] };
+
+  if (intent === "tasks" || intent === "snags") {
+    const tasks = (records.tasks || []).filter((task) => intent !== "snags" || task.type === "Snag");
+    const actions = assistantTaskActions(tasks, records.jobs, now, false);
+    return { recognized: true, title: intent === "snags" ? "Open snags" : "Open tasks and snags", summary: records.tasks === undefined ? "Task records are not ready for this answer." : `${plural(actions.length, "open item")} in the loaded records.`, scope: "Includes future and undated work. Saved urgency, Safety category and past due dates come first. Completed and customer-confirmed items are excluded. These are recorded tasks, not a site inspection or safety assessment.", warnings: records.tasks === undefined ? ["Task records have not been supplied. Open Tasks & Snagging to review them."] : [], items: actions.map(actionItem) };
+  }
 
   if (["today", "tomorrow", "week"].includes(intent)) {
     const start = day + (intent === "tomorrow" ? 1 : 0);

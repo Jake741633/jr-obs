@@ -6,11 +6,11 @@ import { ArrowRight, Search, Sparkles } from "lucide-react";
 import { buildAssistantBriefing, filterAssistantActions, type AssistantFocus } from "../../lib/assistantBriefing";
 import { canAccessPath } from "../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
-import { useAiRemindersCollection, useCertificatesCollection, useInvoicesCollection, usePaymentsCollection, useJobsCollection, usePlannerCollection, usePricingDocumentsCollection, usePurchaseListsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useAiRemindersCollection, useCertificatesCollection, useInvoicesCollection, usePaymentsCollection, useJobsCollection, useJobTasksCollection, usePlannerCollection, usePricingDocumentsCollection, usePurchaseListsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { Card } from "../ui/Card";
 import { AssistantQuestions } from "./AssistantQuestions";
 
-const focuses: AssistantFocus[] = ["All", "Money", "Quotes", "Site", "Diary", "Reminders"];
+const focuses: AssistantFocus[] = ["All", "Money", "Quotes", "Site", "Diary", "Tasks", "Reminders"];
 const tones = { Now: "bg-rose-400/10 text-rose-200", Today: "bg-amber-400/10 text-amber-200", Next: "bg-cyan-400/10 text-cyan-200" };
 
 export function AssistantBriefing() {
@@ -34,6 +34,7 @@ function AccountBriefing() {
   const purchases = usePurchaseListsCollection();
   const reminders = useAiRemindersCollection();
   const certificates = useCertificatesCollection();
+  const tasks = useJobTasksCollection();
   const [now, setNow] = useState(() => new Date());
   const [focus, setFocus] = useState<AssistantFocus>("All");
   const [query, setQuery] = useState("");
@@ -44,8 +45,8 @@ function AccountBriefing() {
     window.addEventListener("focus", update);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", update); };
   }, []);
-  const ready = [jobs, documents, invoices, payments, planner, purchases, reminders, certificates].every((store) => store.isReady);
-  const records = useMemo(() => ({ jobs: jobs.items, documents: documents.items, invoices: invoices.items, payments: payments.items, planner: planner.items, purchases: purchases.items, reminders: reminders.items, certificates: certificates.items }), [jobs.items, documents.items, invoices.items, payments.items, planner.items, purchases.items, reminders.items, certificates.items]);
+  const ready = [jobs, documents, invoices, payments, planner, purchases, reminders, certificates, tasks].every((store) => store.isReady);
+  const records = useMemo(() => ({ jobs: jobs.items, documents: documents.items, invoices: invoices.items, payments: payments.items, planner: planner.items, purchases: purchases.items, reminders: reminders.items, certificates: certificates.items, tasks: tasks.items }), [jobs.items, documents.items, invoices.items, payments.items, planner.items, purchases.items, reminders.items, certificates.items, tasks.items]);
   const briefing = useMemo(() => buildAssistantBriefing(records, now), [records, now]);
   if (!ready) return <Card role="status">Gathering your jobs, quotes and diary…</Card>;
   const visible = filterAssistantActions(briefing.actions, focus, query);
@@ -62,11 +63,11 @@ function AccountBriefing() {
     </Card>
     <AssistantQuestions records={records} now={now} briefing={briefing} />
 
-    <div role="group" aria-label="Focus the briefing" className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+    <div role="group" aria-label="Focus the briefing" className="grid grid-cols-3 gap-2 sm:grid-cols-4">
       {focuses.map((item) => <button key={item} type="button" aria-pressed={focus === item} onClick={() => choose(item)} className={`min-h-12 rounded-xl border px-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-cyan-400 ${focus === item ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-200" : "border-slate-800 bg-slate-900 text-slate-300"}`}>{item}<span className="ml-1 text-xs opacity-70">{item === "All" ? briefing.actions.length : briefing.actions.filter((action) => action.category === item).length}</span></button>)}
     </div>
     <label className="block">
-      <span className="text-sm font-semibold">Find a job, quote or invoice</span>
+      <span className="text-sm font-semibold">Find a job, quote, invoice or task</span>
       <span className="relative mt-2 block"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 size-5 text-slate-400" /><input type="search" maxLength={160} autoComplete="off" value={query} onChange={(event) => { setQuery(event.target.value); setLimit(8); }} placeholder="Search your next actions…" className="min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-11 pr-3 text-base focus:border-cyan-400 focus:outline-none" /></span>
     </label>
     <p role="status" className="text-sm text-slate-400">{visible.length} {visible.length === 1 ? "action" : "actions"}{focus === "All" ? "" : ` in ${focus.toLowerCase()}`} · {briefing.today}</p>

@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import * as signals from "../lib/assistantSignals-core.mjs";
 import * as jobsCore from "../lib/jobManagement-core.mjs";
+import * as taskCore from "../lib/jobTasks-core.mjs";
 import * as payments from "../lib/payments.ts";
 import * as permissions from "../lib/cloud/permissions.ts";
 
@@ -14,9 +15,11 @@ function compile(path, dependencies = {}, jsx = false, globals = {}) {
   return mod.exports;
 }
 const scheduling = compile("../lib/scheduling.ts");
+const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
+const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
-const briefing = compile("../lib/assistantBriefing.ts", { "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
-const questions = compile("../lib/assistantQuestions.ts", { "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
+const briefing = compile("../lib/assistantBriefing.ts", { "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
+const questions = compile("../lib/assistantQuestions.ts", { "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
 const now = new Date(2026, 9, 10, 10);
 const records = (patch = {}) => ({ jobs: [], documents: [], invoices: [], payments: [], planner: [], purchases: [], reminders: [], certificates: [], ...patch });
 const visit = (patch = {}) => ({ id: "v1", title: "First fix", status: "Confirmed", date: "2026-10-11", startTime: "09:00", endTime: "12:00", location: "1 High Street", teamMemberIds: ["worker"], ...patch });
@@ -175,4 +178,28 @@ test("actual planner date links select the day and show spanning visits without 
   assert.match(text(result), /Spanning visit/);
   assert.equal(nodes(result).some((node) => node.type === "form"), false);
   assert.equal(writes, 0);
+});
+
+test("task questions include all open work while snag questions keep their narrower scope", () => {
+  const task = (patch = {}) => ({ id: "t1", jobId: "j1", type: "Task", title: "Finish labels", status: "Open", category: "General", priority: "Normal", dueDate: "2026-12-01", ...patch });
+  const data = { jobs: [job()], tasks: [task(), task({ id: "snag", type: "Snag", dueDate: "" }), task({ id: "closed", status: "Completed" }), task({ id: "confirmed", type: "Snag", status: "Customer confirmed" })] };
+  const result = answer("Show my open tasks", data);
+  assert.equal(result.items.length, 2); assert.match(result.scope, /future and undated/);
+  assert.equal(answer("What snags need fixing?", data).items.length, 1);
+  assert.equal(answer("Show my open snags", data).items[0].id, "task:snag");
+  assert.equal(answer("Complete all tasks", data).recognized, false);
+  assert.equal(answer("Show open tasks for Smith", data).recognized, false);
+  assert.equal(answer("Show overdue tasks", data).recognized, false);
+  assert.match(answer("Show tasks").summary, /not ready/);
+  assert.match(answer("Show tasks", { tasks: [] }).summary, /0 open items/);
+});
+
+test("task shortcuts refresh after a task is completed without writing or retaining stale answers", () => {
+  const data = records({ tasks: [{ id: "t1", jobId: "j1", title: "Fix faceplate", type: "Snag", status: "Open", category: "General", priority: "High", dueDate: "2026-10-10" }] });
+  const h = ui(data);
+  h.click("Open snags"); assert.match(text(h.render()), /1 open item/);
+  assert.equal(nodes(h.render()).find((n) => n.type === "Link").props.href, "/job-tasks?job=j1&task=t1");
+  h.replaceRecords({ ...data, tasks: [{ ...data.tasks[0], status: "Completed" }] });
+  assert.match(text(h.render()), /0 open items/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 0);
 });

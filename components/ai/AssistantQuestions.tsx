@@ -9,6 +9,7 @@ import { Card } from "../ui/Card";
 const shortcuts = [
   ["Today", "What is booked today?"], ["Tomorrow", "What is booked tomorrow?"], ["Overdue money", "How much is overdue?"],
   ["Quote follow-ups", "Which quotes need chasing?"], ["Site preparation", "Am I ready for site?"], ["Next seven days", "Show my diary next 7 days"],
+  ["Open tasks", "Show my open tasks"], ["Open snags", "Show my open snags"],
 ];
 
 export function AssistantQuestions({ records, now, briefing }: { records: AssistantRecords; now: Date; briefing: { today: string; actions: AssistantAction[] } }) {
@@ -20,8 +21,8 @@ export function AssistantQuestions({ records, now, briefing }: { records: Assist
   function ask(value: string) { setQuestion(value); setAsked(value.trim()); setLimit(4); inputRef.current?.blur(); }
   return <Card className="border-cyan-400/20">
     <h2 className="text-lg font-bold">Ask JR AI</h2>
-    <p className="mt-1 text-sm text-slate-400">Quick answers from your loaded records. Choose a question or ask about your diary, unpaid invoices, quote follow-ups or site preparation.</p>
-    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">{shortcuts.map(([label, value]) => <button key={label} type="button" aria-pressed={asked === value} onClick={() => ask(value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-left text-sm font-semibold text-cyan-100 focus-visible:outline-2 focus-visible:outline-cyan-400">{label}</button>)}</div>
+    <p className="mt-1 text-sm text-slate-400">Quick answers from your loaded records. Choose a question or ask about your diary, unpaid invoices, quote follow-ups, tasks or site preparation.</p>
+    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{shortcuts.map(([label, value]) => <button key={label} type="button" aria-pressed={asked === value} onClick={() => ask(value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-left text-sm font-semibold text-cyan-100 focus-visible:outline-2 focus-visible:outline-cyan-400">{label}</button>)}</div>
     <form className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); ask(question); }}>
       <label className="min-w-0 flex-1 text-sm font-semibold"><span>Your question</span><input ref={inputRef} type="text" maxLength={180} autoComplete="off" enterKeyHint="send" value={question} onChange={(event) => { setQuestion(event.target.value); setAsked(""); setLimit(4); }} placeholder="For example: How much am I owed?" className="mt-2 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base focus:border-cyan-400 focus:outline-none" /></label>
       <button type="submit" disabled={!question.trim()} className="min-h-12 rounded-xl bg-cyan-400 px-5 font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-40">Ask</button>
