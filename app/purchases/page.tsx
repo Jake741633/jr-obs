@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, ExternalLink, PackageCheck, ShoppingCart, Trash2, Truck } from "lucide-react";
 import { Button } from "../../components/ui/Button";
@@ -25,6 +25,10 @@ export default function PurchasesPage() {
   const [selectedDocumentId, setSelectedDocumentId] = useState("");
   const [selectedJobId, setSelectedJobId] = useState("");
   const [message, setMessage] = useState("");
+  const creationDraft = useRef<{ id: string; createdAt: string; lineIds: string[]; complete: boolean } | null>(null);
+  const creationGeneration = useRef(0);
+  const [creationVersion, setCreationVersion] = useState(0);
+  const [creationFailed, setCreationFailed] = useState(false);
   const [focusedListId, setFocusedListId] = useState("");
   const [invalidListLink, setInvalidListLink] = useState(false);
   const [linkReady, setLinkReady] = useState(false);
@@ -57,21 +61,36 @@ export default function PurchasesPage() {
     return materials.items.find((material) => material.name.trim().toLowerCase() === normalised);
   }
 
+  function changeCreationSelection(kind: "document" | "job", value: string) {
+    creationGeneration.current++; setCreationVersion(creationGeneration.current);
+    if (creationDraft.current?.complete) creationDraft.current = null;
+    if (kind === "document") setSelectedDocumentId(value); else setSelectedJobId(value);
+    setCreationFailed(false); setMessage("");
+  }
+
   function createFromDocument() {
+    if (creationVersion !== creationGeneration.current || creationDraft.current?.complete) return;
+    if (priceRestricted || !ready) return setMessage("Wait for authorized purchase records to finish loading before creating a list.");
     const document = sourceDocuments.find((item) => item.id === selectedDocumentId);
     if (!document) return setMessage("Choose a quote or estimate with material lines.");
     const materialLines = document.items.filter((item) => item.category === "Materials");
-    const now = new Date().toISOString();
+    if (materialLines.some((line) => !line.description.trim() || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unitCost ?? 0) || (line.unitCost ?? 0) < 0)) return setMessage("Review the source material descriptions, quantities and unit costs before creating this purchase list.");
+    const jobId = selectedJobId || document.jobId;
+    if (jobId && !jobs.items.some((job) => job.id === jobId)) return setMessage("The linked job is unavailable. Review the source or choose a current job before creating the list.");
+    const draft = creationDraft.current || { id: makeId("purchase"), createdAt: new Date().toISOString(), lineIds: [], complete: false };
+    creationDraft.current = draft;
+    const now = draft.createdAt;
     const list: PurchaseList = {
-      id: makeId("purchase"),
+      id: draft.id,
       number: `PO-${String(purchaseLists.items.length + 1).padStart(4, "0")}`,
       title: `${document.number} materials`,
       pricingDocumentId: document.id,
-      jobId: selectedJobId || document.jobId,
-      items: materialLines.map((line) => {
+      jobId,
+      items: materialLines.map((line, index) => {
         const material = materialMatch(line.description);
+        const id = draft.lineIds[index] || makeId("purchase-item"); draft.lineIds[index] = id;
         return {
-          id: makeId("purchase-item"),
+          id,
           materialId: material?.id,
           description: line.description,
           supplier: material?.supplier || "",
@@ -86,10 +105,18 @@ export default function PurchasesPage() {
       createdAt: now,
       updatedAt: now,
     };
-    purchaseLists.setItems((current) => [list, ...current]);
+    try {
+      purchaseLists.createItem(list);
+    } catch (error) {
+      setCreationFailed(true);
+      setMessage(`Purchase list save could not be confirmed. Your selections are retained; review and retry here. Leaving this page loses the unsaved retry. ${error instanceof Error ? error.message : ""}`);
+      return;
+    }
+    draft.complete = true; setCreationFailed(false);
     setSelectedDocumentId("");
     setSelectedJobId("");
-    setMessage(`${list.number} created with ${list.items.length} material line${list.items.length === 1 ? "" : "s"}.`);
+    setFocusedListId(list.id); setInvalidListLink(false);
+    setMessage(`${list.number} saved on this device with ${list.items.length} material line${list.items.length === 1 ? "" : "s"}. Check sync status before switching devices. No supplier order has been placed.`);
   }
 
   function updateItem(listId: string, itemId: string, patch: Partial<PurchaseList["items"][number]>) {
@@ -103,7 +130,7 @@ export default function PurchasesPage() {
   return <div className="space-y-6">
     <PageHeader eyebrow="Procurement" title="Purchase Lists" description={priceRestricted ? "Track required materials, suppliers and order/receipt status without office cost or quote data." : "Turn quote and estimate material lines into supplier-ready purchase lists, then track ordering and receipt."} />
     {focused ? <section aria-label="Purchase list selection" className="space-y-3 rounded-xl border border-cyan-400/30 p-4"><p role="status" className="break-words text-sm text-cyan-100">{invalidListLink ? "This purchase-list link is invalid. Show all purchase lists to choose a saved record." : focusUnavailable ? "The selected purchase list is unavailable or its identity is ambiguous. Other lists have not been substituted." : `Showing ${visibleLists[0].number} · ${visibleLists[0].title}. Totals and lines below belong to this saved list and reflect its current status.`}</p><button onClick={() => { setFocusedListId(""); setInvalidListLink(false); }} className="min-h-12 rounded-xl border border-slate-700 px-3 text-sm font-semibold">Show all purchase lists</button></section> : null}
-    {message ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    {message ? <div role="status" className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
     <section className={`grid gap-4 sm:grid-cols-2 ${priceRestricted ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
       <Card><ShoppingCart className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Purchase lists</p><p className="mt-2 text-3xl font-bold">{summary.lists}</p></Card>
       <Card><Truck className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Need ordering</p><p className="mt-2 text-3xl font-bold">{summary.needed}</p><p className="text-xs text-slate-500">{summary.ordered} already ordered</p></Card>
@@ -111,7 +138,7 @@ export default function PurchasesPage() {
       {!priceRestricted ? <Card><p className="text-sm text-slate-400">Committed spend</p><p className="mt-2 text-3xl font-bold">{money.format(summary.committed)}</p></Card> : null}
     </section>
 
-    {!priceRestricted ? <Card className="border-cyan-400/30"><h2 className="font-semibold">Create from quote or estimate</h2><div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><select value={selectedDocumentId} onChange={(event) => setSelectedDocumentId(event.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm"><option value="">Choose pricing document</option>{sourceDocuments.map((document) => <option key={document.id} value={document.id}>{document.number} · {document.title}</option>)}</select><select value={selectedJobId} onChange={(event) => setSelectedJobId(event.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm"><option value="">Use linked job / no job</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select><Button onClick={createFromDocument}>Create purchase list</Button></div></Card> : null}
+    {!priceRestricted ? <Card className="border-cyan-400/30"><h2 className="font-semibold">Create from quote or estimate</h2><div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><select aria-label="Pricing document" value={selectedDocumentId} onChange={(event) => changeCreationSelection("document", event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose pricing document</option>{sourceDocuments.map((document) => <option key={document.id} value={document.id}>{document.number} · {document.title}</option>)}</select><select aria-label="Purchase job" value={selectedJobId} onChange={(event) => changeCreationSelection("job", event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Use linked job / no job</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select><Button disabled={!selectedDocumentId} onClick={createFromDocument}>{creationFailed ? "Retry purchase list" : "Create purchase list"}</Button></div></Card> : null}
 
     {visibleLists.length === 0 ? <Card><p className="text-sm text-slate-400">{focused ? "No purchase list is available for this link." : "No purchase lists yet."} {!focused ? priceRestricted ? "Office can create lists that will appear here for field ordering and receipt updates." : "Create one from the materials already priced in a quote or estimate." : ""}</p></Card> : <div aria-label="Purchase list records" className="space-y-5">{visibleLists.map((list) => {
       const totalCost = list.items.reduce((sum, item) => sum + item.quantity * (item.unitCost ?? 0), 0);
