@@ -589,7 +589,17 @@ test("visit planning preserves sources and exact permitted links for office owne
   const data = records({ jobs: [job({ id: "j /?#", status: "Awaiting deposit" })], planner: [visit({ jobId: "j /?#", status: "Tentative" })] }); const before = JSON.stringify(data);
   for (const role of ["office", "owner", "admin"]) {
     const result = questions.answerAssistantQuestion(data, "Which jobs need booking?", now, undefined, "", permissions.canAccessPath(role, "/job-tasks"));
-    assert.equal(result.items[0].href, "/jobs/j%20%2F%3F%23"); assert.ok(result.items.every((i) => permissions.canAccessPath(role, permissions.internalPathForAccess(i.href))));
+    assert.equal(result.items[0].href, "/planner?job=j%20%2F%3F%23"); assert.ok(result.items.every((i) => permissions.canAccessPath(role, permissions.internalPathForAccess(i.href))));
   }
   assert.equal(JSON.stringify(data), before);
+});
+
+test("next-visit scheduling links encode one exact job scope and cannot carry booking commands", () => {
+  for (const id of ["j /?# +&action=create&job=other", "  opaque id  ", "électricité", "x".repeat(300)]) {
+    const result = assistantVisits.assistantVisitActions([job({ id, status: "Scheduled" })], [], "2026-10-10")[0];
+    const link = new URL(result.href, "https://jr.example"); assert.equal(link.pathname, "/planner");
+    assert.deepEqual(Array.from(link.searchParams), [["job", id]]); assert.deepEqual(Array.from(result.jobIds), [id]);
+  }
+  const longId = "x".repeat(301); const result = assistantVisits.assistantVisitActions([job({ id: longId, status: "Scheduled" })], [], "2026-10-10")[0];
+  assert.equal(result.href, `/jobs/${longId}`);
 });

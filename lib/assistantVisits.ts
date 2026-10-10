@@ -20,7 +20,7 @@ export function assistantVisitActions(jobs: Job[], planner: ScheduledPlannerEntr
       title: `${review ? "Review work bookings" : "Plan next visit"} for ${job.title}`,
       reason: review ? `${count} linked work booking${count === 1 ? " has" : "s have"} invalid/reversed dates or an unsupported status. Review these before creating another visit.`
         : "No ongoing or future planned/confirmed work visit was found for this accepted or on-site job in the loaded records.",
-      nextStep, href: `/jobs/${encodeURIComponent(job.id)}`, actionLabel: "Review job scheduling", dueDate: "", jobIds: [job.id],
+      nextStep, href: job.id.trim() && job.id.length <= 300 ? `/planner?job=${encodeURIComponent(job.id)}` : `/jobs/${encodeURIComponent(job.id)}`, actionLabel: "Review job scheduling", dueDate: "", jobIds: [job.id],
       evidence: [`Job status: ${job.status}`, `Address: ${job.siteAddress || "Not recorded"}`, `Checked as of: ${today}`,
         `Saved start: ${plannerViewDate(job.startDate || null) || "Not recorded or invalid"}`, "Job dates alone do not confirm a booked visit.",
         `${plan.upcoming.length} ongoing/future planned or confirmed Job visit(s) recorded. Missing times or assignments still require review.`,
