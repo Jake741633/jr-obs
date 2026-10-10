@@ -51,7 +51,7 @@ If a status change saves but its timeline note fails, the same note-only retry r
 
 The page distinguishes a device save from cloud confirmation. Unsaved timeline retries exist only while the page is open, and the failure notice explains that leaving retains the saved task change but loses the unsaved note. Account changes retain the existing page-remount boundary.
 
-Next visit checks is a JR AI shortcut for accepted or on-site work needing another recorded work visit or a booking review. It uses the job selector and exact-name/address questions, starts with four answers and updates when bookings change. Job briefings include the same check without counting a survey or delivery as the next work visit. It keeps deposit/builder dependencies explicit and opens the saved job for review; it does not book a visit.
+Next visit checks is a JR AI shortcut for accepted or on-site work needing another recorded work visit or a booking review. It uses the job selector and exact-name/address questions, starts with four answers and updates when bookings change. Job briefings include the same check without counting a survey or delivery as the next work visit. It keeps deposit/builder dependencies explicit and opens that saved job's diary scope for review; it does not book a visit.
 
 ## Diary booking saves
 
@@ -60,6 +60,12 @@ New bookings persist each visit through the existing durable creation method bef
 A recurring series can be partly saved: its confirmed count and remaining dates are shown, the original details are locked, and Retry remaining visits saves only the unsaved tail with its original ids and recurrence group. Repeated callbacks cannot duplicate a completed booking. Keep saved visits only stops the remaining draft without deleting or changing any saved visit. Partial retries exist only while the page is open; the notice explains that leaving retains saved visits but loses the unsaved tail. Review the diary before creating the remaining visits later. Existing queue, conflict, account and access rules remain unchanged.
 
 ## Diary dates and touch controls
+
+Find a diary visit searches the recorded title, location, type, phase and status together with the exact linked job/address, customer, workers and vehicle registration. Every search word must match. All visits retains historical and unsupported-status records; Active includes only Planned/Confirmed, with separate Complete and Cancelled filters. Eight matching visit cards appear first, with eight more at a time. Search, status, job, calendar navigation and Clear diary filters reset the card limit. Filter targets are 48px and expose their selected state.
+
+Diary job scope selects a saved identity, never a title or address. JR AI's scheduling checks open `/planner?job=…` with one encoded id. The initial link resolves after the required sources are ready, without showing broader results first, focusing the keyboard or preparing a booking. Empty, duplicate and oversized ids require an explicit choice or clearing the filters. Missing/removed ids remain unavailable even if another job reuses the name; restoring the same id restores the scope. Later user selections and clearing take precedence for the mounted page; reloading replays the original link. Existing create-booking links retain their workflow.
+
+Job scope narrows the calendar, next-visit planning and diary reviews. Cross-job clashes retain the other affected visit as evidence; unrelated signals are excluded. Text/status filters affect only the calendar list, so they cannot hide the selected job's review warnings. Show visit day clears stale list filters and selects the exact loaded linked job where available. These controls are read-only and do not replace a booking form or a partially saved recurring draft. Oversized historical job ids use the source-job review link instead of an unusable diary scope.
 
 Upcoming clash signals now use only planned/confirmed visits with real calendar ranges and explicit valid start/end times. Completed/cancelled history, past visits and unsupported statuses cannot create current clash signals. Missing times are not inferred from estimated duration, and invalid/reversed dates cannot become overlaps. Shared worker signals are deduplicated; real staff, vehicle and job conflicts retain their source identities and labels.
 

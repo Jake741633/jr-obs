@@ -52,7 +52,10 @@ const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && type
 const text = (tree) => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 const entry = (patch = {}) => ({ id: "e1", title: "Site visit", type: "Job", date: "2026-01-31", endDate: "2026-02-01", startTime: "09:00", endTime: "12:00", teamMemberIds: [], location: "", status: "Planned", ...patch });
 const job = (patch = {}) => ({ id: "j1", title: "Workshop", status: "Scheduled", siteAddress: "Site", notes: "Saved job notes", updatedAt: "2026-01-01T10:00:00Z", ...patch });
-function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: initialJobs = [], failEntries = 0, failJobs = 0, failCreateAt = [], ready: initialReady = true, now: initialNow = "2026-10-10T10:00:00" } = {}) {
+const diaryRegion = (view) => nodes(view).find((n) => n.type === "section" && n.props["aria-label"] === "Diary visits");
+const diaryTitles = (view) => Array.from(nodes(diaryRegion(view)).filter((n) => n.type === "h3"), text);
+const nextVisitCards = (view) => nodes(view).filter((n) => n.type === "article" && n.props["aria-label"]?.startsWith("Next visit ·"));
+function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: initialJobs = [], customers = [], team = [], vehicles = [], failEntries = 0, failJobs = 0, failCreateAt = [], ready: initialReady = true, now: initialNow = "2026-10-10T10:00:00" } = {}) {
   const state = [], effects = [];
   let cursor = 0, entries = initial, jobs = initialJobs, writes = 0, ids = 0, ready = initialReady;
   let now = initialNow, tick;
@@ -86,14 +89,14 @@ function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: ini
   const deps = {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState, useRef: (value) => useState({ current: value })[0], useMemo: (fn) => fn(), useEffect: (fn) => effects.push(fn) }, "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
-    "../../lib/scheduling": { ...scheduling, plannerDateKey: () => scheduling.plannerDateKey(new Date(now)) }, "../../lib/jobManagement-core.mjs": jobCore, "../../lib/storage": { makeId: () => `id-${++ids}`, useCloudLocalCollection: () => store() },
-    "../../lib/cloud/coreBusinessCollections": { useCustomersCollection: () => store(), useJobsCollection: () => ({ ...store(jobs), updateItem: (id, update) => updateItem("job", id, update), setItems() { throw new Error("Dispatch must use durable job writes"); } }), usePlannerCollection: () => ({ ...store(entries), createItem, updateItem: (id, update) => updateItem("visit", id, update), setItems() { throw new Error("Bookings must use durable creation"); } }) },
+    "../../lib/scheduling": { ...scheduling, plannerDateKey: () => scheduling.plannerDateKey(new Date(now)) }, "../../lib/jobManagement-core.mjs": jobCore, "../../lib/storage": { makeId: () => `id-${++ids}`, useCloudLocalCollection: (key) => store(key === "jr-os-team" ? team : vehicles) },
+    "../../lib/cloud/coreBusinessCollections": { useCustomersCollection: () => store(customers), useJobsCollection: () => ({ ...store(jobs), updateItem: (id, update) => updateItem("job", id, update), setItems() { throw new Error("Dispatch must use durable job writes"); } }), usePlannerCollection: () => ({ ...store(entries), createItem, updateItem: (id, update) => updateItem("visit", id, update), setItems() { throw new Error("Bookings must use durable creation"); } }) },
   };
   const mod = { exports: {} };
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/planner/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Date: TestDate, Error, URLSearchParams, window: { location: { search }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {}, setInterval(fn) { tick = fn; return 1; }, clearInterval() {}, addEventListener(event, fn) { listeners.set(event, fn); }, removeEventListener() {}, scrollTo() {} }, require(name) { assert.ok(name in deps, name); return deps[name]; } });
   const render = () => { cursor = 0; effects.length = 0; return mod.exports.default(); };
   render(); effects.splice(0).forEach((fn) => fn());
-  return { render, writes: () => writes, entries: () => entries, jobs: () => jobs, attempts, creations, replaceEntries(value) { entries = value; }, replaceJobs(value) { jobs = value; }, setReady(value) { ready = value; },
+  return { render, writes: () => writes, entries: () => entries, jobs: () => jobs, attempts, creations, replaceEntries(value) { entries = value; }, replaceJobs(value) { jobs = value; }, setReady(value) { ready = value; render(); effects.splice(0).forEach((fn) => fn()); },
     advance(value, focus = false) { now = value; (focus ? listeners.get("focus") : tick)(); },
     handler(label) { const node = nodes(render()).find((n) => ["button", "Button"].includes(n.type) && text(n) === label); assert.ok(node, label); return node.props.onClick; },
     click(label) { const node = nodes(render()).find((n) => ["button", "Button"].includes(n.type) && (n.props["aria-label"] === label || text(n) === label)); assert.ok(node, label); node.props.onClick(); },
@@ -307,7 +310,7 @@ test("stale visit cards and finished history cannot dispatch a job", () => {
 test("unallocated jobs exclude closed and held records and loading cannot expose dispatch controls", () => {
   const savedJobs = [job({ title: "Active work" }), ...["Complete", "Invoiced", "Paid", "Cancelled", "On hold"].map((status) => job({ id: status, title: `${status} job`, status }))];
   const h = harness({ jobs: savedJobs }); assert.match(text(h.render()), /Active work/);
-  for (const status of ["Complete", "Invoiced", "Paid", "Cancelled", "On hold"]) assert.doesNotMatch(text(h.render()), new RegExp(`${status} job`));
+  for (const status of ["Complete", "Invoiced", "Paid", "Cancelled", "On hold"]) assert.doesNotMatch(text(nextVisitCards(h.render())), new RegExp(`${status} job`));
   assert.deepEqual(h.jobs(), savedJobs); assert.equal(h.writes(), 0);
   const loading = harness({ ready: false, entries: [entry({ jobId: "j1" })], jobs: [job()] });
   assert.match(text(loading.render()), /Loading scheduling centre/); assert.doesNotMatch(text(loading.render()), /Start job|Site visit/);
@@ -331,7 +334,7 @@ test("ongoing and future work visits count independently of calendar view and th
   assert.deepEqual(scheduling.jobVisitPlan("j1", [current, future], "2026-10-10").upcoming, [current, future]);
   assert.deepEqual(scheduling.jobVisitPlan("j1", [current, future], "2026-10-11").upcoming, [future]);
   const h = harness({ entries: [future], jobs: [job({ title: "Future allocated job", startDate: "2020-01-01" })] });
-  assert.doesNotMatch(text(h.render()), /Future allocated job|Book next visit/);
+  assert.equal(nextVisitCards(h.render()).length, 0); assert.doesNotMatch(text(h.render()), /Book next visit/);
   assert.match(text(h.render()), /No next-visit checks flagged in loaded records/); assert.equal(h.writes(), 0);
 });
 
@@ -384,9 +387,9 @@ test("a partially saved series cannot be replaced by the next-visit shortcut", (
 
 test("next-visit planning refreshes after local midnight and when the app regains focus", () => {
   const h = harness({ jobs: [job({ title: "Continuing work" })], entries: [entry({ jobId: "j1", date: "2026-10-10", endDate: undefined })] });
-  assert.doesNotMatch(text(h.render()), /Continuing work/);
+  assert.equal(nextVisitCards(h.render()).length, 0);
   h.advance("2026-10-11T00:01:00"); assert.match(text(h.render()), /Continuing work.*No ongoing or future work visit found/);
-  h.replaceEntries([entry({ jobId: "j1", date: "2026-10-11", endDate: undefined })]); assert.doesNotMatch(text(h.render()), /Continuing work/);
+  h.replaceEntries([entry({ jobId: "j1", date: "2026-10-11", endDate: undefined })]); assert.equal(nextVisitCards(h.render()).length, 0);
   h.advance("2026-10-12T07:00:00", true); assert.match(text(h.render()), /Continuing work.*No ongoing or future work visit found/);
   assert.equal(h.writes(), 0);
 });
@@ -464,4 +467,114 @@ test("clash and timing review counts refresh after local midnight without cleari
   h.advance("2026-10-11T00:01:00"); assert.match(text(h.render()), /Upcoming clash signals00 diary record/);
   assert.doesNotMatch(text(h.render()), /Diary details need review|Clashes need review/);
   assert.deepEqual(h.entries(), saved); assert.equal(h.writes(), 0);
+});
+
+test("phone diary search joins exact operational records and requires every search word", () => {
+  const saved = [entry({ title: "Repair circuit", jobId: "j1", customerId: "direct", location: "Rear entrance", visitPhase: "Maintenance", teamMemberIds: ["worker"], vehicleId: "van" }), entry({ id: "other", title: "Other visit", jobId: "j2" })];
+  const h = harness({ entries: saved, jobs: [job({ customerId: "fallback", siteAddress: "12 High Street" }), job({ id: "j2", title: "Warehouse", siteAddress: "8 Station Road" })],
+    customers: [{ id: "direct", name: "Alice Smith" }, { id: "fallback", name: "Builder Jones" }], team: [{ id: "worker", name: "Jake Rinaldi" }], vehicles: [{ id: "van", registration: "JR 01" }] });
+  for (const query of [" workshop HIGH repair ", "Alice rear Maintenance", "Jake JR 01 planned", "Job circuit"]) {
+    h.fill("Find a diary visit", query); assert.deepEqual(diaryTitles(h.render()), ["Repair circuit"], query);
+  }
+  for (const query of ["Workshop Station", "Builder Jones", "Jake missing"]) {
+    h.fill("Find a diary visit", query); assert.deepEqual(diaryTitles(h.render()), [], query);
+  }
+  h.click("Clear diary filters"); assert.deepEqual(diaryTitles(h.render()), ["Repair circuit", "Other visit"]);
+  assert.equal(h.writes(), 0); assert.deepEqual(h.entries(), saved);
+});
+
+test("phone diary reveals eight visits at a time and status filters retain history without writes", () => {
+  const saved = Array.from({ length: 18 }, (_, i) => entry({ id: `e${i}`, title: `Visit ${String(i).padStart(2, "0")}`, status: i === 15 ? "Complete" : i === 16 ? "Cancelled" : i === 17 ? "Tentative" : i % 2 ? "Confirmed" : "Planned" }));
+  const h = harness({ entries: saved }); assert.equal(diaryTitles(h.render()).length, 8);
+  h.click("Show more visits (10 remaining)"); assert.equal(diaryTitles(h.render()).length, 16);
+  h.click("Show more visits (2 remaining)"); assert.equal(diaryTitles(h.render()).length, 18);
+  h.fill("Find a diary visit", "visit"); assert.equal(diaryTitles(h.render()).length, 8);
+  h.click("Active"); assert.equal(diaryTitles(h.render()).length, 8); assert.match(text(h.render()), /15 matches in this day/);
+  assert.equal(nodes(h.render()).find((n) => n.type === "button" && text(n) === "Active").props["aria-pressed"], true);
+  h.click("Complete"); assert.deepEqual(diaryTitles(h.render()), ["Visit 15"]);
+  h.click("Cancelled"); assert.deepEqual(diaryTitles(h.render()), ["Visit 16"]);
+  h.click("All visits"); assert.equal(diaryTitles(h.render()).length, 8);
+  h.click("Show more visits (10 remaining)"); h.click("week"); assert.equal(diaryTitles(h.render()).length, 8);
+  h.click("Show more visits (10 remaining)"); h.click("Next week"); h.click("Previous week"); assert.equal(diaryTitles(h.render()).length, 8);
+  h.click("Show more visits (10 remaining)"); h.click("Clear diary filters"); assert.equal(diaryTitles(h.render()).length, 8);
+  assert.ok(nodes(h.render()).filter((n) => n.type === "button" && ["All visits", "Active", "Complete", "Cancelled"].includes(text(n))).every((n) => n.props.className.includes("min-h-12")));
+  assert.equal(h.writes(), 0); assert.deepEqual(h.entries(), saved);
+});
+
+test("encoded diary job links keep exact identity despite duplicate titles and never prepare a booking", () => {
+  const id = " j /?# +&job=other ";
+  const saved = [entry({ title: "Chosen visit", jobId: id, date: "2026-10-10", endDate: undefined, status: "Complete" }), entry({ id: "other", title: "Other visit", jobId: "other", date: "2026-10-10", endDate: undefined, status: "Complete" })];
+  const h = harness({ search: `?date=2026-10-10&job=${encodeURIComponent(id)}`, entries: saved, jobs: [job({ id }), job({ id: "other" })] });
+  assert.deepEqual(diaryTitles(h.render()), ["Chosen visit"]); assert.equal(nextVisitCards(h.render()).length, 1);
+  assert.equal(nodes(nextVisitCards(h.render())).find((n) => n.type === "Link").props.href, `/jobs/${encodeURIComponent(id)}`);
+  assert.equal(nodes(h.render()).some((n) => n.type === "form"), false);
+  h.fill("Diary job scope", "other"); assert.deepEqual(diaryTitles(h.render()), ["Other visit"]);
+  h.setReady(true); assert.deepEqual(diaryTitles(h.render()), ["Other visit"]);
+  h.click("Clear diary filters"); h.setReady(true); assert.deepEqual(diaryTitles(h.render()), ["Chosen visit", "Other visit"]);
+  assert.equal(h.writes(), 0); assert.deepEqual(h.entries(), saved);
+});
+
+test("empty duplicate and oversized diary scopes require a choice instead of broadening results", () => {
+  for (const search of ["?job=", "?job=%20%20", "?job=j1&job=j1", "?job=j1&job=other", `?job=${"x".repeat(301)}`]) {
+    const h = harness({ search, jobs: [job()], entries: [entry({ date: "2026-10-10", endDate: undefined, jobId: "j1", startTime: "" })] });
+    assert.match(text(h.render()), /diary job link is invalid/); assert.deepEqual(diaryTitles(h.render()), []); assert.equal(nextVisitCards(h.render()).length, 0);
+    assert.equal(nodes(h.render()).some((n) => n.type === "article"), false);
+    h.fill("Diary job scope", "j1"); assert.deepEqual(diaryTitles(h.render()), ["Site visit"]); assert.doesNotMatch(text(h.render()), /diary job link is invalid/);
+    assert.equal(h.writes(), 0);
+    const cleared = harness({ search, jobs: [job()], entries: [entry({ date: "2026-10-10", endDate: undefined, jobId: "j1" })] });
+    cleared.click("Clear diary filters"); assert.deepEqual(diaryTitles(cleared.render()), ["Site visit"]); assert.equal(cleared.writes(), 0);
+  }
+});
+
+test("missing and removed diary job identities stay unavailable until explicitly resolved", () => {
+  const selected = job(); const other = job({ id: "other" });
+  const h = harness({ search: "?job=j1", jobs: [other], entries: [entry({ title: "Exact visit", date: "2026-10-10", endDate: undefined, jobId: "j1" }), entry({ id: "other", title: "Replacement visit", date: "2026-10-10", endDate: undefined, jobId: "other" })] });
+  assert.match(text(h.render()), /selected job is unavailable/); assert.deepEqual(diaryTitles(h.render()), []); assert.equal(nextVisitCards(h.render()).length, 0);
+  h.replaceJobs([selected, other]); assert.deepEqual(diaryTitles(h.render()), ["Exact visit"]);
+  h.replaceJobs([other]); assert.deepEqual(diaryTitles(h.render()), []); assert.match(text(h.render()), /Selected job unavailable/);
+  h.fill("Diary job scope", "other"); assert.deepEqual(diaryTitles(h.render()), ["Replacement visit"]);
+  assert.equal(h.writes(), 0);
+});
+
+test("scoped diary checks retain cross-job conflict evidence while list filters cannot hide warnings", () => {
+  const e = (patch) => entry({ date: "2026-10-10", endDate: undefined, ...patch });
+  const saved = [e({ title: "Chosen work", jobId: "j1", teamMemberIds: ["shared"] }), e({ id: "cross", title: "Other affected work", jobId: "other", teamMemberIds: ["shared"] }),
+    e({ id: "u1", title: "Unrelated one", jobId: "other", teamMemberIds: ["unrelated"] }), e({ id: "u2", title: "Unrelated two", jobId: "other", teamMemberIds: ["unrelated"] }),
+    e({ id: "review", title: "Chosen uncertain", jobId: "j1", date: "2026-02-30" }), e({ id: "other-review", title: "Other uncertain", jobId: "other", date: "2026-02-30" })];
+  const h = harness({ search: "?job=j1", jobs: [job(), job({ id: "other" })], entries: saved, team: [{ id: "shared", name: "Jake" }, { id: "unrelated", name: "Other worker" }] });
+  assert.deepEqual(diaryTitles(h.render()), ["Chosen work"]); assert.match(text(h.render()), /Chosen work \/ Other affected work · Staff: Jake/);
+  const reviews = () => nodes(h.render()).filter((n) => n.type === "article" && n.props["aria-label"]?.startsWith("Diary review"));
+  assert.equal(reviews().length, 1); assert.match(text(reviews()), /Chosen uncertain/); assert.doesNotMatch(text(h.render()), /Unrelated one|Unrelated two|Other uncertain/);
+  h.fill("Find a diary visit", "no matches"); h.click("Complete");
+  assert.deepEqual(diaryTitles(h.render()), []); assert.match(text(h.render()), /Upcoming clash signals11 diary record/); assert.equal(reviews().length, 1);
+  assert.equal(h.writes(), 0); assert.deepEqual(h.entries(), saved);
+});
+
+test("Show visit day clears stale text and status filters and exposes the exact linked review", () => {
+  const h = harness({ jobs: [job(), job({ id: "other" })], entries: [entry({ title: "Review this visit", jobId: "j1", date: "2026-11-10", endDate: undefined, endTime: "" })] });
+  h.fill("Find a diary visit", "absent"); h.click("Cancelled"); assert.deepEqual(diaryTitles(h.render()), []);
+  h.click("Show visit day"); assert.deepEqual(diaryTitles(h.render()), ["Review this visit"]);
+  const all = nodes(h.render()); assert.equal(all.find((n) => n.props?.label === "Find a diary visit").props.value, "");
+  assert.equal(nodes(all.find((n) => n.type === "label" && text(n).startsWith("Diary job scope"))).find((n) => n.type === "select").props.value, "j1");
+  assert.equal(all.find((n) => n.type === "button" && text(n) === "All visits").props["aria-pressed"], true); assert.equal(h.writes(), 0);
+});
+
+test("diary scopes resolve after readiness and existing create-booking links retain precedence", () => {
+  const h = harness({ ready: false, search: "?job=j1", jobs: [job(), job({ id: "other" })], entries: [entry({ title: "Chosen loaded visit", jobId: "j1", date: "2026-10-10", endDate: undefined }), entry({ id: "other", title: "Other loaded visit", jobId: "other", date: "2026-10-10", endDate: undefined })] });
+  assert.match(text(h.render()), /Loading scheduling centre/); assert.doesNotMatch(text(h.render()), /Chosen loaded visit|Other loaded visit/);
+  h.setReady(true); assert.deepEqual(diaryTitles(h.render()), ["Chosen loaded visit"]); assert.equal(h.writes(), 0);
+  const create = harness({ search: "?action=create&jobId=j1&job=missing&job=duplicate", jobs: [job()] });
+  assert.equal(nodes(create.render()).some((n) => n.type === "form"), true); assert.doesNotMatch(text(create.render()), /diary job link is invalid|selected job is unavailable/);
+  assert.equal(nodes(create.render()).find((n) => n.props?.label === "Entry title").props.value, "Workshop"); assert.equal(create.writes(), 0);
+});
+
+test("diary filtering cannot discard or change a partially saved recurring booking", () => {
+  const h = harness({ jobs: [job(), job({ id: "other" })], failCreateAt: [2] }); prepareBooking(h); h.fill("Linked job", "j1"); h.submit();
+  assert.equal(h.entries().length, 1); const first = h.entries()[0];
+  h.fill("Diary job scope", "other"); h.fill("Find a diary visit", "none"); h.click("Cancelled"); h.click("Clear diary filters");
+  assert.match(text(h.render()), /1 of 3 visits saved.*original booking details are locked/);
+  assert.equal(nodes(h.render()).find((n) => n.type === "fieldset").props.disabled, true); assert.deepEqual(h.entries(), [first]);
+  h.submit(); assert.equal(h.entries().length, 3); assert.equal(h.creations.length, 4);
+  assert.equal(h.creations[1].id, h.creations[2].id); assert.equal(h.creations.filter((e) => e.id === first.id).length, 1);
+  assert.ok(h.entries().every((e) => e.jobId === "j1" && e.title === "Monthly visit" && e.notes === "Original series"));
 });

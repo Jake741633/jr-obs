@@ -17,6 +17,7 @@ const types: PlannerEntryType[] = ["Job", "Survey", "Delivery", "Training", "Hol
 const statuses: ScheduledPlannerEntry["status"][] = ["Planned", "Confirmed", "Complete", "Cancelled"];
 const phases: VisitPhase[] = ["General", "First fix", "Second fix", "Maintenance", "Inspection", "Follow-up"];
 const recurrences: RecurrenceFrequency[] = ["None", "Weekly", "Monthly"];
+const diaryFilters = ["All visits", "Active", "Complete", "Cancelled"] as const;
 const today = () => plannerDateKey();
 const fieldClass = "min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm";
 const blankForm = { title: "", type: "Job" as PlannerEntryType, date: today(), endDate: today(), startTime: "08:00", endTime: "16:30", estimatedDurationMinutes: "510", customerId: "", jobId: "", teamMemberIds: [] as string[], vehicleId: "", visitPhase: "General" as VisitPhase, recurrence: "None" as RecurrenceFrequency, recurrenceCount: "1", location: "", notes: "", status: "Planned" as ScheduledPlannerEntry["status"] };
@@ -46,13 +47,46 @@ export default function PlannerPage() {
   const [visitQuery, setVisitQuery] = useState("");
   const [visitLimit, setVisitLimit] = useState(4);
   const [reviewLimit, setReviewLimit] = useState(4);
+  const [diaryQuery, setDiaryQuery] = useState("");
+  const [diaryStatus, setDiaryStatus] = useState<typeof diaryFilters[number]>("All visits");
+  const [diaryJobId, setDiaryJobId] = useState("");
+  const [diaryLimit, setDiaryLimit] = useState(8);
+  const [invalidJobLink, setInvalidJobLink] = useState(false);
+  const [scopeResolved, setScopeResolved] = useState(false);
   const ready = [entries, jobs, customers, team, vehicles].every((store) => store.isReady);
+  const missingScope = Boolean(diaryJobId && !jobs.items.some((job) => job.id === diaryJobId));
+  const scopeAvailable = scopeResolved && !invalidJobLink && !missingScope;
+  const scopeMessage = invalidJobLink ? "This diary job link is invalid. Choose a loaded job or clear the diary filters."
+    : missingScope ? "The selected job is unavailable in loaded records. This view has not broadened to other jobs; choose a current job or clear the diary filters." : "";
 
   const currentEntries = useMemo(() => entries.items.filter((entry) => !["Complete", "Cancelled"].includes(entry.status) && (!plannerEntryDatesValid(entry) || entryEndDate(entry) >= currentDay)), [entries.items, currentDay]);
-  const visitReviews = useMemo(() => currentEntries.map((entry) => ({ entry, issues: plannerVisitReviewIssues(entry) })).filter(({ issues }) => issues.length), [currentEntries]);
-  const clashes = useMemo(() => detectScheduleClashes(currentEntries, team.items, vehicles.items), [currentEntries, team.items, vehicles.items]);
+  const visitReviews = useMemo(() => !scopeAvailable ? [] : currentEntries.filter((entry) => !diaryJobId || entry.jobId === diaryJobId).map((entry) => ({ entry, issues: plannerVisitReviewIssues(entry) })).filter(({ issues }) => issues.length), [currentEntries, scopeAvailable, diaryJobId]);
+  const clashes = useMemo(() => {
+    if (!scopeAvailable) return [];
+    const signals = detectScheduleClashes(currentEntries, team.items, vehicles.items);
+    const jobByEntry = new Map(currentEntries.map((entry) => [entry.id, entry.jobId]));
+    return signals.filter((signal) => !diaryJobId || jobByEntry.get(signal.entryId) === diaryJobId || jobByEntry.get(signal.otherEntryId) === diaryJobId);
+  }, [currentEntries, team.items, vehicles.items, scopeAvailable, diaryJobId]);
   const visible = useMemo(() => entries.items.filter((entry) => dateWithinView(entry.date, anchor, view, entryEndDate(entry))).toSorted((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)), [entries.items, anchor, view]);
-  const visitChecks = useMemo(() => jobs.items.filter((job) => !isJobInactiveStatus(job.status)).map((job) => ({ job, plan: jobVisitPlan(job.id, entries.items, currentDay) })).filter(({ plan }) => !plan.upcoming.length || plan.uncertain.length), [jobs.items, entries.items, currentDay]);
+  const matchingDiaryEntries = useMemo(() => {
+    if (!scopeAvailable) return [];
+    const words = diaryQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const jobById = new Map(jobs.items.map((job) => [job.id, job]));
+    const customerById = new Map(customers.items.map((customer) => [customer.id, customer]));
+    const workerById = new Map(team.items.map((member) => [member.id, member.name]));
+    const vehicleById = new Map(vehicles.items.map((vehicle) => [vehicle.id, vehicle.registration]));
+    return visible.filter((entry) => {
+      if (diaryJobId && entry.jobId !== diaryJobId) return false;
+      if (diaryStatus !== "All visits" && (diaryStatus === "Active" ? !["Planned", "Confirmed"].includes(entry.status) : entry.status !== diaryStatus)) return false;
+      const job = entry.jobId ? jobById.get(entry.jobId) : undefined;
+      const customerId = entry.customerId || job?.customerId;
+      const customer = customerId ? customerById.get(customerId) : undefined;
+      const haystack = [entry.title, entry.location, entry.type, entry.visitPhase, entry.status, job?.title, job?.siteAddress, customer?.name,
+        ...entry.teamMemberIds.map((id) => workerById.get(id)), entry.vehicleId ? vehicleById.get(entry.vehicleId) : undefined].join(" ").toLowerCase();
+      return words.every((word) => haystack.includes(word));
+    });
+  }, [visible, scopeAvailable, diaryQuery, diaryStatus, diaryJobId, jobs.items, customers.items, team.items, vehicles.items]);
+  const visitChecks = useMemo(() => !scopeAvailable ? [] : jobs.items.filter((job) => (!diaryJobId || job.id === diaryJobId) && !isJobInactiveStatus(job.status)).map((job) => ({ job, plan: jobVisitPlan(job.id, entries.items, currentDay) })).filter(({ plan }) => !plan.upcoming.length || plan.uncertain.length), [jobs.items, entries.items, currentDay, scopeAvailable, diaryJobId]);
   const visitWords = visitQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const matchingVisitChecks = visitChecks.filter(({ job }) => visitWords.every((word) => `${job.title} ${job.siteAddress} ${job.status}`.toLowerCase().includes(word)));
 
@@ -71,6 +105,11 @@ export default function PlannerPage() {
       if (requestedDate && parameters.get("action") !== "create") {
         setAnchor(requestedDate);
         setView("day");
+      }
+      if (parameters.get("action") !== "create") {
+        const ids = parameters.getAll("job");
+        if (ids.length === 1 && ids[0].trim() && ids[0].length <= 300) setDiaryJobId(ids[0]);
+        else if (ids.length) setInvalidJobLink(true);
       }
       if (parameters.get("action") === "create") {
         const customerId = parameters.get("customerId") || "";
@@ -95,11 +134,19 @@ export default function PlannerPage() {
         setMessage(`${type} booking prepared${customer ? ` for ${customer.name}` : ""}. Choose the date and save.`);
       }
       deepLinkHandled.current = true;
+      setScopeResolved(true);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [customers.isReady, customers.items, jobs.isReady, jobs.items]);
 
   function toggleMember(id: string) { setForm((current) => ({ ...current, teamMemberIds: current.teamMemberIds.includes(id) ? current.teamMemberIds.filter((value) => value !== id) : [...current.teamMemberIds, id] })); }
+  function clearDiaryFilters() { setDiaryQuery(""); setDiaryStatus("All visits"); setDiaryJobId(""); setInvalidJobLink(false); setDiaryLimit(8); }
+  function showVisitDay(entry: ScheduledPlannerEntry) {
+    if (!plannerEntryDatesValid(entry)) return;
+    setAnchor(entry.date < currentDay ? currentDay : entry.date); setView("day");
+    setDiaryJobId(jobs.items.some((job) => job.id === entry.jobId) ? entry.jobId! : "");
+    setInvalidJobLink(false); setDiaryQuery(""); setDiaryStatus("All visits"); setDiaryLimit(8);
+  }
   function nextBookingGeneration() { bookingGeneration.current++; setGeneration(bookingGeneration.current); }
   function selectCustomer(customerId: string) { const customer = customers.items.find((item) => item.id === customerId); setForm((current) => ({ ...current, customerId, title: current.title || (customer ? `${current.type} · ${customer.name}` : ""), location: current.location || customer?.address || "" })); }
   function selectJob(jobId: string) { const job = jobs.items.find((item) => item.id === jobId); setForm((current) => ({ ...current, customerId: job?.customerId || current.customerId, jobId, title: current.title || job?.title || "", location: current.location || job?.siteAddress || "", date: current.date || job?.startDate || today(), endDate: current.endDate || job?.targetCompletionDate || current.date })); }
@@ -222,14 +269,14 @@ export default function PlannerPage() {
     }
   }
 
-  if (!ready) return <Card>Loading scheduling centre…</Card>;
+  if (!ready || !scopeResolved) return <Card>Loading scheduling centre…</Card>;
 
   return <div className="space-y-6">
     <PageHeader eyebrow="Operations" title="Scheduling, Diary & Dispatch Centre" description="Plan jobs and visits, assign staff and vehicles, spot clashes and dispatch today’s work." action={<Button onClick={toggleBookingForm}><Plus className="mr-2 size-4" />{bookingProgress ? "Review booking save" : "Add diary entry"}</Button>} />
     {message ? <div role="status" className="break-words rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      <Card><CalendarDays className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Visible diary entries</p><p className="mt-2 text-3xl font-bold">{visible.length}</p></Card>
+      <Card><CalendarDays className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Diary matches</p><p className="mt-2 text-3xl font-bold">{matchingDiaryEntries.length}</p></Card>
       <Card><Users className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Jobs needing visit review</p><p className="mt-2 text-3xl font-bold">{visitChecks.length}</p></Card>
       <Card><CarFront className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Active vehicles</p><p className="mt-2 text-3xl font-bold">{vehicles.items.filter((item) => item.status === "Active").length}</p></Card>
       <Card><AlertTriangle className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Upcoming clash signals</p><p className="mt-2 text-3xl font-bold">{clashes.length}</p><p className="mt-2 text-sm text-slate-400">{visitReviews.length} diary record(s) need a separate details review.</p></Card>
@@ -242,7 +289,7 @@ export default function PlannerPage() {
       <div className="mt-4 grid gap-3 md:grid-cols-2">{visitReviews.slice(0, reviewLimit).map(({ entry, issues }) => <article key={entry.id} aria-label={`Diary review · ${entry.title}`} className="min-w-0 break-words rounded-xl border border-slate-700 p-3">
         <h3 className="font-semibold">{entry.title}</h3><p className="mt-2 text-sm text-slate-400">{entry.type} · {entry.status} · {entry.date || "Start missing"} to {entryEndDate(entry) || "End missing"} · {entry.startTime || "Start time missing"}–{entry.endTime || "End time missing"}</p>
         <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-amber-200">{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul>
-        <div className="mt-3 flex flex-wrap gap-2">{plannerEntryDatesValid(entry) ? <button onClick={() => { setAnchor(entry.date < currentDay ? currentDay : entry.date); setView("day"); }} className="min-h-12 rounded-xl border border-slate-700 px-3 text-sm">Show visit day</button> : null}{jobs.items.some((job) => job.id === entry.jobId) ? <Link href={`/jobs/${encodeURIComponent(entry.jobId!)}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 text-sm">Review linked job</Link> : null}</div>
+        <div className="mt-3 flex flex-wrap gap-2">{plannerEntryDatesValid(entry) ? <button onClick={() => showVisitDay(entry)} className="min-h-12 rounded-xl border border-slate-700 px-3 text-sm">Show visit day</button> : null}{jobs.items.some((job) => job.id === entry.jobId) ? <Link href={`/jobs/${encodeURIComponent(entry.jobId!)}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 text-sm">Review linked job</Link> : null}</div>
       </article>)}</div>
       {visitReviews.length > reviewLimit ? <button onClick={() => setReviewLimit((value) => value + 4)} className="mt-4 min-h-12 w-full rounded-xl border border-slate-700 px-3 text-sm">Show more diary reviews ({visitReviews.length - reviewLimit} remaining)</button> : null}
     </Card> : null}
@@ -288,12 +335,22 @@ export default function PlannerPage() {
           <div className="mt-3 flex flex-wrap gap-2"><button disabled={Boolean(bookingProgress) || Boolean(plan.uncertain.length) || Boolean(plan.upcoming.length)} onClick={() => prepareNextVisit(job)} className="min-h-12 rounded-xl border border-cyan-400/30 px-3 text-sm text-cyan-200 disabled:opacity-40">Book next visit</button><Link href={`/jobs/${encodeURIComponent(job.id)}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 text-sm">Review job</Link></div>
         </article>)}</div>
         {matchingVisitChecks.length > visitLimit ? <button onClick={() => setVisitLimit((value) => value + 4)} className="mt-4 min-h-12 w-full rounded-xl border border-slate-700 px-3 text-sm">Show more jobs ({matchingVisitChecks.length - visitLimit} remaining)</button> : null}
-        {!matchingVisitChecks.length ? <p className="mt-4 text-sm text-slate-400">{visitChecks.length ? "No jobs match this search." : "No next-visit checks flagged in loaded records. Check sync status and the diary before planning more work."}</p> : null}
+        {!matchingVisitChecks.length ? <p className="mt-4 text-sm text-slate-400">{!scopeAvailable ? "Choose an available diary job scope before planning its next visit." : visitChecks.length ? "No jobs match this search." : "No next-visit checks flagged in loaded records. Check sync status and the diary before planning more work."}</p> : null}
       </Card>
 
-      <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-xl border border-slate-800 p-1">{(["day", "week", "month"] as DiaryView[]).map((item) => <button key={item} onClick={() => setView(item)} className={`min-h-12 rounded-lg px-4 py-2 text-sm font-semibold capitalize ${view === item ? "bg-cyan-400 text-slate-950" : "text-slate-400"}`}>{item}</button>)}</div><div className="flex items-center gap-2"><button aria-label={`Previous ${view}`} onClick={() => setAnchor(shiftPlannerDate(anchor, -1, view) || anchor)} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronLeft className="size-4" /></button><button onClick={() => setAnchor(today())} className="min-h-12 rounded-xl border border-slate-800 px-3 py-2 text-sm">Today</button><button aria-label={`Next ${view}`} onClick={() => setAnchor(shiftPlannerDate(anchor, 1, view) || anchor)} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronRight className="size-4" /></button></div></div>
+      <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-xl border border-slate-800 p-1">{(["day", "week", "month"] as DiaryView[]).map((item) => <button key={item} onClick={() => { setView(item); setDiaryLimit(8); }} className={`min-h-12 rounded-lg px-4 py-2 text-sm font-semibold capitalize ${view === item ? "bg-cyan-400 text-slate-950" : "text-slate-400"}`}>{item}</button>)}</div><div className="flex items-center gap-2"><button aria-label={`Previous ${view}`} onClick={() => { setAnchor(shiftPlannerDate(anchor, -1, view) || anchor); setDiaryLimit(8); }} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronLeft className="size-4" /></button><button onClick={() => { setAnchor(today()); setDiaryLimit(8); }} className="min-h-12 rounded-xl border border-slate-800 px-3 py-2 text-sm">Today</button><button aria-label={`Next ${view}`} onClick={() => { setAnchor(shiftPlannerDate(anchor, 1, view) || anchor); setDiaryLimit(8); }} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronRight className="size-4" /></button></div></div>
         <Card><p className="text-sm text-slate-400">{view[0].toUpperCase() + view.slice(1)} diary centred on</p><p className="mt-1 text-xl font-bold">{displayDate(anchor)}</p></Card>
-        {visible.length ? visible.map((entry) => { const job = jobs.items.find((item) => item.id === entry.jobId); const customer = entryCustomer(entry, jobs.items, customers.items); const vehicle = vehicles.items.find((item) => item.id === entry.vehicleId); const entryClashes = clashes.filter((item) => item.entryId === entry.id || item.otherEntryId === entry.id); const activeVisit = ["Planned", "Confirmed"].includes(entry.status); const startsJob = entry.type === "Job" && Boolean(entry.jobId) && (!job || !isJobOnSiteStatus(job.status)); return <Card key={entry.id} className={entryClashes.length ? "border-amber-400/30" : undefined}><div className="flex flex-col gap-4 lg:flex-row lg:justify-between"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{entry.visitPhase || entry.type} · {displayDate(entry.date)}{entryEndDate(entry) !== entry.date ? ` to ${displayDate(entryEndDate(entry))}` : ""}</p><h3 className="mt-1 text-xl font-bold">{entry.title}</h3><div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-400"><span className="inline-flex items-center gap-1"><Clock3 className="size-4" />{entry.startTime || "Any time"}{entry.endTime ? `–${entry.endTime}` : ""}</span><span>Visit: {entry.status}</span>{job ? <span>Job: {job.status}</span> : entry.jobId ? <span className="text-amber-300">Linked job unavailable</span> : null}{vehicle ? <span className="inline-flex items-center gap-1"><CarFront className="size-4" />{vehicle.registration}</span> : null}</div><p className="mt-3 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0" />{entry.location || job?.siteAddress || "No travel address"}</p><p className="mt-2 text-sm text-slate-300">Customer: {customer?.name || "Not linked"}</p><p className="mt-1 text-sm text-slate-300">Workers: {entry.teamMemberIds.length ? entry.teamMemberIds.map((id) => team.items.find((member) => member.id === id)?.name || "Unknown").join(", ") : "Unallocated"}</p>{entryClashes.length ? <p className="mt-3 text-sm font-semibold text-amber-300">{entryClashes.length} clash warning{entryClashes.length === 1 ? "" : "s"}</p> : null}</div><div className="flex flex-wrap items-start gap-2 lg:max-w-64 lg:justify-end"><button disabled={!activeVisit} onClick={() => moveEntry(entry, -1)} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Move back a day</button><button disabled={!activeVisit} onClick={() => moveEntry(entry, 1)} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Move ahead a day</button><Button disabled={!activeVisit || (startsJob ? !job || normaliseJobStatus(job.status) !== "Scheduled" : entry.status === "Confirmed")} onClick={() => markStarted(entry)}>{startsJob ? "Start job" : "Confirm visit"}</Button>{entry.location || job?.siteAddress ? <a href={mapsUrl(entry.location || job?.siteAddress || "")} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 py-2 text-sm"><Navigation className="mr-2 size-4" />Navigate</a> : null}{customer?.phone ? <a href={`tel:${customer.phone}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 py-2 text-sm"><Phone className="mr-2 size-4" />Call</a> : null}{job ? <Link href={`/jobs/${encodeURIComponent(job.id)}`} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm">View job</Link> : null}</div></div></Card>; }) : <Card><p className="text-sm text-slate-500">No diary entries in this {view}.</p></Card>}
+        <Card><section aria-label="Diary filters" className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2"><InputField label="Find a diary visit" type="search" value={diaryQuery} onChange={(event) => { setDiaryQuery(event.target.value); setDiaryLimit(8); }} />
+            <label className="grid min-w-0 gap-2 text-sm font-medium text-slate-300"><span>Diary job scope</span><select value={diaryJobId} onChange={(event) => { setDiaryJobId(event.target.value); setInvalidJobLink(false); setDiaryLimit(8); }} className="min-h-12 w-full min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">{invalidJobLink ? "Choose a job or clear filters" : "All loaded jobs"}</option>{missingScope ? <option value={diaryJobId}>Selected job unavailable</option> : null}{jobs.items.toSorted((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"} · {job.status}</option>)}</select></label>
+          </div>
+          <div role="group" aria-label="Diary status filter" className="grid grid-cols-2 gap-2 sm:grid-cols-4">{diaryFilters.map((item) => <button key={item} aria-pressed={diaryStatus === item} onClick={() => { setDiaryStatus(item); setDiaryLimit(8); }} className={`min-h-12 rounded-xl border px-3 text-sm font-semibold ${diaryStatus === item ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-200" : "border-slate-700 text-slate-400"}`}>{item}</button>)}</div>
+          <p role="status" className="text-sm text-slate-400">{matchingDiaryEntries.length} matches in this {view}. Text and status filters narrow this diary list; job scope also applies to next-visit planning and review checks.</p>
+          {diaryJobId && scopeAvailable ? <p className="text-sm text-slate-400">Clash checks retain the other affected visit when it overlaps this job.</p> : null}
+          {scopeMessage ? <p role="status" className="rounded-xl bg-amber-400/10 p-3 text-sm text-amber-200">{scopeMessage}</p> : null}
+          {diaryQuery || diaryJobId || invalidJobLink || diaryStatus !== "All visits" ? <button onClick={clearDiaryFilters} className="min-h-12 rounded-xl border border-slate-700 px-3 text-sm">Clear diary filters</button> : null}
+        </section></Card>
+        <section aria-label="Diary visits" className="space-y-4">{matchingDiaryEntries.length ? matchingDiaryEntries.slice(0, diaryLimit).map((entry) => { const job = jobs.items.find((item) => item.id === entry.jobId); const customer = entryCustomer(entry, jobs.items, customers.items); const vehicle = vehicles.items.find((item) => item.id === entry.vehicleId); const entryClashes = clashes.filter((item) => item.entryId === entry.id || item.otherEntryId === entry.id); const activeVisit = ["Planned", "Confirmed"].includes(entry.status); const startsJob = entry.type === "Job" && Boolean(entry.jobId) && (!job || !isJobOnSiteStatus(job.status)); return <Card key={entry.id} className={entryClashes.length ? "border-amber-400/30" : undefined}><div className="flex flex-col gap-4 lg:flex-row lg:justify-between"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{entry.visitPhase || entry.type} · {displayDate(entry.date)}{entryEndDate(entry) !== entry.date ? ` to ${displayDate(entryEndDate(entry))}` : ""}</p><h3 className="mt-1 text-xl font-bold">{entry.title}</h3><div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-400"><span className="inline-flex items-center gap-1"><Clock3 className="size-4" />{entry.startTime || "Any time"}{entry.endTime ? `–${entry.endTime}` : ""}</span><span>Visit: {entry.status}</span>{job ? <span>Job: {job.status}</span> : entry.jobId ? <span className="text-amber-300">Linked job unavailable</span> : null}{vehicle ? <span className="inline-flex items-center gap-1"><CarFront className="size-4" />{vehicle.registration}</span> : null}</div><p className="mt-3 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0" />{entry.location || job?.siteAddress || "No travel address"}</p><p className="mt-2 text-sm text-slate-300">Customer: {customer?.name || "Not linked"}</p><p className="mt-1 text-sm text-slate-300">Workers: {entry.teamMemberIds.length ? entry.teamMemberIds.map((id) => team.items.find((member) => member.id === id)?.name || "Unknown").join(", ") : "Unallocated"}</p>{entryClashes.length ? <p className="mt-3 text-sm font-semibold text-amber-300">{entryClashes.length} clash warning{entryClashes.length === 1 ? "" : "s"}</p> : null}</div><div className="flex flex-wrap items-start gap-2 lg:max-w-64 lg:justify-end"><button disabled={!activeVisit} onClick={() => moveEntry(entry, -1)} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Move back a day</button><button disabled={!activeVisit} onClick={() => moveEntry(entry, 1)} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Move ahead a day</button><Button disabled={!activeVisit || (startsJob ? !job || normaliseJobStatus(job.status) !== "Scheduled" : entry.status === "Confirmed")} onClick={() => markStarted(entry)}>{startsJob ? "Start job" : "Confirm visit"}</Button>{entry.location || job?.siteAddress ? <a href={mapsUrl(entry.location || job?.siteAddress || "")} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 py-2 text-sm"><Navigation className="mr-2 size-4" />Navigate</a> : null}{customer?.phone ? <a href={`tel:${customer.phone}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 py-2 text-sm"><Phone className="mr-2 size-4" />Call</a> : null}{job ? <Link href={`/jobs/${encodeURIComponent(job.id)}`} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm">View job</Link> : null}</div></div></Card>; }) : <Card><p className="text-sm text-slate-500">{scopeAvailable ? `No diary entries match these filters in this ${view}.` : "Choose an available diary job scope to view its visits."}</p></Card>}{matchingDiaryEntries.length > diaryLimit ? <button onClick={() => setDiaryLimit((value) => value + 8)} className="min-h-12 w-full rounded-xl border border-slate-700 px-3 text-sm">Show more visits ({matchingDiaryEntries.length - diaryLimit} remaining)</button> : null}</section>
       </div>
     </section>
   </div>;
