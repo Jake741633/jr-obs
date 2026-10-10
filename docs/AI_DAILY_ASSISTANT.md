@@ -23,15 +23,14 @@ control. Each card explains its reason, next step and saved evidence.
   quote-side and job-side/snapshot links before conversion is suggested.
 - **Site:** active work and visits in the coming seven days are joined to linked
   purchase lists. Missing addresses, missing assigned workers, needed materials
-  and unconfirmed deliveries produce one readiness card per job. A planner
-  assignment or visit address can satisfy the corresponding job-level gap.
+  and unconfirmed deliveries produce one readiness card per job. Each upcoming visit is checked separately: one prepared visit cannot hide another visit’s missing address or worker. Job-level address/assignment can supply the corresponding fallback for each visit. Missing or invalid visit times produce a timing review rather than a guessed clash. Visit-only gaps link to the affected day; material or job-level checks link to the job.
   Closed jobs without a completed certificate get a review of requirements,
   never a conclusion about electrical compliance.
 - **Diary:** the existing scheduling engine detects overlapping staff, vehicle
   or job assignments. The assistant excludes cancelled/completed visits, checks
-  a seven-day horizon and requires valid explicit times. Multiple shared
+  today plus six days and requires valid explicit times. Multiple shared
   resources for the same pair produce one card. Missing times are not treated
-  as a confirmed clash.
+  as a confirmed clash. Clash links open the first affected day within the horizon, including today for ongoing multi-day clashes.
 - **Tasks:** outstanding tasks and snags use their saved priority, category and due date. Urgent work, Safety-category records and past due dates appear first. High priority, due-today and work due through today plus six days follow. Completed/customer-confirmed records are excluded; closed-job and orphaned tasks remain reviewable with their actual source evidence. The Safety label comes from the saved record and is not a new assessment of the installation.
 - **Reminders:** incomplete reminders due today or earlier remain visible.
 
@@ -90,3 +89,5 @@ Payment regression cases execute the actual ledger policy, assistant, Today and 
 Quick-question regression tests execute the actual answer rules and form handlers, including unsupported intent, calendar boundaries, spanning visits, duplicate suppression, invalid data, payment totals, follow-up agreements, source links, progressive reveal, stale-answer clearing, record refresh and read-only planner navigation.
 
 `tests/task-inbox.test.mjs` executes task priorities, evidence and exact task links, mobile search/filters, progressive reveal, completed/deleted target updates and read-only navigation. Assistant tests also cover task readiness, narrow snag scope, unsupported task commands and live completion updates.
+
+Calendar and site-readiness regression cases cover each visit independently, missing-time reviews, consistent seven-day horizons and targeted clash dates. `tests/planner-calendar.test.mjs` checks week/month/year boundaries, leap days, monthly recurrence, local Today across timezones, invalid range rejection and actual planner navigation/create/move handlers.

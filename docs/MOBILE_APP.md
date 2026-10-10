@@ -39,6 +39,12 @@ The office Tasks & Snagging workspace starts with outstanding work. Open, Due, S
 
 JR AI links open the exact task and show its current status, even if it was completed after the answer. A missing or mismatched link shows an unavailable message with a way back to all open tasks. Loading and account changes retain the existing access boundaries. Search, filtering and navigation do not write business records.
 
+## Diary dates and touch controls
+
+Week views run Monday through Sunday, including month/year boundaries. Previous/next month navigation clamps the displayed day to the last day in a shorter month. Today uses the device’s local date; date-only shifts avoid timezone offsets and daylight-saving drift. Calendar navigation and visit move actions have distinct labels and 48px touch targets.
+
+Monthly repeats stay anchored to the original day, using month end when necessary (31 January → 28 February → 31 March in a non-leap year). The form explains this rule; each occurrence preserves its calendar-day duration. No repeat always creates one booking, even if an earlier repeat count remains in the form. Invalid/reversed dates and ranges outside the supported calendar are rejected before any booking is written. Existing bookings are not rewritten.
+
 ## Install
 
 - **iPhone/iPad:** open the normal JR OS address in Safari, tap **Share → Add to

@@ -165,3 +165,42 @@ test("Business Coach excludes draft and ledger-settled balances from debt totals
   const partial = commandCentre.buildBusinessCoach({ ...data, payments: [payment({ amount: 100 })] });
   assert.equal(partial.unpaidInvoiceValue, 140); assert.equal(partial.overdueInvoiceCount, 1);
 });
+
+test("one complete visit cannot hide another visit's missing address or worker", () => {
+  const data = { jobs: [job({ startDate: "2026-01-01", assignedTo: [], siteAddress: "" })], planner: [visit({ title: "Prepared visit", jobId: "j1" }), visit({ id: "v2", title: "Unprepared visit", jobId: "j1", date: "2026-10-12", location: "", teamMemberIds: [] })] };
+  const result = actions(data);
+  assert.equal(result.length, 1); assert.equal(result[0].id, "readiness:j1");
+  assert.equal(result[0].dueDate, "2026-10-12"); assert.equal(result[0].priority, "Today");
+  assert.equal(result[0].href, "/planner?date=2026-10-12");
+  assert.match(result[0].evidence.join(" "), /Unprepared visit.*No site or visit address/);
+  assert.match(result[0].evidence.join(" "), /No worker assigned to the job or this visit/);
+  assert.doesNotMatch(result[0].evidence.join(" "), /Prepared visit/);
+  assert.equal(JSON.stringify(actions({ ...data, planner: [...data.planner].reverse() })), JSON.stringify(result));
+});
+
+test("job-level assignment and address remain valid fallbacks for every linked visit", () => {
+  const result = actions({ jobs: [job()], planner: [visit({ jobId: "j1", location: "", teamMemberIds: [] }), visit({ id: "v2", jobId: "j1", date: "2026-10-12", location: "", teamMemberIds: [] })] });
+  assert.equal(result.length, 0);
+});
+
+test("missing visit times generate a review instead of a guessed clash", () => {
+  const result = actions({ jobs: [job()], planner: [visit({ jobId: "j1", startTime: "" }), visit({ id: "v2", jobId: "j1" })] });
+  assert.equal(result.length, 1); assert.equal(result[0].id, "readiness:j1");
+  assert.match(result[0].evidence.join(" "), /Visit time is missing or invalid/);
+  assert.equal(result[0].href, "/planner?date=2026-10-10");
+});
+
+test("site and clash horizons include today plus six days, excluding the eighth day", () => {
+  for (const [date, expected] of [["2026-10-16", 1], ["2026-10-17", 0]]) {
+    assert.equal(actions({ jobs: [job({ startDate: date, siteAddress: "" })] }).length, expected);
+    assert.equal(actions({ planner: [visit({ date }), visit({ id: "v2", date })] }).length, expected);
+    assert.equal(actions({ jobs: [job({ startDate: "2026-01-01", siteAddress: "" })], planner: [visit({ date, jobId: "j1", location: "" })] }).length, expected);
+  }
+});
+
+test("ongoing multi-day clashes open today while preserving original date evidence", () => {
+  const result = actions({ planner: [visit({ date: "2026-10-08", endDate: "2026-10-12" }), visit({ id: "v2", date: "2026-10-09", endDate: "2026-10-11" })] });
+  assert.equal(result.length, 1); assert.equal(result[0].dueDate, "2026-10-10");
+  assert.equal(result[0].href, "/planner?date=2026-10-10");
+  assert.match(result[0].evidence.join(" "), /2026-10-08 to 2026-10-12/);
+});

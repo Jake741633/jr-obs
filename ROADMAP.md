@@ -18,6 +18,8 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Task-aware JR AI priorities and open-task/snag answers linked to the exact record
 - [x] Phone task inbox with job/search/status filters and progressive loading
 - [x] Open the requested diary day and retain multi-day visits across calendar views
+- [x] Correct week/month boundaries, local phone dates and monthly booking repeats
+- [x] Check each upcoming visit’s readiness and open the affected diary day
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off
 - [x] Manufacturer-evidence device-pair coordination with saved backup and selectivity comparisons

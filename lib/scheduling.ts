@@ -30,6 +30,24 @@ export function plannerViewDate(value: string | null) {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : null;
 }
 
+export function plannerDateKey(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+/** Date-only arithmetic has no timezone offset; monthly shifts clamp to the destination month. */
+export function shiftPlannerDate(date: string, amount: number, view: DiaryView = "day") {
+  if (!plannerViewDate(date) || !Number.isSafeInteger(amount)) return null;
+  const value = new Date(`${date}T00:00:00Z`);
+  if (view === "month") {
+    const day = value.getUTCDate();
+    value.setUTCMonth(value.getUTCMonth() + amount, 1);
+    const last = new Date(value);
+    last.setUTCMonth(last.getUTCMonth() + 1, 0);
+    value.setUTCDate(Math.min(day, last.getUTCDate()));
+  } else value.setUTCDate(value.getUTCDate() + amount * (view === "week" ? 7 : 1));
+  return Number.isFinite(value.getTime()) ? plannerViewDate(value.toISOString().slice(0, 10)) : null;
+}
+
 export function entryEndDate(entry: ScheduledPlannerEntry) {
   return entry.endDate || entry.date;
 }
@@ -73,16 +91,12 @@ export function detectScheduleClashes(entries: ScheduledPlannerEntry[], team: Te
   return clashes;
 }
 
-function addDate(date: string, amount: number, monthly = false) {
-  const value = new Date(`${date}T12:00:00`);
-  if (monthly) value.setMonth(value.getMonth() + amount);
-  else value.setDate(value.getDate() + amount);
-  return value.toISOString().slice(0, 10);
-}
-
 export function recurringDates(startDate: string, frequency: RecurrenceFrequency, count: number) {
-  const safeCount = Math.max(1, Math.min(24, count || 1));
-  return Array.from({ length: safeCount }, (_, index) => frequency === "Weekly" ? addDate(startDate, index * 7) : frequency === "Monthly" ? addDate(startDate, index, true) : startDate);
+  if (!plannerViewDate(startDate) || !["None", "Weekly", "Monthly"].includes(frequency)) return [];
+  if (frequency === "None") return [startDate];
+  const safeCount = Math.max(1, Math.min(24, Number.isFinite(count) ? Math.trunc(count) : 1));
+  const dates = Array.from({ length: safeCount }, (_, index) => shiftPlannerDate(startDate, index, frequency === "Weekly" ? "week" : "month"));
+  return dates.every((date): date is string => date !== null) ? dates : [];
 }
 
 export function entryCustomer(entry: ScheduledPlannerEntry, jobs: Job[], customers: Customer[]) {
@@ -93,18 +107,19 @@ export function entryCustomer(entry: ScheduledPlannerEntry, jobs: Job[], custome
 export function dateWithinView(date: string, anchor: string, view: DiaryView, endDate = date) {
   if (!plannerViewDate(date) || !plannerViewDate(endDate) || !plannerViewDate(anchor) || endDate < date) return false;
   if (view === "day") return date <= anchor && endDate >= anchor;
-  const anchorDate = new Date(`${anchor}T12:00:00`);
+  const anchorDate = new Date(`${anchor}T00:00:00Z`);
   const start = new Date(anchorDate);
   const end = new Date(anchorDate);
   if (view === "week") {
-    const mondayOffset = (anchorDate.getDay() + 6) % 7;
-    start.setDate(anchorDate.getDate() - mondayOffset);
-    end.setDate(start.getDate() + 6);
+    const mondayOffset = (anchorDate.getUTCDay() + 6) % 7;
+    start.setUTCDate(anchorDate.getUTCDate() - mondayOffset);
+    end.setTime(start.getTime());
+    end.setUTCDate(start.getUTCDate() + 6);
   } else {
-    start.setDate(1);
-    end.setMonth(start.getMonth() + 1, 0);
+    start.setUTCDate(1);
+    end.setUTCMonth(start.getUTCMonth() + 1, 0);
   }
-  const entryStart = new Date(`${date}T12:00:00`);
-  const entryEnd = new Date(`${endDate}T12:00:00`);
+  const entryStart = new Date(`${date}T00:00:00Z`);
+  const entryEnd = new Date(`${endDate}T00:00:00Z`);
   return entryStart <= end && entryEnd >= start;
 }
