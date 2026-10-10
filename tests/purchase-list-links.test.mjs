@@ -10,8 +10,8 @@ const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && type
 const text = (tree) => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 const list = (patch = {}) => ({ id: "p1", number: "PO-1", title: "Cable order", jobId: "j1", items: [{ id: "line1", description: "Cable reel", quantity: 2, unitCost: 10, supplier: "CEF", stockCode: "C1", status: "Needed" }], notes: "Source note", ...patch });
 
-function harness({ search = "", lists: initial = [], ready: initialReady = true, pricing: initialPricing = [], jobs: initialJobs = [], materials = [], role = "office", failCreateAt = [] } = {}) {
-  const state = [], effects = [], attempts = []; let cursor = 0, mounted = false, lists = initial, ready = initialReady, writes = 0, ids = 0, pricing = initialPricing, jobs = initialJobs;
+function harness({ search = "", lists: initial = [], ready: initialReady = true, pricing: initialPricing = [], jobs: initialJobs = [], materials = [], role = "office", failCreateAt = [], failUpdateAt = [], failRemoveAt = [], confirm = true } = {}) {
+  const state = [], effects = [], attempts = [], updates = [], removals = [], confirmations = []; let cursor = 0, mounted = false, lists = initial, ready = initialReady, writes = 0, ids = 0, pricing = initialPricing, jobs = initialJobs;
   function createItem(item) {
     if (!ready) throw new Error("Purchase records are not ready");
     if (lists.some((list) => list.id === item.id)) throw new Error("A collection record with this id already exists");
@@ -19,20 +19,39 @@ function harness({ search = "", lists: initial = [], ready: initialReady = true,
     if (failCreateAt.includes(attempts.length)) throw new Error("Purchase storage failed");
     lists = [item, ...lists]; return item;
   }
+  function updateItem(id, update) {
+    if (!ready) throw new Error("Purchase records are not ready");
+    const index = lists.findIndex((record) => record.id === id); if (index < 0) throw new Error("Purchase list is no longer available");
+    const item = update(lists[index]); if (item === lists[index]) return item;
+    writes++; updates.push(item); if (failUpdateAt.includes(updates.length)) throw new Error("Purchase storage failed");
+    lists = lists.map((record, i) => i === index ? item : record); return item;
+  }
+  function removeItem(id, validate) {
+    if (!ready) throw new Error("Purchase records are not ready");
+    const item = lists.find((record) => record.id === id); if (!item) throw new Error("Purchase list is no longer available");
+    validate?.(item); writes++; removals.push(item); if (failRemoveAt.includes(removals.length)) throw new Error("Purchase storage failed");
+    lists = lists.filter((record) => record.id !== id); return item;
+  }
   const store = (items = []) => ({ items, isReady: ready, setItems() { writes++; throw new Error("Navigation must not write records"); }, remove() { writes++; throw new Error("Navigation must not delete records"); } });
   const deps = {
     "react/jsx-runtime": { jsx, jsxs: jsx },
     react: { useMemo: (fn) => fn(), useEffect: (fn) => { if (!mounted) effects.push(fn); }, useRef(initial) { const i = cursor++; if (!(i in state)) state[i] = { current: initial }; return state[i]; }, useState(initial) { const i = cursor++; if (!(i in state)) state[i] = typeof initial === "function" ? initial() : initial; return [state[i], (value) => { state[i] = typeof value === "function" ? value(state[i]) : value; }]; } },
     "next/link": { default: "Link" }, "lucide-react": {}, "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" },
-    "../../lib/cloud/coreBusinessCollections": { usePurchaseListsCollection: () => ({ ...store(lists), createItem }) }, "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: { role } }) },
+    "../../lib/cloud/coreBusinessCollections": { usePurchaseListsCollection: () => ({ ...store(lists), createItem, updateItem, removeItem }) }, "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: { role } }) },
     "../../lib/storage": { useCloudLocalCollection: (key) => store(key === "jr-os-pricing-documents" ? pricing : key === "jr-os-jobs" ? jobs : materials), makeId: (prefix) => `${prefix}-${++ids}` }, "../../lib/purchaseListLink": links,
   };
   const mod = { exports: {} };
-  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/purchases/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Intl, Date, Error, window: { location: { search }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {} }, require(name) { assert.ok(name in deps, name); return deps[name]; } });
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/purchases/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Intl, Date, Error, window: { location: { search }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {}, confirm(message) { confirmations.push(message); return confirm; } }, require(name) { assert.ok(name in deps, name); return deps[name]; } });
   const render = () => { cursor = 0; const view = mod.exports.default(); mounted = true; return view; };
   const first = render();
   const flush = () => effects.splice(0).forEach((fn) => fn());
-  return { first, render, flush, writes: () => writes, lists: () => lists, attempts, replace(value) { lists = value; }, replacePricing(value) { pricing = value; }, replaceJobs(value) { jobs = value; }, setReady(value) { ready = value; },
+  return { first, render, flush, writes: () => writes, lists: () => lists, attempts, updates, removals, confirmations, replace(value) { lists = value; }, replacePricing(value) { pricing = value; }, replaceJobs(value) { jobs = value; }, setReady(value) { ready = value; },
+    line(number = "PO-1", description = "Cable reel") { const row = nodes(render()).find((n) => n.props["aria-label"] === `Edit ${description} in ${number}`); assert.ok(row); return row; },
+    edit(field, value, number, description) { const label = nodes(this.line(number, description)).find((n) => n.type === "label" && text(n).startsWith(field)); assert.ok(label); nodes(label).find((n) => ["input", "select"].includes(n.type)).props.onChange({ target: { value } }); },
+    saveHandler(number, description) { const button = nodes(this.line(number, description)).find((n) => n.type === "button" && text(n) === "Save line"); assert.ok(button); return button.props.onClick; },
+    save(number, description) { this.saveHandler(number, description)(); },
+    discard(number, description) { nodes(this.line(number, description)).find((n) => n.type === "button" && text(n) === "Use saved values").props.onClick(); },
+    deleteHandler(number = "PO-1") { const button = nodes(render()).find((n) => n.type === "button" && n.props["aria-label"] === `Delete ${number}`); assert.ok(button); return button.props.onClick; },
     choose(label, value) { const control = nodes(render()).find((n) => n.type === "select" && n.props["aria-label"] === label); assert.ok(control, label); control.props.onChange({ target: { value } }); },
     createHandler() { const button = nodes(render()).find((n) => n.type === "Button" && /^(Create|Retry) purchase list$/.test(text(n))); assert.ok(button); return button.props.onClick; },
     create() { this.createHandler()(); },
@@ -151,4 +170,104 @@ test("purchase creation handles readiness loss and keeps field roles outside the
   const h = creationHarness(); const create = h.createHandler(); h.setReady(false); create(); assert.equal(h.writes(), 0); h.setReady(true);
   assert.match(text(h.render()), /save could not be confirmed/); assert.equal(nodes(h.render()).find((n) => n.props["aria-label"] === "Pricing document").props.value, "q1"); h.create(); assert.equal(h.lists().length, 1);
   const field = harness({ role: "electrician", pricing: [quote()], jobs: [{ id: "j1", title: "Workshop" }] }); field.flush(); assert.equal(nodes(field.render()).some((n) => n.type === "Button"), false); assert.equal(field.writes(), 0);
+});
+
+const editingHarness = (options = {}) => { const h = harness({ lists: [list()], ...options }); h.flush(); return h; };
+
+test("purchase line edits remain drafts until explicit durable save and counts retain saved values", () => {
+  const h = editingHarness(); h.edit("Quantity", "3.5"); h.edit("Unit cost", "12"); h.edit("Status", "Delivered");
+  assert.equal(h.writes(), 0); assert.equal(h.lists()[0].items[0].quantity, 2); assert.equal(h.lists()[0].items[0].status, "Needed");
+  assert.match(text(h.render()), /1 unsaved line.*leaving loses unsaved line changes/); assert.match(text(h.line()), /Saved quantity 2 · Needed/);
+  assert.match(text(renderedLists(h.render())), /£20\.00/); assert.doesNotMatch(text(renderedLists(h.render())), /£42\.00/);
+  h.save(); assert.equal(h.writes(), 1); assert.equal(h.lists()[0].items[0].quantity, 3.5); assert.equal(h.lists()[0].items[0].unitCost, 12); assert.equal(h.lists()[0].items[0].status, "Delivered");
+  assert.match(text(h.render()), /line saved on this device.*Check sync status.*no supplier order/); assert.match(text(renderedLists(h.render())), /£42\.00/); assert.doesNotMatch(text(h.render()), /unsaved line/); assert.doesNotMatch(text(h.line()), /Save line/);
+});
+
+test("failed line saves retain editable drafts and repeated success callbacks cannot write twice", () => {
+  const h = editingHarness({ failUpdateAt: [1, 2] }); h.edit("Quantity", "4"); const save = h.saveHandler();
+  save(); save(); assert.equal(h.lists()[0].items[0].quantity, 2); assert.equal(h.updates.length, 2); assert.match(text(h.render()), /save could not be confirmed.*draft is retained.*Leaving this page loses unsaved line changes.*storage failed/);
+  assert.equal(nodes(h.line()).find((n) => n.type === "input").props.value, "4"); save(); save(); assert.equal(h.updates.length, 3); assert.equal(h.lists()[0].items[0].quantity, 4);
+  assert.equal(new Set(h.updates.map((record) => record.items[0].id)).size, 1); assert.doesNotMatch(text(h.render()), /could not be confirmed/); assert.doesNotMatch(text(h.line()), /Save line/);
+});
+
+test("blank and invalid purchase drafts cannot change records and partial typing is retained", () => {
+  for (const [field, values] of [["Quantity", ["", " ", "0", "-1", "NaN", "Infinity", "1e309"]], ["Unit cost", ["", " ", "-1", "NaN", "Infinity"]], ["Status", ["Dispatched", ""]]]) for (const value of values) {
+    const h = editingHarness(); h.edit(field, value); assert.equal(h.writes(), 0); h.save(); assert.equal(h.writes(), 0); assert.match(text(h.render()), /Review this line.*draft is retained/);
+    assert.deepEqual(h.lists(), [list()]); h.discard(); assert.doesNotMatch(text(h.render()), /unsaved line/); assert.doesNotMatch(text(h.line()), /Save line/);
+  }
+  const h = editingHarness(); h.edit("Quantity", ""); h.edit("Quantity", "5"); h.edit("Unit cost", "0"); h.save(); assert.equal(h.lists()[0].items[0].quantity, 5); assert.equal(h.lists()[0].items[0].unitCost, 0);
+});
+
+test("changed line identities, values and linked sources block stale drafts without overwriting saved records", () => {
+  const changes = [
+    (current) => { current.items[0].quantity = 8; },
+    (current) => { current.items[0].description = "Replacement cable"; },
+    (current) => { current.items[0].status = "Ordered"; },
+    (current) => { current.jobId = "other-job"; },
+    (current) => { current.pricingDocumentId = "other-quote"; },
+    (current) => { current.items = []; },
+    (current) => { current.items.push({ ...current.items[0] }); },
+  ];
+  for (const change of changes) {
+    const h = editingHarness(); h.edit("Quantity", "4"); const save = h.saveHandler(); const revised = list(); change(revised); h.replace([revised]); save();
+    assert.equal(h.writes(), 0); assert.deepEqual(h.lists(), [revised]); assert.match(text(h.render()), /save could not be confirmed.*linked source has changed/);
+  }
+  const h = editingHarness(); h.edit("Quantity", "4"); const save = h.saveHandler(); h.replace([]); save(); assert.equal(h.writes(), 0); assert.match(text(h.render()), /no longer available/);
+});
+
+test("purchase line saves preserve current list notes and unrelated lines", () => {
+  const h = editingHarness(); h.edit("Quantity", "4"); const save = h.saveHandler(); const revised = list({ notes: "Updated office note", title: "Current title" });
+  revised.items.push({ id: "other-line", description: "Fixings", quantity: 10, unitCost: 1, status: "Delivered" }); h.replace([revised]); save();
+  assert.equal(h.lists()[0].notes, revised.notes); assert.equal(h.lists()[0].title, revised.title); assert.deepEqual(h.lists()[0].items[1], revised.items[1]); assert.equal(h.lists()[0].items[0].quantity, 4); assert.equal(h.writes(), 1);
+});
+
+test("new draft values and Use saved values invalidate older save callbacks", () => {
+  const h = editingHarness(); h.edit("Quantity", "4"); const old = h.saveHandler(); h.edit("Quantity", "5"); old(); assert.equal(h.writes(), 0);
+  const current = h.saveHandler(); h.discard(); current(); assert.equal(h.writes(), 0); assert.doesNotMatch(text(h.line()), /Save line/);
+  h.edit("Quantity", "2"); h.save(); assert.equal(h.writes(), 0); assert.doesNotMatch(text(h.line()), /Save line/);
+  h.edit("Quantity", "6"); const stale = h.saveHandler(); h.replace([list({ items: [{ ...list().items[0], quantity: 8 }] })]); h.discard(); stale(); assert.equal(h.writes(), 0);
+  assert.equal(nodes(h.line()).find((n) => n.type === "input").props.value, 8); h.edit("Quantity", "9"); h.save(); assert.equal(h.lists()[0].items[0].quantity, 9);
+});
+
+test("purchase drafts remain separate by exact list and line identity across focus changes", () => {
+  const first = list({ id: "a", number: "PO-1", items: [{ ...list().items[0], id: "b:c" }] }); const second = list({ id: "a:b", number: "PO-2", items: [{ ...list().items[0], id: "c" }] });
+  const h = editingHarness({ lists: [first, second], search: "?list=a" }); h.edit("Quantity", "4"); h.clear(); h.edit("Quantity", "5", "PO-2"); assert.match(text(h.render()), /2 unsaved lines/);
+  h.save("PO-1"); assert.equal(h.lists()[0].items[0].quantity, 4); assert.equal(h.lists()[1].items[0].quantity, 2); assert.match(text(h.render()), /1 unsaved line/); h.save("PO-2"); assert.equal(h.lists()[1].items[0].quantity, 5);
+});
+
+test("line saves reject duplicate parent identities and readiness loss while retaining the retry", () => {
+  const h = editingHarness(); h.edit("Quantity", "4"); h.replace([list(), list({ title: "Duplicate identity" })]); h.save(); assert.equal(h.writes(), 0); assert.match(text(h.render()), /identity is ambiguous/);
+  h.replace([list()]); const save = h.saveHandler(); h.setReady(false); save(); assert.equal(h.writes(), 0); h.setReady(true); assert.match(text(h.render()), /records are not ready/); h.save(); assert.equal(h.lists()[0].items[0].quantity, 4);
+});
+
+test("unsupported purchase statuses require an explicit correction before saving another line value", () => {
+  const saved = list({ items: [{ ...list().items[0], status: "Dispatched" }] }); const h = editingHarness({ lists: [saved] }); h.edit("Quantity", "4"); h.save(); assert.equal(h.writes(), 0);
+  h.edit("Status", "Ordered"); h.save(); assert.equal(h.lists()[0].items[0].status, "Ordered"); assert.equal(h.lists()[0].items[0].quantity, 4);
+});
+
+test("purchase deletion requires confirmation and failed persistence retains the exact saved list", () => {
+  const cancel = editingHarness({ confirm: false }); cancel.deleteHandler()(); assert.equal(cancel.writes(), 0); assert.equal(cancel.confirmations.length, 1);
+  const h = editingHarness({ failRemoveAt: [1], search: "?list=p1", lists: [list(), list({ id: "p2", number: "PO-2", title: "Other list" })] }); const remove = h.deleteHandler(); remove();
+  assert.equal(h.lists().length, 2); assert.match(text(h.render()), /Deletion could not be confirmed.*remains available.*storage failed/); assert.match(h.confirmations[0], /Delete purchase list PO-1 “Cable order”/);
+  remove(); remove(); assert.equal(h.removals.length, 2); assert.equal(h.confirmations.length, 2); assert.equal(h.lists().length, 1); assert.equal(h.lists()[0].id, "p2"); assert.match(text(h.render()), /deleted on this device.*Check sync status/);
+  assert.equal(renderedLists(h.render()).length, 0); assert.match(text(h.render()), /selected purchase list is unavailable/); assert.doesNotMatch(text(renderedLists(h.render())), /Other list/);
+});
+
+test("purchase deletion refuses changed records, ambiguous ids, pending drafts and lost readiness", () => {
+  const h = editingHarness(); const remove = h.deleteHandler(); const revised = list({ notes: "Changed record" }); h.replace([revised]); remove(); assert.equal(h.writes(), 0); assert.deepEqual(h.lists(), [revised]); assert.match(text(h.render()), /has changed/);
+  const draft = editingHarness(); draft.edit("Quantity", "4"); draft.deleteHandler()(); assert.equal(draft.writes(), 0); assert.equal(draft.confirmations.length, 0); assert.match(text(draft.render()), /Save or discard/);
+  const duplicate = editingHarness({ lists: [list(), list({ title: "Duplicate" })] }); duplicate.deleteHandler()(); assert.equal(duplicate.writes(), 0); assert.equal(duplicate.confirmations.length, 0);
+  const pending = editingHarness(); const old = pending.deleteHandler(); pending.setReady(false); old(); assert.equal(pending.writes(), 0); pending.setReady(true); assert.match(text(pending.render()), /records are not ready/);
+});
+
+test("field-role purchase rendering hides pricing and deletion while quantity drafts preserve internal cost", () => {
+  const h = editingHarness({ role: "electrician" }); assert.equal(nodes(h.render()).some((n) => n.props["aria-label"] === "Delete PO-1"), false); assert.doesNotMatch(text(h.line()), /Unit cost|£/);
+  h.edit("Quantity", "4"); assert.doesNotMatch(text(h.line()), /Unit cost|£/); h.save(); assert.equal(h.lists()[0].items[0].unitCost, 10); assert.equal(h.lists()[0].items[0].quantity, 4);
+});
+
+test("drafts for removed lines remain visible and can be discarded without a record write", () => {
+  const h = editingHarness(); h.edit("Quantity", "4"); const stale = h.saveHandler(); h.replace([list({ items: [] })]);
+  h.deleteHandler()(); assert.equal(h.confirmations.length, 0); assert.match(text(h.render()), /1 unsaved line/);
+  const clear = nodes(h.render()).find((n) => n.type === "button" && text(n) === "Discard all line drafts"); assert.ok(clear); clear.props.onClick(); stale();
+  assert.equal(h.writes(), 0); assert.doesNotMatch(text(h.render()), /unsaved line/); h.deleteHandler()(); assert.equal(h.lists().length, 0);
 });

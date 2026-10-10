@@ -37,6 +37,6 @@ test("purchase page hides quote-derived creation and all cost totals from electr
   assert.match(purchases, /!priceRestricted \? <label className="text-xs text-slate-500">Unit cost/);
   assert.match(purchases, /!priceRestricted \? <strong>\{money\.format\(totalCost\)\}<\/strong>/);
   assert.match(purchases, /!priceRestricted \? <strong>\{money\.format\(subtotal\)\}<\/strong>/);
-  assert.match(purchases, /!priceRestricted \? <button onClick=\{\(\) => purchaseLists\.remove/);
+  assert.match(purchases, /!priceRestricted \? <button onClick=\{\(\) => deleteList\(list\)/);
   assert.match(purchases, /item\.quantity \* \(item\.unitCost \?\? 0\)/);
 });

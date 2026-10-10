@@ -33,6 +33,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Phone diary search, status/job filters and progressive visit cards with exact job-scoped JR AI scheduling links
 - [x] JR AI material-ordering and delivery-follow-up answers with exact job scope and purchase-list review links
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection
+- [x] Phone purchase-line drafts with explicit durable saves, conflict review and confirmed list deletion
 - [x] Check each upcoming visit’s readiness and open the affected diary day
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off

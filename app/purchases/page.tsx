@@ -9,11 +9,13 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { usePurchaseListsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
-import type { Job, Material, PricingDocument, PurchaseItemStatus, PurchaseList } from "../../lib/models";
+import type { Job, Material, PricingDocument, PurchaseItemStatus, PurchaseList, PurchaseListItem } from "../../lib/models";
 import { purchaseListFromLink } from "../../lib/purchaseListLink";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const statuses: PurchaseItemStatus[] = ["Needed", "Ordered", "Delivered"];
+type LineDraft = { expected: PurchaseListItem; jobId?: string; pricingDocumentId?: string; quantity: string; unitCost: string; status: PurchaseItemStatus };
+const lineKey = (listId: string, itemId: string) => JSON.stringify([listId, itemId]);
 
 export default function PurchasesPage() {
   const purchaseLists = usePurchaseListsCollection();
@@ -29,6 +31,9 @@ export default function PurchasesPage() {
   const creationGeneration = useRef(0);
   const [creationVersion, setCreationVersion] = useState(0);
   const [creationFailed, setCreationFailed] = useState(false);
+  const [lineDrafts, setLineDrafts] = useState<Record<string, LineDraft>>({});
+  const draftRef = useRef<Record<string, LineDraft>>({});
+  const deletedRecords = useRef(new WeakSet<PurchaseList>());
   const [focusedListId, setFocusedListId] = useState("");
   const [invalidListLink, setInvalidListLink] = useState(false);
   const [linkReady, setLinkReady] = useState(false);
@@ -119,9 +124,56 @@ export default function PurchasesPage() {
     setMessage(`${list.number} saved on this device with ${list.items.length} material line${list.items.length === 1 ? "" : "s"}. Check sync status before switching devices. No supplier order has been placed.`);
   }
 
-  function updateItem(listId: string, itemId: string, patch: Partial<PurchaseList["items"][number]>) {
-    const now = new Date().toISOString();
-    purchaseLists.setItems((current) => current.map((list) => list.id === listId ? { ...list, items: list.items.map((item) => item.id === itemId ? { ...item, ...patch } : item), updatedAt: now } : list));
+  function editLine(list: PurchaseList, item: PurchaseListItem, field: "quantity" | "unitCost" | "status", value: string) {
+    if (priceRestricted && field === "unitCost") return;
+    const key = lineKey(list.id, item.id);
+    const draft = draftRef.current[key] || { expected: item, jobId: list.jobId, pricingDocumentId: list.pricingDocumentId, quantity: String(item.quantity), unitCost: String(item.unitCost ?? 0), status: item.status };
+    draftRef.current = { ...draftRef.current, [key]: { ...draft, [field]: value } };
+    setLineDrafts(draftRef.current); setMessage("");
+  }
+
+  function discardLine(listId: string, itemId: string) {
+    const next = { ...draftRef.current }; delete next[lineKey(listId, itemId)];
+    draftRef.current = next; setLineDrafts(next); setMessage("");
+  }
+
+  function saveLine(list: PurchaseList, item: PurchaseListItem, draft: LineDraft) {
+    const key = lineKey(list.id, item.id);
+    if (draftRef.current[key] !== draft) return;
+    const quantity = Number(draft.quantity), unitCost = Number(draft.unitCost);
+    if (!draft.quantity.trim() || !Number.isFinite(quantity) || quantity <= 0 || (!priceRestricted && (!draft.unitCost.trim() || !Number.isFinite(unitCost) || unitCost < 0)) || !statuses.includes(draft.status)) {
+      setMessage("Review this line: quantity must be above zero, unit cost must be zero or above, and status must be Needed, Ordered or Delivered. Your draft is retained."); return;
+    }
+    try {
+      if (!ready || purchaseLists.items.filter((record) => record.id === list.id).length !== 1) throw new Error("The purchase list is not ready or its identity is ambiguous. Review the saved record.");
+      purchaseLists.updateItem(list.id, (current) => {
+        const matches = current.items.filter((line) => line.id === item.id);
+        if (current.jobId !== draft.jobId || current.pricingDocumentId !== draft.pricingDocumentId || matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(draft.expected)) throw new Error("The saved line or its linked source has changed. Use saved values to review it before editing again.");
+        const saved = matches[0];
+        if (saved.quantity === quantity && (priceRestricted || (saved.unitCost ?? 0) === unitCost) && saved.status === draft.status) return current;
+        return { ...current, items: current.items.map((line) => line.id === item.id ? { ...line, quantity, ...(!priceRestricted ? { unitCost } : {}), status: draft.status } : line), updatedAt: new Date().toISOString() };
+      });
+    } catch (error) {
+      setMessage(`Line save could not be confirmed. Your draft is retained; review and retry here. Leaving this page loses unsaved line changes. ${error instanceof Error ? error.message : ""}`); return;
+    }
+    discardLine(list.id, item.id);
+    setMessage(`${list.number} line saved on this device. Check sync status before switching devices. This records your status; no supplier order has been placed by JR OS.`);
+  }
+
+  function deleteList(list: PurchaseList) {
+    if (priceRestricted || deletedRecords.current.has(list)) return;
+    if (!ready || purchaseLists.items.filter((record) => record.id === list.id).length !== 1) { setMessage("Wait for one unambiguous purchase list to finish loading before deleting."); return; }
+    if (Object.keys(draftRef.current).some((key) => JSON.parse(key)[0] === list.id)) { setMessage("Save or discard this list's unsaved line changes before deleting."); return; }
+    if (!window.confirm(`Delete purchase list ${list.number} “${list.title}”?`)) return;
+    try {
+      purchaseLists.removeItem(list.id, (current) => {
+        if (JSON.stringify(current) !== JSON.stringify(list)) throw new Error("This purchase list has changed. Review its current record before deleting.");
+      });
+    } catch (error) {
+      setMessage(`Deletion could not be confirmed. The purchase list remains available; review and retry. ${error instanceof Error ? error.message : ""}`); return;
+    }
+    deletedRecords.current.add(list);
+    setMessage(`${list.number} deleted on this device. Check sync status before switching devices.`);
   }
 
   const ready = purchaseLists.isReady && pricing.isReady && materials.isReady && jobs.isReady;
@@ -131,6 +183,7 @@ export default function PurchasesPage() {
     <PageHeader eyebrow="Procurement" title="Purchase Lists" description={priceRestricted ? "Track required materials, suppliers and order/receipt status without office cost or quote data." : "Turn quote and estimate material lines into supplier-ready purchase lists, then track ordering and receipt."} />
     {focused ? <section aria-label="Purchase list selection" className="space-y-3 rounded-xl border border-cyan-400/30 p-4"><p role="status" className="break-words text-sm text-cyan-100">{invalidListLink ? "This purchase-list link is invalid. Show all purchase lists to choose a saved record." : focusUnavailable ? "The selected purchase list is unavailable or its identity is ambiguous. Other lists have not been substituted." : `Showing ${visibleLists[0].number} · ${visibleLists[0].title}. Totals and lines below belong to this saved list and reflect its current status.`}</p><button onClick={() => { setFocusedListId(""); setInvalidListLink(false); }} className="min-h-12 rounded-xl border border-slate-700 px-3 text-sm font-semibold">Show all purchase lists</button></section> : null}
     {message ? <div role="status" className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    {Object.keys(lineDrafts).length ? <section aria-label="Unsaved purchase lines" className="space-y-2"><p role="status" className="text-sm text-amber-200">{Object.keys(lineDrafts).length} unsaved line{Object.keys(lineDrafts).length === 1 ? "" : "s"}. Save each line or use saved values to discard its draft. Keep this page open; leaving loses unsaved line changes.</p><button type="button" onClick={() => { draftRef.current = {}; setLineDrafts({}); setMessage(""); }} className="min-h-12 rounded-xl border border-slate-700 px-4 text-sm font-semibold">Discard all line drafts</button></section> : null}
     <section className={`grid gap-4 sm:grid-cols-2 ${priceRestricted ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
       <Card><ShoppingCart className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Purchase lists</p><p className="mt-2 text-3xl font-bold">{summary.lists}</p></Card>
       <Card><Truck className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Need ordering</p><p className="mt-2 text-3xl font-bold">{summary.needed}</p><p className="text-xs text-slate-500">{summary.ordered} already ordered</p></Card>
@@ -140,10 +193,21 @@ export default function PurchasesPage() {
 
     {!priceRestricted ? <Card className="border-cyan-400/30"><h2 className="font-semibold">Create from quote or estimate</h2><div className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><select aria-label="Pricing document" value={selectedDocumentId} onChange={(event) => changeCreationSelection("document", event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose pricing document</option>{sourceDocuments.map((document) => <option key={document.id} value={document.id}>{document.number} · {document.title}</option>)}</select><select aria-label="Purchase job" value={selectedJobId} onChange={(event) => changeCreationSelection("job", event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Use linked job / no job</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select><Button disabled={!selectedDocumentId} onClick={createFromDocument}>{creationFailed ? "Retry purchase list" : "Create purchase list"}</Button></div></Card> : null}
 
+    {visibleLists.length ? <p className="text-sm text-slate-400">{priceRestricted ? "Edit quantity or status" : "Edit quantity, cost or status"}, then Save line. Totals and delivery counts use saved values.</p> : null}
     {visibleLists.length === 0 ? <Card><p className="text-sm text-slate-400">{focused ? "No purchase list is available for this link." : "No purchase lists yet."} {!focused ? priceRestricted ? "Office can create lists that will appear here for field ordering and receipt updates." : "Create one from the materials already priced in a quote or estimate." : ""}</p></Card> : <div aria-label="Purchase list records" className="space-y-5">{visibleLists.map((list) => {
       const totalCost = list.items.reduce((sum, item) => sum + item.quantity * (item.unitCost ?? 0), 0);
       const groupedSuppliers = [...new Set(list.items.map((item) => item.supplier || "Unassigned"))];
-      return <Card key={list.id} className="overflow-hidden p-0"><div className="flex flex-col gap-3 border-b border-slate-800 p-5 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{list.number}</p><h2 className="mt-1 text-xl font-bold">{list.title}</h2><p className="mt-1 text-sm text-slate-400">{jobs.items.find((job) => job.id === list.jobId)?.title || "No linked job"} · {list.items.length} lines</p></div><div className="flex items-center gap-3">{!priceRestricted ? <strong>{money.format(totalCost)}</strong> : null}{!priceRestricted ? <button onClick={() => purchaseLists.remove((item) => item.id === list.id)} aria-label={`Delete ${list.number}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div></div><div className="space-y-5 p-5">{groupedSuppliers.map((supplier) => { const supplierItems = list.items.filter((item) => (item.supplier || "Unassigned") === supplier); const subtotal = supplierItems.reduce((sum, item) => sum + item.quantity * (item.unitCost ?? 0), 0); return <section key={supplier} className="rounded-xl border border-slate-800"><div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/60 px-4 py-3"><div><p className="font-semibold">{supplier}</p><p className="text-xs text-slate-500">{supplierItems.length} line{supplierItems.length === 1 ? "" : "s"}</p></div>{!priceRestricted ? <strong>{money.format(subtotal)}</strong> : null}</div><div className="divide-y divide-slate-800">{supplierItems.map((item) => <div key={item.id} className={`grid gap-3 p-4 ${priceRestricted ? "lg:grid-cols-[1fr_120px_150px_auto]" : "lg:grid-cols-[1fr_120px_130px_150px_auto]"} lg:items-center`}><div><p className="font-semibold">{item.description}</p><p className="text-xs text-slate-500">{item.stockCode || "No stock code"}</p></div><label className="text-xs text-slate-500">Quantity<input value={item.quantity} onChange={(event) => updateItem(list.id, item.id, { quantity: Number(event.target.value || 0) })} type="number" min="0" step="0.01" className="mt-1 min-h-12 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label>{!priceRestricted ? <label className="text-xs text-slate-500">Unit cost<input value={item.unitCost ?? 0} onChange={(event) => updateItem(list.id, item.id, { unitCost: Number(event.target.value || 0) })} type="number" min="0" step="0.01" className="mt-1 min-h-12 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label> : null}<label className="text-xs text-slate-500">Status<select value={item.status} onChange={(event) => updateItem(list.id, item.id, { status: event.target.value as PurchaseItemStatus })} className="mt-1 min-h-12 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-white">{!statuses.includes(item.status) ? <option value={item.status}>{item.status || "Status not recorded"} · review</option> : null}{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><div className="flex items-center justify-end gap-2">{!priceRestricted ? <strong className="text-sm">{money.format(item.quantity * (item.unitCost ?? 0))}</strong> : null}{item.supplierUrl ? <a href={item.supplierUrl} target="_blank" rel="noreferrer" className="rounded-lg p-2 text-cyan-300 hover:bg-cyan-400/10" aria-label={`Open supplier for ${item.description}`}><ExternalLink className="size-4" /></a> : null}{item.status === "Delivered" ? <CheckCircle2 className="size-5 text-emerald-300" /> : null}</div></div>)}</div></section>; })}{list.notes ? <p className="text-sm text-slate-400">{list.notes}</p> : null}</div></Card>;
+      return <Card key={list.id} className="overflow-hidden p-0"><div className="flex flex-col gap-3 border-b border-slate-800 p-5 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{list.number}</p><h2 className="mt-1 text-xl font-bold">{list.title}</h2><p className="mt-1 text-sm text-slate-400">{jobs.items.find((job) => job.id === list.jobId)?.title || "No linked job"} · {list.items.length} lines</p></div><div className="flex items-center gap-3">{!priceRestricted ? <strong>{money.format(totalCost)}</strong> : null}{!priceRestricted ? <button onClick={() => deleteList(list)} aria-label={`Delete ${list.number}`} className="min-h-12 min-w-12 rounded-lg p-3 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div></div><div className="space-y-5 p-5">{groupedSuppliers.map((supplier) => { const supplierItems = list.items.filter((item) => (item.supplier || "Unassigned") === supplier); const subtotal = supplierItems.reduce((sum, item) => sum + item.quantity * (item.unitCost ?? 0), 0); return <section key={supplier} className="rounded-xl border border-slate-800"><div className="flex items-center justify-between border-b border-slate-800 bg-slate-950/60 px-4 py-3"><div><p className="font-semibold">{supplier}</p><p className="text-xs text-slate-500">{supplierItems.length} line{supplierItems.length === 1 ? "" : "s"}</p></div>{!priceRestricted ? <strong>{money.format(subtotal)}</strong> : null}</div><div className="divide-y divide-slate-800">{supplierItems.map((item) => {
+        const draft = lineDrafts[lineKey(list.id, item.id)];
+        return <div key={item.id} role="group" aria-label={`Edit ${item.description} in ${list.number}`} className={`grid gap-3 p-4 ${priceRestricted ? "lg:grid-cols-[1fr_120px_150px_auto]" : "lg:grid-cols-[1fr_120px_130px_150px_auto]"} lg:items-center`}>
+          <div><p className="font-semibold">{item.description}</p><p className="text-xs text-slate-500">{item.stockCode || "No stock code"}</p></div>
+          <label className="text-xs text-slate-500">Quantity<input value={draft?.quantity ?? item.quantity} onChange={(event) => editLine(list, item, "quantity", event.target.value)} type="number" min="0.01" step="any" inputMode="decimal" className="mt-1 min-h-12 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-base text-white" /></label>
+          {!priceRestricted ? <label className="text-xs text-slate-500">Unit cost<input value={draft?.unitCost ?? item.unitCost ?? 0} onChange={(event) => editLine(list, item, "unitCost", event.target.value)} type="number" min="0" step="any" inputMode="decimal" className="mt-1 min-h-12 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-base text-white" /></label> : null}
+          <label className="text-xs text-slate-500">Status<select value={draft?.status ?? item.status} onChange={(event) => editLine(list, item, "status", event.target.value)} className="mt-1 min-h-12 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-base text-white">{!statuses.includes(item.status) ? <option value={item.status}>{item.status || "Status not recorded"} · review</option> : null}{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
+          <div className="flex items-center justify-end gap-2">{!priceRestricted ? <strong className="text-sm">{money.format(item.quantity * (item.unitCost ?? 0))}</strong> : null}{item.supplierUrl ? <a href={item.supplierUrl} target="_blank" rel="noreferrer" className="flex min-h-12 min-w-12 items-center justify-center rounded-lg text-cyan-300 hover:bg-cyan-400/10" aria-label={`Open supplier for ${item.description}`}><ExternalLink className="size-4" /></a> : null}{item.status === "Delivered" ? <CheckCircle2 className="size-5 text-emerald-300" /> : null}</div>
+          {draft ? <div className="space-y-2 lg:col-span-full"><p className="text-sm text-amber-200">Unsaved changes · Saved quantity {item.quantity} · {item.status || "Status not recorded"}{!priceRestricted ? ` · Unit cost ${money.format(item.unitCost ?? 0)}` : ""}</p><div className="flex flex-wrap gap-2"><button type="button" onClick={() => saveLine(list, item, draft)} className="min-h-12 rounded-xl border border-cyan-400/40 px-4 text-sm font-semibold text-cyan-200">Save line</button><button type="button" onClick={() => discardLine(list.id, item.id)} className="min-h-12 rounded-xl border border-slate-700 px-4 text-sm font-semibold">Use saved values</button></div></div> : null}
+        </div>;
+      })}</div></section>; })}{list.notes ? <p className="text-sm text-slate-400">{list.notes}</p> : null}</div></Card>;
     })}</div>}
 
     <div className="flex justify-end"><Link href="/materials" className="text-sm font-semibold text-cyan-300 hover:text-cyan-200">Open materials library →</Link></div>
