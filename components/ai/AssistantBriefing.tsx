@@ -6,7 +6,7 @@ import { ArrowRight, Search, Sparkles } from "lucide-react";
 import { buildAssistantBriefing, filterAssistantActions, type AssistantFocus } from "../../lib/assistantBriefing";
 import { canAccessPath } from "../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
-import { useAiRemindersCollection, useCertificatesCollection, useInvoicesCollection, useJobsCollection, usePlannerCollection, usePricingDocumentsCollection, usePurchaseListsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useAiRemindersCollection, useCertificatesCollection, useInvoicesCollection, usePaymentsCollection, useJobsCollection, usePlannerCollection, usePricingDocumentsCollection, usePurchaseListsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { Card } from "../ui/Card";
 
 const focuses: AssistantFocus[] = ["All", "Money", "Quotes", "Site", "Diary", "Reminders"];
@@ -28,6 +28,7 @@ function AccountBriefing() {
   const jobs = useJobsCollection();
   const documents = usePricingDocumentsCollection();
   const invoices = useInvoicesCollection();
+  const payments = usePaymentsCollection();
   const planner = usePlannerCollection();
   const purchases = usePurchaseListsCollection();
   const reminders = useAiRemindersCollection();
@@ -42,8 +43,8 @@ function AccountBriefing() {
     window.addEventListener("focus", update);
     return () => { window.clearInterval(timer); window.removeEventListener("focus", update); };
   }, []);
-  const ready = [jobs, documents, invoices, planner, purchases, reminders, certificates].every((store) => store.isReady);
-  const briefing = useMemo(() => buildAssistantBriefing({ jobs: jobs.items, documents: documents.items, invoices: invoices.items, planner: planner.items, purchases: purchases.items, reminders: reminders.items, certificates: certificates.items }, now), [jobs.items, documents.items, invoices.items, planner.items, purchases.items, reminders.items, certificates.items, now]);
+  const ready = [jobs, documents, invoices, payments, planner, purchases, reminders, certificates].every((store) => store.isReady);
+  const briefing = useMemo(() => buildAssistantBriefing({ jobs: jobs.items, documents: documents.items, invoices: invoices.items, payments: payments.items, planner: planner.items, purchases: purchases.items, reminders: reminders.items, certificates: certificates.items }, now), [jobs.items, documents.items, invoices.items, payments.items, planner.items, purchases.items, reminders.items, certificates.items, now]);
   if (!ready) return <Card role="status">Gathering your jobs, quotes and diary…</Card>;
   const visible = filterAssistantActions(briefing.actions, focus, query);
   const urgent = briefing.actions.filter((action) => action.priority === "Now").length;

@@ -20,6 +20,7 @@ import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { buildBusinessCoach } from "../../../lib/aiCommandCentre";
 import { canAccessPath } from "../../../lib/cloud/permissions";
+import { usePaymentsCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { useLocalStorageCollection } from "../../../lib/storage";
 import { pricingDocumentTotal } from "../../../lib/workflow";
@@ -55,22 +56,24 @@ export default function AiBusinessCoachPage() {
   const canOpenBusiness = unrestricted || canAccessPath(identity?.role, "/business", identity?.email);
   const documents = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const payments = usePaymentsCollection();
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
   const reminders = useLocalStorageCollection<AiReminder>("jr-os-ai-reminders");
   const labourSettingsStore = useLocalStorageCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
   const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
-  const ready = [documents, invoices, jobs, certificates, reminders, labourSettingsStore].every((store) => store.isReady);
+  const ready = [documents, invoices, payments, jobs, certificates, reminders, labourSettingsStore].every((store) => store.isReady);
   const coach = useMemo(
     () => buildBusinessCoach({
       documents: documents.items,
       invoices: invoices.items,
+      payments: payments.items,
       jobs: jobs.items,
       certificates: certificates.items,
       reminders: reminders.items,
       labourSettings,
     }),
-    [certificates.items, documents.items, invoices.items, jobs.items, labourSettings, reminders.items],
+    [certificates.items, documents.items, invoices.items, payments.items, jobs.items, labourSettings, reminders.items],
   );
 
   const context = useMemo(() => {

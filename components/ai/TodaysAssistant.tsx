@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import { canAccessPath } from "../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
-import { invoiceTotal } from "../../lib/workflow";
+import { assistantInvoiceBalance } from "../../lib/assistantSignals-core.mjs";
+import { effectiveInvoicePaid, type PaymentRecord } from "../../lib/payments";
 import type { AiRecommendation } from "../../lib/aiCommandCentre";
 import type { AiReminder, AiReminderPriority, Customer, CustomerProfile, Invoice, Job, PlannerEntry, PricingDocument, PurchaseList } from "../../lib/models";
 import { Button } from "../ui/Button";
@@ -31,6 +32,7 @@ interface TodaySnapshot {
   todaysJobs: Job[];
   todaysPlanner: PlannerEntry[];
   overdueInvoices: Invoice[];
+  payments?: PaymentRecord[];
   quoteFollowUps: PricingDocument[];
   dueReminders: AiReminder[];
   customerFollowUps: CustomerProfile[];
@@ -69,7 +71,8 @@ export function TodaysAssistant({
     notes: "",
   });
   const customerNames = new Map(customers.map((customer) => [customer.id, customer.name]));
-  const overdueValue = snapshot.overdueInvoices.reduce((sum, invoice) => sum + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
+  const balance = (invoice: Invoice) => assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, snapshot.payments || []));
+  const overdueValue = snapshot.overdueInvoices.reduce((sum, invoice) => sum + balance(invoice), 0);
   const materialItemsNeeded = snapshot.materialsToOrder?.reduce((sum, list) => sum + list.items.filter((item) => item.status === "Needed").length, 0) ?? 0;
   const extendedOperations = snapshot.todaysSurveys !== undefined || snapshot.materialsToOrder !== undefined || snapshot.certificatesOutstanding !== undefined || snapshot.businessHealthScore !== undefined;
   const businessHealthCard = (
@@ -157,7 +160,7 @@ export function TodaysAssistant({
             {snapshot.overdueInvoices.slice(0, 4).map((invoice) => (
               <Link key={invoice.id} href="/invoices" className="flex items-center justify-between gap-3 rounded-lg bg-slate-950 px-3 py-2 text-sm hover:bg-slate-800">
                 <span className="truncate">{invoice.number}</span>
-                <strong className="shrink-0 text-red-300">{money.format(Math.max(0, invoiceTotal(invoice) - invoice.amountPaid))}</strong>
+                <strong className="shrink-0 text-red-300">{money.format(balance(invoice))}</strong>
               </Link>
             ))}
             {!snapshot.overdueInvoices.length ? <p className="text-sm text-slate-500">Nothing overdue.</p> : null}

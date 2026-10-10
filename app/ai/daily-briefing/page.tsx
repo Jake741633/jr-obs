@@ -6,7 +6,9 @@ import { FinanceDirectorInsights } from "../../../components/FinanceDirectorInsi
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useLocalStorageCollection } from "../../../lib/storage";
-import { assistantDateKey, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "../../../lib/assistantSignals-core.mjs";
+import { assistantDateKey, assistantInvoiceBalance, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "../../../lib/assistantSignals-core.mjs";
+import { effectiveInvoicePaid } from "../../../lib/payments";
+import { usePaymentsCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { isJobInactiveStatus } from "../../../lib/jobManagement-core.mjs";
 import type { CustomerProfile, ElectricalCertificate, Invoice, Job, PlannerEntry, PricingDocument, PurchaseList, SiteSurvey } from "../../../lib/models";
 
@@ -24,19 +26,20 @@ export default function DailyBriefingPage() {
   const planner = useLocalStorageCollection<PlannerEntry>("jr-os-planner");
   const pricing = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const payments = usePaymentsCollection();
   const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
   const purchases = useLocalStorageCollection<PurchaseList>("jr-os-purchase-lists");
   const certificates = useLocalStorageCollection<ElectricalCertificate>("jr-os-certificates");
   const profiles = useLocalStorageCollection<CustomerProfile>("jr-os-customer-profiles");
 
-  const ready = jobs.isReady && planner.isReady && pricing.isReady && invoices.isReady && surveys.isReady && purchases.isReady && certificates.isReady && profiles.isReady;
+  const ready = jobs.isReady && planner.isReady && pricing.isReady && invoices.isReady && payments.isReady && surveys.isReady && purchases.isReady && certificates.isReady && profiles.isReady;
 
   const todaysJobs = jobs.items.filter((job) => job.startDate === today && !isJobInactiveStatus(job.status));
   const todaysPlanner = planner.items.filter((entry) => entry.date === today && ["Planned", "Confirmed"].includes(entry.status));
   const surveysDue = surveys.items.filter((survey) => survey.status !== "Complete");
   const sentQuotes = pricing.items.filter((item) => assistantQuoteFollowUpDue(item, now));
-  const overdueInvoices = invoices.items.filter((invoice) => isAssistantInvoiceOverdue(invoice, now));
-  const overdueValue = overdueInvoices.reduce((sum, invoice) => sum + Math.max(0, documentTotal(invoice) - invoice.amountPaid), 0);
+  const overdueInvoices = invoices.items.filter((invoice) => isAssistantInvoiceOverdue(invoice, now, effectiveInvoicePaid(invoice, payments.items)));
+  const overdueValue = overdueInvoices.reduce((sum, invoice) => sum + assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, payments.items)), 0);
   const purchaseAttention = purchases.items.filter((list) => list.items.some((item) => item.status === "Needed" || item.status === "Ordered"));
   const certificatesToIssue = certificates.items.filter((certificate) => certificate.status === "Complete");
   const reviewsToRequest = profiles.items.filter((profile) => profile.reviewStatus === "Not requested");
@@ -49,7 +52,7 @@ export default function DailyBriefingPage() {
     { title: "Today's jobs", detail: `${todaysJobs.length} job${todaysJobs.length === 1 ? "" : "s"} starting today`, href: "/jobs", icon: BriefcaseBusiness, items: todaysJobs.slice(0, 4).map((job) => `${job.title} · ${job.siteAddress || "No address"}`) },
     { title: "Today's planner", detail: `${todaysPlanner.length} confirmed or planned entr${todaysPlanner.length === 1 ? "y" : "ies"}`, href: "/planner", icon: CalendarDays, items: todaysPlanner.slice(0, 4).map((entry) => `${entry.startTime || "Time TBC"} · ${entry.title}`) },
     { title: "Quote follow-ups", detail: `${sentQuotes.length} sent quote${sentQuotes.length === 1 ? "" : "s"}`, href: "/quotes", icon: FileText, items: sentQuotes.slice(0, 4).map((quote) => `${quote.number} · ${quote.title || "Untitled"} · ${money.format(documentTotal(quote))}`) },
-    { title: "Overdue invoices", detail: `${money.format(overdueValue)} overdue`, href: "/invoices", icon: ReceiptText, items: overdueInvoices.slice(0, 4).map((invoice) => `${invoice.number} · ${invoice.title} · ${money.format(Math.max(0, documentTotal(invoice) - invoice.amountPaid))}`) },
+    { title: "Overdue invoices", detail: `${money.format(overdueValue)} overdue`, href: "/invoices", icon: ReceiptText, items: overdueInvoices.slice(0, 4).map((invoice) => `${invoice.number} · ${invoice.title} · ${money.format(assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, payments.items)))}`) },
     { title: "Survey queue", detail: `${surveysDue.length} incomplete survey${surveysDue.length === 1 ? "" : "s"}`, href: "/surveys", icon: ClipboardCheck, items: surveysDue.slice(0, 4).map((survey) => `${survey.number} · ${survey.status}`) },
     { title: "Materials and orders", detail: `${purchaseAttention.length} purchase list${purchaseAttention.length === 1 ? "" : "s"} need attention`, href: "/purchases", icon: PackageCheck, items: purchaseAttention.slice(0, 4).map((list) => `${list.number} · ${list.title}`) },
     { title: "Certificates to issue", detail: `${certificatesToIssue.length} completed certificate${certificatesToIssue.length === 1 ? "" : "s"}`, href: "/certificates", icon: AlertTriangle, items: certificatesToIssue.slice(0, 4).map((certificate) => `${certificate.number} · ${certificate.type}`) },

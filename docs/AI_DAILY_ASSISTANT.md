@@ -2,7 +2,7 @@
 
 `/ai/assistant` is a compact, read-only briefing for owner, admin and office
 accounts. It uses existing account-scoped collection hooks for jobs, quotes,
-invoices, planner entries, purchase lists, reminders and certificates. No external
+invoices, recorded payments, planner entries, purchase lists, reminders and certificates. No external
 model, API key, new collection, schema change or write action is introduced.
 
 The assistant ranks individual actions by urgency, calendar due date and stable
@@ -13,7 +13,7 @@ control. Each card explains its reason, next step and saved evidence.
 ## Connected checks
 
 - **Money:** only sent, part-paid or overdue invoices with a positive remaining
-  balance and a valid past due date. Draft, settled and cancelled invoices are
+  balance and a valid past due date. Balance uses the existing payment policy: the higher of the invoice paid amount and its linked ledger payments, including credits and refunds. These two paid amounts are not added together. Draft, settled and cancelled invoices are
   excluded. Completed/invoiced jobs with no linked non-cancelled invoice get a
   billing review, not an automatic new invoice.
 - **Quotes:** saved next-follow-up dates take precedence over the default
@@ -35,7 +35,9 @@ control. Each card explains its reason, next step and saved evidence.
 - **Reminders:** incomplete reminders due today or earlier remain visible.
 
 The shared invoice/follow-up predicates also correct the existing Today’s
-Assistant, Smart Recommendations and daily invoice briefing. Calendar comparisons
+Assistant, Smart Recommendations, daily invoice briefing, home dashboard and
+Business Coach outstanding-money totals. Draft invoices are excluded from
+outstanding-money figures. Calendar comparisons
 use the device's local date; the new assistant refreshes its clock each minute
 and when the app regains focus.
 
@@ -43,7 +45,7 @@ and when the app regains focus.
 
 Authorization is checked before mounting any business hooks. Identity resolution
 hides the briefing; a change to mode, organisation, user, role or customer scope
-remounts both collections and local search state. Every source must be ready
+remounts both collections and local search state. Every source, including the payment ledger, must be ready
 before recommendations appear. Existing RLS, cache, queue, tombstone and conflict
 handling remain in place. There is no new response cache or automatic mutation.
 
@@ -67,3 +69,5 @@ Required release gates remain `npm test`, lint, build, TypeScript, dependency
 audit, both CI workflows, SQL and full Supabase rehearsals, and preview checks.
 Signed-in physical iPhone/Android acceptance and actual production recovery
 evidence remain separate requirements in `RELEASE_REVIEW.md`.
+
+Payment regression cases execute the actual ledger policy, assistant, Today and Smart Recommendations, including full/partial payments, credit notes, refunds, overpayments, unrelated invoices, avoiding duplicate paid amounts, ledger readiness and source immutability. Existing payment-policy semantics and records are unchanged.

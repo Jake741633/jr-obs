@@ -4,6 +4,8 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import * as permissions from "../lib/cloud/permissions.ts";
+import * as assistantSignals from "../lib/assistantSignals-core.mjs";
+import * as paymentHelpers from "../lib/payments.ts";
 import manifest from "../app/manifest.ts";
 
 const owner = { organisationId: "org-a", userId: "owner-a", role: "owner" };
@@ -26,10 +28,10 @@ function compile(path, dependencies, window) {
   return mod.exports;
 }
 function harness() {
-  let snapshot = { identity: owner, mode: "cloud", isReady: true }, ready = true;
+  let snapshot = { identity: owner, mode: "cloud", isReady: true }, ready = true, paymentsReady = true;
   let active, cursor;
   const state = new Map(), reads = [], clocks = [];
-  const hooks = Object.fromEntries(["Jobs", "PricingDocuments", "Invoices", "Planner", "PurchaseLists", "AiReminders", "Certificates"].map((name) => [`use${name}Collection`, () => { reads.push(snapshot.identity?.organisationId); return { items: [], isReady: ready }; }]));
+  const hooks = Object.fromEntries(["Jobs", "PricingDocuments", "Invoices", "Payments", "Planner", "PurchaseLists", "AiReminders", "Certificates"].map((name) => [`use${name}Collection`, () => { reads.push(snapshot.identity?.organisationId); return { items: [], isReady: ready && (name !== "Payments" || paymentsReady) }; }]));
   const components = compile("../components/ai/AssistantBriefing.tsx", {
     react: {
       useState(initial) { const index = cursor++; if (!(index in active)) active[index] = typeof initial === "function" ? initial() : initial; const own = active; return [own[index], (value) => { own[index] = typeof value === "function" ? value(own[index]) : value; }]; },
@@ -49,7 +51,7 @@ function harness() {
     return { ...node, props: { ...node.props, children: expand(node.props?.children, `${path}/children`) } };
   }
   const render = () => expand(jsx(components.AssistantBriefing, {}));
-  return { reads, render, setSnapshot(value) { snapshot = { ...snapshot, ...value }; }, setReady(value) { ready = value; }, search(query) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value: query } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
+  return { reads, render, setSnapshot(value) { snapshot = { ...snapshot, ...value }; }, setReady(value) { ready = value; }, setPaymentsReady(value) { paymentsReady = value; }, search(query) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value: query } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
 }
 
 test("assistant denies unauthorized or unresolved accounts before reading business collections", () => {
@@ -66,7 +68,7 @@ test("office, owner and admin can review the briefing with no mutation controls"
   for (const role of ["owner", "admin", "office"]) {
     const h = harness(); h.setSnapshot({ identity: { ...owner, role } });
     const view = h.render(); assert.match(text(view), /org-a invoice/);
-    assert.equal(h.reads.length, 7);
+    assert.equal(h.reads.length, 8);
     assert.ok(nodes(view).filter((n) => n.type === "Link").every((n) => permissions.canAccessPath(role, permissions.internalPathForAccess(n.props.href))));
   }
 });
@@ -128,4 +130,26 @@ test("installed app shortcuts have same-origin guarded destinations and usable i
   assert.deepEqual(shortcuts.map((item) => item.url), ["/app", "/ai/assistant", "/quotes/mobile"]);
   for (const shortcut of shortcuts) { assert.ok(permissions.internalPathForAccess(shortcut.url)); assert.ok(shortcut.icons[0].src.startsWith("/icons/")); }
   assert.equal(permissions.canAccessPath("electrician", "/ai/assistant"), false);
+});
+
+test("assistant waits for ledger readiness before showing payment recommendations", () => {
+  const h = harness(); h.setPaymentsReady(false);
+  assert.match(text(h.render()), /Gathering your jobs/);
+  assert.doesNotMatch(text(h.render()), /org-a invoice/);
+  h.setPaymentsReady(true);
+  assert.match(text(h.render()), /org-a invoice/);
+});
+
+test("Today's Assistant displays ledger-aware per-invoice amounts and their total", () => {
+  const mod = compile("../components/ai/TodaysAssistant.tsx", {
+    react: { useState: (initial) => [initial, () => {}] },
+    "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: owner, mode: "cloud" }) },
+    "../../lib/assistantSignals-core.mjs": assistantSignals,
+    "../../lib/payments": paymentHelpers,
+    "../ui/Button": { Button: "Button" }, "../ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
+  });
+  const snapshot = { today: "2026-10-10", todaysJobs: [], todaysPlanner: [], quoteFollowUps: [], dueReminders: [], customerFollowUps: [], urgentActions: [], overdueInvoices: [{ id: "i1", number: "INV-1", amountPaid: 40, items: [{ quantity: 2, unitPrice: 100 }], vatEnabled: true, vatRate: 20 }], payments: [{ invoiceId: "i1", type: "Payment", amount: 100 }] };
+  const view = mod.TodaysAssistant({ snapshot, customers: [], onAddReminder() {}, onToggleReminder() {} });
+  assert.equal((text(view).match(/£140\.00/g) || []).length, 2);
+  assert.doesNotMatch(text(view), /£200\.00|£100\.00/);
 });

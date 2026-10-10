@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import * as signals from "../lib/assistantSignals-core.mjs";
+import * as paymentsCore from "../lib/payments-core.mjs";
 import * as jobsCore from "../lib/jobManagement-core.mjs";
 
 function compile(path, dependencies = {}) {
@@ -12,9 +13,10 @@ function compile(path, dependencies = {}) {
   vm.runInNewContext(output, { module: mod, exports: mod.exports, Date, Intl, require(name) { assert.ok(name in dependencies, name); return dependencies[name]; } });
   return mod.exports;
 }
+const payments = compile("../lib/payments.ts", { "./payments-core.mjs": paymentsCore });
 const scheduling = compile("../lib/scheduling.ts");
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
-const { buildAssistantBriefing, filterAssistantActions } = compile("../lib/assistantBriefing.ts", { "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals });
+const { buildAssistantBriefing, filterAssistantActions } = compile("../lib/assistantBriefing.ts", { "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
 const now = new Date(2026, 9, 10, 10, 0, 0);
 const invoice = (patch = {}) => ({ id: "i/1?#", number: "INV-01", title: "Workshop lights", status: "Sent", dueDate: "2026-10-09", items: [{ quantity: 2, unitPrice: 100 }], vatEnabled: true, vatRate: 20, amountPaid: 40, ...patch });
 const quote = (patch = {}) => ({ id: "q1", number: "Q-01", title: "Workshop", type: "Quote", status: "Sent", validUntil: "2026-11-01", updatedAt: "2026-10-01T12:00:00Z", ...patch });
@@ -115,4 +117,48 @@ test("search and focus work together without changing or persisting source recor
   assert.equal(filterAssistantActions(briefing.actions, "Quotes", "INV-01").length, 0);
   assert.equal(filterAssistantActions(briefing.actions, "All", "unknown").length, 0);
   assert.equal(JSON.stringify(input), before);
+});
+
+const payment = (patch = {}) => ({ id: "p1", invoiceId: "i/1?#", type: "Payment", amount: 240, reconciliationStatus: "Allocated", ...patch });
+test("assistant counts ledger payments before recommending a chase, without double-counting invoice paid amounts", () => {
+  assert.equal(actions({ invoices: [invoice()], payments: [payment()] }).length, 0);
+  const partial = actions({ invoices: [invoice()], payments: [payment({ amount: 100 })] });
+  assert.equal(partial.length, 1);
+  assert.match(partial[0].reason, /£140\.00 remains unpaid/);
+  assert.match(partial[0].evidence.join(" "), /Effective recorded paid: £100\.00/);
+  assert.match(actions({ invoices: [invoice({ amountPaid: 150 })], payments: [payment({ amount: 100 })] })[0].reason, /£90\.00/);
+  assert.match(actions({ invoices: [invoice()], payments: [payment({ invoiceId: "another-invoice" })] })[0].reason, /£200\.00/);
+});
+
+test("assistant payment evidence follows existing credit/refund rules and leaves source records untouched", () => {
+  const inputs = records({ invoices: [invoice({ amountPaid: 0 })], payments: [payment(), payment({ id: "refund", type: "Refund", amount: 40 })] });
+  const before = JSON.stringify(inputs);
+  assert.match(buildAssistantBriefing(inputs, now).actions[0].reason, /£40\.00/);
+  assert.equal(JSON.stringify(inputs), before);
+  assert.equal(actions({ invoices: [invoice()], payments: [payment({ type: "Credit note" })] }).length, 0);
+  assert.equal(actions({ invoices: [invoice()], payments: [payment({ amount: 300 })] }).length, 0);
+});
+
+const commandCentre = compile("../lib/aiCommandCentre.ts", {
+  "./quoteEngine": {}, "./workflow": {}, "./aiLearning": {}, "./scheduling": scheduling,
+  "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard,
+  "./assistantSignals-core.mjs": signals, "./payments": payments,
+});
+test("legacy Today and Smart Recommendations share the same payment-aware evidence", () => {
+  const data = { ...records({ invoices: [invoice()], payments: [payment()] }), profiles: [], recommendations: [], labourSettings: { targetNetMargin: 25 }, now };
+  assert.equal(commandCentre.buildSmartRecommendations(data).some((item) => item.id === "overdue-invoices"), false);
+  const today = commandCentre.buildTodayAssistant(data);
+  assert.equal(today.overdueInvoices.length, 0);
+  assert.equal(today.payments, data.payments);
+  const partial = { ...data, payments: [payment({ amount: 100 })] };
+  assert.match(commandCentre.buildSmartRecommendations(partial).find((item) => item.id === "overdue-invoices").detail, /£140\.00/);
+  assert.equal(commandCentre.buildTodayAssistant(partial).overdueInvoices.length, 1);
+});
+
+test("Business Coach excludes draft and ledger-settled balances from debt totals", () => {
+  const data = { ...records({ invoices: [invoice({ issueDate: "2026-10-01" }), invoice({ id: "draft", status: "Draft", issueDate: "2026-10-01" })], payments: [payment()] }), labourSettings: { targetNetMargin: 25 }, now };
+  const full = commandCentre.buildBusinessCoach(data);
+  assert.equal(full.unpaidInvoiceValue, 0); assert.equal(full.overdueInvoiceCount, 0);
+  const partial = commandCentre.buildBusinessCoach({ ...data, payments: [payment({ amount: 100 })] });
+  assert.equal(partial.unpaidInvoiceValue, 140); assert.equal(partial.overdueInvoiceCount, 1);
 });
