@@ -61,6 +61,10 @@ A recurring series can be partly saved: its confirmed count and remaining dates 
 
 ## Diary dates and touch controls
 
+Upcoming clash signals now use only planned/confirmed visits with real calendar ranges and explicit valid start/end times. Completed/cancelled history, past visits and unsupported statuses cannot create current clash signals. Missing times are not inferred from estimated duration, and invalid/reversed dates cannot become overlaps. Shared worker signals are deduplicated; real staff, vehicle and job conflicts retain their source identities and labels.
+
+Diary details need review keeps uncertain current/future or unplaceable records visible outside the calendar, even when invalid dates prevent a card from appearing on a day. Four review cards appear first, with progressive reveal, a read-only affected-day action for valid dates and an exact linked-job review when available. It refreshes with the phone's local day. The page separates these reviews from timed clashes and explains that no warning is not proof of availability or site readiness. History and stored records are not rewritten by these checks.
+
 Next visit planning lists active jobs without an ongoing or future planned/confirmed Job visit, together with work bookings whose dates or status need review. Completed, cancelled and past visits cannot hide the need for another visit; surveys, deliveries and other appointments are kept separate from work bookings. Uncertain records remain visible, including alongside a valid booking, and their one-tap booking action stays disabled until reviewed. The list searches job name, address and status, starts with four cards and reveals four more at a time. Review links retain the exact saved job id.
 
 Book next visit prepares an unsaved form using that job. Old, invalid or reversed job dates cannot prefill a booking in the past; valid future dates remain available for review. It cannot replace a partially saved recurring series. The list follows the phone's local date and refreshes each minute and on app focus. These checks describe loaded records and do not confirm availability, assignment, sync or site readiness.

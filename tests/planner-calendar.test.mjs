@@ -390,3 +390,78 @@ test("next-visit planning refreshes after local midnight and when the app regain
   h.advance("2026-10-12T07:00:00", true); assert.match(text(h.render()), /Continuing work.*No ongoing or future work visit found/);
   assert.equal(h.writes(), 0);
 });
+
+test("clash signals require active visits and never infer timing from history or estimated duration", () => {
+  const timed = entry({ date: "2026-10-10", endDate: undefined, teamMemberIds: ["worker"] });
+  for (const patch of [{ status: "Complete" }, { status: "Cancelled" }, { status: "Tentative" }, { startTime: "", endTime: "", estimatedDurationMinutes: 90 }, { endTime: "", estimatedDurationMinutes: 90 }, { startTime: "", estimatedDurationMinutes: 90 }, { startTime: "24:00" }, { endTime: "12:60" }, { startTime: "9:00" }, { startTime: "12:00", endTime: "09:00" }, { startTime: "09:00", endTime: "09:00" }]) {
+    assert.equal(scheduling.detectScheduleClashes([{ ...timed, ...patch }, { ...timed, id: "other" }], [], []).length, 0, JSON.stringify(patch));
+  }
+  assert.match(scheduling.plannerVisitReviewIssues({ ...timed, endTime: "", estimatedDurationMinutes: 90 }).join(" "), /no timed clash can be confirmed/);
+  assert.match(scheduling.plannerVisitReviewIssues({ ...timed, status: "Tentative" }).join(" "), /Unsupported visit status: Tentative/);
+});
+
+test("invalid or reversed calendar dates cannot become a date overlap or a timed clash", () => {
+  const timed = entry({ date: "2026-10-10", endDate: undefined, teamMemberIds: ["worker"] });
+  for (const patch of [{ date: "2026-02-30" }, { date: "bad" }, { date: "" }, { endDate: "2026-13-01" }, { endDate: "2026-10-09" }]) {
+    const invalid = { ...timed, ...patch };
+    assert.equal(scheduling.dateRangeOverlaps(invalid, invalid), false);
+    assert.equal(scheduling.timeRangeOverlaps(invalid, invalid), false);
+    assert.equal(scheduling.detectScheduleClashes([invalid, { ...invalid, id: "other" }], [], []).length, 0);
+    assert.match(scheduling.plannerVisitReviewIssues(invalid).join(" "), /dates are missing, invalid or reversed/);
+  }
+});
+
+test("real overlaps retain staff vehicle and job evidence once without mutating source assignments", () => {
+  const a = entry({ date: "2026-10-10", endDate: undefined, jobId: "j1", vehicleId: "van", teamMemberIds: ["worker", "worker"] });
+  const b = entry({ id: "other", date: "2026-10-10", endDate: undefined, jobId: "j1", vehicleId: "van", teamMemberIds: ["worker"], startTime: "11:00", endTime: "13:00" });
+  const saved = [a, b], before = structuredClone(saved);
+  const signals = scheduling.detectScheduleClashes(saved, [{ id: "worker", name: "Jake" }], [{ id: "van", registration: "JR 01" }]);
+  assert.deepEqual(signals.map((signal) => [signal.kind, signal.label]), [["Staff", "Jake"], ["Vehicle", "JR 01"], ["Job", "Overlapping visits for the same job"]]);
+  assert.ok(signals.every((signal) => signal.entryId === "e1" && signal.otherEntryId === "other"));
+  assert.deepEqual(saved, before);
+});
+
+test("explicit overlap checks respect touching endpoints and multi-day work windows", () => {
+  const a = entry({ date: "2026-10-08", endDate: "2026-10-12", teamMemberIds: ["worker"] });
+  for (const [patch, overlaps] of [[{ date: "2026-10-10", endDate: undefined, startTime: "11:00" }, true], [{ date: "2026-10-10", endDate: undefined, startTime: "12:00", endTime: "13:00" }, false], [{ date: "2026-10-13", endDate: undefined, startTime: "10:00" }, false]]) {
+    const b = { ...a, id: "other", ...patch }; assert.equal(scheduling.timeRangeOverlaps(a, b), overlaps);
+    assert.equal(scheduling.detectScheduleClashes([a, b], [], []).length, overlaps ? 1 : 0);
+  }
+});
+
+test("planner separates uncertain diary records from clashes and keeps invalid dates visible for review", () => {
+  const saved = [entry({ id: "untimed", title: "Untimed visit", jobId: "j /?#", date: "2026-10-12", endDate: undefined, startTime: "", endTime: "" }), entry({ id: "invalid", title: "Invalid visit", date: "2026-02-30", endDate: undefined }), entry({ id: "unknown", title: "Unknown visit", date: "2026-10-12", endDate: undefined, status: "Tentative" }), entry({ id: "finished", title: "Completed history", date: "2026-10-12", endDate: undefined, status: "Complete", startTime: "" })];
+  const h = harness({ jobs: [job({ id: "j /?#" })], entries: saved }); const view = h.render();
+  assert.match(text(view), /Upcoming clash signals03 diary record\(s\) need a separate details review/);
+  const reviews = nodes(view).filter((n) => n.type === "article" && n.props["aria-label"]?.startsWith("Diary review")); assert.equal(reviews.length, 3);
+  assert.ok(reviews.some((n) => /Invalid visit.*2026-02-30.*dates are missing, invalid or reversed/.test(text(n))));
+  const bad = reviews.find((n) => text(n).startsWith("Invalid visit")); assert.equal(nodes(bad).some((n) => n.type === "button" && text(n) === "Show visit day"), false);
+  const link = nodes(view).find((n) => n.type === "Link" && text(n) === "Review linked job"); assert.equal(link.props.href, "/jobs/j%20%2F%3F%23");
+  assert.doesNotMatch(text(view), /Clashes need review/); assert.equal(h.writes(), 0); assert.deepEqual(h.entries(), saved);
+});
+
+test("phone diary review reveals four records at a time and opens only a valid affected day", () => {
+  const saved = Array.from({ length: 7 }, (_, i) => entry({ id: `e${i}`, title: `Untimed ${i}`, date: "2026-11-10", endDate: undefined, startTime: "", endTime: "", teamMemberIds: ["worker"] }));
+  const h = harness({ entries: saved });
+  const reviews = () => nodes(h.render()).filter((n) => n.type === "article" && n.props["aria-label"]?.startsWith("Diary review"));
+  assert.equal(reviews().length, 4); h.click("Show more diary reviews (3 remaining)"); assert.equal(reviews().length, 7);
+  assert.ok(nodes(reviews()).filter((n) => n.type === "button").every((n) => n.props.className.includes("min-h-12")));
+  h.click("Show visit day"); assert.match(text(h.render()), /Day diary centred on.*10 Nov 2026/);
+  assert.match(text(h.render()), /No warning does not confirm availability or site readiness/);
+  assert.equal(h.writes(), 0); assert.deepEqual(h.entries(), saved);
+});
+
+test("planner upcoming clash signals exclude past and completed history independently of the viewed month", () => {
+  const pair = (date, status = "Planned") => [entry({ id: `${date}-${status}-a`, date, endDate: undefined, status, teamMemberIds: ["worker"] }), entry({ id: `${date}-${status}-b`, date, endDate: undefined, status, teamMemberIds: ["worker"] })];
+  const h = harness({ entries: [...pair("2026-01-31"), ...pair("2026-10-12", "Complete"), ...pair("2026-10-12")] });
+  const view = h.render(); assert.match(text(view), /Upcoming clash signals1/); assert.match(text(view), /Clashes need review/);
+  assert.match(text(view), /Day diary centred on.*31 Jan 2026/); assert.equal(h.writes(), 0);
+});
+
+test("clash and timing review counts refresh after local midnight without clearing saved history", () => {
+  const saved = [entry({ date: "2026-10-10", endDate: undefined, teamMemberIds: ["worker"] }), entry({ id: "other", date: "2026-10-10", endDate: undefined, teamMemberIds: ["worker"] }), entry({ id: "untimed", date: "2026-10-10", endDate: undefined, startTime: "" })];
+  const h = harness({ entries: saved }); assert.match(text(h.render()), /Upcoming clash signals11 diary record/);
+  h.advance("2026-10-11T00:01:00"); assert.match(text(h.render()), /Upcoming clash signals00 diary record/);
+  assert.doesNotMatch(text(h.render()), /Diary details need review|Clashes need review/);
+  assert.deepEqual(h.entries(), saved); assert.equal(h.writes(), 0);
+});
