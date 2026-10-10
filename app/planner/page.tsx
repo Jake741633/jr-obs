@@ -11,6 +11,7 @@ import { useCustomersCollection, useJobsCollection, usePlannerCollection } from 
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, plannerViewDate, plannerDateKey, shiftPlannerDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
 import type { FleetVehicle, Job, PlannerEntryType, TeamMember } from "../../lib/models";
+import { isJobInactiveStatus, isJobOnSiteStatus, normaliseJobStatus } from "../../lib/jobManagement-core.mjs";
 
 const types: PlannerEntryType[] = ["Job", "Survey", "Delivery", "Training", "Holiday", "Office", "Other"];
 const statuses: ScheduledPlannerEntry["status"][] = ["Planned", "Confirmed", "Complete", "Cancelled"];
@@ -36,11 +37,12 @@ export default function PlannerPage() {
   const [form, setForm] = useState(freshForm);
   const [showForm, setShowForm] = useState(false);
   const [message, setMessage] = useState("");
+  const ready = [entries, jobs, customers, team, vehicles].every((store) => store.isReady);
 
   const clashes = useMemo(() => detectScheduleClashes(entries.items, team.items, vehicles.items), [entries.items, team.items, vehicles.items]);
   const visible = useMemo(() => entries.items.filter((entry) => dateWithinView(entry.date, anchor, view, entryEndDate(entry))).toSorted((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)), [entries.items, anchor, view]);
   const allocatedJobIds = useMemo(() => new Set(entries.items.filter((entry) => entry.status !== "Cancelled").map((entry) => entry.jobId).filter(Boolean)), [entries.items]);
-  const unallocatedJobs = jobs.items.filter((job) => !allocatedJobIds.has(job.id) && job.status !== "Complete" && job.status !== "On hold");
+  const unallocatedJobs = jobs.items.filter((job) => !allocatedJobIds.has(job.id) && !isJobInactiveStatus(job.status));
 
   useEffect(() => {
     if (deepLinkHandled.current || !customers.isReady || !jobs.isReady) return;
@@ -101,23 +103,62 @@ export default function PlannerPage() {
   }
 
   function moveEntry(entry: ScheduledPlannerEntry, days: number) {
-    const date = shiftPlannerDate(entry.date, days);
-    const endDate = shiftPlannerDate(entryEndDate(entry), days);
-    if (!date || !endDate || endDate < date) { setMessage("This entry has invalid or unsupported dates. Review it before moving it."); return; }
-    entries.setItems((current) => current.map((item) => item.id === entry.id ? { ...item, date, endDate, updatedAt: new Date().toISOString() } : item));
+    if (!ready) { setMessage("Wait for scheduling records to finish loading before moving a visit."); return; }
+    try {
+      const moved = entries.updateItem(entry.id, (current) => {
+        if (JSON.stringify(current) !== JSON.stringify(entry)) throw new Error("This visit has changed. Review its current record before moving it.");
+        if (!["Planned", "Confirmed"].includes(current.status)) throw new Error("Only planned or confirmed visits can be moved. Review completed or cancelled history separately.");
+        const date = shiftPlannerDate(current.date, days);
+        const endDate = shiftPlannerDate(entryEndDate(current), days);
+        if (!date || !endDate || endDate < date) throw new Error("This entry has invalid or unsupported dates. Review it before moving it.");
+        return { ...current, date, endDate, updatedAt: new Date().toISOString() };
+      });
+      setMessage(`${moved.title} moved to ${displayDate(moved.date)} on this device. Check sync status before switching devices. Any clashes remain visible.`);
+    } catch (error) {
+      setMessage(`Visit move could not be confirmed. Review and retry. ${error instanceof Error ? error.message : ""}`);
+    }
   }
 
   function markStarted(entry: ScheduledPlannerEntry) {
-    if (entry.jobId) jobs.setItems((current) => current.map((job) => job.id === entry.jobId ? { ...job, status: "In progress", updatedAt: new Date().toISOString() } : job));
-    entries.setItems((current) => current.map((item) => item.id === entry.id ? { ...item, status: "Confirmed", updatedAt: new Date().toISOString() } : item));
-    setMessage(`${entry.title} marked as started.`);
+    if (!ready) { setMessage("Wait for scheduling records to finish loading before confirming a visit."); return; }
+    let currentEntry: ScheduledPlannerEntry;
+    let savedJob: Job | undefined;
+    let startedJob = false;
+    try {
+      // Validate the current visit without writing before attempting a job save.
+      currentEntry = entries.updateItem(entry.id, (current) => {
+        if (JSON.stringify(current) !== JSON.stringify(entry)) throw new Error("This visit has changed. Review its current record before confirming it.");
+        if (!["Planned", "Confirmed"].includes(current.status)) throw new Error("Completed or cancelled visits cannot be started or reconfirmed.");
+        return current;
+      });
+      if (currentEntry.type === "Job" && currentEntry.jobId) {
+        savedJob = jobs.updateItem(currentEntry.jobId, (current) => {
+          if (isJobOnSiteStatus(current.status)) return current;
+          if (normaliseJobStatus(current.status) !== "Scheduled") throw new Error(`Job status is ${current.status}. Review the job before starting; only scheduled jobs can start here.`);
+          startedJob = true;
+          return { ...current, status: "First fix", updatedAt: new Date().toISOString() };
+        });
+      }
+    } catch (error) {
+      setMessage(`Start or confirmation could not be confirmed. Review the saved records before retrying. ${error instanceof Error ? error.message : ""}`);
+      return;
+    }
+    try {
+      entries.updateItem(currentEntry.id, (current) => {
+        if (JSON.stringify(current) !== JSON.stringify(currentEntry)) throw new Error("This visit has changed. Review its current record before confirming it.");
+        return current.status === "Confirmed" ? current : { ...current, status: "Confirmed", updatedAt: new Date().toISOString() };
+      });
+      setMessage(`${currentEntry.title}: ${startedJob ? "job saved as First fix and " : ""}visit confirmed on this device.${savedJob && !startedJob ? ` Job status remains ${savedJob.status}.` : ""} Check sync status before switching devices.`);
+    } catch (error) {
+      setMessage(`${startedJob ? "Job saved as First fix on this device, but " : ""}visit confirmation could not be confirmed. Review the records and retry Confirm visit; the saved job will not be restarted. ${error instanceof Error ? error.message : ""}`);
+    }
   }
 
-  if (![entries, jobs, customers, team, vehicles].every((store) => store.isReady)) return <Card>Loading scheduling centre…</Card>;
+  if (!ready) return <Card>Loading scheduling centre…</Card>;
 
   return <div className="space-y-6">
     <PageHeader eyebrow="Operations" title="Scheduling, Diary & Dispatch Centre" description="Plan jobs and visits, assign staff and vehicles, spot clashes and dispatch today’s work." action={<Button onClick={() => setShowForm((value) => !value)}><Plus className="mr-2 size-4" />Add diary entry</Button>} />
-    {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    {message ? <div role="status" className="break-words rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Card><CalendarDays className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Visible diary entries</p><p className="mt-2 text-3xl font-bold">{visible.length}</p></Card>
@@ -155,7 +196,7 @@ export default function PlannerPage() {
 
       <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-xl border border-slate-800 p-1">{(["day", "week", "month"] as DiaryView[]).map((item) => <button key={item} onClick={() => setView(item)} className={`min-h-12 rounded-lg px-4 py-2 text-sm font-semibold capitalize ${view === item ? "bg-cyan-400 text-slate-950" : "text-slate-400"}`}>{item}</button>)}</div><div className="flex items-center gap-2"><button aria-label={`Previous ${view}`} onClick={() => setAnchor(shiftPlannerDate(anchor, -1, view) || anchor)} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronLeft className="size-4" /></button><button onClick={() => setAnchor(today())} className="min-h-12 rounded-xl border border-slate-800 px-3 py-2 text-sm">Today</button><button aria-label={`Next ${view}`} onClick={() => setAnchor(shiftPlannerDate(anchor, 1, view) || anchor)} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronRight className="size-4" /></button></div></div>
         <Card><p className="text-sm text-slate-400">{view[0].toUpperCase() + view.slice(1)} diary centred on</p><p className="mt-1 text-xl font-bold">{displayDate(anchor)}</p></Card>
-        {visible.length ? visible.map((entry) => { const job = jobs.items.find((item) => item.id === entry.jobId); const customer = entryCustomer(entry, jobs.items, customers.items); const vehicle = vehicles.items.find((item) => item.id === entry.vehicleId); const entryClashes = clashes.filter((item) => item.entryId === entry.id || item.otherEntryId === entry.id); return <Card key={entry.id} className={entryClashes.length ? "border-amber-400/30" : undefined}><div className="flex flex-col gap-4 lg:flex-row lg:justify-between"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{entry.visitPhase || entry.type} · {displayDate(entry.date)}{entryEndDate(entry) !== entry.date ? ` to ${displayDate(entryEndDate(entry))}` : ""}</p><h3 className="mt-1 text-xl font-bold">{entry.title}</h3><div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-400"><span className="inline-flex items-center gap-1"><Clock3 className="size-4" />{entry.startTime || "Any time"}{entry.endTime ? `–${entry.endTime}` : ""}</span><span>{job?.status || entry.status}</span>{vehicle ? <span className="inline-flex items-center gap-1"><CarFront className="size-4" />{vehicle.registration}</span> : null}</div><p className="mt-3 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0" />{entry.location || job?.siteAddress || "No travel address"}</p><p className="mt-2 text-sm text-slate-300">Customer: {customer?.name || "Not linked"}</p><p className="mt-1 text-sm text-slate-300">Workers: {entry.teamMemberIds.length ? entry.teamMemberIds.map((id) => team.items.find((member) => member.id === id)?.name || "Unknown").join(", ") : "Unallocated"}</p>{entryClashes.length ? <p className="mt-3 text-sm font-semibold text-amber-300">{entryClashes.length} clash warning{entryClashes.length === 1 ? "" : "s"}</p> : null}</div><div className="flex flex-wrap items-start gap-2 lg:max-w-64 lg:justify-end"><button onClick={() => moveEntry(entry, -1)} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm">Move back a day</button><button onClick={() => moveEntry(entry, 1)} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm">Move ahead a day</button><Button onClick={() => markStarted(entry)}>Start job</Button>{entry.location || job?.siteAddress ? <a href={mapsUrl(entry.location || job?.siteAddress || "")} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 py-2 text-sm"><Navigation className="mr-2 size-4" />Navigate</a> : null}{customer?.phone ? <a href={`tel:${customer.phone}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 py-2 text-sm"><Phone className="mr-2 size-4" />Call</a> : null}{job ? <Link href={`/jobs/${job.id}`} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm">View job</Link> : null}</div></div></Card>; }) : <Card><p className="text-sm text-slate-500">No diary entries in this {view}.</p></Card>}
+        {visible.length ? visible.map((entry) => { const job = jobs.items.find((item) => item.id === entry.jobId); const customer = entryCustomer(entry, jobs.items, customers.items); const vehicle = vehicles.items.find((item) => item.id === entry.vehicleId); const entryClashes = clashes.filter((item) => item.entryId === entry.id || item.otherEntryId === entry.id); const activeVisit = ["Planned", "Confirmed"].includes(entry.status); const startsJob = entry.type === "Job" && Boolean(entry.jobId) && (!job || !isJobOnSiteStatus(job.status)); return <Card key={entry.id} className={entryClashes.length ? "border-amber-400/30" : undefined}><div className="flex flex-col gap-4 lg:flex-row lg:justify-between"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{entry.visitPhase || entry.type} · {displayDate(entry.date)}{entryEndDate(entry) !== entry.date ? ` to ${displayDate(entryEndDate(entry))}` : ""}</p><h3 className="mt-1 text-xl font-bold">{entry.title}</h3><div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-400"><span className="inline-flex items-center gap-1"><Clock3 className="size-4" />{entry.startTime || "Any time"}{entry.endTime ? `–${entry.endTime}` : ""}</span><span>Visit: {entry.status}</span>{job ? <span>Job: {job.status}</span> : entry.jobId ? <span className="text-amber-300">Linked job unavailable</span> : null}{vehicle ? <span className="inline-flex items-center gap-1"><CarFront className="size-4" />{vehicle.registration}</span> : null}</div><p className="mt-3 flex items-start gap-2 text-sm text-slate-400"><MapPin className="mt-0.5 size-4 shrink-0" />{entry.location || job?.siteAddress || "No travel address"}</p><p className="mt-2 text-sm text-slate-300">Customer: {customer?.name || "Not linked"}</p><p className="mt-1 text-sm text-slate-300">Workers: {entry.teamMemberIds.length ? entry.teamMemberIds.map((id) => team.items.find((member) => member.id === id)?.name || "Unknown").join(", ") : "Unallocated"}</p>{entryClashes.length ? <p className="mt-3 text-sm font-semibold text-amber-300">{entryClashes.length} clash warning{entryClashes.length === 1 ? "" : "s"}</p> : null}</div><div className="flex flex-wrap items-start gap-2 lg:max-w-64 lg:justify-end"><button disabled={!activeVisit} onClick={() => moveEntry(entry, -1)} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Move back a day</button><button disabled={!activeVisit} onClick={() => moveEntry(entry, 1)} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm disabled:opacity-40">Move ahead a day</button><Button disabled={!activeVisit || (startsJob ? !job || normaliseJobStatus(job.status) !== "Scheduled" : entry.status === "Confirmed")} onClick={() => markStarted(entry)}>{startsJob ? "Start job" : "Confirm visit"}</Button>{entry.location || job?.siteAddress ? <a href={mapsUrl(entry.location || job?.siteAddress || "")} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 py-2 text-sm"><Navigation className="mr-2 size-4" />Navigate</a> : null}{customer?.phone ? <a href={`tel:${customer.phone}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 py-2 text-sm"><Phone className="mr-2 size-4" />Call</a> : null}{job ? <Link href={`/jobs/${encodeURIComponent(job.id)}`} className="min-h-12 rounded-xl border border-slate-700 px-3 py-2 text-sm">View job</Link> : null}</div></div></Card>; }) : <Card><p className="text-sm text-slate-500">No diary entries in this {view}.</p></Card>}
       </div>
     </section>
   </div>;
