@@ -67,6 +67,10 @@ Money answers distinguish invoices overdue before today from all unpaid invoices
 
 Four answer records show initially, with progressive reveal. Editing a question clears its previous answer; submitting dismisses the phone keyboard. Answers refresh with the loaded collections and the existing local clock. The account-scoped parent remounts question state on account changes, and every source must be ready before the question panel mounts. Questions and answers are not persisted or sent to an external service.
 
+Next visit checks answers “Which jobs need booking?” or “Show next visit checks”, optionally using the phone job selector or an exact saved name/address such as “Show next visit checks for Workshop”. It applies the same identity, duplicate-choice and unavailable-record rules as task questions. Checks cover accepted, awaiting-deposit, scheduled and on-site work; enquiries, unaccepted quotes, closed and held jobs are excluded. An ongoing or future planned/confirmed Job visit counts even outside seven days. History, surveys and deliveries cannot hide a missing work visit.
+
+Uncertain work dates or statuses remain review checks even alongside a valid future visit. Missing bookings receive Next priority with no invented deadline; uncertain records receive Today review priority. Source evidence includes saved job status/date, actual uncertain booking identities and any known work visits. Awaiting-deposit and awaiting-builder jobs get specific review steps before agreeing a visit. These checks also appear once in a job briefing and refresh as records change. The links open permitted job records for review; questions do not book, cancel or change a visit, confirm deposit receipt, or establish availability or site readiness.
+
 ## Account and data boundaries
 
 Authorization is checked before mounting any business hooks. Identity resolution

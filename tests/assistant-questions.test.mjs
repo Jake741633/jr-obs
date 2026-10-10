@@ -16,14 +16,15 @@ function compile(path, dependencies = {}, jsx = false, globals = {}) {
 }
 const jobLink = compile("../lib/assistantJobLink.ts", {}, false, { URLSearchParams });
 const scheduling = compile("../lib/scheduling.ts");
+const assistantVisits = compile("../lib/assistantVisits.ts", { "./jobManagement-core.mjs": jobsCore, "./scheduling": scheduling });
 const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
 const briefing = compile("../lib/assistantBriefing.ts", { "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
-const questions = compile("../lib/assistantQuestions.ts", { "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
+const questions = compile("../lib/assistantQuestions.ts", { "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
 const now = new Date(2026, 9, 10, 10);
 const records = (patch = {}) => ({ jobs: [], documents: [], invoices: [], payments: [], planner: [], purchases: [], reminders: [], certificates: [], ...patch });
-const visit = (patch = {}) => ({ id: "v1", title: "First fix", status: "Confirmed", date: "2026-10-11", startTime: "09:00", endTime: "12:00", location: "1 High Street", teamMemberIds: ["worker"], ...patch });
+const visit = (patch = {}) => ({ id: "v1", title: "First fix", type: "Job", status: "Confirmed", date: "2026-10-11", startTime: "09:00", endTime: "12:00", location: "1 High Street", teamMemberIds: ["worker"], ...patch });
 const job = (patch = {}) => ({ id: "j1", title: "Workshop", status: "Scheduled", startDate: "2026-10-11", siteAddress: "1 High Street", assignedTo: ["worker"], ...patch });
 const invoice = (patch = {}) => ({ id: "i1", number: "INV-1", title: "Lighting", status: "Sent", dueDate: "2026-10-09", items: [{ quantity: 2, unitPrice: 100 }], vatEnabled: true, vatRate: 20, amountPaid: 0, ...patch });
 const siteTask = (patch = {}) => ({ id: "t1", jobId: "j1", type: "Task", title: "Fit labels", status: "Open", priority: "Normal", category: "General", dueDate: "", ...patch });
@@ -422,7 +423,9 @@ test("phone job briefing choices, progressive reveal, typed scope and record ref
   assert.match(text(h.render()), /Job briefing · Elsewhere/);
   h.scope("j1"); h.click("Job briefing"); assert.match(text(h.render()), /Job briefing · Workshop/);
   assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 4);
-  h.click("Show more records"); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 7);
+  h.click("Show more records"); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 8);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link" && n.props.href.startsWith("/job-tasks?")).length, 6);
+  assert.match(text(h.render()), /Plan next visit for Workshop/);
   h.fill("Job briefing for Elsewhere"); h.submit(); assert.match(text(h.render()), /Job briefing · Elsewhere/);
   h.replaceRecords({ ...data, jobs: [job(), job({ id: "replacement", title: "Elsewhere", siteAddress: "Other address" })] });
   assert.match(text(h.render()), /previous selection is unavailable/); assert.ok(!nodes(h.render()).some((n) => n.type === "Link" && n.props.href === "/jobs/other"));
@@ -513,4 +516,80 @@ test("job-to-assistant shortcuts follow account access and never render for deni
   assert.equal(makeLink({ role: "owner" }, "cloud", true, ""), null);
   assert.ok(makeLink(null, "local")); assert.ok(makeLink(null, "migration"));
   for (const path of ["../app/jobs/[id]/page.tsx", "../app/jobs/[id]/workspace/page.tsx"]) assert.match(readFileSync(new URL(path, import.meta.url), "utf8"), /<JobAssistantLink jobId=\{job\.id\} \/>/);
+});
+
+test("next-visit questions have explicit forms and cannot interpret commands or broader diary requests", () => {
+  for (const question of ["Which jobs need booking?", "What jobs need another work visit?", "Please show me next visit checks!", "Show jobs needing a visit", "Show work visit checks"]) assert.equal(questions.assistantQuestionIntent(question), "visits");
+  for (const question of ["Book the next visit", "Delete next visit checks", "Which jobs need booking next month?", "Which jobs need another visit and overdue invoices?"]) {
+    assert.equal(answer(question).recognized, false); assert.equal(answer(question).items.length, 0);
+  }
+});
+
+test("visit planning covers accepted and on-site work with stage-specific review while excluding leads and closed jobs", () => {
+  const included = ["Accepted", "Awaiting deposit", "Scheduled", "First fix", "In progress", "Awaiting builder", "Second fix", "Testing", "Snagging"];
+  const excluded = ["Enquiry", "Lead", "Survey required", "Quoted", "Complete", "Invoiced", "Paid", "On hold", "Cancelled", "Unknown"];
+  const jobs = [...included, ...excluded].map((status) => job({ id: status, status }));
+  const result = answer("Which jobs need another visit?", { jobs });
+  assert.deepEqual(new Set(idsOf(result)), new Set(included.map((status) => `visit-plan:${status}`)));
+  assert.match(result.items.find((i) => i.id === "visit-plan:Awaiting deposit").detail, /Review the deposit.*before agreeing/);
+  assert.match(result.items.find((i) => i.id === "visit-plan:Awaiting builder").detail, /Confirm the builder's access/);
+  assert.match(result.scope, /enquiries, unaccepted quotes, closed and held jobs are excluded.*does not confirm availability, payment, access or site readiness/);
+  assert.ok(assistantVisits.assistantVisitActions(jobs, [], "2026-10-10").every((action) => action.priority === "Next" && !action.dueDate));
+});
+
+test("work-visit answers distinguish real current/future bookings from past history surveys and deliveries", () => {
+  for (const patch of [{ type: "Survey" }, { type: "Delivery" }, { status: "Complete" }, { status: "Cancelled" }, { date: "2026-10-08", endDate: "2026-10-09" }, { jobId: "other" }, { jobId: undefined }]) {
+    const data = { jobs: [job({ startDate: "2026-10-10" })], planner: [visit({ jobId: "j1", ...patch })] };
+    assert.deepEqual(idsOf(answer("Which jobs need booking?", data)), ["visit-plan:j1"]);
+  }
+  for (const patch of [{ date: "2026-10-08", endDate: "2026-10-10" }, { date: "2028-10-10", endDate: undefined }]) {
+    assert.equal(answer("Which jobs need booking?", { jobs: [job()], planner: [visit({ jobId: "j1", ...patch })] }).items.length, 0);
+  }
+});
+
+test("uncertain work bookings stay explicit alongside a future visit without leaking another job's record", () => {
+  const planner = [visit({ jobId: "j1", id: "valid-future", date: "2027-01-01" }), visit({ jobId: "j1", id: "bad-date", date: "2026-02-30" }), visit({ jobId: "j1", id: "reversed", date: "2026-10-12", endDate: "2026-10-11" }), visit({ jobId: "j1", id: "unknown", status: "Tentative" }), visit({ jobId: "other", id: "other-bad", date: "bad" })];
+  const result = answerFor("Show next visit checks", { jobs: [job(), job({ id: "other" })], planner }, "j1");
+  assert.equal(result.resolvedJobId, "j1"); assert.deepEqual(idsOf(result), ["visit-plan:j1"]);
+  assert.match(result.items[0].detail, /3 linked work bookings have invalid\/reversed dates or an unsupported status.*before creating another visit/);
+  const evidence = result.items[0].evidence.join(" "); assert.match(evidence, /1 ongoing\/future.*bad-date.*reversed.*Tentative/); assert.doesNotMatch(evidence, /other-bad/);
+  assert.equal(assistantVisits.assistantVisitActions([job()], planner, "2026-10-10")[0].priority, "Today");
+});
+
+test("named next-visit questions retain exact-name duplicate choices and never broaden missing identity", () => {
+  const data = { jobs: [job(), job({ id: "other", siteAddress: "Elsewhere" })] };
+  const duplicate = answer("Show next visit checks for Workshop", data); assert.equal(duplicate.title, "Choose a job"); assert.equal(duplicate.jobChoices.length, 2); assert.equal(duplicate.items.length, 0);
+  const exact = answer("Show next visit checks at 1 High Street", data); assert.equal(exact.resolvedJobId, "j1"); assert.deepEqual(idsOf(exact), ["visit-plan:j1"]);
+  assert.equal(answer("Show next visit checks for Work", data).items.length, 0);
+  assert.equal(answerFor("Show next visit checks", data, "missing").title, "Job unavailable");
+  assert.equal(answerFor("Show next visit checks for Workshop", data, "missing").items.length, 0);
+});
+
+test("phone next-visit shortcut scopes jobs, reveals four at a time and refreshes after bookings change", () => {
+  const data = records({ jobs: Array.from({ length: 7 }, (_, i) => job({ id: `j${i}`, title: `Job ${i}` })) }); const h = ui(data);
+  h.click("Next visit checks"); assert.match(text(h.render()), /7 jobs with missing or uncertain work bookings/); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 4); assert.equal(h.blurred(), 1);
+  h.click("Show more records"); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 7);
+  h.scope("j6"); assert.equal(nodes(h.render()).some((n) => n.props["aria-label"] === "JR AI answer"), false);
+  h.click("Next visit checks"); assert.match(text(h.render()), /Next work visit checks · Job 6/); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 1);
+  h.replaceRecords({ ...data, planner: [visit({ jobId: "j6" })] }); assert.match(text(h.render()), /0 jobs with missing or uncertain work bookings/); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 0);
+  h.replaceRecords({ ...data, jobs: data.jobs.filter((j) => j.id !== "j6") }); assert.match(text(h.render()), /selected job is no longer available/);
+  h.click("Clear answer"); assert.equal(nodes(h.render()).find((n) => n.type === "select").props.value, "");
+});
+
+test("job briefing includes one work-booking check and drops it when a real work visit arrives", () => {
+  const data = records({ jobs: [job()], tasks: [], planner: [visit({ jobId: "j1", type: "Survey" })] }); const h = ui(data);
+  h.scope("j1"); h.click("Job briefing"); assert.match(text(h.render()), /Plan next visit for Workshop/);
+  const result = answerFor("Show job briefing", data, "j1"); assert.equal(idsOf(result).filter((id) => id === "visit-plan:j1").length, 1); assert.ok(idsOf(result).includes("visit:v1"), "the separate survey remains listed");
+  h.replaceRecords({ ...data, planner: [visit({ jobId: "j1" })] }); assert.doesNotMatch(text(h.render()), /Plan next visit for Workshop/);
+  h.replaceRecords({ ...data, planner: [visit({ jobId: "j1", status: "Complete" })] }); assert.match(text(h.render()), /Plan next visit for Workshop/);
+  assert.ok(!idsOf(answerFor("Show job briefing", { ...data, jobs: [job({ status: "Complete" })] }, "j1")).includes("visit-plan:j1"));
+});
+
+test("visit planning preserves sources and exact permitted links for office owner and admin accounts", () => {
+  const data = records({ jobs: [job({ id: "j /?#", status: "Awaiting deposit" })], planner: [visit({ jobId: "j /?#", status: "Tentative" })] }); const before = JSON.stringify(data);
+  for (const role of ["office", "owner", "admin"]) {
+    const result = questions.answerAssistantQuestion(data, "Which jobs need booking?", now, undefined, "", permissions.canAccessPath(role, "/job-tasks"));
+    assert.equal(result.items[0].href, "/jobs/j%20%2F%3F%23"); assert.ok(result.items.every((i) => permissions.canAccessPath(role, permissions.internalPathForAccess(i.href))));
+  }
+  assert.equal(JSON.stringify(data), before);
 });

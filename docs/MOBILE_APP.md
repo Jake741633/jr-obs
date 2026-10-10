@@ -51,6 +51,8 @@ If a status change saves but its timeline note fails, the same note-only retry r
 
 The page distinguishes a device save from cloud confirmation. Unsaved timeline retries exist only while the page is open, and the failure notice explains that leaving retains the saved task change but loses the unsaved note. Account changes retain the existing page-remount boundary.
 
+Next visit checks is a JR AI shortcut for accepted or on-site work needing another recorded work visit or a booking review. It uses the job selector and exact-name/address questions, starts with four answers and updates when bookings change. Job briefings include the same check without counting a survey or delivery as the next work visit. It keeps deposit/builder dependencies explicit and opens the saved job for review; it does not book a visit.
+
 ## Diary booking saves
 
 New bookings persist each visit through the existing durable creation method before clearing the form. Failed first saves keep editable details and reuse the original record identities on retry. Success says saved on this device and asks the user to check sync status before switching devices.
