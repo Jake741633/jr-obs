@@ -55,6 +55,12 @@ Week views run Monday through Sunday, including month/year boundaries. Previous/
 
 Monthly repeats stay anchored to the original day, using month end when necessary (31 January → 28 February → 31 March in a non-leap year). The form explains this rule; each occurrence preserves its calendar-day duration. No repeat always creates one booking, even if an earlier repeat count remains in the form. Invalid/reversed dates and ranges outside the supported calendar are rejected before any booking is written. Existing bookings are not rewritten.
 
+Moving a planned/confirmed visit now uses the durable update method before reporting success. Both endpoints move together, and storage/queue failures retain the saved dates. A changed or missing visit is rejected before writing, including repeated callbacks from an older card. Completed/cancelled history cannot be moved with these controls.
+
+Start job applies only to a linked scheduled Job visit and saves the canonical First fix status before confirming the visit. Existing First fix, Second fix, Testing, Snagging and other on-site stages are preserved. Closed, held, unscheduled or missing jobs cannot be started here. Other appointment types and unlinked visits use Confirm visit without changing a job. The cards show visit and job statuses separately, and unallocated jobs exclude closed/held records.
+
+Job and visit writes remain separate. A job-save failure stops visit confirmation; a subsequent visit-save failure explicitly reports the saved job and offers the existing Confirm visit action for retry. That retry keeps the later job stage and does not repeat a saved start. These actions distinguish device persistence from cloud confirmation and retain existing queue/conflict/access rules. Creating new diary bookings retains its existing save flow; this increment hardens moves and dispatch.
+
 ## Install
 
 - **iPhone/iPad:** open the normal JR OS address in Safari, tap **Share → Add to

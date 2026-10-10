@@ -22,6 +22,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Confirm task status saves and deletion before success, with separate timeline retries
 - [x] Open the requested diary day and retain multi-day visits across calendar views
 - [x] Correct week/month boundaries, local phone dates and monthly booking repeats
+- [x] Durable diary moves and visit confirmation without resetting later or closed job stages
 - [x] Check each upcoming visit’s readiness and open the affected diary day
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off

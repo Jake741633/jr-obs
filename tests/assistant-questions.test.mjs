@@ -172,6 +172,7 @@ test("actual planner date links select the day and show spanning visits without 
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
     "../../lib/cloud/coreBusinessCollections": { useCustomersCollection: () => store(), useJobsCollection: () => store(), usePlannerCollection: () => store([visit({ title: "Spanning visit", date: "2026-10-09", endDate: "2026-10-12" })]) },
     "../../lib/storage": { useCloudLocalCollection: () => store() }, "../../lib/scheduling": scheduling,
+    "../../lib/jobManagement-core.mjs": jobsCore,
   }, true, { URLSearchParams, window: { location: { search: "?date=2026-10-11" }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {} } });
   const render = () => { cursor = 0; return plannerPage.default(); };
   render(); effects.forEach((fn) => fn()); const result = render();
