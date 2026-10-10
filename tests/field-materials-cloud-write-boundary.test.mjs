@@ -29,8 +29,8 @@ test("mobile materials is read-only for unsupported cloud writes", () => {
   assert.match(page, /!cloudFieldMode \? <Card>/);
 });
 
-test("cloud materials guards mutation entry points before optimistic writes", () => {
-  for (const functionName of ["useMaterial", "createPurchaseRequest"]) {
+test("cloud materials guards mutation entry points before writes", () => {
+  for (const functionName of ["useMaterial", "createPurchaseRequest", "savePurchaseRequest"]) {
     const match = page.match(new RegExp(`function ${functionName}\\([^)]*\\) \\{([\\s\\S]*?)\\n  \\}`));
     assert.ok(match, `${functionName} should exist`);
     assert.match(match[1], /if \(cloudFieldMode\)/, `${functionName} should fail closed in cloud mode`);
@@ -52,7 +52,7 @@ test("materials scanning remains available while local mode retains mutation wor
   assert.match(page, /stock\.setItems/);
   assert.match(page, /movements\.setItems/);
   assert.match(page, /jobUsage\.setItems/);
-  assert.match(page, /purchases\.setItems/);
+  assert.match(page, /purchases\.createItem/);
 });
 
 test("cloud field material shortcuts stay on permitted field routes", () => {

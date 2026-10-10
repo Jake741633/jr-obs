@@ -60,6 +60,9 @@ export function buildLowStockPurchaseList(input: {
   now: string;
   jobId?: string;
 }): PurchaseList | null {
+  if (input.stockItems.some((item) => !Number.isFinite(item.quantity) || item.quantity < 0 || !Number.isFinite(item.minimumQuantity) || item.minimumQuantity < 0)) {
+    throw new Error("Review stock quantities and minimum levels before preparing a request.");
+  }
   const existingMaterialIds = new Set(
     input.existingLists
       .flatMap((list) => list.items)
@@ -67,12 +70,26 @@ export function buildLowStockPurchaseList(input: {
       .map((item) => item.materialId)
       .filter(Boolean),
   );
+  const existingStockIds = new Set(input.existingLists.flatMap((list) => list.items
+    .filter((item) => item.status !== "Delivered" && typeof item.id === "string" && item.id.startsWith(`${list.id}-`))
+    .map((item) => item.id.slice(list.id.length + 1))));
 
   const items = lowStockItems(input.stockItems)
-    .filter((item) => !item.materialId || !existingMaterialIds.has(item.materialId))
+    .filter((item) => !existingStockIds.has(item.id) && (!item.materialId || !existingMaterialIds.has(item.materialId)))
     .map((item) => {
-      const material = input.materials.find((entry) => entry.id === item.materialId);
+      if (typeof item.id !== "string" || !item.id.trim() || input.stockItems.filter((entry) => entry.id === item.id).length !== 1 || typeof item.description !== "string" || !item.description.trim() || !["Each", "Metre", "Drum", "Box", "Pack"].includes(item.unit)) {
+        throw new Error("Review the replenishment stock identities, descriptions and units before preparing a request.");
+      }
+      const matches = item.materialId ? input.materials.filter((entry) => entry.id === item.materialId) : [];
+      if (item.materialId && matches.length !== 1) throw new Error("A linked material is unavailable or ambiguous. Review its saved stock record.");
+      const material = matches[0];
+      if (material && material.unit !== item.unit) throw new Error("The linked material and stock units differ. Review the saved material link before preparing a request.");
       const targetQuantity = Math.max(item.minimumQuantity * 2, item.minimumQuantity + 1);
+      const quantity = Math.max(1, targetQuantity - item.quantity);
+      const unitCost = material ? material.tradeCost : item.unitCost;
+      if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitCost) || unitCost < 0 || !Number.isFinite(quantity * unitCost)) {
+        throw new Error("Review replenishment quantities and unit costs before preparing a request.");
+      }
       return {
         id: `${input.purchaseListId}-${item.id}`,
         materialId: item.materialId,
@@ -80,13 +97,14 @@ export function buildLowStockPurchaseList(input: {
         supplier: material?.supplier || item.supplier,
         stockCode: material?.stockCode || item.stockCode,
         supplierUrl: material?.supplierUrl,
-        quantity: Math.max(1, targetQuantity - item.quantity),
-        unitCost: material?.tradeCost ?? item.unitCost,
+        quantity,
+        unitCost,
         status: "Needed" as const,
       };
     });
 
   if (!items.length) return null;
+  if (!Number.isFinite(items.reduce((total, item) => total + item.quantity * item.unitCost, 0))) throw new Error("Review replenishment quantities and unit costs before preparing a request.");
 
   return {
     id: input.purchaseListId,
@@ -98,6 +116,13 @@ export function buildLowStockPurchaseList(input: {
     createdAt: input.now,
     updatedAt: input.now,
   };
+}
+
+export function lowStockRequestSourceSignature(list: PurchaseList, stockItems: StockItem[], materials: Material[]) {
+  const lineIds = new Set(list.items.map((item) => item.id));
+  const includedStock = stockItems.filter((item) => lineIds.has(`${list.id}-${item.id}`));
+  const materialIds = new Set(includedStock.map((item) => item.materialId).filter(Boolean));
+  return JSON.stringify({ stock: includedStock, materials: materials.filter((item) => materialIds.has(item.id)) });
 }
 
 export function matchesScanCode(item: StockItem, material: Material | undefined, scanCode: string) {
