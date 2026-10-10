@@ -79,6 +79,10 @@ Review purchase list carries one encoded saved list id into `/purchases?list=…
 
 ## Account and data boundaries
 
+Scoped questions require a unique saved job identity across the complete loaded job collection, even if only one duplicate copy matches the typed name/address. Missing or duplicate job identities cannot appear as selectable phone choices. A retained or linked selection becomes unavailable/ambiguous until that exact identity is unique again; a reused title cannot substitute another job.
+
+Materials and delivery status counts exclude missing/ambiguous purchase and line identities. Duplicate list identities produce one explicit source review with saved-copy evidence; conflicts outside the selected job do not broaden its evidence. Conflicting line copies are reviewed together, including any Delivered copy needed to explain the conflict, without being counted as outstanding. Missing or oversized list ids offer Review purchase inbox explicitly. Empty saved lists, absent descriptions and unavailable/ambiguous linked jobs remain reviewable rather than implying requirements are covered. Existing four-card reveal and source links are retained; Source details and Clear answer have 48px touch targets. No copy is chosen as authoritative and no records are changed.
+
 Authorization is checked before mounting any business hooks. Identity resolution
 hides the briefing; a change to mode, organisation, user, role or customer scope
 remounts both collections and local search state. Every source, including the payment ledger and task records, must be ready

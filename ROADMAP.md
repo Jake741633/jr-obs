@@ -32,6 +32,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Evidence-based diary clash signals and separate phone review of uncertain dates, times and statuses
 - [x] Phone diary search, status/job filters and progressive visit cards with exact job-scoped JR AI scheduling links
 - [x] JR AI material-ordering and delivery-follow-up answers with exact job scope and purchase-list review links
+- [x] JR AI source-identity review for ambiguous jobs, purchase lists and lines without inflated status counts
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection
 - [x] Phone purchase-line drafts with explicit durable saves, conflict review and confirmed list deletion
 - [x] Phone purchase search, exact job/status filters, uncertain-record review and progressive list cards
