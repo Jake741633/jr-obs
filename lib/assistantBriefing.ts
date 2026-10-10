@@ -18,6 +18,8 @@ export interface AssistantAction {
   actionLabel: string;
   evidence: string[];
   dueDate: string;
+  /** Explicit saved relationships for job-scoped answers; never title matching. */
+  jobIds?: string[];
 }
 export interface AssistantRecords {
   jobs: Job[];
@@ -51,12 +53,13 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
     add({ id: `invoice:${invoice.id}`, category: "Money", priority: "Now", title: `Chase ${invoice.number}`,
       reason: `${money.format(assistantInvoiceBalance(invoice, paid))} remains unpaid, ${plural(overdueDays, "day")} after the due date.`,
       nextStep: "Check for a recent payment, then review the invoice before contacting the customer.",
-      href: `/invoices?invoice=${encodeURIComponent(invoice.id)}`, actionLabel: "Review invoice", dueDate: invoice.dueDate,
+      href: `/invoices?invoice=${encodeURIComponent(invoice.id)}`, actionLabel: "Review invoice", dueDate: invoice.dueDate, jobIds: invoice.jobId ? [invoice.jobId] : [],
       evidence: [invoice.title, `Status: ${invoice.status}`, `Due: ${invoice.dueDate}`, `Effective recorded paid: ${money.format(paid)}`, "Uses the higher of the invoice paid amount and linked ledger payments, including credits/refunds; these amounts are not added together."] });
   }
 
   const linkedQuoteIds = new Set(jobs.flatMap((job) => [job.sourceQuoteId, job.quoteSnapshot?.quoteId].filter(Boolean)));
   for (const quote of documents.filter((item) => item.type === "Quote")) {
+    const jobIds = quote.jobId ? [quote.jobId] : jobs.filter((job) => job.sourceQuoteId === quote.id || job.quoteSnapshot?.quoteId === quote.id).map((job) => job.id);
     if (quote.status === "Accepted" && !quote.jobId && !linkedQuoteIds.has(quote.id)) {
       add({ id: `convert:${quote.id}`, category: "Quotes", priority: "Today", title: `Plan ${quote.number}`,
         reason: "This quote is accepted and no linked job was found in the loaded records.", nextStep: "Open the accepted quote and review its conversion to a job.",
@@ -71,7 +74,7 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
       title: `${expired ? "Review expired quote" : "Follow up"} ${quote.number}`,
       reason: expired ? "The saved validity date has passed. Check pricing before making a new offer." : quote.nextFollowUpDate ? `The saved follow-up date is ${quote.nextFollowUpDate}.` : "This sent quote is due for review based on its last recorded contact or validity date.",
       nextStep: expired ? "Review validity and pricing; keep any future follow-up date agreed with the customer." : "Review the quote and recent contact, then record the outcome and next follow-up date.",
-      href: quotePath(quote.id), actionLabel: "Review quote", dueDate: expired ? quote.validUntil : quote.nextFollowUpDate || "",
+      href: quotePath(quote.id), actionLabel: "Review quote", dueDate: expired ? quote.validUntil : quote.nextFollowUpDate || "", jobIds,
       evidence: [quote.title, `Status: ${quote.status}`, `Valid until: ${quote.validUntil || "Not recorded"}`, `Next follow-up: ${quote.nextFollowUpDate || "Not set"}`, `Last contact: ${quote.lastFollowUpAt || quote.updatedAt}`] });
   }
 
@@ -106,19 +109,19 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
     const dueDate = gaps[0]?.date || nextVisitDate;
     if (gaps.length) add({ id: `readiness:${job.id}`, category: "Site", priority: dueDate <= today ? "Now" : "Today", title: `Prepare ${job.title}`,
       reason: `${plural(gaps.length, "readiness check")} before the next site visit.`, nextStep: "Confirm access, visit timing and the assigned worker, then check linked material orders before travelling.",
-      href: generalGaps.length ? jobPath(job.id) : `/planner?date=${dueDate}`, actionLabel: generalGaps.length ? "Open job" : "Review visit details", dueDate, evidence: [`Job status: ${job.status}`, `Visit/start: ${dueDate}`, ...gaps.map((gap) => gap.detail), ...lists.map((list) => `${list.number} · ${list.title}`)] });
+      href: generalGaps.length ? jobPath(job.id) : `/planner?date=${dueDate}`, actionLabel: generalGaps.length ? "Open job" : "Review visit details", dueDate, jobIds: [job.id], evidence: [`Job status: ${job.status}`, `Visit/start: ${dueDate}`, ...gaps.map((gap) => gap.detail), ...lists.map((list) => `${list.number} · ${list.title}`)] });
   }
 
   const invoicedJobs = new Set(invoices.filter((item) => item.status !== "Cancelled").map((item) => item.jobId));
   for (const job of jobs.filter((item) => ["Complete", "Invoiced"].includes(item.status) && !invoicedJobs.has(item.id))) {
     add({ id: `invoice-job:${job.id}`, category: "Money", priority: "Today", title: `Check billing for ${job.title}`,
       reason: "The job is complete but no linked, non-cancelled invoice was found.", nextStep: "Review payment stages and previous billing before preparing a draft invoice.",
-      href: jobPath(job.id), actionLabel: "Review job billing", dueDate: "", evidence: [`Job status: ${job.status}`, "No linked invoice in loaded records"] });
+      href: jobPath(job.id), actionLabel: "Review job billing", dueDate: "", jobIds: [job.id], evidence: [`Job status: ${job.status}`, "No linked invoice in loaded records"] });
   }
   for (const job of outstandingCertificateJobs(jobs, certificates)) {
     add({ id: `certificate:${job.id}`, category: "Site", priority: "Today", title: `Check certification for ${job.title}`,
       reason: "No complete, issued or archived certificate is linked to this closed job.", nextStep: "Confirm which certification the work requires and review its evidence before issue.",
-      href: jobPath(job.id), actionLabel: "Review job records", dueDate: "", evidence: [`Job status: ${job.status}`, "No completed certificate in loaded records"] });
+      href: jobPath(job.id), actionLabel: "Review job records", dueDate: "", jobIds: [job.id], evidence: [`Job status: ${job.status}`, "No completed certificate in loaded records"] });
   }
 
   // Only assert a timed clash with valid explicit times; missing times need human review.
@@ -135,7 +138,7 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
     const dueDate = [today, a.date, b.date].sort().at(-1)!;
     add({ id: `clash:${key}`, category: "Diary", priority: dueDate <= today ? "Now" : "Today", title: `Resolve ${a.title} / ${b.title}`,
       reason: `Overlapping visits share ${[...kinds].sort().join(", ")}.`, nextStep: "Review both visits in the planner and confirm the assignment or timing.",
-      href: `/planner?date=${dueDate}`, actionLabel: "Review clash day", dueDate,
+      href: `/planner?date=${dueDate}`, actionLabel: "Review clash day", dueDate, jobIds: [...new Set([a.jobId, b.jobId].filter((id): id is string => Boolean(id)))],
       evidence: [a, b].map((entry) => `${entry.title} · ${entry.date}${entryEndDate(entry) !== entry.date ? ` to ${entryEndDate(entry)}` : ""} · ${entry.startTime}–${entry.endTime}`) });
   }
   for (const reminder of reminders.filter((item) => !item.completed && assistantDay(item.dueDate) !== null && item.dueDate <= today)) {
