@@ -66,7 +66,7 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
       const paid = effectiveInvoicePaid(invoice, records.payments || []);
       const balance = assistantInvoiceBalance(invoice, paid);
       const pence = Math.round(balance * 100);
-      if (!Number.isFinite(invoiceGross(invoice)) || invoiceGross(invoice) < 0 || !Number.isFinite(paid) || !Number.isSafeInteger(pence)) { invalidAmounts++; return []; }
+      if (!Number.isFinite(invoiceGross(invoice)) || invoiceGross(invoice) < 0 || !Number.isFinite(invoice.amountPaid) || invoice.amountPaid < 0 || !Number.isFinite(paid) || !Number.isSafeInteger(pence)) { invalidAmounts++; return []; }
       if (pence <= 0) return [];
       const due = assistantDay(invoice.dueDate);
       if (due === null) missingDates++;

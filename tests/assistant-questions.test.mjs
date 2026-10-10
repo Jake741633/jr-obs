@@ -82,6 +82,16 @@ test("money totals keep penny precision and visibly exclude invalid amounts or u
   assert.match(answer("How much am I owed?", { invoices: large }).summary, /outside the supported total range/);
 });
 
+test("malformed recorded-paid amounts are reported instead of becoming zero-paid invoice chases", () => {
+  for (const amountPaid of [undefined, null, NaN, Infinity, -1]) {
+    const data = records({ invoices: [invoice({ amountPaid })] });
+    const result = questions.answerAssistantQuestion(data, "How much is overdue?", now);
+    assert.equal(result.items.length, 0);
+    assert.match(result.warnings[0], /invalid or unsupported amounts/);
+    assert.equal(briefing.buildAssistantBriefing(data, now).actions.length, 0);
+  }
+});
+
 test("quote answers respect contact agreements even when an expired quote still needs a pricing review", () => {
   const quote = { id: "q1", number: "Q-1", title: "Lighting", type: "Quote", status: "Sent", updatedAt: "2026-10-01T12:00:00Z", validUntil: "2026-10-08", nextFollowUpDate: "2026-10-12" };
   assert.equal(answer("Which quotes need chasing?", { documents: [quote] }).items.length, 0);
