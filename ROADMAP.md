@@ -3,6 +3,25 @@
 ## Vision
 Build JR OS into the operating system for JR Electrical Services, capable of supporting a solo electrician today and a £1m+ electrical company in the future.
 
+## Current delivery track — October 2026
+
+These features are delivered on the `jr-os-v2` preview track. Production release
+acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
+
+- [x] Saved calculation evidence linked to jobs, quotes, estimates and surveys
+- [x] Home-screen web app foundation with role-aware launch and installation help
+- [x] Phone quick actions and direct JR AI navigation
+- [x] Evidence-backed daily priorities connecting money, quotes, site readiness and diary clashes
+- [x] Correct draft-invoice and scheduled-follow-up false alerts
+- [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
+- [ ] Production recovery evidence and release sign-off
+- [ ] Full manufacturer device selection and coordination in Electrical Calculators
+
+Implementation and checks: [Phone app](docs/MOBILE_APP.md),
+[Daily Assistant](docs/AI_DAILY_ASSISTANT.md),
+[Electrical Calculators](docs/ELECTRICAL_CALCULATORS.md).
+The version lists below retain the original planning baseline.
+
 ## v0.1 Foundation
 - [x] Next.js app created
 - [x] GitHub connected

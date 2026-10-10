@@ -1,5 +1,7 @@
 import { annualOverheadCost, calculateQuoteProfitability } from "./quoteEngine";
 import { invoiceTotal } from "./workflow";
+import { assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "./assistantSignals-core.mjs";
+import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import {
   buildMaterialLearningPatterns,
   buildQuoteLearningSuggestion,
@@ -676,9 +678,7 @@ export function buildSmartRecommendations({
     });
   }
 
-  const overdue = invoices.filter((invoice) =>
-    !["Paid", "Cancelled"].includes(invoice.status) && invoice.dueDate && daysFrom(now, invoice.dueDate) < 0,
-  );
+  const overdue = invoices.filter((invoice) => isAssistantInvoiceOverdue(invoice, now));
   if (overdue.length) {
     const value = overdue.reduce((sum, invoice) => sum + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
     recommendations.push({
@@ -783,17 +783,13 @@ export function buildTodayAssistant({
   now?: Date;
 }) {
   const today = dateKey(now);
-  const todaysJobs = jobs.filter((job) => job.startDate === today && !["Complete", "On hold"].includes(job.status));
-  const todaysPlanner = planner.filter((entry) => entry.date === today && entry.status !== "Cancelled");
+  const todaysJobs = jobs.filter((job) => job.startDate === today && !isJobInactiveStatus(job.status));
+  const todaysPlanner = planner.filter((entry) => entry.date === today && ["Planned", "Confirmed"].includes(entry.status));
   const overdueInvoices = invoices
-    .filter((invoice) => !["Paid", "Cancelled"].includes(invoice.status) && invoice.dueDate && daysFrom(now, invoice.dueDate) < 0)
+    .filter((invoice) => isAssistantInvoiceOverdue(invoice, now))
     .toSorted((left, right) => left.dueDate.localeCompare(right.dueDate));
   const quoteFollowUps = documents
-    .filter((document) => document.type === "Quote" && document.status === "Sent")
-    .filter((document) => {
-      const ageDays = Math.floor((now.getTime() - new Date(document.updatedAt).getTime()) / 86_400_000);
-      return ageDays >= 3 || daysFrom(now, document.validUntil) <= 7;
-    })
+    .filter((document) => assistantQuoteFollowUpDue(document, now))
     .toSorted((left, right) => left.updatedAt.localeCompare(right.updatedAt));
   const dueReminders = reminders
     .filter((reminder) => !reminder.completed && reminder.dueDate && reminder.dueDate <= today)
@@ -877,7 +873,7 @@ export function buildBusinessCoach({
   const previousMonth = months.at(-2)!;
   const unpaidInvoices = invoices.filter((invoice) => !["Paid", "Cancelled"].includes(invoice.status));
   const unpaidInvoiceValue = unpaidInvoices.reduce((sum, invoice) => sum + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
-  const overdueInvoiceCount = unpaidInvoices.filter((invoice) => invoice.dueDate && daysFrom(now, invoice.dueDate) < 0).length;
+  const overdueInvoiceCount = unpaidInvoices.filter((invoice) => isAssistantInvoiceOverdue(invoice, now)).length;
   const coaching = buildSmartRecommendations({ jobs, documents, invoices, certificates, reminders, labourSettings, now });
 
   if (acceptedQuotes.length >= 3 && acceptedQuotes.length / Math.max(1, decidedQuotes.length) < 0.35) {

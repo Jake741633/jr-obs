@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BriefcaseBusiness, Cloud, FileText, LayoutDashboard, Menu, Users } from "lucide-react";
+import { BriefcaseBusiness, Cloud, FileText, LayoutDashboard, Menu, Sparkles, Users } from "lucide-react";
 import { canAccessPath } from "../lib/cloud/permissions";
 import { useCloudIdentity } from "../lib/cloud/useCloudIdentity";
 
@@ -10,7 +10,7 @@ const mobileNavigation = [
   { label: "Home", href: "/", icon: LayoutDashboard },
   { label: "Jobs", href: "/jobs", icon: BriefcaseBusiness },
   { label: "Quotes", href: "/quotes/mobile", icon: FileText },
-  { label: "Customers", href: "/customers", icon: Users },
+  { label: "JR AI", href: "/ai/assistant", icon: Sparkles },
   { label: "More", href: "/menu", icon: Menu },
 ] as const;
 
@@ -46,6 +46,8 @@ export function MobileNav() {
             ? pathname === itemHref
             : itemHref === "/field/jobs" && identity?.role === "electrician"
               ? pathname === itemHref || pathname.startsWith(`${itemHref}/`) || fieldJobWorkspacePath.test(pathname)
+              : itemHref === "/ai/assistant"
+                ? pathname === "/ai" || pathname.startsWith("/ai/")
               : itemHref === "/quotes/mobile"
                 ? pathname.startsWith("/quotes") || pathname.startsWith("/estimates")
                 : pathname === itemHref || pathname.startsWith(`${itemHref}/`);

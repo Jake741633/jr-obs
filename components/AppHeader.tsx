@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { UserRound, Zap } from "lucide-react";
 import { CloudSyncIndicator } from "./CloudSyncIndicator";
+import { MobileQuickActions } from "./mobile/MobileQuickActions";
 
 export function AppHeader() {
   return (
@@ -12,6 +13,7 @@ export function AppHeader() {
         </Link>
         <div className="flex min-w-0 items-center gap-2">
           <CloudSyncIndicator />
+          <MobileQuickActions />
           <Link href="/cloud" aria-label="Account" className="grid min-h-11 min-w-11 place-items-center rounded-xl border border-slate-800 bg-slate-900 text-slate-200 focus-visible:outline-2 focus-visible:outline-cyan-400 lg:hidden">
             <UserRound aria-hidden="true" className="size-5" />
           </Link>

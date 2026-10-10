@@ -6,11 +6,11 @@ import { FinanceDirectorInsights } from "../../../components/FinanceDirectorInsi
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { useLocalStorageCollection } from "../../../lib/storage";
+import { assistantDateKey, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "../../../lib/assistantSignals-core.mjs";
+import { isJobInactiveStatus } from "../../../lib/jobManagement-core.mjs";
 import type { CustomerProfile, ElectricalCertificate, Invoice, Job, PlannerEntry, PricingDocument, PurchaseList, SiteSurvey } from "../../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
-const today = new Date().toISOString().slice(0, 10);
-const now = Date.now();
 
 function documentTotal(document: PricingDocument | Invoice) {
   const subtotal = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
@@ -18,6 +18,8 @@ function documentTotal(document: PricingDocument | Invoice) {
 }
 
 export default function DailyBriefingPage() {
+  const now = new Date();
+  const today = assistantDateKey(now);
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const planner = useLocalStorageCollection<PlannerEntry>("jr-os-planner");
   const pricing = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
@@ -29,11 +31,11 @@ export default function DailyBriefingPage() {
 
   const ready = jobs.isReady && planner.isReady && pricing.isReady && invoices.isReady && surveys.isReady && purchases.isReady && certificates.isReady && profiles.isReady;
 
-  const todaysJobs = jobs.items.filter((job) => job.startDate === today && job.status !== "Complete" && job.status !== "On hold");
-  const todaysPlanner = planner.items.filter((entry) => entry.date === today && entry.status !== "Cancelled");
+  const todaysJobs = jobs.items.filter((job) => job.startDate === today && !isJobInactiveStatus(job.status));
+  const todaysPlanner = planner.items.filter((entry) => entry.date === today && ["Planned", "Confirmed"].includes(entry.status));
   const surveysDue = surveys.items.filter((survey) => survey.status !== "Complete");
-  const sentQuotes = pricing.items.filter((item) => item.type === "Quote" && item.status === "Sent");
-  const overdueInvoices = invoices.items.filter((invoice) => invoice.status !== "Paid" && invoice.status !== "Cancelled" && invoice.dueDate && new Date(`${invoice.dueDate}T23:59:59`).getTime() < now);
+  const sentQuotes = pricing.items.filter((item) => assistantQuoteFollowUpDue(item, now));
+  const overdueInvoices = invoices.items.filter((invoice) => isAssistantInvoiceOverdue(invoice, now));
   const overdueValue = overdueInvoices.reduce((sum, invoice) => sum + Math.max(0, documentTotal(invoice) - invoice.amountPaid), 0);
   const purchaseAttention = purchases.items.filter((list) => list.items.some((item) => item.status === "Needed" || item.status === "Ordered"));
   const certificatesToIssue = certificates.items.filter((certificate) => certificate.status === "Complete");
