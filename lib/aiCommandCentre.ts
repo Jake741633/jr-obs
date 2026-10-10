@@ -1,6 +1,6 @@
 import { annualOverheadCost, calculateQuoteProfitability } from "./quoteEngine";
-import { invoiceTotal } from "./workflow";
-import { assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "./assistantSignals-core.mjs";
+import { assistantInvoiceBalance, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "./assistantSignals-core.mjs";
+import { effectiveInvoicePaid, type PaymentRecord } from "./payments";
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import {
   buildMaterialLearningPatterns,
@@ -634,6 +634,7 @@ export function buildSmartRecommendations({
   jobs,
   documents,
   invoices,
+  payments = [],
   certificates,
   reminders = [],
   labourSettings,
@@ -642,6 +643,7 @@ export function buildSmartRecommendations({
   jobs: Job[];
   documents: PricingDocument[];
   invoices: Invoice[];
+  payments?: PaymentRecord[];
   certificates: CertificateSignal[];
   reminders?: AiReminder[];
   labourSettings: LabourCostSettings;
@@ -678,9 +680,9 @@ export function buildSmartRecommendations({
     });
   }
 
-  const overdue = invoices.filter((invoice) => isAssistantInvoiceOverdue(invoice, now));
+  const overdue = invoices.filter((invoice) => isAssistantInvoiceOverdue(invoice, now, effectiveInvoicePaid(invoice, payments)));
   if (overdue.length) {
-    const value = overdue.reduce((sum, invoice) => sum + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
+    const value = overdue.reduce((sum, invoice) => sum + assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, payments)), 0);
     recommendations.push({
       id: "overdue-invoices",
       kind: "Invoice",
@@ -768,6 +770,7 @@ export function buildTodayAssistant({
   planner,
   documents,
   invoices,
+  payments = [],
   profiles,
   reminders,
   recommendations,
@@ -777,6 +780,7 @@ export function buildTodayAssistant({
   planner: PlannerEntry[];
   documents: PricingDocument[];
   invoices: Invoice[];
+  payments?: PaymentRecord[];
   profiles: CustomerProfile[];
   reminders: AiReminder[];
   recommendations: AiRecommendation[];
@@ -786,7 +790,7 @@ export function buildTodayAssistant({
   const todaysJobs = jobs.filter((job) => job.startDate === today && !isJobInactiveStatus(job.status));
   const todaysPlanner = planner.filter((entry) => entry.date === today && ["Planned", "Confirmed"].includes(entry.status));
   const overdueInvoices = invoices
-    .filter((invoice) => isAssistantInvoiceOverdue(invoice, now))
+    .filter((invoice) => isAssistantInvoiceOverdue(invoice, now, effectiveInvoicePaid(invoice, payments)))
     .toSorted((left, right) => left.dueDate.localeCompare(right.dueDate));
   const quoteFollowUps = documents
     .filter((document) => assistantQuoteFollowUpDue(document, now))
@@ -803,6 +807,7 @@ export function buildTodayAssistant({
     todaysJobs,
     todaysPlanner,
     overdueInvoices,
+    payments,
     quoteFollowUps,
     dueReminders,
     customerFollowUps,
@@ -818,6 +823,7 @@ function trend(current: number, previous: number) {
 export function buildBusinessCoach({
   documents,
   invoices,
+  payments = [],
   jobs,
   certificates,
   reminders = [],
@@ -826,6 +832,7 @@ export function buildBusinessCoach({
 }: {
   documents: PricingDocument[];
   invoices: Invoice[];
+  payments?: PaymentRecord[];
   jobs: Job[];
   certificates: CertificateSignal[];
   reminders?: AiReminder[];
@@ -871,10 +878,10 @@ export function buildBusinessCoach({
 
   const currentMonth = months.at(-1)!;
   const previousMonth = months.at(-2)!;
-  const unpaidInvoices = invoices.filter((invoice) => !["Paid", "Cancelled"].includes(invoice.status));
-  const unpaidInvoiceValue = unpaidInvoices.reduce((sum, invoice) => sum + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
-  const overdueInvoiceCount = unpaidInvoices.filter((invoice) => isAssistantInvoiceOverdue(invoice, now)).length;
-  const coaching = buildSmartRecommendations({ jobs, documents, invoices, certificates, reminders, labourSettings, now });
+  const unpaidInvoices = invoices.filter((invoice) => ["Sent", "Part paid", "Overdue"].includes(invoice.status) && assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, payments)) > 0);
+  const unpaidInvoiceValue = unpaidInvoices.reduce((sum, invoice) => sum + assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, payments)), 0);
+  const overdueInvoiceCount = unpaidInvoices.filter((invoice) => isAssistantInvoiceOverdue(invoice, now, effectiveInvoicePaid(invoice, payments))).length;
+  const coaching = buildSmartRecommendations({ jobs, documents, invoices, payments, certificates, reminders, labourSettings, now });
 
   if (acceptedQuotes.length >= 3 && acceptedQuotes.length / Math.max(1, decidedQuotes.length) < 0.35) {
     coaching.push({

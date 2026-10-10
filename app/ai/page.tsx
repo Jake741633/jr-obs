@@ -33,7 +33,7 @@ import {
   defaultBankDetails,
   defaultPaymentTermsTemplates,
 } from "../../lib/businessSettings";
-import { useJobVariationsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useJobVariationsCollection, usePaymentsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../lib/jobManagement-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
@@ -43,6 +43,8 @@ import {
   createPurchaseListFromPricingDocument,
   pricingDocumentTotal,
 } from "../../lib/workflow";
+import { assistantInvoiceBalance } from "../../lib/assistantSignals-core.mjs";
+import { effectiveInvoicePaid } from "../../lib/payments";
 import { useAiLearningMemory } from "../../lib/useAiLearningMemory";
 import { materialOrderLists, operationalHealthScore, outstandingCertificateJobs } from "../../lib/dashboardIntelligence";
 import type {
@@ -85,6 +87,7 @@ export default function AiPage() {
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const pricing = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
+  const payments = usePaymentsCollection();
   const planner = useLocalStorageCollection<PlannerEntry>("jr-os-planner");
   const profiles = useLocalStorageCollection<CustomerProfile>("jr-os-customer-profiles");
   const interactions = useLocalStorageCollection<CustomerInteraction>("jr-os-customer-interactions");
@@ -113,7 +116,7 @@ export default function AiPage() {
     materials: materials.items,
   }, labourSettings);
   const ready = [
-    jobs, customers, builders, pricing, invoices, planner, profiles, interactions, reminders, certificates,
+    jobs, customers, builders, pricing, invoices, payments, planner, profiles, interactions, reminders, certificates,
     surveys, timeline, jobDocuments, materials, purchaseLists, variations, labourSettingsStore, bankStore, paymentTermsStore,
   ].every((store) => store.isReady) && learning.isReady;
 
@@ -122,11 +125,12 @@ export default function AiPage() {
       jobs: jobs.items,
       documents: pricing.items,
       invoices: invoices.items,
+      payments: payments.items,
       certificates: certificates.items,
       reminders: reminders.items,
       labourSettings,
     }),
-    [certificates.items, invoices.items, jobs.items, labourSettings, pricing.items, reminders.items],
+    [certificates.items, invoices.items, payments.items, jobs.items, labourSettings, pricing.items, reminders.items],
   );
 
   const today = useMemo(
@@ -135,23 +139,25 @@ export default function AiPage() {
       planner: planner.items,
       documents: pricing.items,
       invoices: invoices.items,
+      payments: payments.items,
       profiles: profiles.items,
       reminders: reminders.items,
       recommendations,
     }),
-    [invoices.items, jobs.items, planner.items, pricing.items, profiles.items, recommendations, reminders.items],
+    [invoices.items, payments.items, jobs.items, planner.items, pricing.items, profiles.items, recommendations, reminders.items],
   );
 
   const coach = useMemo(
     () => buildBusinessCoach({
       documents: pricing.items,
       invoices: invoices.items,
+      payments: payments.items,
       jobs: jobs.items,
       certificates: certificates.items,
       reminders: reminders.items,
       labourSettings,
     }),
-    [certificates.items, invoices.items, jobs.items, labourSettings, pricing.items, reminders.items],
+    [certificates.items, invoices.items, payments.items, jobs.items, labourSettings, pricing.items, reminders.items],
   );
 
   const operations = useMemo(() => {
@@ -159,9 +165,7 @@ export default function AiPage() {
     const openQuotes = pricing.items.filter((document) => document.type === "Quote" && ["Draft", "Sent"].includes(document.status));
     const quotePipeline = openQuotes.reduce((sum, document) => sum + pricingDocumentTotal(document), 0);
     const overdueValue = today.overdueInvoices.reduce((sum, invoice) => {
-      const net = invoice.items.reduce((lineSum, item) => lineSum + item.quantity * item.unitPrice, 0);
-      const total = net + (invoice.vatEnabled ? net * invoice.vatRate / 100 : 0);
-      return sum + Math.max(0, total - invoice.amountPaid);
+      return sum + assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, payments.items));
     }, 0);
     const incompleteSurveys = surveys.items.filter((survey) => survey.status !== "Complete");
     const draftCertificates = certificates.items.filter((certificate) => ["Draft", "In progress"].includes(certificate.status));
@@ -177,7 +181,7 @@ export default function AiPage() {
       incompleteSurveys,
       readinessScore: Math.max(0, Math.min(100, 100 - warnings)),
     };
-  }, [certificates.items, jobs.items, pricing.items, recommendations, surveys.items, today.overdueInvoices]);
+  }, [certificates.items, jobs.items, payments.items, pricing.items, recommendations, surveys.items, today.overdueInvoices]);
 
   const acceptedQuotes = pricing.items.filter((document) => document.type === "Quote" && document.status === "Accepted" && !document.jobId);
   const completedJobs = jobs.items.filter((job) =>

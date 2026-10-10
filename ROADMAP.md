@@ -13,6 +13,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Phone quick actions and direct JR AI navigation
 - [x] Evidence-backed daily priorities connecting money, quotes, site readiness and diary clashes
 - [x] Correct draft-invoice and scheduled-follow-up false alerts
+- [x] Connect assistant and dashboard balances to the payment ledger without double-counting
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off
 - [x] Manufacturer-evidence device-pair coordination with saved backup and selectivity comparisons

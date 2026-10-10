@@ -19,6 +19,7 @@ import {
   useCustomerProfilesCollection,
   useCustomersCollection,
   useInvoicesCollection,
+  usePaymentsCollection,
   useJobsCollection,
   usePlannerCollection,
   usePricingDocumentsCollection,
@@ -26,7 +27,9 @@ import {
 } from "../lib/cloud/coreBusinessCollections";
 import { materialOrderLists, operationalHealthScore, outstandingCertificateJobs } from "../lib/dashboardIntelligence";
 import { makeId, useCloudLocalCollection } from "../lib/storage";
-import { invoiceTotal, pricingDocumentTotal } from "../lib/workflow";
+import { pricingDocumentTotal } from "../lib/workflow";
+import { assistantInvoiceBalance, isAssistantInvoiceOverdue } from "../lib/assistantSignals-core.mjs";
+import { effectiveInvoicePaid } from "../lib/payments";
 import type { AiReminderPriority, LabourCostSettings } from "../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -37,6 +40,7 @@ export default function Home() {
   const customers = useCustomersCollection();
   const quotes = usePricingDocumentsCollection();
   const invoices = useInvoicesCollection();
+  const payments = usePaymentsCollection();
   const planner = usePlannerCollection();
   const profiles = useCustomerProfilesCollection();
   const reminders = useAiRemindersCollection();
@@ -44,11 +48,11 @@ export default function Home() {
   const purchaseLists = usePurchaseListsCollection();
   const labourSettingsStore = useCloudLocalCollection<LabourCostSettings>("jr-os-labour-cost-settings", [defaultLabourSettings]);
   const [message, setMessage] = useState("");
-  const ready = [jobs, customers, quotes, invoices, planner, profiles, reminders, certificates, purchaseLists, labourSettingsStore].every((store) => store.isReady);
+  const ready = [jobs, customers, quotes, invoices, payments, planner, profiles, reminders, certificates, purchaseLists, labourSettingsStore].every((store) => store.isReady);
   const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
 
-  const recommendations = useMemo(() => buildSmartRecommendations({ jobs: jobs.items, documents: quotes.items, invoices: invoices.items, certificates: certificates.items, reminders: reminders.items, labourSettings }), [certificates.items, invoices.items, jobs.items, labourSettings, quotes.items, reminders.items]);
-  const today = useMemo(() => buildTodayAssistant({ jobs: jobs.items, planner: planner.items, documents: quotes.items, invoices: invoices.items, profiles: profiles.items, reminders: reminders.items, recommendations }), [invoices.items, jobs.items, planner.items, profiles.items, quotes.items, recommendations, reminders.items]);
+  const recommendations = useMemo(() => buildSmartRecommendations({ jobs: jobs.items, documents: quotes.items, invoices: invoices.items, payments: payments.items, certificates: certificates.items, reminders: reminders.items, labourSettings }), [certificates.items, invoices.items, payments.items, jobs.items, labourSettings, quotes.items, reminders.items]);
+  const today = useMemo(() => buildTodayAssistant({ jobs: jobs.items, planner: planner.items, documents: quotes.items, invoices: invoices.items, payments: payments.items, profiles: profiles.items, reminders: reminders.items, recommendations }), [invoices.items, payments.items, jobs.items, planner.items, profiles.items, quotes.items, recommendations, reminders.items]);
   const operational = useMemo(() => {
     const pendingMaterialLists = materialOrderLists(purchaseLists.items);
     const certificateJobs = outstandingCertificateJobs(jobs.items, certificates.items);
@@ -74,9 +78,9 @@ export default function Home() {
     const activeJobs = jobs.items.filter((job) => !["Complete", "On hold"].includes(job.status));
     const openQuotes = quotes.items.filter((quote) => quote.type === "Quote" && ["Draft", "Sent"].includes(quote.status));
     const quotePipeline = openQuotes.reduce((sum, quote) => sum + pricingDocumentTotal(quote), 0);
-    const outstandingInvoices = invoices.items.filter((invoice) => ["Sent", "Part paid", "Overdue"].includes(invoice.status));
-    const outstanding = outstandingInvoices.reduce((sum, invoice) => sum + Math.max(0, invoiceTotal(invoice) - invoice.amountPaid), 0);
-    const overdueCount = outstandingInvoices.filter((invoice) => invoice.status === "Overdue" || (invoice.dueDate && new Date(invoice.dueDate) < new Date())).length;
+    const outstandingInvoices = invoices.items.filter((invoice) => ["Sent", "Part paid", "Overdue"].includes(invoice.status) && assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, payments.items)) > 0);
+    const outstanding = outstandingInvoices.reduce((sum, invoice) => sum + assistantInvoiceBalance(invoice, effectiveInvoicePaid(invoice, payments.items)), 0);
+    const overdueCount = outstandingInvoices.filter((invoice) => isAssistantInvoiceOverdue(invoice, new Date(), effectiveInvoicePaid(invoice, payments.items))).length;
     const recentJobs = [...jobs.items].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 5);
     const urgentInvoices = outstandingInvoices.toSorted((a, b) => a.dueDate.localeCompare(b.dueDate)).slice(0, 4);
     const quoteDocuments = quotes.items.filter((quote) => quote.type === "Quote");
@@ -90,7 +94,7 @@ export default function Home() {
     const wonQuotesAwaitingJob = quoteDocuments.filter((quote) => quote.status === "Accepted" && !quote.jobId);
     const expectedProfit = jobExpectedProfit + wonQuotesAwaitingJob.reduce((sum, quote) => sum + (quote.profitability?.expectedProfit ?? 0), 0);
     return { activeJobs, openQuotes, quotePipeline, outstanding, overdueCount, recentJobs, urgentInvoices, quoteConversionRate, jobsInProgress, outstandingInvoices, expectedProfit };
-  }, [invoices.items, jobs.items, quotes.items]);
+  }, [invoices.items, payments.items, jobs.items, quotes.items]);
 
   function addReminder(input: { title: string; dueDate: string; dueTime: string; priority: AiReminderPriority; customerId?: string; notes: string }) {
     const now = new Date().toISOString();

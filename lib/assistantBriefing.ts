@@ -3,6 +3,7 @@ import { detectScheduleClashes, entryEndDate, type ScheduledPlannerEntry } from 
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import { outstandingCertificateJobs, type CertificateSignal } from "./dashboardIntelligence";
 import { assistantDateKey, assistantDay, assistantInvoiceBalance, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "./assistantSignals-core.mjs";
+import { effectiveInvoicePaid, type PaymentRecord } from "./payments";
 
 export type AssistantFocus = "All" | "Money" | "Quotes" | "Site" | "Diary" | "Reminders";
 export interface AssistantAction {
@@ -21,6 +22,7 @@ export interface AssistantRecords {
   jobs: Job[];
   documents: PricingDocument[];
   invoices: Invoice[];
+  payments?: PaymentRecord[];
   planner: ScheduledPlannerEntry[];
   purchases: PurchaseList[];
   reminders: AiReminder[];
@@ -38,15 +40,16 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
   const todayDay = assistantDay(today)!;
   const actions: AssistantAction[] = [];
   const add = (action: AssistantAction) => actions.push(action);
-  const { jobs, documents, invoices, planner, purchases, reminders, certificates } = records;
+  const { jobs, documents, invoices, payments = [], planner, purchases, reminders, certificates } = records;
 
-  for (const invoice of invoices.filter((item) => isAssistantInvoiceOverdue(item, now))) {
+  for (const invoice of invoices.filter((item) => isAssistantInvoiceOverdue(item, now, effectiveInvoicePaid(item, payments)))) {
+    const paid = effectiveInvoicePaid(invoice, payments);
     const overdueDays = todayDay - assistantDay(invoice.dueDate)!;
     add({ id: `invoice:${invoice.id}`, category: "Money", priority: "Now", title: `Chase ${invoice.number}`,
-      reason: `${money.format(assistantInvoiceBalance(invoice))} remains unpaid, ${plural(overdueDays, "day")} after the due date.`,
+      reason: `${money.format(assistantInvoiceBalance(invoice, paid))} remains unpaid, ${plural(overdueDays, "day")} after the due date.`,
       nextStep: "Check for a recent payment, then review the invoice before contacting the customer.",
       href: `/invoices?invoice=${encodeURIComponent(invoice.id)}`, actionLabel: "Review invoice", dueDate: invoice.dueDate,
-      evidence: [invoice.title, `Status: ${invoice.status}`, `Due: ${invoice.dueDate}`, `Recorded paid: ${money.format(invoice.amountPaid)}`] });
+      evidence: [invoice.title, `Status: ${invoice.status}`, `Due: ${invoice.dueDate}`, `Effective recorded paid: ${money.format(paid)}`, "Uses the higher of the invoice paid amount and linked ledger payments, including credits/refunds; these amounts are not added together."] });
   }
 
   const linkedQuoteIds = new Set(jobs.flatMap((job) => [job.sourceQuoteId, job.quoteSnapshot?.quoteId].filter(Boolean)));
