@@ -17,11 +17,13 @@ function compile(path, dependencies = {}, jsx = false, globals = {}) {
 const jobLink = compile("../lib/assistantJobLink.ts", {}, false, { URLSearchParams });
 const scheduling = compile("../lib/scheduling.ts");
 const assistantVisits = compile("../lib/assistantVisits.ts", { "./jobManagement-core.mjs": jobsCore, "./scheduling": scheduling });
+const purchaseLink = compile("../lib/purchaseListLink.ts", {}, false, { URLSearchParams });
+const assistantMaterials = compile("../lib/assistantMaterials.ts", { "./purchaseListLink": purchaseLink });
 const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
 const briefing = compile("../lib/assistantBriefing.ts", { "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
-const questions = compile("../lib/assistantQuestions.ts", { "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
+const questions = compile("../lib/assistantQuestions.ts", { "./assistantMaterials": assistantMaterials, "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
 const now = new Date(2026, 9, 10, 10);
 const records = (patch = {}) => ({ jobs: [], documents: [], invoices: [], payments: [], planner: [], purchases: [], reminders: [], certificates: [], ...patch });
 const visit = (patch = {}) => ({ id: "v1", title: "First fix", type: "Job", status: "Confirmed", date: "2026-10-11", startTime: "09:00", endTime: "12:00", location: "1 High Street", teamMemberIds: ["worker"], ...patch });
@@ -602,4 +604,84 @@ test("next-visit scheduling links encode one exact job scope and cannot carry bo
   }
   const longId = "x".repeat(301); const result = assistantVisits.assistantVisitActions([job({ id: longId, status: "Scheduled" })], [], "2026-10-10")[0];
   assert.equal(result.href, `/jobs/${longId}`);
+});
+
+const purchaseLine = (patch = {}) => ({ id: "line-1", description: "Cable", supplier: "CEF", stockCode: "CABLE-10", quantity: 12.5, unitCost: 6, status: "Needed", ...patch });
+const purchaseList = (patch = {}) => ({ id: "p1", number: "PO-01", title: "Workshop materials", jobId: "j1", items: [purchaseLine()], notes: "", ...patch });
+
+test("materials and delivery questions accept explicit forms and reject orders or invented delivery dates", () => {
+  for (const [query, intent] of [["Which materials need ordering?", "materials"], ["What materials do I need to order?", "materials"], ["Please show materials to order!", "materials"], ["What deliveries am I waiting for?", "deliveries"], ["Show awaiting deliveries", "deliveries"], ["List outstanding deliveries", "deliveries"], ["Which materials are ordered?", "deliveries"]]) assert.equal(questions.assistantQuestionIntent(query), intent, query);
+  for (const query of ["Order all materials", "Mark all materials delivered", "What deliveries arrive tomorrow?", "Show late deliveries", "Cancel orders for Workshop", "What cable should I buy?", "Show materials to order and unpaid invoices"]) {
+    assert.equal(answer(query).recognized, false, query); assert.equal(answer(query).items.length, 0);
+  }
+});
+
+test("material answers separate saved order stages, keep uncertain statuses and preserve each line's evidence", () => {
+  const data = { jobs: [job()], purchases: [purchaseList({ items: [purchaseLine(), purchaseLine({ id: "second", quantity: 3, stockCode: "OTHER" }), purchaseLine({ id: "ordered", description: "Ordered sockets", status: "Ordered" }), purchaseLine({ id: "done", description: "Delivered switches", status: "Delivered" }), purchaseLine({ id: "legacy", description: "Legacy line", status: "Dispatched" })] })] };
+  const before = JSON.stringify(data);
+  const needed = answer("Which materials need ordering?", data); assert.match(needed.summary, /2 line\(s\) marked Needed.*1 uncertain/); assert.equal(needed.items.length, 1);
+  const evidence = needed.items[0].evidence.join(" "); assert.match(evidence, /Line line-1.*Quantity: 12.5.*CEF.*CABLE-10.*Line second.*Quantity: 3.*OTHER.*Legacy line.*Dispatched/);
+  assert.doesNotMatch(evidence, /Ordered sockets|Delivered switches|unitCost|£/);
+  const ordered = answer("Show awaiting deliveries", data); assert.match(ordered.summary, /1 line\(s\) marked Ordered.*1 uncertain/);
+  assert.match(ordered.items[0].evidence.join(" "), /Ordered sockets.*Legacy line/); assert.doesNotMatch(ordered.items[0].evidence.join(" "), /Delivered switches|Line second/);
+  assert.match(ordered.scope, /not confirmed late deliveries/); assert.equal(JSON.stringify(data), before);
+});
+
+test("material job scope uses only saved purchase links and preserves closed orphan and unlinked evidence", () => {
+  const data = { jobs: [job({ status: "Complete" }), job({ id: "other", title: "Other job" })], purchases: [purchaseList(), purchaseList({ id: "other", jobId: "other" }), purchaseList({ id: "orphan", jobId: "missing" }), purchaseList({ id: "unlinked", jobId: undefined, pricingDocumentId: "q1" })], documents: [{ id: "q1", jobId: "j1" }] };
+  const all = answer("Show materials to order", data); assert.equal(all.items.length, 4); assert.match(all.scope, /including unlinked lists and lists on closed jobs/);
+  assert.match(all.items.find((i) => i.id === "purchase:orphan").evidence[0], /Linked job unavailable/); assert.match(all.items.find((i) => i.id === "purchase:unlinked").evidence[0], /No saved job link/);
+  const scoped = answerFor("Show materials to order", data, "j1"); assert.deepEqual(Array.from(scoped.items, (i) => i.id), ["purchase:p1"]); assert.match(scoped.scope, /Job status: Complete/);
+  const missing = answerFor("Show materials to order", data, "removed"); assert.equal(missing.title, "Job unavailable"); assert.equal(missing.items.length, 0);
+});
+
+test("named material and delivery questions preserve duplicate choices, quoted names and full addresses", () => {
+  const data = { jobs: [job(), job({ id: "other", title: "Workshop", siteAddress: "2 High Street" })], purchases: [purchaseList({ items: [purchaseLine({ status: "Ordered" })] }), purchaseList({ id: "other", jobId: "other" })] };
+  assert.equal(answer("Which materials need ordering for Workshop?", data).title, "Choose a job");
+  assert.equal(answer("Which materials need ordering for Workshop?", data).items.length, 0);
+  for (const query of ['What deliveries am I waiting for at "1 High Street"?', "Show awaiting deliveries for 1 high   street", "Which materials are ordered at 1 High Street"]) {
+    const result = answer(query, data); assert.equal(result.resolvedJobId, "j1", query); assert.equal(result.items[0].id, "purchase:p1");
+  }
+  assert.equal(answer("Show materials to order for Work", data).title, "Job unavailable");
+  const named = { jobs: [job({ title: "Workshop for Ray" })], purchases: [purchaseList()] };
+  assert.equal(answer('Show materials to order for "Workshop for Ray"', named).resolvedJobId, "j1");
+});
+
+test("missing quantity and status evidence cannot become an empty materials clearance", () => {
+  const data = { purchases: [purchaseList({ items: [0, -1, NaN, Infinity, undefined].map((quantity, i) => purchaseLine({ id: String(i), quantity, supplier: "", stockCode: "" })).concat([purchaseLine({ id: "legacy", quantity: 2, status: "" }), purchaseLine({ id: "done", status: "Delivered", quantity: NaN })]) })] };
+  const result = answer("Show materials to order", data); assert.match(result.summary, /5 line\(s\) marked Needed.*1 uncertain/); assert.match(result.warnings[0], /5 outstanding line/);
+  assert.match(result.items[0].evidence.join(" "), /Quantity needs review.*Supplier: Not recorded.*Stock code: Not recorded/);
+  assert.match(result.items[0].evidence.join(" "), /Line legacy.*Status: Not recorded/);
+  assert.match(answer("Show materials to order", { purchases: undefined }).summary, /not ready/);
+  assert.match(answer("Show materials to order", { purchases: [] }).summary, /0 line\(s\) marked Needed/);
+});
+
+test("phone material shortcuts reveal four lists and refresh on saved order and delivery changes", () => {
+  const data = records({ jobs: [job()], purchases: Array.from({ length: 7 }, (_, i) => purchaseList({ id: `p${i}`, number: `PO-${i}` })) }); const h = ui(data);
+  h.scope("j1"); h.click("Materials to order"); assert.match(text(h.render()), /Only purchase lists explicitly linked to Workshop/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 4); assert.equal(h.blurred(), 1);
+  h.click("Show more records"); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 7);
+  h.replaceRecords({ ...data, purchases: data.purchases.map((list) => ({ ...list, items: [purchaseLine({ status: "Ordered" })] })) });
+  assert.match(text(h.render()), /0 line\(s\) marked Needed/); h.click("Awaiting deliveries"); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 4);
+  h.replaceRecords({ ...data, purchases: data.purchases.map((list) => ({ ...list, items: [purchaseLine({ status: "Delivered" })] })) }); assert.match(text(h.render()), /0 line\(s\) marked Ordered/);
+  h.scope(""); assert.equal(nodes(h.render()).some((n) => n.props["aria-label"] === "JR AI answer"), false);
+});
+
+test("submitted named material answers retain the selected identity when names are reused", () => {
+  const data = records({ jobs: [job()], purchases: [purchaseList()] }); const h = ui(data);
+  h.fill("Show materials to order for Workshop"); h.submit(); assert.match(text(h.render()), /1 line\(s\) marked Needed/);
+  h.replaceRecords({ ...data, jobs: [job({ id: "replacement" })], purchases: [purchaseList({ jobId: "replacement" })] });
+  assert.match(text(h.render()), /previous selection is unavailable/); assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 1, "only an explicit job-choice review link remains");
+  assert.ok(!nodes(h.render()).some((n) => n.type === "Link" && n.props.href.startsWith("/purchases")));
+  h.choose(); assert.match(text(h.render()), /1 line\(s\) marked Needed/); h.click("Clear answer"); assert.equal(nodes(h.render()).some((n) => n.props["aria-label"] === "JR AI answer"), false);
+});
+
+test("material review links retain opaque saved ids and permitted office destinations without source mutation", () => {
+  const id = " p /?# +&action=create "; const data = records({ jobs: [job()], purchases: [purchaseList({ id })] }); const before = JSON.stringify(data);
+  for (const role of ["owner", "admin", "office"]) {
+    const result = questions.answerAssistantQuestion(data, "Which materials need ordering?", now, undefined, "j1", permissions.canAccessPath(role, "/job-tasks"));
+    const link = new URL(result.items[0].href, "https://jr.example"); assert.deepEqual(Array.from(link.searchParams), [["list", id]]);
+    assert.equal(permissions.canAccessPath(role, permissions.internalPathForAccess(result.items[0].href)), true); assert.equal(purchaseLink.purchaseListFromLink(link.search).listId, id);
+  }
+  assert.equal(JSON.stringify(data), before);
 });

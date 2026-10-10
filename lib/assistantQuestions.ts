@@ -5,8 +5,9 @@ import { effectiveInvoicePaid, invoiceGross } from "./payments";
 import { entryEndDate } from "./scheduling";
 import { assistantTaskActions } from "./assistantTasks";
 import { assistantVisitActions } from "./assistantVisits";
+import { assistantMaterialsAnswer } from "./assistantMaterials";
 
-export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags" | "job" | "visits";
+export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries";
 export interface AssistantAnswerItem { id: string; title: string; detail: string; evidence: string[]; href: string; actionLabel: string }
 export interface AssistantJobChoice { id: string; title: string; address: string; status: string }
 export interface AssistantAnswer { recognized: boolean; title: string; summary: string; scope: string; warnings: string[]; items: AssistantAnswerItem[]; jobChoices?: AssistantJobChoice[]; resolvedJobId?: string }
@@ -26,6 +27,8 @@ export function assistantQuestionIntent(question: string): AssistantQuestionInte
   if (/^(?:(?:which|what) jobs need (?:booking|(?:another|a) (?:work )?visit)|show(?: me)? (?:next visit checks|work visit checks|jobs needing (?:a |another )?visit))$/.test(query)) return "visits";
   if (/^(?:(?:show(?: me)?|list)(?: my)? (?:open |outstanding )?tasks|what tasks (?:are open|are outstanding|need doing))$/.test(query)) return "tasks";
   if (/^(?:(?:show(?: me)?|list)(?: my)? (?:open |outstanding )?snags|what snags (?:are open|are outstanding|need fixing))$/.test(query)) return "snags";
+  if (/^(?:(?:which|what) materials (?:need ordering|do i need to order)|show(?: me)? materials to order|list materials to order)$/.test(query)) return "materials";
+  if (/^(?:(?:which|what) deliveries am i waiting for|show(?: me)? (?:awaiting deliveries|outstanding deliveries)|list outstanding deliveries|(?:which|what) materials are ordered)$/.test(query)) return "deliveries";
   return null;
 }
 
@@ -39,11 +42,11 @@ const jobKey = (value: string) => value.trim().replace(/\s+/g, " ").replace(/’
 function namedJobQuestion(question: string) {
   if (question.length > 180) return null;
   const query = question.trim().replace(/\s+/g, " ").replace(/^please /i, "").replace(/^can you /i, "").replace(/^tell me /i, "").replace(/ please[?.!]*$/i, "");
-  const match = query.match(/^(.+?) (?:for|at) (.+)$/i);
+  const match = query.match(/^((?:(?:what|which) deliveries am i waiting for)|.+?) (?:for|at) (.+)$/i);
   if (!match) return null;
   const parsedIntent = assistantQuestionIntent(match[1]);
   const intent = parsedIntent === "priorities" ? "job" : parsedIntent;
-  if (intent !== "tasks" && intent !== "snags" && intent !== "job" && intent !== "visits") return null;
+  if (intent !== "tasks" && intent !== "snags" && intent !== "job" && intent !== "visits" && intent !== "materials" && intent !== "deliveries") return null;
   const raw = match[2].trim();
   const quoted = raw.match(/^["“](.+)["”][?.!]*$/);
   const label = quoted ? quoted[1].trim() : raw.replace(/[?.!]+$/, "").trim();
@@ -61,7 +64,7 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
   const day = assistantDay(today);
   if (!intent || day === null) return { recognized: false, title: "Try a supported question", summary: "I could not reliably match that question. Try “What is booked tomorrow?”, “How much is overdue?” or “Which quotes need chasing?”.", scope: "Quick answers use local rules and your loaded records. Use the record search below for a particular job, quote or invoice.", warnings: [], items: [] };
 
-  if (intent === "tasks" || intent === "snags" || intent === "job" || intent === "visits") {
+  if (intent === "tasks" || intent === "snags" || intent === "job" || intent === "visits" || intent === "materials" || intent === "deliveries") {
     const matchingJobs = namedJob ? records.jobs.filter((job) => namedJob.keys.has(jobKey(job.title)) || (job.siteAddress.trim() && namedJob.keys.has(jobKey(job.siteAddress)))) : records.jobs;
     const selectedJob = selectedJobId ? matchingJobs.find((job) => job.id === selectedJobId) : namedJob && matchingJobs.length === 1 ? matchingJobs[0] : undefined;
     const needsChoice = Boolean((namedJob || intent === "job") && !selectedJob);
@@ -73,6 +76,7 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
         scope: "Job names and site addresses must match in full, ignoring case and repeated spaces. I have not broadened this answer to other jobs.",
         warnings: selectedJobId ? ["The previous selection is unavailable or no longer matches this question. Choose a current record or clear the job scope."] : [], items: [], jobChoices: showChoices ? choices : [] };
     }
+    if (intent === "materials" || intent === "deliveries") return assistantMaterialsAnswer(records, intent, selectedJob);
     if (intent === "job" && selectedJob) {
       const jobId = selectedJob.id;
       const priorityRank = { Now: 0, Today: 1, Next: 2 };

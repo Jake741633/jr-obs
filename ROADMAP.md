@@ -31,6 +31,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Phone next-visit planning that separates ongoing/future work bookings from history and uncertain records
 - [x] Evidence-based diary clash signals and separate phone review of uncertain dates, times and statuses
 - [x] Phone diary search, status/job filters and progressive visit cards with exact job-scoped JR AI scheduling links
+- [x] JR AI material-ordering and delivery-follow-up answers with exact job scope and purchase-list review links
 - [x] Check each upcoming visit’s readiness and open the affected diary day
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off
