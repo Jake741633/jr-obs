@@ -161,7 +161,7 @@ test("planner views include visits spanning the requested day, week or month", (
 
 test("actual planner date links select the day and show spanning visits without writing records", () => {
   const state = [], effects = []; let cursor = 0, writes = 0;
-  const useState = (initial) => { const index = cursor++; if (!(index in state)) state[index] = initial; return [state[index], (value) => { state[index] = typeof value === "function" ? value(state[index]) : value; }]; };
+  const useState = (initial) => { const index = cursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial; return [state[index], (value) => { state[index] = typeof value === "function" ? value(state[index]) : value; }]; };
   const store = (items = []) => ({ items, isReady: true, setItems() { writes++; throw new Error("Navigation must not write records"); } });
   const plannerPage = compile("../app/planner/page.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx },

@@ -35,6 +35,7 @@ const jobPath = (id: string) => `/jobs/${encodeURIComponent(id)}`;
 const quotePath = (id: string) => `/quotes/${encodeURIComponent(id)}`;
 const rank = { Now: 0, Today: 1, Next: 2 };
 const plural = (value: number, singular: string) => `${value} ${singular}${value === 1 ? "" : "s"}`;
+const validVisitTimes = (entry: ScheduledPlannerEntry) => /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.startTime) && /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.endTime) && entry.startTime < entry.endTime;
 
 /** Read-only, deterministic recommendations. The caller supplies only authorized collections. */
 export function buildAssistantBriefing(records: AssistantRecords, now = new Date()) {
@@ -76,7 +77,7 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
 
   const visits = planner.filter((entry) => ["Planned", "Confirmed"].includes(entry.status)
     && assistantDay(entry.date) !== null && assistantDay(entryEndDate(entry)) !== null
-    && entry.date <= entryEndDate(entry) && assistantDay(entry.date)! <= todayDay + 7 && assistantDay(entryEndDate(entry))! >= todayDay);
+    && entry.date <= entryEndDate(entry) && assistantDay(entry.date)! <= todayDay + 6 && assistantDay(entryEndDate(entry))! >= todayDay);
   const jobVisits = new Map<string, ScheduledPlannerEntry[]>();
   for (const visit of visits) if (visit.jobId) jobVisits.set(visit.jobId, [...(jobVisits.get(visit.jobId) || []), visit]);
   const jobPurchases = new Map<string, PurchaseList[]>();
@@ -84,20 +85,28 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
   for (const job of jobs.filter((item) => !isJobInactiveStatus(item.status))) {
     const linkedVisits = jobVisits.get(job.id) || [];
     const start = assistantDay(job.startDate);
-    const scheduledSoon = start !== null && start >= todayDay && start <= todayDay + 7;
+    const scheduledSoon = start !== null && start >= todayDay && start <= todayDay + 6;
     const onSite = ["First fix", "Second fix", "Testing", "Snagging", "In progress", "Awaiting builder"].includes(job.status);
     if (!scheduledSoon && !onSite && !linkedVisits.length) continue;
-    const dueDate = linkedVisits.map((visit) => visit.date).concat(scheduledSoon || onSite ? [job.startDate] : []).filter((date) => assistantDay(date) !== null).sort()[0] || today;
+    const nextVisitDate = onSite ? today : linkedVisits.map((visit) => visit.date < today ? today : visit.date).sort()[0] || (scheduledSoon ? job.startDate : today);
     const lists = jobPurchases.get(job.id) || [];
     const needed = lists.flatMap((list) => list.items.filter((item) => item.status === "Needed"));
     const ordered = lists.flatMap((list) => list.items.filter((item) => item.status === "Ordered"));
-    const gaps = [!job.siteAddress.trim() && !linkedVisits.some((visit) => visit.location.trim()) ? "No site or visit address recorded" : "",
-      !job.assignedTo?.length && !linkedVisits.some((visit) => visit.teamMemberIds.length) ? "No worker assigned to the job or upcoming visits" : "",
+    const visitGaps = linkedVisits.flatMap((visit) => {
+      const date = visit.date < today ? today : visit.date;
+      return [!job.siteAddress.trim() && !visit.location.trim() ? "No site or visit address recorded" : "",
+        !job.assignedTo?.length && !visit.teamMemberIds.length ? "No worker assigned to the job or this visit" : "",
+        !validVisitTimes(visit) ? "Visit time is missing or invalid; review timing before checking clashes" : ""].filter(Boolean).map((gap) => ({ date, detail: `${visit.title} · ${date}: ${gap}` }));
+    });
+    const generalGaps = [!linkedVisits.length && !job.siteAddress.trim() ? "No site or visit address recorded" : "",
+      !linkedVisits.length && !job.assignedTo?.length ? "No worker assigned to the job" : "",
       needed.length ? `${plural(needed.length, "material line")} still marked Needed` : "",
-      ordered.length ? `${plural(ordered.length, "material line")} ordered but not marked delivered` : ""].filter(Boolean);
+      ordered.length ? `${plural(ordered.length, "material line")} ordered but not marked delivered` : ""].filter(Boolean).map((detail) => ({ date: nextVisitDate, detail }));
+    const gaps = [...visitGaps, ...generalGaps].toSorted((a, b) => a.date.localeCompare(b.date) || a.detail.localeCompare(b.detail));
+    const dueDate = gaps[0]?.date || nextVisitDate;
     if (gaps.length) add({ id: `readiness:${job.id}`, category: "Site", priority: dueDate <= today ? "Now" : "Today", title: `Prepare ${job.title}`,
-      reason: `${plural(gaps.length, "readiness check")} before the next site visit.`, nextStep: "Confirm access and the assigned worker, then check linked material orders before travelling.",
-      href: jobPath(job.id), actionLabel: "Open job", dueDate, evidence: [`Job status: ${job.status}`, `Visit/start: ${dueDate}`, ...gaps, ...lists.map((list) => `${list.number} · ${list.title}`)] });
+      reason: `${plural(gaps.length, "readiness check")} before the next site visit.`, nextStep: "Confirm access, visit timing and the assigned worker, then check linked material orders before travelling.",
+      href: generalGaps.length ? jobPath(job.id) : `/planner?date=${dueDate}`, actionLabel: generalGaps.length ? "Open job" : "Review visit details", dueDate, evidence: [`Job status: ${job.status}`, `Visit/start: ${dueDate}`, ...gaps.map((gap) => gap.detail), ...lists.map((list) => `${list.number} · ${list.title}`)] });
   }
 
   const invoicedJobs = new Set(invoices.filter((item) => item.status !== "Cancelled").map((item) => item.jobId));
@@ -113,7 +122,7 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
   }
 
   // Only assert a timed clash with valid explicit times; missing times need human review.
-  const timedVisits = visits.filter((entry) => /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.startTime) && /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.endTime) && entry.startTime < entry.endTime);
+  const timedVisits = visits.filter(validVisitTimes);
   const visitById = new Map(timedVisits.map((entry) => [entry.id, entry]));
   const clashGroups = new Map<string, { a: ScheduledPlannerEntry; b: ScheduledPlannerEntry; kinds: Set<string> }>();
   for (const clash of detectScheduleClashes(timedVisits, [], [])) {
@@ -123,10 +132,10 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
     group.kinds.add(clash.kind.toLowerCase()); clashGroups.set(key, group);
   }
   for (const [key, { a, b, kinds }] of clashGroups) {
-    const dueDate = a.date > b.date ? a.date : b.date;
+    const dueDate = [today, a.date, b.date].sort().at(-1)!;
     add({ id: `clash:${key}`, category: "Diary", priority: dueDate <= today ? "Now" : "Today", title: `Resolve ${a.title} / ${b.title}`,
       reason: `Overlapping visits share ${[...kinds].sort().join(", ")}.`, nextStep: "Review both visits in the planner and confirm the assignment or timing.",
-      href: "/planner", actionLabel: "Open planner", dueDate,
+      href: `/planner?date=${dueDate}`, actionLabel: "Review clash day", dueDate,
       evidence: [a, b].map((entry) => `${entry.title} · ${entry.date}${entryEndDate(entry) !== entry.date ? ` to ${entryEndDate(entry)}` : ""} · ${entry.startTime}–${entry.endTime}`) });
   }
   for (const reminder of reminders.filter((item) => !item.completed && assistantDay(item.dueDate) !== null && item.dueDate <= today)) {
