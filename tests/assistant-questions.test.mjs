@@ -14,6 +14,7 @@ function compile(path, dependencies = {}, jsx = false, globals = {}) {
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, ...(jsx ? { jsx: ts.JsxEmit.ReactJSX } : {}) } }).outputText, { ...globals, module: mod, exports: mod.exports, Date, Intl, require(name) { assert.ok(name in dependencies, name); return dependencies[name]; } });
   return mod.exports;
 }
+const jobLink = compile("../lib/assistantJobLink.ts", {}, false, { URLSearchParams });
 const scheduling = compile("../lib/scheduling.ts");
 const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
@@ -116,16 +117,16 @@ test("answers retain source immutability, authorised internal links and explicit
 const jsx = (type, props) => ({ type, props });
 const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
 const text = (tree) => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
-function ui(data = records(), canOpenTaskWorkspace = true) {
-  const states = []; let cursor = 0, blurred = 0;
+function ui(data = records(), canOpenTaskWorkspace = true, search = "") {
+  const states = [], effects = [], frames = []; let cursor = 0, blurred = 0, mounted = false;
   const component = compile("../components/ai/AssistantQuestions.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx },
-    react: { useMemo: (fn) => fn(), useRef: () => ({ current: { blur: () => blurred++ } }), useState(initial) { const index = cursor++; if (!(index in states)) states[index] = initial; return [states[index], (value) => { states[index] = typeof value === "function" ? value(states[index]) : value; }]; } },
-    "next/link": { default: "Link" }, "../ui/Card": { Card: "Card" }, "../../lib/assistantQuestions": questions,
-  }, true);
+    react: { useEffect: (fn) => { if (!mounted) effects.push(fn); }, useMemo: (fn) => fn(), useRef: () => ({ current: { blur: () => blurred++ } }), useState(initial) { const index = cursor++; if (!(index in states)) states[index] = initial; return [states[index], (value) => { states[index] = typeof value === "function" ? value(states[index]) : value; }]; } },
+    "next/link": { default: "Link" }, "../ui/Card": { Card: "Card" }, "../../lib/assistantQuestions": questions, "../../lib/assistantJobLink": jobLink,
+  }, true, { window: { location: { search }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame(id) { frames[id - 1] = null; } } });
   let recordsNow = data;
-  const render = () => { cursor = 0; return component.AssistantQuestions({ records: recordsNow, now, briefing: briefing.buildAssistantBriefing(recordsNow, now, canOpenTaskWorkspace), canOpenTaskWorkspace }); };
-  return { render, blurred: () => blurred, replaceRecords(value) { recordsNow = value; }, scope(value) { nodes(render()).find((node) => node.type === "select").props.onChange({ target: { value } }); }, choose(index = 0) { const button = nodes(render()).filter((node) => node.type === "button" && text(node) === "Use this job")[index]; assert.ok(button); button.props.onClick(); }, fill(value) { nodes(render()).find((node) => node.type === "input").props.onChange({ target: { value } }); }, submit() { nodes(render()).find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); }, click(label) { const button = nodes(render()).find((node) => node.type === "button" && text(node).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
+  const render = () => { cursor = 0; const tree = component.AssistantQuestions({ records: recordsNow, now, briefing: briefing.buildAssistantBriefing(recordsNow, now, canOpenTaskWorkspace), canOpenTaskWorkspace }); mounted = true; return tree; };
+  return { render, flush() { render(); effects.splice(0).forEach((fn) => fn()); frames.splice(0).filter(Boolean).forEach((fn) => fn()); }, blurred: () => blurred, replaceRecords(value) { recordsNow = value; }, scope(value) { nodes(render()).find((node) => node.type === "select").props.onChange({ target: { value } }); }, choose(index = 0) { const button = nodes(render()).filter((node) => node.type === "button" && text(node) === "Use this job")[index]; assert.ok(button); button.props.onClick(); }, fill(value) { nodes(render()).find((node) => node.type === "input").props.onChange({ target: { value } }); }, submit() { nodes(render()).find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); }, click(label) { const button = nodes(render()).find((node) => node.type === "button" && text(node).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
 }
 
 test("quick question buttons, typed submission, progressive reveal, edit invalidation and clearing use real handlers", () => {
@@ -448,4 +449,68 @@ test("a phone job briefing refreshes saved task, payment and visit status withou
   assert.doesNotMatch(text(h.render()), /Chase INV-1|Task: Fit labels|Review visit day/);
   assert.match(text(h.render()), /0 open tasks and snags.*0 upcoming or ongoing visits/);
   assert.match(text(h.render()), /Job briefing · Workshop/);
+});
+
+test("job briefing links encode one opaque identity and reject duplicate or unusable query ids", () => {
+  for (const id of ["j1", "j /?# +&date=2026-10-10", "Whiteside’s café"] ) {
+    const href = jobLink.assistantJobBriefingHref(id); assert.ok(href.startsWith("/ai/assistant?job="));
+    const parsed = jobLink.assistantJobFromLink(new URL(href, "https://jr.example").search); assert.equal(parsed.jobId, id);
+    assert.equal(new URL(href, "https://jr.example").searchParams.getAll("job").length, 1);
+  }
+  assert.equal(jobLink.assistantJobFromLink("?question=delete&action=create"), null);
+  for (const search of ["?job=", "?job=+", "?job=j1&job=j2", `?job=${"x".repeat(301)}`]) assert.equal(jobLink.assistantJobFromLink(search).jobId, null);
+  for (const id of ["", " ", "x".repeat(301)]) assert.equal(jobLink.assistantJobBriefingHref(id), null);
+});
+
+test("opening a saved job link shows only that job's briefing and does not replay after a user selects another", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Elsewhere" })], tasks: [siteTask(), siteTask({ id: "other-task", jobId: "other" })] });
+  const h = ui(data, true, "?job=j1&action=create&question=Delete+all+invoices"); h.flush();
+  assert.match(text(h.render()), /Job briefing · Workshop/); assert.ok(!text(h.render()).includes("Job briefing · Elsewhere"));
+  assert.ok(nodes(h.render()).some((n) => n.type === "Link" && n.props.href === "/job-tasks?job=j1&task=t1"));
+  assert.ok(!nodes(h.render()).some((n) => n.type === "Link" && n.props.href.includes("task=other-task")));
+  assert.equal(nodes(h.render()).find((n) => n.type === "select").props.value, "j1"); assert.equal(h.blurred(), 0);
+  h.scope("other"); h.click("Job briefing"); h.flush(); assert.match(text(h.render()), /Job briefing · Elsewhere/);
+});
+
+test("unknown linked jobs remain unavailable across refreshes and cannot substitute a reused title", () => {
+  const data = records({ jobs: [job({ id: "replacement" })], tasks: [siteTask({ jobId: "replacement" })] }); const h = ui(data, true, "?job=j1"); h.flush();
+  assert.match(text(h.render()), /Selected job unavailable/); assert.match(text(h.render()), /selected job is no longer available/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 0);
+  h.replaceRecords({ ...data, jobs: [job()] }); assert.match(text(h.render()), /Job briefing · Workshop/);
+  h.replaceRecords(data); assert.match(text(h.render()), /selected job is no longer available/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 0);
+});
+
+test("invalid job links ask for a choice and expose no briefing records until the user chooses", () => {
+  const data = records({ jobs: [job()], tasks: [siteTask()] });
+  for (const search of ["?job=", "?job=j1&job=other", `?job=${"x".repeat(301)}`]) {
+    const h = ui(data, true, search); h.flush(); assert.match(text(h.render()), /job briefing link is invalid/); assert.match(text(h.render()), /Choose one loaded job/);
+    assert.ok(!nodes(h.render()).some((n) => n.type === "Link" && n.props.href.startsWith("/job-tasks")));
+    h.choose(); assert.match(text(h.render()), /Job briefing · Workshop/); assert.doesNotMatch(text(h.render()), /link is invalid/);
+  }
+  const plain = ui(data); plain.flush(); assert.ok(!text(plain.render()).includes("Job briefing ·"));
+});
+
+test("job links preserve office task destinations and clear answer state through the existing controls", () => {
+  const h = ui(records({ jobs: [job()], tasks: [siteTask({ priority: "High" })] }), false, "?job=j1"); h.flush();
+  assert.match(text(h.render()), /Job briefing · Workshop/);
+  assert.ok(nodes(h.render()).filter((n) => n.type === "Link").every((n) => permissions.canAccessPath("office", permissions.internalPathForAccess(n.props.href))));
+  assert.ok(!nodes(h.render()).some((n) => n.type === "Link" && n.props.href.startsWith("/job-tasks")));
+  h.click("Clear answer"); h.flush(); assert.ok(!text(h.render()).includes("Job briefing ·"));
+});
+
+test("job-to-assistant shortcuts follow account access and never render for denied or unresolved roles", () => {
+  const makeLink = (identity, mode = "cloud", isReady = true, jobId = "j /?#") => compile("../components/ai/JobAssistantLink.tsx", {
+    "react/jsx-runtime": { jsx, jsxs: jsx }, "next/link": { default: "Link" }, "../../lib/assistantJobLink": jobLink,
+    "../../lib/cloud/permissions": permissions, "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity, mode, isReady }) },
+  }, true).JobAssistantLink({ jobId });
+  for (const role of ["owner", "admin", "office"]) {
+    const link = makeLink({ role }); assert.ok(link); assert.equal(link.props.href, "/ai/assistant?job=j%20%2F%3F%23");
+    assert.match(link.props.className, /min-h-12/); assert.equal(text(link), "Ask JR AI about this job");
+  }
+  for (const role of ["electrician", "apprentice", "builder", "customer", undefined]) assert.equal(makeLink({ role }), null);
+  assert.equal(makeLink({ role: "owner" }, "cloud", false), null);
+  assert.equal(makeLink({ role: "owner" }, "cloud", true, ""), null);
+  assert.ok(makeLink(null, "local")); assert.ok(makeLink(null, "migration"));
+  for (const path of ["../app/jobs/[id]/page.tsx", "../app/jobs/[id]/workspace/page.tsx"]) assert.match(readFileSync(new URL(path, import.meta.url), "utf8"), /<JobAssistantLink jobId=\{job\.id\} \/>/);
 });

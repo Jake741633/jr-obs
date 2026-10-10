@@ -16,6 +16,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Connect assistant and dashboard balances to the payment ledger without double-counting
 - [x] One-tap assistant answers for diary, money, quote follow-ups and site preparation
 - [x] Task-aware JR AI priorities and open-task/snag answers linked to the exact record
+- [x] One-tap job-to-JR-AI briefing links with exact saved identity and invalid-link handling
 - [x] Job-specific JR AI briefing joining tasks, visits, materials, quote links and payment-aware billing
 - [x] Ask for tasks/snags on a named job or site, with a phone job selector and explicit duplicate choices
 - [x] Phone task inbox with job/search/status filters and progressive loading
