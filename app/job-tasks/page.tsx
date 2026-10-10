@@ -7,7 +7,7 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useJobsCollection, useJobTasksCollection, useJobTimelineCollection, useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
-import { isOutstandingJobTask, jobTaskStatuses, jobTaskTimelineEntry, transitionJobTask } from "../../lib/jobTasks-core.mjs";
+import { isOutstandingJobTask, isJobTaskStatus, jobTaskStatuses, jobTaskStatusTransitionAllowed, jobTaskTimelineEntry, transitionJobTask } from "../../lib/jobTasks-core.mjs";
 import { assistantDateKey, assistantDay } from "../../lib/assistantSignals-core.mjs";
 import { filterTaskInbox, resolveTaskInboxLink, taskInboxFilters, taskMatchesInboxFilter, type TaskInboxFilter } from "../../lib/taskInbox";
 import { makeId } from "../../lib/storage";
@@ -165,6 +165,7 @@ export default function JobTasksPage() {
         if (current.jobId !== task.jobId) throw new Error("This task has moved to another job. Review its current record before changing status.");
         if (current.status === nextStatus) return current;
         if (current.status !== task.status) throw new Error("This task's status has changed. Review its current record before retrying.");
+        if (!jobTaskStatusTransitionAllowed(current.status, nextStatus)) throw new Error(`${current.type} cannot move from ${current.status} to ${nextStatus}.`);
         previousStatus = current.status;
         return transitionJobTask({ task: current, nextStatus, now });
       });
@@ -243,7 +244,8 @@ export default function JobTasksPage() {
           <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${task.type === "Snag" ? "bg-amber-500/10 text-amber-300" : "bg-cyan-500/10 text-cyan-300"}`}>{task.type}</span><span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">{task.priority}</span><span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">{task.status}</span></div><h2 className="mt-3 text-lg font-bold">{task.title}</h2><p className="mt-1 text-sm text-slate-400">{job?.title ?? "Unknown job"} · {task.category}</p></div>{complete ? <CheckCircle2 className="size-6 shrink-0 text-emerald-300" /> : task.priority === "Urgent" ? <AlertTriangle className="size-6 shrink-0 text-red-300" /> : null}</div>
           {task.description ? <p className="mt-4 whitespace-pre-wrap text-sm text-slate-300">{task.description}</p> : null}
           <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-3"><span>Assigned: {assignee?.name ?? "Unassigned"}</span><span>Due: {assistantDay(task.dueDate) !== null ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString("en-GB") : task.dueDate ? "Date needs review" : "No date"}</span><span>Photos: {task.photos.length}</span></div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{jobTaskStatuses.map((status) => <button key={status} type="button" disabled={task.status === status} onClick={() => changeStatus(task, status as JobTaskStatus)} className="min-h-12 rounded-xl border border-slate-700 px-2 text-xs font-semibold text-slate-300 disabled:border-cyan-500/30 disabled:bg-cyan-500/10 disabled:text-cyan-200">{status}</button>)}</div>
+          {!isJobTaskStatus(task.status) ? <p className="mt-3 text-sm text-amber-200">Saved status needs review. Choose a supported next stage after checking the task.</p> : ["Open", "In progress"].includes(task.status) ? <p className="mt-3 text-sm text-slate-400">Complete the task before recording customer confirmation.</p> : task.status === "Customer confirmed" ? <p className="mt-3 text-sm text-slate-400">Reopen the task before moving it to another stage.</p> : null}
+          <div role="group" aria-label="Task status actions" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{jobTaskStatuses.map((status) => <button key={status} type="button" aria-pressed={task.status === status} disabled={!jobTaskStatusTransitionAllowed(task.status, status)} onClick={() => changeStatus(task, status)} className={`min-h-12 rounded-xl border px-2 text-xs font-semibold ${task.status === status ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200" : "border-slate-700 text-slate-300 disabled:opacity-40"}`}>{status}</button>)}</div>
           <button type="button" onClick={() => removeTask(task)} className="mt-4 min-h-12 text-sm font-semibold text-red-300">Delete {task.type.toLowerCase()}</button>
         </Card>;
       }) : <Card><h2 className="font-bold">No matching tasks or snags</h2><p className="mt-2 text-sm text-slate-400">Try another filter or search, or choose a job to add an action. Only loaded records are included.</p></Card>}
