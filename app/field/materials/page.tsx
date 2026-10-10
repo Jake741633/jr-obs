@@ -10,8 +10,8 @@ import { PageHeader } from "../../../components/ui/PageHeader";
 import { useJobMaterialUsageCollection, useJobsCollection, useMaterialsCollection, usePurchaseListsCollection, useStockItemsCollection, useStockLocationsCollection, useStockMovementsCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { buildJobMaterialUsage, materialsTodaySummary, materialsUsedToday } from "../../../lib/jobMaterialsToday-core.mjs";
-import { applyStockUsage, buildLowStockPurchaseList, lowStockItems, lowStockRequestSourceSignature, matchesScanCode } from "../../../lib/mobileStock";
-import type { PurchaseList } from "../../../lib/models";
+import { applyStockUsage, buildLowStockPurchaseList, lowStockItems, lowStockRequestSourceSignature, stockItemIdentityIndex, stockScanMatches } from "../../../lib/mobileStock";
+import type { PurchaseList, StockItem } from "../../../lib/models";
 import { purchaseListReviewHref } from "../../../lib/purchaseListLink";
 import { makeId } from "../../../lib/storage";
 
@@ -19,6 +19,8 @@ const blankUsage = { stockItemId: "", quantity: "1", jobId: "", note: "" };
 const today = () => new Date().toISOString().slice(0, 10);
 const currency = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 type RequestDraft = { list: PurchaseList; sourceSignature: string; jobSignature: string; jobTitle: string; units: Record<string, string> };
+type ScanSelection = { item: StockItem; code: string };
+const stockQuantityLabel = (item: StockItem) => Number.isFinite(item.quantity) && item.quantity >= 0 ? `${item.quantity} ${typeof item.unit === "string" && item.unit.trim() ? item.unit : "units not recorded"}` : "Quantity needs review";
 
 const cloudFieldMaterialLinks = [
   { label: "Supplier Material Lookup", href: "/field/material-lookup" },
@@ -40,7 +42,16 @@ export default function MobileMaterialsPage() {
   const jobUsage = useJobMaterialUsageCollection();
   const identityState = useCloudIdentity();
   const [usage, setUsage] = useState(blankUsage);
+  const usageGeneration = useRef(0);
+  const [usageVersion, setUsageVersion] = useState(0);
   const [scanCode, setScanCode] = useState("");
+  const scanInput = useRef("");
+  const [scanQuery, setScanQuery] = useState("");
+  const scanGeneration = useRef(0);
+  const [scanVersion, setScanVersion] = useState(0);
+  const [scanLimit, setScanLimit] = useState(4);
+  const [scanSelection, setScanSelection] = useState<ScanSelection | null>(null);
+  const scanSelectionRef = useRef<ScanSelection | null>(null);
   const [message, setMessage] = useState("");
   const [requestDraft, setRequestDraft] = useState<RequestDraft | null>(null);
   const requestRef = useRef<RequestDraft | null>(null);
@@ -49,11 +60,18 @@ export default function MobileMaterialsPage() {
 
   const materialMap = useMemo(() => new Map(materials.items.map((item) => [item.id, item])), [materials.items]);
   const jobMap = useMemo(() => new Map(jobs.items.map((item) => [item.id, item.title])), [jobs.items]);
-  const locationMap = useMemo(() => new Map(locations.items.map((item) => [item.id, item.name])), [locations.items]);
+  const locationMap = useMemo(() => {
+    const labels = new Map<string, string | undefined>();
+    for (const item of locations.items) labels.set(item.id, labels.has(item.id) ? undefined : item.name);
+    return labels;
+  }, [locations.items]);
   const lowStock = useMemo(() => lowStockItems(stock.items), [stock.items]);
   const usedToday = useMemo(() => materialsUsedToday(jobUsage.items, today()), [jobUsage.items]);
   const todaySummary = useMemo(() => materialsTodaySummary(jobUsage.items, today()), [jobUsage.items]);
-  const selectedItem = stock.items.find((item) => item.id === usage.stockItemId);
+  const stockIndex = useMemo(() => stockItemIdentityIndex(stock.items), [stock.items]);
+  const selectedItem = stockIndex.get(usage.stockItemId);
+  const scanMatches = useMemo(() => scanQuery ? stockScanMatches(stock.items, materials.items, scanQuery) : [], [stock.items, materials.items, scanQuery]);
+  const scanSelectionUnavailable = Boolean(scanSelection && (JSON.stringify(stockIndex.get(scanSelection.item.id)) !== JSON.stringify(scanSelection.item) || !scanMatches.some((item) => item.id === scanSelection.item.id)));
   const cloudFieldMode = identityState.mode !== "local" && identityState.identity?.role === "electrician";
   const ready = [jobs, materials, stock, locations, movements, purchases, jobUsage].every((store) => store.isReady) && identityState.isReady;
   const requestSources = useRef({ stockItems: stock.items, materials: materials.items, existingLists: purchases.items, jobs: jobs.items, ready, cloudFieldMode });
@@ -61,22 +79,37 @@ export default function MobileMaterialsPage() {
     requestSources.current = { stockItems: stock.items, materials: materials.items, existingLists: purchases.items, jobs: jobs.items, ready, cloudFieldMode };
   }, [stock.items, materials.items, purchases.items, jobs.items, ready, cloudFieldMode]);
 
+  function patchUsage(patch: Partial<typeof blankUsage>) {
+    usageGeneration.current++; setUsageVersion(usageGeneration.current);
+    setUsage((current) => ({ ...current, ...patch }));
+  }
+
   function useMaterial(event: FormEvent) {
     event.preventDefault();
+    if (usageVersion !== usageGeneration.current) return;
     if (cloudFieldMode) {
       setMessage("Stock deductions are read-only for field cloud sessions until a dedicated secure materials mutation route is available.");
       return;
     }
+    const current = requestSources.current;
+    if (!current.ready || current.cloudFieldMode) { setMessage("Wait for authorized materials records to finish loading."); return; }
+    if (usage.jobId && current.jobs.filter((job) => job.id === usage.jobId).length !== 1) {
+      setMessage("The linked job is unavailable or ambiguous. Review the saved job before recording stock usage."); return;
+    }
+    const scanned = scanSelectionRef.current;
+    if (scanned && (JSON.stringify(stockItemIdentityIndex(current.stockItems).get(scanned.item.id)) !== JSON.stringify(scanned.item) || !stockScanMatches(current.stockItems, current.materials, scanned.code).some((item) => item.id === scanned.item.id))) {
+      setMessage("The selected scan result has changed or is unavailable. Find the code again and review its saved stock line before deducting."); return;
+    }
     const quantity = Number(usage.quantity || 0);
     const now = new Date().toISOString();
     const result = applyStockUsage({
-      stockItems: stock.items,
+      stockItems: current.stockItems,
       usage: { stockItemId: usage.stockItemId, quantity, jobId: usage.jobId || undefined, note: usage.note },
       movementId: makeId("movement"),
       now,
     });
     if (!result) {
-      setMessage("Choose a stock item and enter a quantity greater than zero.");
+      setMessage("Choose one unambiguous stock record with a valid saved quantity and unit, then enter a positive finite quantity.");
       return;
     }
     stock.setItems(result.stockItems);
@@ -96,20 +129,45 @@ export default function MobileMaterialsPage() {
       if (ledgerEntry) jobUsage.setItems((current) => [ledgerEntry, ...current]);
     }
 
-    setUsage({ ...blankUsage, jobId: usage.jobId });
+    patchUsage({ ...blankUsage, jobId: usage.jobId });
+    scanSelectionRef.current = null; setScanSelection(null); setScanQuery("");
     setMessage(result.shortage > 0
       ? `${result.updatedItem.description} deducted. Stock reached zero with a shortage of ${result.shortage}.`
       : `${result.updatedItem.description} deducted. ${result.updatedItem.quantity} ${result.updatedItem.unit.toLowerCase()} remain.`);
   }
 
+  function changeScanCode(value: string) {
+    scanGeneration.current++; setScanVersion(scanGeneration.current);
+    scanInput.current = value; setScanCode(value); setScanQuery(""); setScanLimit(4);
+    scanSelectionRef.current = null; setScanSelection(null); patchUsage({ stockItemId: "" }); setMessage("");
+  }
+
+  function selectScanResult(item: StockItem, code: string, version: number) {
+    const current = requestSources.current;
+    if (!current.ready || version !== scanGeneration.current || scanInput.current.trim().toLowerCase() !== code.trim().toLowerCase()) return;
+    const saved = stockItemIdentityIndex(current.stockItems).get(item.id);
+    if (!saved || JSON.stringify(saved) !== JSON.stringify(item) || !stockScanMatches(current.stockItems, current.materials, code).some((match) => match.id === item.id)) {
+      setMessage("That stock result has changed or its identity is unavailable/ambiguous. Find the code again and review the saved record."); return;
+    }
+    const selection = { item: saved, code };
+    scanSelectionRef.current = selection; setScanSelection(selection); patchUsage({ stockItemId: saved.id });
+    setMessage(`${saved.description} selected for review from its exact saved stock record. Code lookup has not changed stock.`);
+  }
+
   function findByScanCode() {
-    const match = stock.items.find((item) => matchesScanCode(item, item.materialId ? materialMap.get(item.materialId) : undefined, scanCode));
-    if (!match) {
+    const current = requestSources.current, code = scanInput.current.trim();
+    const version = ++scanGeneration.current; setScanVersion(version);
+    scanSelectionRef.current = null; setScanSelection(null); patchUsage({ stockItemId: "" }); setScanLimit(4);
+    if (!current.ready) { setScanQuery(""); setMessage("Wait for stock and material records to finish loading before looking up a code."); return; }
+    setScanQuery(code);
+    if (!code) { setMessage("Enter a supplier stock code, JR OS stock ID or material ID."); return; }
+    const matches = stockScanMatches(current.stockItems, current.materials, code);
+    if (!matches.length) {
       setMessage("No stock item matched that barcode, QR value, stock code or JR OS record ID.");
       return;
     }
-    setUsage((current) => ({ ...current, stockItemId: match.id }));
-    setMessage(`${match.description} selected from scan code.`);
+    if (matches.length === 1 && stockItemIdentityIndex(current.stockItems).get(matches[0].id)) selectScanResult(matches[0], code, version);
+    else setMessage(`${matches.length} stock record(s) match this code. Choose the saved stock line and location to review. Missing or duplicate identities cannot be selected.`);
   }
 
   function createPurchaseRequest() {
@@ -196,18 +254,27 @@ export default function MobileMaterialsPage() {
     {savedRequestId && !cloudFieldMode ? <Link href={purchaseListReviewHref(savedRequestId)} className="inline-flex min-h-12 items-center rounded-xl border border-cyan-400/30 px-4 py-3 text-sm font-semibold text-cyan-200">Review saved request</Link> : null}
 
     <Card className="space-y-4">
-      <div className="flex items-start gap-3"><div className="grid size-10 place-items-center rounded-xl bg-slate-800"><QrCode className="size-5 text-cyan-300" /></div><div><h2 className="text-lg font-bold">Barcode / QR foundation</h2><p className="text-sm text-slate-400">Enter a supplier stock code, JR OS stock ID or material ID. This input is ready to receive camera-scanner output later.</p></div></div>
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto]"><InputField label="Scan code" placeholder="Scan or enter code" value={scanCode} onChange={(event) => setScanCode(event.target.value)} /><div className="flex items-end"><Button type="button" onClick={findByScanCode}><Barcode className="mr-2 size-4" />Find item</Button></div></div>
+      <div className="flex items-start gap-3"><div className="grid size-10 place-items-center rounded-xl bg-slate-800"><QrCode className="size-5 text-cyan-300" /></div><div><h2 className="text-lg font-bold">Find stock by code</h2><p className="text-sm text-slate-400">Enter a supplier stock code, JR OS stock ID or material ID. Choose the exact saved stock line and location when several records match. Code lookup does not change stock.</p></div></div>
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto]"><InputField label="Scan code" placeholder="Enter stock code or record ID" autoComplete="off" autoCapitalize="none" enterKeyHint="search" value={scanCode} onChange={(event) => changeScanCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); findByScanCode(); } }} /><div className="flex items-end"><Button className="min-h-12" type="button" onClick={findByScanCode}><Barcode className="mr-2 size-4" />Find item</Button></div></div>
+      {scanQuery ? <section aria-label="Stock code matches" className="space-y-3">
+        <h3 className="break-words text-sm font-semibold">{scanMatches.length} stock record(s) match “{scanQuery}”</h3>
+        {scanSelectionUnavailable ? <p role="status" className="rounded-xl bg-amber-400/10 p-3 text-sm text-amber-200">The selected scan result has changed or is unavailable. Find the code again and review the saved stock line before deducting.</p> : null}
+        {!scanMatches.length ? <p className="text-sm text-slate-400">No matching stock records are loaded.</p> : scanMatches.slice(0, scanLimit).map((item, index) => <div key={`${item.id}-${index}`} className="min-w-0 space-y-2 rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+          <p className="break-words font-semibold">{item.description || "Description not recorded"}</p><p className="break-words text-sm text-slate-400">{locationMap.get(item.locationId) || "Location unavailable"} · {stockQuantityLabel(item)}</p><p className="break-words text-xs text-slate-500">Record: {item.id || "Identity not recorded"} · Stock code: {item.stockCode || "Not recorded"}</p>
+          {!stockIndex.get(item.id) ? <p className="text-sm text-amber-200">Stock identity is missing or ambiguous. Review the saved stock records.</p> : scanSelection?.item.id === item.id && !scanSelectionUnavailable ? <p className="text-sm font-semibold text-cyan-200">Selected stock record</p> : <Button type="button" className="min-h-12" variant="secondary" onClick={() => selectScanResult(item, scanQuery, scanVersion)}>Use stock item</Button>}
+        </div>)}
+        {scanMatches.length > scanLimit ? <Button type="button" variant="secondary" className="min-h-12 w-full" onClick={() => setScanLimit((limit) => limit + 4)}>Show more stock matches ({scanMatches.length - scanLimit} remaining)</Button> : null}
+      </section> : null}
     </Card>
 
     {!cloudFieldMode ? <Card>
       <form onSubmit={useMaterial} className="grid gap-4 md:grid-cols-2">
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Stock item</span><select required value={usage.stockItemId} onChange={(event) => setUsage({ ...usage, stockItemId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose material</option>{stock.items.map((item) => <option key={item.id} value={item.id}>{item.description} · {locationMap.get(item.locationId) || "Unknown location"} · {item.quantity} {item.unit.toLowerCase()}</option>)}</select></label>
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select value={usage.jobId} onChange={(event) => setUsage({ ...usage, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">No job selected</option>{jobs.items.filter((job) => job.status !== "Complete" && job.status !== "Paid" && job.status !== "Cancelled").map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
-        <InputField label="Quantity used" type="number" min="0.01" step="0.01" value={usage.quantity} onChange={(event) => setUsage({ ...usage, quantity: event.target.value })} />
-        <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm"><p className="text-slate-400">Available</p><p className="mt-1 font-semibold text-white">{selectedItem ? `${selectedItem.quantity} ${selectedItem.unit.toLowerCase()}` : "Choose an item"}</p></div>
-        <div className="md:col-span-2"><TextareaField label="Usage note" placeholder="Where it was fitted, circuit or room…" value={usage.note} onChange={(event) => setUsage({ ...usage, note: event.target.value })} /></div>
-        <div className="md:col-span-2"><Button className="w-full sm:w-auto" type="submit"><PackageMinus className="mr-2 size-4" />Deduct stock</Button></div>
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Stock item</span><select required value={usage.stockItemId} onChange={(event) => { scanSelectionRef.current = null; setScanSelection(null); patchUsage({ stockItemId: event.target.value }); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">Choose material</option>{usage.stockItemId && !selectedItem ? <option value={usage.stockItemId}>Selected stock item unavailable or ambiguous</option> : null}{stock.items.filter((item) => stockIndex.get(item.id)).map((item) => <option key={item.id} value={item.id}>{item.description} · {locationMap.get(item.locationId) || "Unknown location"} · {stockQuantityLabel(item)}</option>)}</select></label>
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Linked job</span><select value={usage.jobId} onChange={(event) => patchUsage({ jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">No job selected</option>{jobs.items.filter((job) => job.status !== "Complete" && job.status !== "Paid" && job.status !== "Cancelled").map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
+        <InputField label="Quantity used" type="number" min="0.01" step="0.01" value={usage.quantity} onChange={(event) => patchUsage({ quantity: event.target.value })} />
+        <div className="rounded-xl border border-slate-800 bg-slate-950/50 px-4 py-3 text-sm"><p className="text-slate-400">Available</p><p className="mt-1 font-semibold text-white">{scanSelectionUnavailable ? "Selected scan result needs review" : selectedItem ? stockQuantityLabel(selectedItem) : usage.stockItemId ? "Selected stock item unavailable or ambiguous" : "Choose an item"}</p></div>
+        <div className="md:col-span-2"><TextareaField label="Usage note" placeholder="Where it was fitted, circuit or room…" value={usage.note} onChange={(event) => patchUsage({ note: event.target.value })} /></div>
+        <div className="md:col-span-2"><Button className="min-h-12 w-full sm:w-auto" disabled={!selectedItem || scanSelectionUnavailable} type="submit"><PackageMinus className="mr-2 size-4" />Deduct stock</Button></div>
       </form>
     </Card> : null}
 
