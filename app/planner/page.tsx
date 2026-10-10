@@ -9,7 +9,7 @@ import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useCustomersCollection, useJobsCollection, usePlannerCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
-import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
+import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, plannerViewDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
 import type { FleetVehicle, Job, PlannerEntryType, TeamMember } from "../../lib/models";
 
 const types: PlannerEntryType[] = ["Job", "Survey", "Delivery", "Training", "Holiday", "Office", "Other"];
@@ -38,7 +38,7 @@ export default function PlannerPage() {
   const [message, setMessage] = useState("");
 
   const clashes = useMemo(() => detectScheduleClashes(entries.items, team.items, vehicles.items), [entries.items, team.items, vehicles.items]);
-  const visible = useMemo(() => entries.items.filter((entry) => dateWithinView(entry.date, anchor, view)).toSorted((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)), [entries.items, anchor, view]);
+  const visible = useMemo(() => entries.items.filter((entry) => dateWithinView(entry.date, anchor, view, entryEndDate(entry))).toSorted((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)), [entries.items, anchor, view]);
   const allocatedJobIds = useMemo(() => new Set(entries.items.filter((entry) => entry.status !== "Cancelled").map((entry) => entry.jobId).filter(Boolean)), [entries.items]);
   const unallocatedJobs = jobs.items.filter((job) => !allocatedJobIds.has(job.id) && job.status !== "Complete" && job.status !== "On hold");
 
@@ -46,6 +46,11 @@ export default function PlannerPage() {
     if (deepLinkHandled.current || !customers.isReady || !jobs.isReady) return;
     const frame = window.requestAnimationFrame(() => {
       const parameters = new URLSearchParams(window.location.search);
+      const requestedDate = plannerViewDate(parameters.get("date"));
+      if (requestedDate && parameters.get("action") !== "create") {
+        setAnchor(requestedDate);
+        setView("day");
+      }
       if (parameters.get("action") === "create") {
         const customerId = parameters.get("customerId") || "";
         const jobId = parameters.get("jobId") || "";

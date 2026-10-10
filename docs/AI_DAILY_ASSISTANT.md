@@ -41,6 +41,18 @@ outstanding-money figures. Calendar comparisons
 use the device's local date; the new assistant refreshes its clock each minute
 and when the app regains focus.
 
+## Quick questions on phones
+
+The assistant includes six one-tap questions plus a short question field. Supported forms cover today, tomorrow, the next seven days, overdue invoices, all unpaid invoices, quote follow-ups, site preparation and priorities. Matching uses explicit local question forms and normalises common phrasing, case and punctuation. Unsupported scopes, compound questions and commands return an explanation and examples; they never trigger record changes or a guessed answer.
+
+Diary answers include planned/confirmed visits that span the selected dates, with actual recorded times and addresses. Active job starts without a matching visit are listed separately as unconfirmed scheduling. Each distinct visit remains visible, but a job is not repeated as an unbooked start when it has a matching visit. Invalid dates are reported; missing or invalid times remain visible for review. Seven days means today plus six calendar days, including month/year changes. These results do not confirm availability or site readiness.
+
+Diary source links open the specific ISO day in `/planner?date=YYYY-MM-DD`. The planner accepts only real calendar dates, changes only the view, and includes multi-day entries overlapping its day/week/month range. Existing create-booking links keep their own workflow.
+
+Money answers distinguish invoices overdue before today from all unpaid invoices, including those not yet due. They reuse the payment-aware balance, aggregate in pence, show source evidence and refuse unsafe numeric totals. Invalid amounts and unknown overdue dates are reported rather than silently implying all records are clear. Quote answers respect agreed follow-up dates even when an expired quote independently needs a pricing review.
+
+Four answer records show initially, with progressive reveal. Editing a question clears its previous answer; submitting dismisses the phone keyboard. Answers refresh with the loaded collections and the existing local clock. The account-scoped parent remounts question state on account changes, and every source must be ready before the question panel mounts. Questions and answers are not persisted or sent to an external service.
+
 ## Account and data boundaries
 
 Authorization is checked before mounting any business hooks. Identity resolution
@@ -71,3 +83,5 @@ Signed-in physical iPhone/Android acceptance and actual production recovery
 evidence remain separate requirements in `RELEASE_REVIEW.md`.
 
 Payment regression cases execute the actual ledger policy, assistant, Today and Smart Recommendations, including full/partial payments, credit notes, refunds, overpayments, unrelated invoices, avoiding duplicate paid amounts, ledger readiness and source immutability. Existing payment-policy semantics and records are unchanged.
+
+Quick-question regression tests execute the actual answer rules and form handlers, including unsupported intent, calendar boundaries, spanning visits, duplicate suppression, invalid data, payment totals, follow-up agreements, source links, progressive reveal, stale-answer clearing, record refresh and read-only planner navigation.

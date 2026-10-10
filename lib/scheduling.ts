@@ -23,6 +23,13 @@ export interface ScheduleClash {
 
 export const plannerStorageKey = "jr-os-planner";
 
+/** Read-only calendar navigation accepts only an actual, unambiguous ISO day. */
+export function plannerViewDate(value: string | null) {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value ? value : null;
+}
+
 export function entryEndDate(entry: ScheduledPlannerEntry) {
   return entry.endDate || entry.date;
 }
@@ -83,8 +90,9 @@ export function entryCustomer(entry: ScheduledPlannerEntry, jobs: Job[], custome
   return customers.find((item) => item.id === (entry.customerId || job?.customerId));
 }
 
-export function dateWithinView(date: string, anchor: string, view: DiaryView) {
-  if (view === "day") return date === anchor;
+export function dateWithinView(date: string, anchor: string, view: DiaryView, endDate = date) {
+  if (!plannerViewDate(date) || !plannerViewDate(endDate) || !plannerViewDate(anchor) || endDate < date) return false;
+  if (view === "day") return date <= anchor && endDate >= anchor;
   const anchorDate = new Date(`${anchor}T12:00:00`);
   const start = new Date(anchorDate);
   const end = new Date(anchorDate);
@@ -96,6 +104,7 @@ export function dateWithinView(date: string, anchor: string, view: DiaryView) {
     start.setDate(1);
     end.setMonth(start.getMonth() + 1, 0);
   }
-  const value = new Date(`${date}T12:00:00`);
-  return value >= start && value <= end;
+  const entryStart = new Date(`${date}T12:00:00`);
+  const entryEnd = new Date(`${endDate}T12:00:00`);
+  return entryStart <= end && entryEnd >= start;
 }
