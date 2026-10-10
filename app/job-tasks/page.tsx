@@ -11,7 +11,7 @@ import { isOutstandingJobTask, jobTaskStatuses, jobTaskTimelineEntry, transition
 import { assistantDateKey, assistantDay } from "../../lib/assistantSignals-core.mjs";
 import { filterTaskInbox, resolveTaskInboxLink, taskInboxFilters, taskMatchesInboxFilter, type TaskInboxFilter } from "../../lib/taskInbox";
 import { makeId } from "../../lib/storage";
-import type { JobPriority, JobTask, JobTaskCategory, JobTaskStatus, JobTaskType } from "../../lib/models";
+import type { JobPriority, JobTask, JobTaskCategory, JobTaskStatus, JobTaskType, JobTimelineEntry } from "../../lib/models";
 
 const categories: JobTaskCategory[] = ["General", "Survey", "First fix", "Second fix", "Testing", "Certificate", "Materials", "Handover", "Safety", "Other"];
 const priorities: JobPriority[] = ["Low", "Normal", "High", "Urgent"];
@@ -43,6 +43,9 @@ export default function JobTasksPage() {
   const [missingLink, setMissingLink] = useState(false);
   const [today, setToday] = useState(() => assistantDateKey(new Date()));
   const deepLinkHandled = useRef(false);
+  const draft = useRef({ id: "", saved: false });
+  const [pendingNotes, setPendingNotes] = useState<JobTimelineEntry[]>([]);
+  const completedNoteIds = useRef(new Set<string>());
 
   const visibleTasks = useMemo(() => missingLink ? [] : targetTaskId ? tasks.items.filter((task) => task.id === targetTaskId && (!selectedJobId || task.jobId === selectedJobId)) : filterTaskInbox(tasks.items, jobs.items, { jobId: selectedJobId, filter, query, today }), [missingLink, targetTaskId, selectedJobId, tasks.items, jobs.items, filter, query, today]);
   const jobTasks = tasks.items.filter((task) => !selectedJobId || task.jobId === selectedJobId);
@@ -69,6 +72,7 @@ export default function JobTasksPage() {
   function resetInbox() { clearTarget(); setSelectedJobId(""); setFilter("Open"); setQuery(""); }
 
   function openForm(type: JobTaskType) {
+    draft.current = { id: "", saved: false };
     setForm({ ...blankForm, jobId: selectedJobId, type });
     setShowForm(true);
     setMessage("");
@@ -76,11 +80,15 @@ export default function JobTasksPage() {
 
   function createTask(event: FormEvent) {
     event.preventDefault();
-    if (!form.jobId) { setMessage("Choose the job this task belongs to."); return; }
+    if (draft.current.saved || !showForm) return;
+    if (!ready) { setMessage("Wait for task records to finish loading. Your draft is still here."); return; }
+    if (!jobs.items.some((job) => job.id === form.jobId)) { setMessage("Choose an available job this task belongs to."); return; }
     if (!form.title.trim()) { setMessage("Enter a task or snag title."); return; }
+    if (form.dueDate && assistantDay(form.dueDate) === null) { setMessage("Choose a valid due date, or leave it blank. Your draft is still here."); return; }
     const now = new Date().toISOString();
+    draft.current.id ||= makeId(form.type === "Snag" ? "snag" : "task");
     const task: JobTask = {
-      id: makeId(form.type === "Snag" ? "snag" : "task"),
+      id: draft.current.id,
       jobId: form.jobId,
       type: form.type,
       title: form.title.trim(),
@@ -95,8 +103,19 @@ export default function JobTasksPage() {
       createdAt: now,
       updatedAt: now,
     };
-    tasks.setItems((current) => [task, ...current]);
-    timeline.setItems((current) => [{
+    try {
+      // Persist before dismissing the form. setItems alone writes later in an effect.
+      tasks.createItem(task);
+    } catch (error) {
+      setMessage(`${task.type} save could not be confirmed. Your draft is still here. ${error instanceof Error ? error.message : "Please try again."}`);
+      return;
+    }
+    draft.current.saved = true;
+    setSelectedJobId(task.jobId);
+    clearTarget(); setFilter("Open"); setQuery("");
+    setForm(blankForm);
+    setShowForm(false);
+    const note: JobTimelineEntry = {
       id: makeId("timeline"),
       jobId: task.jobId,
       milestone: "Custom update",
@@ -107,12 +126,33 @@ export default function JobTasksPage() {
       completedBy: "JR OS",
       completedAt: now,
       createdAt: now,
-    }, ...current]);
-    setSelectedJobId(task.jobId);
-    clearTarget(); setFilter("Open"); setQuery("");
-    setForm(blankForm);
-    setShowForm(false);
-    setMessage(`${task.type} saved and added to the job timeline.`);
+    };
+    try {
+      timeline.createItem(note);
+      completedNoteIds.current.add(note.id);
+      setMessage(`${task.type} and timeline note saved on this device. Check sync status before switching devices.`);
+    } catch (error) {
+      setPendingNotes((current) => [...current, note]);
+      setMessage(`${task.type} saved on this device, but its timeline note was not saved. Retry the note below; do not recreate the task. ${error instanceof Error ? error.message : ""}`);
+    }
+  }
+
+  function retryCreationNote(note: JobTimelineEntry) {
+    if (!ready) { setMessage("Wait for task records to finish loading before retrying the note."); return; }
+    const existing = timeline.items.find((item) => item.id === note.id);
+    if (existing && (existing.jobId !== note.jobId || existing.sourceId !== note.sourceId || existing.sourceType !== note.sourceType)) {
+      setMessage("The timeline note ID is already used by a different record. Review the job timeline before retrying."); return;
+    }
+    if (!existing && !completedNoteIds.current.has(note.id)) {
+      if (!tasks.items.some((task) => task.id === note.sourceId && task.jobId === note.jobId)) {
+        setMessage("The saved task is no longer available on this job. Review its current record before retrying the note."); return;
+      }
+      try { timeline.createItem(note); }
+      catch (error) { setMessage(`The task remains saved, but its timeline note could not be saved. ${error instanceof Error ? error.message : "Please try again."}`); return; }
+    }
+    completedNoteIds.current.add(note.id);
+    setPendingNotes((current) => current.filter((item) => item.id !== note.id));
+    setMessage("Timeline note saved on this device. Check sync status before switching devices.");
   }
 
   function changeStatus(task: JobTask, nextStatus: JobTaskStatus) {
@@ -148,7 +188,8 @@ export default function JobTasksPage() {
   return <main className="space-y-6 pb-24">
     <PageHeader eyebrow="Job Management Pro" title="Tasks & Snagging" description="Track site actions, defects and customer-confirmed completion from one mobile workspace." action={<Button onClick={() => openForm("Task")}><Plus className="mr-2 size-4" />Add task</Button>} />
 
-    {message ? <div role="status" className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    {message ? <div role="status" className="break-words rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    {pendingNotes.length ? <Card className="border-amber-400/30" aria-label="Unsaved task timeline notes"><h2 className="font-bold">Task saved — timeline note needs retrying</h2><p className="mt-2 text-sm text-slate-400">Your task has been saved on this device. Keep this page open to retry its timeline note; leaving keeps the task but loses this unsaved note.</p><div className="mt-3 space-y-3">{pendingNotes.map((note) => <div key={note.id} className="rounded-xl border border-slate-700 p-3"><p className="break-words text-sm">{note.note}</p><button type="button" onClick={() => retryCreationNote(note)} className="mt-3 min-h-12 rounded-xl border border-amber-400/30 px-3 text-sm font-semibold text-amber-200">Retry timeline note</button></div>)}</div></Card> : null}
 
     <Card>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select value={selectedJobId} onChange={(event) => { setSelectedJobId(event.target.value); clearTarget(); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">All jobs</option>{jobs.items.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"}</option>)}</select></label>
