@@ -38,7 +38,7 @@ const plural = (value: number, singular: string) => `${value} ${singular}${value
 const validVisitTimes = (entry: ScheduledPlannerEntry) => /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.startTime) && /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.endTime) && entry.startTime < entry.endTime;
 
 /** Read-only, deterministic recommendations. The caller supplies only authorized collections. */
-export function buildAssistantBriefing(records: AssistantRecords, now = new Date()) {
+export function buildAssistantBriefing(records: AssistantRecords, now = new Date(), canOpenTaskWorkspace = true) {
   const today = assistantDateKey(now);
   const todayDay = assistantDay(today)!;
   const actions: AssistantAction[] = [];
@@ -143,7 +143,7 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
       reason: `Reminder due ${reminder.dueDate}${reminder.dueTime ? ` at ${reminder.dueTime}` : ""}.`, nextStep: "Open the reminder to review it or mark it complete.",
       href: "/ai#today", actionLabel: "Open reminders", dueDate: reminder.dueDate, evidence: [`Priority: ${reminder.priority}`, reminder.notes || "No additional notes"] });
   }
-  actions.push(...assistantTaskActions(records.tasks || [], jobs, now));
+  actions.push(...assistantTaskActions(records.tasks || [], jobs, now, true, canOpenTaskWorkspace));
   return { today, actions: actions.toSorted((a, b) => rank[a.priority] - rank[b.priority] || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.id.localeCompare(b.id)) };
 }
 

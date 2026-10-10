@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
-import { answerAssistantQuestion } from "../../lib/assistantQuestions";
+import { answerAssistantQuestion, assistantQuestionIntent } from "../../lib/assistantQuestions";
 import type { AssistantAction, AssistantRecords } from "../../lib/assistantBriefing";
 import { Card } from "../ui/Card";
 
@@ -12,16 +12,26 @@ const shortcuts = [
   ["Open tasks", "Show my open tasks"], ["Open snags", "Show my open snags"],
 ];
 
-export function AssistantQuestions({ records, now, briefing }: { records: AssistantRecords; now: Date; briefing: { today: string; actions: AssistantAction[] } }) {
+export function AssistantQuestions({ records, now, briefing, canOpenTaskWorkspace }: { records: AssistantRecords; now: Date; briefing: { today: string; actions: AssistantAction[] }; canOpenTaskWorkspace: boolean }) {
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState("");
   const [limit, setLimit] = useState(4);
+  const [taskJobId, setTaskJobId] = useState("");
+  const [askedJobId, setAskedJobId] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const answer = useMemo(() => answerAssistantQuestion(records, asked, now, briefing), [records, asked, now, briefing]);
-  function ask(value: string) { setQuestion(value); setAsked(value.trim()); setLimit(4); inputRef.current?.blur(); }
+  const answer = useMemo(() => answerAssistantQuestion(records, asked, now, briefing, askedJobId, canOpenTaskWorkspace), [records, asked, now, briefing, askedJobId, canOpenTaskWorkspace]);
+  function ask(value: string) {
+    const intent = assistantQuestionIntent(value);
+    const requestedJobId = intent === "tasks" || intent === "snags" ? taskJobId : "";
+    const initialAnswer = answerAssistantQuestion(records, value, now, briefing, requestedJobId, canOpenTaskWorkspace);
+    setAskedJobId(initialAnswer?.resolvedJobId || requestedJobId);
+    setQuestion(value); setAsked(value.trim()); setLimit(4); inputRef.current?.blur();
+  }
   return <Card className="border-cyan-400/20">
     <h2 className="text-lg font-bold">Ask JR AI</h2>
     <p className="mt-1 text-sm text-slate-400">Quick answers from your loaded records. Choose a question or ask about your diary, unpaid invoices, quote follow-ups, tasks or site preparation.</p>
+    <label className="mt-4 block text-sm font-semibold">Task and snag scope<select value={taskJobId} onChange={(event) => { setTaskJobId(event.target.value); setAsked(""); setAskedJobId(""); setLimit(4); }} className="mt-2 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">All loaded jobs</option>{taskJobId && !records.jobs.some((job) => job.id === taskJobId) ? <option value={taskJobId}>Selected job unavailable</option> : null}{records.jobs.toSorted((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"} · {job.status}</option>)}</select></label>
+    <p className="mt-2 text-xs leading-5 text-slate-400">Choose a job for Open tasks or Open snags. You can also ask “Show tasks for” followed by its full saved name or site address. Other questions keep their normal scope.</p>
     <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{shortcuts.map(([label, value]) => <button key={label} type="button" aria-pressed={asked === value} onClick={() => ask(value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-left text-sm font-semibold text-cyan-100 focus-visible:outline-2 focus-visible:outline-cyan-400">{label}</button>)}</div>
     <form className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); ask(question); }}>
       <label className="min-w-0 flex-1 text-sm font-semibold"><span>Your question</span><input ref={inputRef} type="text" maxLength={180} autoComplete="off" enterKeyHint="send" value={question} onChange={(event) => { setQuestion(event.target.value); setAsked(""); setLimit(4); }} placeholder="For example: How much am I owed?" className="mt-2 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base focus:border-cyan-400 focus:outline-none" /></label>
@@ -31,6 +41,8 @@ export function AssistantQuestions({ records, now, briefing }: { records: Assist
       <div role="status"><h3 className="text-lg font-bold">{answer.title}</h3><p className="mt-1 text-sm text-cyan-100">{answer.summary}</p></div>
       <p className="text-sm leading-6 text-slate-400">{answer.scope}</p>
       {answer.warnings.map((warning) => <p key={warning} className="rounded-xl bg-amber-400/10 p-3 text-sm text-amber-200">{warning}</p>)}
+      {answer.jobChoices?.slice(0, limit).map((job) => <div key={job.id} className="min-w-0 rounded-xl border border-slate-700 bg-slate-950 p-3"><h4 className="break-words font-semibold">{job.title}</h4><p className="mt-2 break-words text-sm text-slate-400">{job.address || "Address not recorded"} · {job.status}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={() => { setAskedJobId(job.id); setTaskJobId(job.id); setLimit(4); }} className="min-h-12 rounded-xl border border-cyan-400/30 px-3 text-sm font-semibold text-cyan-200">Use this job</button><Link href={`/jobs/${encodeURIComponent(job.id)}`} className="flex min-h-12 items-center px-3 text-sm font-semibold text-slate-400">Review job details</Link></div></div>)}
+      {answer.jobChoices && answer.jobChoices.length > limit ? <button type="button" onClick={() => setLimit((value) => value + 4)} className="min-h-12 w-full rounded-xl border border-slate-700 text-sm font-semibold">Show more jobs ({answer.jobChoices.length - limit} remaining)</button> : null}
       {answer.items.slice(0, limit).map((item) => <div key={item.id} className="min-w-0 rounded-xl border border-slate-700 bg-slate-950 p-3">
         <h4 className="break-words font-semibold">{item.title}</h4><p className="mt-2 break-words text-sm leading-6 text-slate-300">{item.detail}</p>
         <details className="mt-2"><summary className="min-h-11 cursor-pointer py-3 text-sm font-semibold text-slate-400">Source details</summary><ul className="list-disc space-y-1 break-words pl-4 text-sm text-slate-400">{item.evidence.map((fact, index) => <li key={index}>{fact}</li>)}</ul></details>
@@ -38,7 +50,7 @@ export function AssistantQuestions({ records, now, briefing }: { records: Assist
       </div>)}
       {answer.items.length > limit ? <button type="button" onClick={() => setLimit((value) => value + 4)} className="min-h-12 w-full rounded-xl border border-slate-700 text-sm font-semibold">Show more records ({answer.items.length - limit} remaining)</button> : null}
       <p className="text-xs leading-5 text-slate-500">Local rules only. Missing or unsynced records can change the answer. Review the source before acting; JR AI has not changed or sent anything.</p>
-      <button type="button" onClick={() => { setQuestion(""); setAsked(""); setLimit(4); }} className="min-h-11 text-sm font-semibold text-slate-400">Clear answer</button>
+      <button type="button" onClick={() => { setQuestion(""); setAsked(""); setTaskJobId(""); setAskedJobId(""); setLimit(4); }} className="min-h-11 text-sm font-semibold text-slate-400">Clear answer</button>
     </section> : null}
   </Card>;
 }

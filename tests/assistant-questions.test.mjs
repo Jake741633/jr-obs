@@ -25,7 +25,9 @@ const records = (patch = {}) => ({ jobs: [], documents: [], invoices: [], paymen
 const visit = (patch = {}) => ({ id: "v1", title: "First fix", status: "Confirmed", date: "2026-10-11", startTime: "09:00", endTime: "12:00", location: "1 High Street", teamMemberIds: ["worker"], ...patch });
 const job = (patch = {}) => ({ id: "j1", title: "Workshop", status: "Scheduled", startDate: "2026-10-11", siteAddress: "1 High Street", assignedTo: ["worker"], ...patch });
 const invoice = (patch = {}) => ({ id: "i1", number: "INV-1", title: "Lighting", status: "Sent", dueDate: "2026-10-09", items: [{ quantity: 2, unitPrice: 100 }], vatEnabled: true, vatRate: 20, amountPaid: 0, ...patch });
+const siteTask = (patch = {}) => ({ id: "t1", jobId: "j1", type: "Task", title: "Fit labels", status: "Open", priority: "Normal", category: "General", dueDate: "", ...patch });
 const answer = (question, data = {}, date = now) => questions.answerAssistantQuestion(records(data), question, date);
+const answerFor = (question, data, id) => questions.answerAssistantQuestion(records(data), question, now, undefined, id);
 
 test("question matching accepts normal phrasing and punctuation, and rejects ambiguous scopes or commands", () => {
   for (const [query, intent] of [["What's booked tomorrow?", "tomorrow"], ["Please show my diary next seven days!", "week"], ["Can you tell me how much is overdue?", "overdue"], ["Who owes me money?", "unpaid"], ["Show quote follow-ups", "quotes"], ["Am I ready for site?", "site"], ["What should I do next?", "priorities"]]) assert.equal(questions.assistantQuestionIntent(query), intent, query);
@@ -114,7 +116,7 @@ test("answers retain source immutability, authorised internal links and explicit
 const jsx = (type, props) => ({ type, props });
 const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
 const text = (tree) => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
-function ui(data = records()) {
+function ui(data = records(), canOpenTaskWorkspace = true) {
   const states = []; let cursor = 0, blurred = 0;
   const component = compile("../components/ai/AssistantQuestions.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx },
@@ -122,8 +124,8 @@ function ui(data = records()) {
     "next/link": { default: "Link" }, "../ui/Card": { Card: "Card" }, "../../lib/assistantQuestions": questions,
   }, true);
   let recordsNow = data;
-  const render = () => { cursor = 0; return component.AssistantQuestions({ records: recordsNow, now, briefing: briefing.buildAssistantBriefing(recordsNow, now) }); };
-  return { render, blurred: () => blurred, replaceRecords(value) { recordsNow = value; }, fill(value) { nodes(render()).find((node) => node.type === "input").props.onChange({ target: { value } }); }, submit() { nodes(render()).find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); }, click(label) { const button = nodes(render()).find((node) => node.type === "button" && text(node).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
+  const render = () => { cursor = 0; return component.AssistantQuestions({ records: recordsNow, now, briefing: briefing.buildAssistantBriefing(recordsNow, now, canOpenTaskWorkspace), canOpenTaskWorkspace }); };
+  return { render, blurred: () => blurred, replaceRecords(value) { recordsNow = value; }, scope(value) { nodes(render()).find((node) => node.type === "select").props.onChange({ target: { value } }); }, choose(index = 0) { const button = nodes(render()).filter((node) => node.type === "button" && text(node) === "Use this job")[index]; assert.ok(button); button.props.onClick(); }, fill(value) { nodes(render()).find((node) => node.type === "input").props.onChange({ target: { value } }); }, submit() { nodes(render()).find((node) => node.type === "form").props.onSubmit({ preventDefault() {} }); }, click(label) { const button = nodes(render()).find((node) => node.type === "button" && text(node).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
 }
 
 test("quick question buttons, typed submission, progressive reveal, edit invalidation and clearing use real handlers", () => {
@@ -188,7 +190,8 @@ test("task questions include all open work while snag questions keep their narro
   assert.equal(answer("What snags need fixing?", data).items.length, 1);
   assert.equal(answer("Show my open snags", data).items[0].id, "task:snag");
   assert.equal(answer("Complete all tasks", data).recognized, false);
-  assert.equal(answer("Show open tasks for Smith", data).recognized, false);
+  assert.equal(answer("Show open tasks for Smith", data).title, "Job unavailable");
+  assert.equal(answer("Show open tasks for Smith", data).items.length, 0);
   assert.equal(answer("Show overdue tasks", data).recognized, false);
   assert.match(answer("Show tasks").summary, /not ready/);
   assert.match(answer("Show tasks", { tasks: [] }).summary, /0 open items/);
@@ -202,4 +205,125 @@ test("task shortcuts refresh after a task is completed without writing or retain
   h.replaceRecords({ ...data, tasks: [{ ...data.tasks[0], status: "Completed" }] });
   assert.match(text(h.render()), /0 open items/);
   assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 0);
+});
+
+test("named task questions use only the exact saved job and keep future, undated and closed-job work visible", () => {
+  const data = { jobs: [job({ status: "Complete" }), job({ id: "other", title: "Other job" })], tasks: [siteTask(), siteTask({ id: "future", dueDate: "2026-12-01", type: "Snag" }), siteTask({ id: "done", status: "Completed" }), siteTask({ id: "other", jobId: "other", priority: "Urgent" }), siteTask({ id: "orphan", jobId: "missing" })] };
+  const result = answer("Show tasks for Workshop", data);
+  assert.deepEqual(Array.from(result.items, (item) => item.id), ["task:future", "task:t1"]);
+  assert.equal(result.resolvedJobId, "j1"); assert.match(result.scope, /Only Workshop.*Complete.*future and undated/);
+  assert.equal(answer("What snags need fixing at Workshop?", data).items.length, 1);
+  assert.equal(answer("Show tasks", data).items.length, 4);
+});
+
+test("saved names and addresses match case, repeated spaces and apostrophes without fuzzy or partial matching", () => {
+  const data = { jobs: [job({ title: "Jake's workshop", siteAddress: "10 High St." })], tasks: [siteTask()] };
+  for (const query of ["Show open tasks for Jake’s workshop?", "Please show my tasks at 10   HIGH st.", 'Can you tell me show snags for "Jake\'s workshop" please?', "List outstanding tasks for Jake's workshop!"]) {
+    const result = answer(query, data); assert.equal(result.resolvedJobId, "j1", query);
+  }
+  for (const query of ["Show tasks for Jake", "Show tasks at High St", "Show tasks for Jakes workshop", "Show tasks for Jake's workshop tomorrow", "Show tasks for missing"]) {
+    const result = answer(query, data); assert.equal(result.title, "Job unavailable", query); assert.equal(result.items.length, 0);
+  }
+  for (const query of ["Complete tasks for Jake's workshop", "Don't show tasks for Jake's workshop", "Show overdue tasks for Jake's workshop", "Show tasks for", "Show tasks for ?", `Show tasks for ${"x".repeat(181)}`]) assert.equal(answer(query, data).recognized, false, query);
+});
+
+test("duplicate names or a title/address collision require an explicit current job choice", () => {
+  const data = { jobs: [job({ id: "title", title: "Workshop", siteAddress: "Elsewhere" }), job({ id: "address", title: "Kitchen", siteAddress: "Workshop" })], tasks: [siteTask({ jobId: "title" }), siteTask({ id: "other", jobId: "address" })] };
+  const result = answer("Show tasks for Workshop", data);
+  assert.equal(result.title, "Choose a job"); assert.equal(result.items.length, 0);
+  assert.deepEqual(Array.from(result.jobChoices, (choice) => choice.id), ["address", "title"]);
+  assert.equal(answerFor("Show tasks for Workshop", data, "address").items[0].id, "task:other");
+  const invalidChoice = answerFor("Show tasks for Workshop", data, "foreign");
+  assert.equal(invalidChoice.items.length, 0); assert.match(invalidChoice.warnings[0], /previous selection is unavailable/);
+});
+
+test("punctuation-bearing names remain distinct and quotes select the literal saved title", () => {
+  const data = { jobs: [job({ title: "Workshop." }), job({ id: "plain", title: "Workshop" })], tasks: [siteTask()] };
+  assert.equal(answer("Show tasks for Workshop.", data).jobChoices.length, 2);
+  assert.equal(answer('Show tasks for "Workshop."?', data).resolvedJobId, "j1");
+  assert.equal(answer('Show tasks for “Workshop”!', data).resolvedJobId, "plain");
+});
+
+test("selected task scopes cannot broaden to other jobs when unavailable and preserve normal invoice scope", () => {
+  const data = { jobs: [job(), job({ id: "other", title: "Elsewhere" })], tasks: [siteTask(), siteTask({ id: "other", jobId: "other" })], invoices: [invoice()] };
+  assert.equal(answerFor("Show tasks", data, "j1").items.length, 1);
+  const unavailable = answerFor("Show snags", data, "missing");
+  assert.equal(unavailable.title, "Job unavailable"); assert.equal(unavailable.items.length, 0);
+  assert.match(answerFor("How much is overdue?", data, "j1").summary, /£240\.00/);
+  assert.match(answer("Show tasks for Workshop", { jobs: [job()] }).summary, /not ready/);
+  assert.match(answer("Show tasks for Workshop", { jobs: [job()], tasks: [] }).summary, /0 open items/);
+});
+
+test("phone job selector scopes both task shortcuts and changing it clears the previous answer", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Kitchen" })], tasks: [siteTask(), siteTask({ id: "other", jobId: "other", type: "Snag" })], invoices: [invoice()] }); const h = ui(data);
+  h.scope("j1"); h.click("Open tasks"); assert.match(text(h.render()), /Only Workshop/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 1);
+  h.scope("other"); assert.equal(nodes(h.render()).some((n) => n.props["aria-label"] === "JR AI answer"), false);
+  h.click("Open snags"); assert.equal(nodes(h.render()).find((n) => n.type === "Link").props.href, "/job-tasks?job=other&task=other");
+  h.click("Overdue money"); assert.match(text(h.render()), /£240\.00/);
+  h.click("Clear answer"); assert.equal(nodes(h.render()).find((n) => n.type === "select").props.value, "");
+});
+
+test("typed job questions take their named scope and retain its resolved identity through record changes", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Kitchen" })], tasks: [siteTask(), siteTask({ id: "other", jobId: "other" })] }); const h = ui(data);
+  h.scope("other"); h.fill("Show tasks for Workshop"); h.submit();
+  assert.match(text(h.render()), /Only Workshop/); assert.equal(nodes(h.render()).find((n) => n.type === "Link").props.href, "/job-tasks?job=j1&task=t1");
+  h.replaceRecords({ ...data, jobs: [job({ id: "replacement" }), data.jobs[1]], tasks: [siteTask({ jobId: "replacement" }), data.tasks[1]] });
+  assert.match(text(h.render()), /previous selection is unavailable/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link" && n.props.href.startsWith("/job-tasks")).length, 0);
+  h.choose(); assert.match(text(h.render()), /Only Workshop/);
+  assert.equal(nodes(h.render()).find((n) => n.type === "Link").props.href, "/job-tasks?job=replacement&task=t1");
+});
+
+test("ambiguous phone answers progressively reveal choices and use only the selected saved identity", () => {
+  const jobs = Array.from({ length: 7 }, (_, index) => job({ id: `j${index}`, title: "Shared site", siteAddress: `Address ${index}` }));
+  const data = records({ jobs, tasks: jobs.map((job) => siteTask({ id: `t-${job.id}`, jobId: job.id })) }); const h = ui(data);
+  h.fill("Show tasks for Shared site"); h.submit();
+  assert.match(text(h.render()), /7 loaded jobs match/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "button" && text(n) === "Use this job").length, 4);
+  h.click("Show more jobs"); h.choose(5);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 1);
+  assert.equal(nodes(h.render()).find((n) => n.type === "Link").props.href, "/job-tasks?job=j5&task=t-j5");
+  h.replaceRecords({ ...data, jobs: jobs.filter((job) => job.id !== "j5") });
+  assert.match(text(h.render()), /previous selection is unavailable/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link" && n.props.href.startsWith("/job-tasks")).length, 0);
+  h.fill("Show open snags"); assert.doesNotMatch(text(h.render()), /loaded jobs match/);
+});
+
+test("a removed dropdown job stays explicitly unavailable and does not fall back to all tasks", () => {
+  const data = records({ jobs: [job()], tasks: [siteTask()] }); const h = ui(data);
+  h.scope("j1"); h.click("Open tasks"); h.replaceRecords({ ...data, jobs: [] });
+  assert.match(text(h.render()), /Selected job unavailable/); assert.match(text(h.render()), /selected job is no longer available/);
+  assert.equal(nodes(h.render()).filter((n) => n.type === "Link").length, 0);
+  h.scope(""); h.click("Open tasks"); assert.match(text(h.render()), /All loaded jobs/);
+});
+
+test("job choices and scoped task links retain source immutability and encode authorised saved identities", () => {
+  const data = records({ jobs: [job({ id: "j /?#", title: "Shared" }), job({ id: "other", title: "Shared" })], tasks: [siteTask({ id: "t /?#", jobId: "j /?#" })] }); const before = JSON.stringify(data); const h = ui(data);
+  h.fill("Show tasks for Shared"); h.submit();
+  const jobLinks = nodes(h.render()).filter((n) => n.type === "Link");
+  assert.ok(jobLinks.some((n) => n.props.href === "/jobs/j%20%2F%3F%23"));
+  const result = answerFor("Show tasks for Shared", data, "j /?#");
+  assert.equal(result.items[0].href, "/job-tasks?job=j%20%2F%3F%23&task=t%20%2F%3F%23");
+  assert.equal(permissions.canAccessPath("owner", permissions.internalPathForAccess(result.items[0].href)), true);
+  assert.equal(permissions.canAccessPath("office", "/job-tasks"), false);
+  assert.equal(JSON.stringify(data), before);
+});
+
+test("office task answers and priorities use permitted job pages while owner/admin keep exact task links", () => {
+  const data = records({ jobs: [job({ id: "j /?#" })], tasks: [siteTask({ jobId: "j /?#", priority: "High" }), siteTask({ id: "orphan", jobId: "missing", priority: "High" })] });
+  for (const query of ["Show tasks", "What should I do next?"]) {
+    const result = questions.answerAssistantQuestion(data, query, now, undefined, "", false);
+    assert.equal(result.items.find((item) => item.id === "task:t1").href, "/jobs/j%20%2F%3F%23");
+    assert.equal(result.items.find((item) => item.id === "task:orphan").href, "/jobs");
+    assert.ok(result.items.every((item) => permissions.canAccessPath("office", permissions.internalPathForAccess(item.href))));
+    assert.match(result.items.find((item) => item.id === "task:t1").detail, /owner or admin/);
+  }
+  const h = ui(data, false); h.fill("Show tasks for Workshop"); h.submit();
+  assert.equal(nodes(h.render()).find((n) => n.type === "Link").props.href, "/jobs/j%20%2F%3F%23");
+  assert.match(text(h.render()), /Review linked job/);
+  for (const role of ["owner", "admin"]) {
+    const result = questions.answerAssistantQuestion(data, "Show tasks", now, undefined, "", permissions.canAccessPath(role, "/job-tasks"));
+    assert.equal(result.items[0].href.startsWith("/job-tasks?"), true);
+  }
 });

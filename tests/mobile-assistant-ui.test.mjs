@@ -6,6 +6,7 @@ import ts from "typescript";
 import * as permissions from "../lib/cloud/permissions.ts";
 import * as assistantSignals from "../lib/assistantSignals-core.mjs";
 import * as paymentHelpers from "../lib/payments.ts";
+import * as taskCore from "../lib/jobTasks-core.mjs";
 import manifest from "../app/manifest.ts";
 
 const owner = { organisationId: "org-a", userId: "owner-a", role: "owner" };
@@ -27,11 +28,14 @@ function compile(path, dependencies, window) {
   });
   return mod.exports;
 }
-function harness() {
+const taskInboxRules = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": assistantSignals });
+const taskRules = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": assistantSignals, "./taskInbox": taskInboxRules });
+function harness({ taskActions = false } = {}) {
   let snapshot = { identity: owner, mode: "cloud", isReady: true }, ready = true, paymentsReady = true, tasksReady = true;
   let active, cursor;
   const state = new Map(), reads = [], clocks = [];
-  const hooks = Object.fromEntries(["Jobs", "PricingDocuments", "Invoices", "Payments", "Planner", "PurchaseLists", "AiReminders", "Certificates", "JobTasks"].map((name) => [`use${name}Collection`, () => { reads.push(snapshot.identity?.organisationId); return { items: [], isReady: ready && (name !== "Payments" || paymentsReady) && (name !== "JobTasks" || tasksReady) }; }]));
+  const taskData = { jobs: [{ id: "job /?#", title: "Workshop", siteAddress: "Site", status: "Scheduled" }], tasks: [{ id: "task /?#", jobId: "job /?#", title: "Fit labels", type: "Task", status: "Open", priority: "High", category: "General", dueDate: "" }] };
+  const hooks = Object.fromEntries(["Jobs", "PricingDocuments", "Invoices", "Payments", "Planner", "PurchaseLists", "AiReminders", "Certificates", "JobTasks"].map((name) => [`use${name}Collection`, () => { reads.push(snapshot.identity?.organisationId); return { items: taskActions && name === "Jobs" ? taskData.jobs : taskActions && name === "JobTasks" ? taskData.tasks : [], isReady: ready && (name !== "Payments" || paymentsReady) && (name !== "JobTasks" || tasksReady) }; }]));
   const components = compile("../components/ai/AssistantBriefing.tsx", {
     react: {
       useState(initial) { const index = cursor++; if (!(index in active)) active[index] = typeof initial === "function" ? initial() : initial; const own = active; return [own[index], (value) => { own[index] = typeof value === "function" ? value(own[index]) : value; }]; },
@@ -41,7 +45,7 @@ function harness() {
     "./AssistantQuestions": { AssistantQuestions: "AssistantQuestions" },
     "../../lib/cloud/coreBusinessCollections": hooks,
     "../../lib/assistantBriefing": {
-      buildAssistantBriefing: (_, now) => { clocks.push(now); return { today: "2026-10-10", actions: Array.from({ length: 10 }, (_, i) => ({ id: `${snapshot.identity.organisationId}:${i}`, title: `${snapshot.identity.organisationId} invoice ${i}`, category: "Money", priority: "Now", reason: "Outstanding payment", nextStep: "Review", href: `/invoices?invoice=${i}`, actionLabel: "Review invoice", evidence: ["Saved amount"] })) }; },
+      buildAssistantBriefing: (_, now, canOpenTaskWorkspace) => { clocks.push(now); return { today: "2026-10-10", actions: taskActions ? taskRules.assistantTaskActions(taskData.tasks, taskData.jobs, now, true, canOpenTaskWorkspace) : Array.from({ length: 10 }, (_, i) => ({ id: `${snapshot.identity.organisationId}:${i}`, title: `${snapshot.identity.organisationId} invoice ${i}`, category: "Money", priority: "Now", reason: "Outstanding payment", nextStep: "Review", href: `/invoices?invoice=${i}`, actionLabel: "Review invoice", evidence: ["Saved amount"] })) }; },
       filterAssistantActions: (actions, focus, query) => actions.filter((item) => (focus === "All" || item.category === focus) && item.title.includes(query)),
     },
   });
@@ -71,6 +75,26 @@ test("office, owner and admin can review the briefing with no mutation controls"
     const view = h.render(); assert.match(text(view), /org-a invoice/);
     assert.equal(h.reads.length, 9);
     assert.ok(nodes(view).filter((n) => n.type === "Link").every((n) => permissions.canAccessPath(role, permissions.internalPathForAccess(n.props.href))));
+  }
+});
+
+test("assistant passes the existing task route permission to its question panel", () => {
+  for (const role of ["owner", "admin", "office"]) {
+    const h = harness(); h.setSnapshot({ identity: { ...owner, role } });
+    const panel = nodes(h.render()).find((n) => n.type === "AssistantQuestions");
+    assert.equal(panel.props.canOpenTaskWorkspace, permissions.canAccessPath(role, "/job-tasks"));
+  }
+  const local = harness(); local.setSnapshot({ mode: "local", identity: { ...owner, role: "office" } });
+  assert.equal(nodes(local.render()).find((n) => n.type === "AssistantQuestions").props.canOpenTaskWorkspace, true);
+});
+
+test("rendered task priorities respect current office, owner and admin route permissions", () => {
+  for (const role of ["owner", "admin", "office"]) {
+    const h = harness({ taskActions: true }); h.setSnapshot({ identity: { ...owner, role } });
+    const view = h.render(); const taskLink = nodes(view).find((n) => n.type === "Link" && /Review (this task|linked job)/.test(text(n)));
+    assert.ok(taskLink); assert.equal(permissions.canAccessPath(role, permissions.internalPathForAccess(taskLink.props.href)), true);
+    assert.equal(taskLink.props.href, role === "office" ? "/jobs/job%20%2F%3F%23" : "/job-tasks?job=job%20%2F%3F%23&task=task%20%2F%3F%23");
+    assert.equal(h.reads.length, 9);
   }
 });
 
