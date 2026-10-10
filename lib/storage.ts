@@ -213,7 +213,49 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     return item;
   }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, key, networkOnly, organisationId, target, userId]);
 
-  return { items: displayItems, setItems, createItem, remove, isReady, createdBySourceId };
+  const updateItem = useCallback((id: string, update: (current: T) => T) => {
+    if (!isReady) throw new Error("Collection is not ready for record updates.");
+    if (networkOnly) throw new Error("This live capability collection is read-only and cannot be stored on this device.");
+    const current = previousRef.current;
+    const index = current.findIndex((record) => recordId(record) === id);
+    if (!id || index < 0) throw new Error("The collection record is no longer available. Reload and review it before retrying.");
+    const item = update(current[index]);
+    if (recordId(item) !== id) throw new Error("A record update must retain its existing id.");
+    if (item === current[index]) return item;
+    const next = current.map((record, recordIndex) => recordIndex === index ? item : record);
+
+    if (target && organisationId && userId) {
+      const repository = createCollectionRepository<RepositoryRecord>({ storageKey: key, table: target.table, collectionKey: target.collectionKey, organisationId, userId, cacheUserId, cacheRole, cacheCustomerSourceId });
+      repository.save(cloudSafeFileRecord(key, item as unknown as object) as RepositoryRecord);
+    } else {
+      window.localStorage.setItem(activeStorageKey, JSON.stringify(next));
+    }
+    previousRef.current = next;
+    setItems(next);
+    return item;
+  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, key, networkOnly, organisationId, target, userId]);
+
+  const removeItem = useCallback((id: string, validate?: (current: T) => void) => {
+    if (!isReady) throw new Error("Collection is not ready for record deletion.");
+    if (networkOnly) throw new Error("This live capability collection is read-only and cannot be stored on this device.");
+    const current = previousRef.current;
+    const item = current.find((record) => recordId(record) === id);
+    if (!id || !item) throw new Error("The collection record is no longer available. Reload and review it before retrying.");
+    validate?.(item);
+    const next = current.filter((record) => recordId(record) !== id);
+    if (target && organisationId && userId) {
+      const repository = createCollectionRepository<RepositoryRecord>({ storageKey: key, table: target.table, collectionKey: target.collectionKey, organisationId, userId, cacheUserId, cacheRole, cacheCustomerSourceId });
+      repository.remove(id);
+      setCreatedBySourceId(repository.recordCreators());
+    } else {
+      window.localStorage.setItem(activeStorageKey, JSON.stringify(next));
+    }
+    previousRef.current = next;
+    setItems(next);
+    return item;
+  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, key, networkOnly, organisationId, target, userId]);
+
+  return { items: displayItems, setItems, createItem, updateItem, removeItem, remove, isReady, createdBySourceId };
 }
 
 export const useLocalStorageCollection = useCloudLocalCollection;

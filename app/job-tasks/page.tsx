@@ -137,7 +137,7 @@ export default function JobTasksPage() {
     }
   }
 
-  function retryCreationNote(note: JobTimelineEntry) {
+  function retryTaskNote(note: JobTimelineEntry) {
     if (!ready) { setMessage("Wait for task records to finish loading before retrying the note."); return; }
     const existing = timeline.items.find((item) => item.id === note.id);
     if (existing && (existing.jobId !== note.jobId || existing.sourceId !== note.sourceId || existing.sourceType !== note.sourceType)) {
@@ -156,31 +156,45 @@ export default function JobTasksPage() {
   }
 
   function changeStatus(task: JobTask, nextStatus: JobTaskStatus) {
+    if (!ready) { setMessage("Wait for task records to finish loading before changing status."); return; }
     const now = new Date().toISOString();
+    let previousStatus: JobTaskStatus | undefined;
+    let updated: JobTask;
     try {
-      const updated = transitionJobTask({ task, nextStatus, now });
-      tasks.setItems((current) => current.map((item) => item.id === task.id ? updated : item));
-      if (task.status !== nextStatus) {
-        const timelineEntry = jobTaskTimelineEntry({
-          task: updated,
-          fromStatus: task.status,
-          toStatus: nextStatus,
-          timelineId: makeId("timeline"),
-          completedBy: "JR OS",
-          now,
-        });
-        timeline.setItems((current) => [timelineEntry, ...current]);
-      }
-      setMessage(`${task.type} updated to ${nextStatus}.`);
+      updated = tasks.updateItem(task.id, (current) => {
+        if (current.jobId !== task.jobId) throw new Error("This task has moved to another job. Review its current record before changing status.");
+        if (current.status === nextStatus) return current;
+        if (current.status !== task.status) throw new Error("This task's status has changed. Review its current record before retrying.");
+        previousStatus = current.status;
+        return transitionJobTask({ task: current, nextStatus, now });
+      });
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "The status could not be changed.");
+      setMessage(`Status save could not be confirmed. Review the task and retry. ${error instanceof Error ? error.message : ""}`);
+      return;
+    }
+    if (previousStatus === undefined) { setMessage(`${updated.type} is already ${nextStatus}.`); return; }
+    const note = jobTaskTimelineEntry({ task: updated, fromStatus: previousStatus, toStatus: nextStatus, timelineId: makeId("timeline"), completedBy: "JR OS", now });
+    try {
+      timeline.createItem(note);
+      completedNoteIds.current.add(note.id);
+      setMessage(`${updated.type} updated to ${nextStatus} and timeline note saved on this device. Check sync status before switching devices.`);
+    } catch (error) {
+      setPendingNotes((current) => [...current, note]);
+      setMessage(`${updated.type} updated to ${nextStatus} on this device, but its timeline note was not saved. Retry the note below. ${error instanceof Error ? error.message : ""}`);
     }
   }
 
   function removeTask(task: JobTask) {
+    if (!ready) { setMessage("Wait for task records to finish loading before deleting."); return; }
     if (!window.confirm(`Delete ${task.type.toLowerCase()} “${task.title}”?`)) return;
-    tasks.remove((item) => item.id === task.id);
-    setMessage(`${task.type} deleted.`);
+    try {
+      tasks.removeItem(task.id, (current) => {
+        if (JSON.stringify(current) !== JSON.stringify(task)) throw new Error("This task has changed. Review its current record before deleting.");
+      });
+      setMessage(`${task.type} deleted on this device. Check sync status before switching devices.`);
+    } catch (error) {
+      setMessage(`Deletion could not be confirmed. Review the task and retry. ${error instanceof Error ? error.message : ""}`);
+    }
   }
 
   if (!ready) return <Card>Loading job tasks…</Card>;
@@ -189,7 +203,7 @@ export default function JobTasksPage() {
     <PageHeader eyebrow="Job Management Pro" title="Tasks & Snagging" description="Track site actions, defects and customer-confirmed completion from one mobile workspace." action={<Button onClick={() => openForm("Task")}><Plus className="mr-2 size-4" />Add task</Button>} />
 
     {message ? <div role="status" className="break-words rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
-    {pendingNotes.length ? <Card className="border-amber-400/30" aria-label="Unsaved task timeline notes"><h2 className="font-bold">Task saved — timeline note needs retrying</h2><p className="mt-2 text-sm text-slate-400">Your task has been saved on this device. Keep this page open to retry its timeline note; leaving keeps the task but loses this unsaved note.</p><div className="mt-3 space-y-3">{pendingNotes.map((note) => <div key={note.id} className="rounded-xl border border-slate-700 p-3"><p className="break-words text-sm">{note.note}</p><button type="button" onClick={() => retryCreationNote(note)} className="mt-3 min-h-12 rounded-xl border border-amber-400/30 px-3 text-sm font-semibold text-amber-200">Retry timeline note</button></div>)}</div></Card> : null}
+    {pendingNotes.length ? <Card className="border-amber-400/30" aria-label="Unsaved task timeline notes"><h2 className="font-bold">Task saved — timeline note needs retrying</h2><p className="mt-2 text-sm text-slate-400">Your task change has been saved on this device. Keep this page open to retry its timeline note; leaving keeps the task change but loses this unsaved note.</p><div className="mt-3 space-y-3">{pendingNotes.map((note) => <div key={note.id} className="rounded-xl border border-slate-700 p-3"><p className="break-words text-sm">{note.note}</p><button type="button" onClick={() => retryTaskNote(note)} className="mt-3 min-h-12 rounded-xl border border-amber-400/30 px-3 text-sm font-semibold text-amber-200">Retry timeline note</button></div>)}</div></Card> : null}
 
     <Card>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select value={selectedJobId} onChange={(event) => { setSelectedJobId(event.target.value); clearTarget(); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">All jobs</option>{jobs.items.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"}</option>)}</select></label>
