@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import {
   isOutstandingJobTask,
+  jobTaskStatusTransitionAllowed,
+  fieldJobTaskStatusTransitionAllowed,
   jobTaskCounts,
   jobTaskTimelineEntry,
   normaliseJobTaskStatus,
@@ -56,6 +58,22 @@ test("invalid task transitions are rejected instead of silently overwritten", ()
     () => transitionJobTask({ task: task(), nextStatus: "Unknown", now }),
     /Unsupported job task status/,
   );
+});
+
+test("management status actions follow the existing stages without expanding field permissions", () => {
+  const allowed = { Open: ["In progress", "Completed"], "In progress": ["Open", "Completed"], Completed: ["Open", "In progress", "Customer confirmed"], "Customer confirmed": ["Open"] };
+  for (const [current, nextStages] of Object.entries(allowed)) {
+    for (const next of [...Object.keys(allowed), "Unknown", undefined]) {
+      assert.equal(jobTaskStatusTransitionAllowed(current, next), nextStages.includes(next), `${current} → ${next}`);
+      if (current !== next && !nextStages.includes(next)) assert.throws(() => transitionJobTask({ task: task({ status: current }), nextStatus: next, now }));
+    }
+  }
+  assert.equal(jobTaskStatusTransitionAllowed("Legacy", "Open"), false);
+  assert.equal(jobTaskStatusTransitionAllowed("Legacy", "In progress"), true);
+  assert.equal(jobTaskStatusTransitionAllowed("Legacy", "Customer confirmed"), false);
+  assert.equal(jobTaskStatusTransitionAllowed("Completed", "Customer confirmed"), true);
+  assert.equal(fieldJobTaskStatusTransitionAllowed("Completed", "Customer confirmed"), false);
+  assert.equal(fieldJobTaskStatusTransitionAllowed("Customer confirmed", "Open"), false);
 });
 
 test("task and snag counts separate outstanding site actions", () => {

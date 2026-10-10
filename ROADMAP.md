@@ -20,6 +20,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Ask for tasks/snags on a named job or site, with a phone job selector and explicit duplicate choices
 - [x] Phone task inbox with job/search/status filters and progressive loading
 - [x] Retain failed task drafts and retry creation notes without duplicating saved tasks
+- [x] Phone task status controls show only valid next stages and distinguish current/blocked actions
 - [x] Confirm task status saves and deletion before success, with separate timeline retries
 - [x] Open the requested diary day and retain multi-day visits across calendar views
 - [x] Correct week/month boundaries, local phone dates and monthly booking repeats

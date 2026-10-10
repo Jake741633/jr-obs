@@ -297,3 +297,46 @@ test("deletion cancellation or a stale changed task cannot delete records", () =
     assert.match(text(h.render()), /Deletion could not be confirmed/);
   }
 });
+
+test("phone task cards enable only valid stage changes and mark the current status distinctly", () => {
+  const stages = { Open: ["In progress", "Completed"], "In progress": ["Open", "Completed"], Completed: ["Open", "In progress", "Customer confirmed"], "Customer confirmed": ["Open"], Legacy: ["In progress", "Completed"] };
+  for (const [status, allowed] of Object.entries(stages)) {
+    const h = pageHarness({ tasks: [task({ status })], search: "?job=j1&task=t1" }); h.flush();
+    const group = nodes(h.render()).find((n) => n.props["aria-label"] === "Task status actions"); assert.ok(group);
+    const buttons = nodes(group).filter((n) => n.type === "button"); assert.equal(buttons.length, 4);
+    for (const button of buttons) {
+      const label = text(button); assert.equal(button.props.disabled, !allowed.includes(label), `${status}: ${label}`);
+      assert.equal(button.props["aria-pressed"], label === status);
+      assert.match(button.props.className, /min-h-12/);
+      if (label !== status && button.props.disabled) assert.match(button.props.className, /disabled:opacity-40/);
+    }
+    assert.equal(h.writes(), 0);
+    if (["Open", "In progress"].includes(status)) assert.match(text(h.render()), /Complete the task before recording customer confirmation/);
+    if (status === "Customer confirmed") assert.match(text(h.render()), /Reopen the task before moving it/);
+    if (status === "Legacy") assert.match(text(h.render()), /Saved status needs review/);
+  }
+});
+
+test("phone stage controls follow completion and reopen immediately while preserving completion evidence", () => {
+  const h = pageHarness({ tasks: [task()], search: "?job=j1&task=t1", writable: true }); h.flush();
+  const buttons = () => nodes(nodes(h.render()).find((n) => n.props["aria-label"] === "Task status actions")).filter((n) => n.type === "button");
+  const status = (label) => buttons().find((n) => text(n) === label);
+  assert.equal(status("Customer confirmed").props.disabled, true);
+  h.taskHandler("Completed")(); assert.equal(h.tasks()[0].status, "Completed"); const completedAt = h.tasks()[0].completedAt;
+  assert.equal(status("Customer confirmed").props.disabled, false);
+  h.taskHandler("Customer confirmed")(); assert.equal(h.tasks()[0].completedAt, completedAt); assert.ok(h.tasks()[0].customerConfirmedAt);
+  assert.equal(status("In progress").props.disabled, true); assert.equal(status("Completed").props.disabled, true); assert.equal(status("Open").props.disabled, false);
+  h.taskHandler("Open")(); assert.equal(h.tasks()[0].status, "Open"); assert.equal(h.tasks()[0].customerConfirmedAt, undefined);
+  assert.equal(status("Customer confirmed").props.disabled, true); assert.equal(h.timeline().length, 3);
+});
+
+test("a disabled phone transition stays rejected even if an old callback is invoked directly", () => {
+  const h = pageHarness({ tasks: [task()], search: "?job=j1&task=t1", writable: true }); h.flush();
+  h.taskHandler("Customer confirmed")(); assert.equal(h.writes(), 0); assert.equal(h.tasks()[0].status, "Open");
+  assert.match(text(h.render()), /cannot move from Open to Customer confirmed/);
+  const complete = h.taskHandler("Completed"); h.replaceTasks([task({ status: "Customer confirmed" })]); complete();
+  assert.equal(h.writes(), 0); assert.equal(h.tasks()[0].status, "Customer confirmed"); assert.match(text(h.render()), /status has changed/);
+  const legacy = pageHarness({ tasks: [task({ status: "Legacy" })], search: "?job=j1&task=t1", writable: true }); legacy.flush();
+  legacy.taskHandler("Open")(); assert.equal(legacy.writes(), 0); assert.equal(legacy.tasks()[0].status, "Legacy");
+  assert.equal(legacy.timeline().length, 0, "a normalised same-stage action must not manufacture an Open-to-Open note");
+});
