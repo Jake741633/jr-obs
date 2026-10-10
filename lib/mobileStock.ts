@@ -14,14 +14,20 @@ export interface StockUsageResult {
   shortage: number;
 }
 
+export function stockItemIdentityIndex(stockItems: StockItem[]) {
+  const index = new Map<string, StockItem | undefined>();
+  for (const item of stockItems) if (typeof item.id === "string" && item.id.trim()) index.set(item.id, index.has(item.id) ? undefined : item);
+  return index;
+}
+
 export function applyStockUsage(input: {
   stockItems: StockItem[];
   usage: StockUsageInput;
   movementId: string;
   now: string;
 }): StockUsageResult | null {
-  const item = input.stockItems.find((entry) => entry.id === input.usage.stockItemId);
-  if (!item || input.usage.quantity <= 0) return null;
+  const item = stockItemIdentityIndex(input.stockItems).get(input.usage.stockItemId);
+  if (!item || !Number.isFinite(input.usage.quantity) || input.usage.quantity <= 0 || !Number.isFinite(item.quantity) || item.quantity < 0 || !["Each", "Metre", "Drum", "Box", "Pack"].includes(item.unit)) return null;
 
   const shortage = Math.max(0, input.usage.quantity - item.quantity);
   const updatedItem: StockItem = {
@@ -130,5 +136,11 @@ export function matchesScanCode(item: StockItem, material: Material | undefined,
   if (!normalized) return false;
   return [item.id, item.stockCode, material?.id, material?.stockCode]
     .filter(Boolean)
-    .some((value) => String(value).toLowerCase() === normalized);
+    .some((value) => String(value).trim().toLowerCase() === normalized);
+}
+
+export function stockScanMatches(stockItems: StockItem[], materials: Material[], scanCode: string) {
+  const materialIndex = new Map<string, Material | undefined>();
+  for (const material of materials) if (typeof material.id === "string" && material.id.trim()) materialIndex.set(material.id, materialIndex.has(material.id) ? undefined : material);
+  return stockItems.filter((item) => matchesScanCode(item, item.materialId ? materialIndex.get(item.materialId) : undefined, scanCode));
 }

@@ -136,7 +136,8 @@ test("safe stock-location labels remain available after one online cache refresh
 });
 
 test("field stock-location UI consumes only the projected label contract", () => {
-  assert.match(fieldMaterials, /locations\.items\.map\(\(item\) => \[item\.id, item\.name\]\)/);
+  assert.match(fieldMaterials, /for \(const item of locations\.items\)/);
+  assert.match(fieldMaterials, /labels\.set\(item\.id, labels\.has\(item\.id\) \? undefined : item\.name\)/);
   assert.doesNotMatch(fieldMaterials, /location\.type|location\.vehicleId|location\.notes|location\.createdAt|location\.updatedAt/);
   assert.equal(canAccessPath("electrician", "/field/materials"), true);
   assert.equal(canAccessPath("electrician", "/stock"), false);
