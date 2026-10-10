@@ -65,7 +65,7 @@ test("deep links resolve exact authorized records and reject mismatched or missi
   assert.equal(inbox.resolveTaskInboxLink([task()], [], "?task=t1&job=j1").taskId, "t1");
 });
 
-function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", ready: initialReady = true, writable = false, failTasks = 0, failTimeline = 0 } = {}) {
+function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", ready: initialReady = true, writable = false, failTasks = 0, failTimeline = 0, failUpdates = 0, failDeletes = 0, confirmDelete = true } = {}) {
   const state = [], effects = [], frames = [], listeners = {};
   let cursor = 0, tasks = initialTasks, timeline = [], ready = initialReady, writes = 0, ids = 0;
   const attempts = [];
@@ -78,15 +78,35 @@ function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", re
     if (kind === "task") tasks = [item, ...tasks]; else timeline = [item, ...timeline];
     return item;
   }
+  function updateItem(id, update) {
+    if (!writable) return noWrite();
+    const index = tasks.findIndex((item) => item.id === id);
+    if (index < 0) throw new Error("The collection record is no longer available");
+    const item = update(tasks[index]);
+    if (item === tasks[index]) return item;
+    writes++; attempts.push({ kind: "update", item });
+    if (failUpdates-- > 0) throw new Error("task update storage failed");
+    tasks = tasks.map((current, i) => i === index ? item : current);
+    return item;
+  }
+  function removeItem(id, validate) {
+    if (!writable) return noWrite();
+    const item = tasks.find((item) => item.id === id);
+    if (!item) throw new Error("The collection record is no longer available");
+    validate?.(item); writes++; attempts.push({ kind: "delete", item });
+    if (failDeletes-- > 0) throw new Error("task deletion storage failed");
+    tasks = tasks.filter((item) => item.id !== id);
+    return item;
+  }
   const useState = (initial) => { const index = cursor++; if (!(index in state)) state[index] = typeof initial === "function" ? initial() : initial; return [state[index], (value) => { state[index] = typeof value === "function" ? value(state[index]) : value; }]; };
   const noWrite = () => { writes++; throw new Error("Inbox navigation must not write records"); };
   const store = (items) => ({ items, isReady: ready, setItems: noWrite, remove: noWrite });
   const page = compile("../app/job-tasks/page.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState, useRef: (value) => useState({ current: value })[0], useMemo: (fn) => fn(), useEffect: (fn) => effects.push(fn) }, "lucide-react": {},
     "../../components/ui/Card": { Card: "Card" }, "../../components/ui/Button": { Button: "Button" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" },
-    "../../lib/cloud/coreBusinessCollections": { useJobsCollection: () => store(jobs), useJobTasksCollection: () => ({ ...store(tasks), createItem: (item) => create("task", item) }), useJobTimelineCollection: () => ({ ...store(timeline), createItem: (item) => create("timeline", item) }), useTeamCollection: () => store([]) },
+    "../../lib/cloud/coreBusinessCollections": { useJobsCollection: () => store(jobs), useJobTasksCollection: () => ({ ...store(tasks), createItem: (item) => create("task", item), updateItem, removeItem }), useJobTimelineCollection: () => ({ ...store(timeline), createItem: (item) => create("timeline", item) }), useTeamCollection: () => store([]) },
     "../../lib/storage": { makeId: () => writable ? `new-${++ids}` : noWrite() }, "../../lib/jobTasks-core.mjs": taskCore, "../../lib/assistantSignals-core.mjs": signals, "../../lib/taskInbox": inbox,
-  }, { window: { location: { search }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, setInterval() { return 1; }, clearInterval() {}, addEventListener(type, fn) { listeners[type] = fn; }, removeEventListener() {} } });
+  }, { window: { confirm: () => confirmDelete, location: { search }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, setInterval() { return 1; }, clearInterval() {}, addEventListener(type, fn) { listeners[type] = fn; }, removeEventListener() {} } });
   const render = () => { cursor = 0; effects.length = 0; return page.default(); };
   const flush = () => { render(); effects.splice(0).forEach((fn) => fn()); frames.splice(0).forEach((fn) => fn()); };
   return { render, flush, writes: () => writes, attempts, tasks: () => tasks, timeline: () => timeline,
@@ -94,6 +114,7 @@ function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", re
     field(label, value) { const form = nodes(render()).find((n) => n.type === "form"); const all = nodes(form); let input = all.find((n) => n.props.label === label); if (!input) input = nodes(all.find((n) => n.type === "label" && text(n).startsWith(label))).find((n) => n.type === "select"); assert.ok(input, label); input.props.onChange({ target: { value } }); },
     submitHandler() { const form = nodes(render()).find((n) => n.type === "form"); assert.ok(form); return () => form.props.onSubmit({ preventDefault() {} }); },
     retryHandler() { const button = nodes(render()).find((n) => n.type === "button" && text(n) === "Retry timeline note"); assert.ok(button); return button.props.onClick; },
+    taskHandler(label) { const card = cards(render()).find((n) => /^(Task|Snag):/.test(n.props["aria-label"])); const button = nodes(card).find((n) => n.type === "button" && text(n) === label); assert.ok(button, label); return button.props.onClick; },
     replaceTasks(value) { tasks = value; }, setReady(value) { ready = value; }, fill(value) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
 }
 const cards = (view) => nodes(view).filter((n) => n.type === "Card" && n.props["aria-label"]);
@@ -204,5 +225,75 @@ test("invalid job and due-date fields retain the draft and never write a task", 
     const h = pageHarness({ writable: true }); draftTask(h); h.field(label, value); h.submitHandler()();
     assert.equal(h.writes(), 0); assert.match(text(h.render()), expected);
     assert.equal(nodes(h.render()).find((n) => n.props.label === "Title").props.value, "Fit labels");
+  }
+});
+
+test("failed task status persistence keeps the saved status and does not create a timeline note", () => {
+  const h = pageHarness({ tasks: [task()], writable: true, failUpdates: 1 }); h.flush();
+  h.taskHandler("Completed")();
+  assert.equal(h.tasks()[0].status, "Open"); assert.equal(h.timeline().length, 0);
+  assert.match(text(h.render()), /Status save could not be confirmed.*task update storage failed/);
+  h.taskHandler("Completed")();
+  assert.equal(h.tasks()[0].status, "Completed"); assert.equal(h.timeline().length, 1);
+  assert.match(text(h.render()), /updated to Completed.*saved on this device.*Check sync status/);
+});
+
+test("a repeated status tap creates one transition and one note", () => {
+  const h = pageHarness({ tasks: [task()], writable: true }); h.flush();
+  const complete = h.taskHandler("Completed"); complete(); complete();
+  assert.equal(h.tasks()[0].status, "Completed"); assert.equal(h.timeline().length, 1);
+  assert.equal(h.attempts.filter((item) => item.kind === "update").length, 1);
+  assert.match(text(h.render()), /already Completed/);
+});
+
+test("status timeline failure retries only the original transition note after later task changes", () => {
+  const h = pageHarness({ tasks: [task()], writable: true, failTimeline: 1 }); h.flush();
+  h.taskHandler("Completed")();
+  assert.equal(h.tasks()[0].status, "Completed"); assert.equal(h.timeline().length, 0);
+  assert.match(text(h.render()), /updated to Completed on this device.*timeline note was not saved/);
+  h.click("Completed"); h.taskHandler("Open")();
+  assert.equal(h.tasks()[0].status, "Open"); assert.equal(h.timeline().length, 1);
+  const retry = h.retryHandler(); retry(); retry();
+  assert.equal(h.tasks()[0].status, "Open"); assert.equal(h.timeline().length, 2);
+  assert.equal(h.attempts.filter((a) => a.kind === "update").length, 2);
+  assert.equal(h.timeline().filter((note) => /changed from Open to Completed/.test(note.note)).length, 1);
+});
+
+test("a status action retains newer task fields and refuses a changed status, job or missing record", () => {
+  for (const patch of [{ title: "Updated title", notes: "New notes" }, { status: "In progress" }, { jobId: "another-job" }, null]) {
+    const h = pageHarness({ tasks: [task()], writable: true }); h.flush();
+    const complete = h.taskHandler("Completed"); h.replaceTasks(patch ? [task(patch)] : []); complete();
+    if (patch?.title) {
+      assert.equal(h.tasks()[0].status, "Completed"); assert.equal(h.tasks()[0].notes, "New notes");
+      assert.match(h.timeline()[0].note, /Updated title/);
+    } else {
+      assert.equal(h.writes(), 0); assert.equal(h.timeline().length, 0);
+      assert.match(text(h.render()), /Status save could not be confirmed/);
+    }
+  }
+});
+
+test("unsupported task status transitions write neither a task nor a timeline note", () => {
+  const h = pageHarness({ tasks: [task()], writable: true }); h.flush(); h.taskHandler("Customer confirmed")();
+  assert.equal(h.writes(), 0); assert.equal(h.tasks()[0].status, "Open");
+  assert.match(text(h.render()), /cannot move from Open to Customer confirmed/);
+});
+
+test("failed deletion retains the task and permits a later durable deletion", () => {
+  const h = pageHarness({ tasks: [task()], writable: true, failDeletes: 1 }); h.flush(); h.taskHandler("Delete task")();
+  assert.equal(h.tasks().length, 1); assert.match(text(h.render()), /Deletion could not be confirmed.*task deletion storage failed/);
+  h.taskHandler("Delete task")();
+  assert.equal(h.tasks().length, 0); assert.match(text(h.render()), /deleted on this device.*Check sync status/);
+  assert.equal(h.timeline().length, 0);
+});
+
+test("deletion cancellation or a stale changed task cannot delete records", () => {
+  const cancelled = pageHarness({ tasks: [task()], writable: true, confirmDelete: false }); cancelled.flush(); cancelled.taskHandler("Delete task")();
+  assert.equal(cancelled.writes(), 0); assert.equal(cancelled.tasks().length, 1);
+  for (const patch of [{ status: "In progress" }, { notes: "New site note" }, { jobId: "another-job" }, null]) {
+    const h = pageHarness({ tasks: [task()], writable: true }); h.flush(); const remove = h.taskHandler("Delete task");
+    const newer = patch ? [task(patch)] : []; h.replaceTasks(newer); remove();
+    assert.equal(h.writes(), 0); assert.deepEqual(h.tasks(), newer);
+    assert.match(text(h.render()), /Deletion could not be confirmed/);
   }
 });

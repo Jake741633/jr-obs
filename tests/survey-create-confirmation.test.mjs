@@ -139,7 +139,7 @@ test("authorization changes block persistence and post-flush navigation", async 
 });
 
 test("collection create commits cache, creator sidecar and expected version zero before state", () => {
-  const createItem = section(storage, "const createItem = useCallback", "\n\n  return { items:");
+  const createItem = section(storage, "const createItem = useCallback", "\n\n  const updateItem = useCallback");
   assert.match(createItem, /if \(!isReady\) throw new Error/);
   assert.match(createItem, /if \(!id\) throw new Error/);
   assert.match(createItem, /current\.some\(\(record\) => recordId\(record\) === id\)/);
@@ -151,7 +151,7 @@ test("collection create commits cache, creator sidecar and expected version zero
   const stateWrite = createItem.indexOf("setItems(next)");
   assert.ok(repositoryWrite >= 0 && repositoryWrite < stateWrite);
   assert.ok(localWrite >= 0 && localWrite < stateWrite);
-  assert.match(storage, /return \{ items: displayItems, setItems, createItem, remove, isReady, createdBySourceId \}/);
+  assert.match(storage, /return \{ items: displayItems, setItems, createItem, updateItem, removeItem, remove, isReady, createdBySourceId \}/);
 });
 
 test("survey page persists, confirms the exact queue target, and uses client navigation", () => {

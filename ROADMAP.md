@@ -18,6 +18,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Task-aware JR AI priorities and open-task/snag answers linked to the exact record
 - [x] Phone task inbox with job/search/status filters and progressive loading
 - [x] Retain failed task drafts and retry creation notes without duplicating saved tasks
+- [x] Confirm task status saves and deletion before success, with separate timeline retries
 - [x] Open the requested diary day and retain multi-day visits across calendar views
 - [x] Correct week/month boundaries, local phone dates and monthly booking repeats
 - [x] Check each upcoming visit’s readiness and open the affected diary day

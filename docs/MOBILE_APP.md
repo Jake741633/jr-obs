@@ -41,7 +41,11 @@ JR AI links open the exact task and show its current status, even if it was comp
 
 Task and snag creation uses the existing durable creation method before clearing the form. A storage/queue error keeps the editable draft and the same record ID for retry; repeated submission after success cannot create another task. If the task saves but its creation note fails, a separate action retries only that timeline note. It retains the original note ID, recognises an existing matching note and refuses mismatched or missing task links. Multiple pending notes remain separate.
 
-The page distinguishes a device save from cloud confirmation. Unsaved timeline retries exist only while the page is open, and the failure notice explains that leaving retains the saved task but loses the unsaved note. Account changes retain the existing page-remount boundary. Status changes and deletion continue to use their existing workflows.
+Status changes and deletion also persist through the existing repository before reporting success or removing the card. A failed write retains the saved task state and explains that the change could not be confirmed. Status updates use the latest loaded record, preserving other edited fields, and refuse stale status/job changes. Repeated status taps do not create another update or timeline note. Deletion keeps its confirmation and refuses a record that changed after the card was rendered.
+
+If a status change saves but its timeline note fails, the same note-only retry retains the original transition details and ID; it never changes the task's current status. Retries require the task to remain on the same job and cannot overwrite a conflicting note identity. The shared durable update/deletion methods preserve queue versions, creator metadata, account-scoped storage and read-only capability restrictions; other collection callers retain their current APIs.
+
+The page distinguishes a device save from cloud confirmation. Unsaved timeline retries exist only while the page is open, and the failure notice explains that leaving retains the saved task change but loses the unsaved note. Account changes retain the existing page-remount boundary.
 
 ## Diary dates and touch controls
 

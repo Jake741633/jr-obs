@@ -63,7 +63,7 @@ function harness({ mode = "cloud", initial = [oldRecord] } = {}) {
   };
 }
 
-async function mountedCollection(h, sanitize = (_key, item) => item) {
+async function mountedCollection(h, sanitize = (_key, item) => item, { networkOnly = false, beforeReady } = {}) {
   const slots = [], effects = []; let cursor = 0;
   const same = (left, right) => left && right.length === left.length && right.every((value, index) => Object.is(value, left[index]));
   const react = {
@@ -74,15 +74,87 @@ async function mountedCollection(h, sanitize = (_key, item) => item) {
     useEffect(callback, deps) { const i = cursor++; if (!same(slots[i]?.deps, deps)) { slots[i]?.cleanup?.(); slots[i] = { deps }; effects.push(() => { slots[i].cleanup = callback(); }); } },
   };
   const hookModule = h.compile("../lib/storage.ts", {
-    react, "./cloud/adapter": h.adapter, "./cloud/collections": h.collections, "./cloud/roleProjectionCache-core.mjs": cachePolicy,
+    react, "./cloud/adapter": h.adapter, "./cloud/collections": h.collections, "./cloud/roleProjectionCache-core.mjs": networkOnly ? { ...cachePolicy, roleProjectionCachePolicy: () => "network-only" } : cachePolicy,
     "./cloud/privateFiles": { cloudSafeFileRecord: sanitize, usePrivateFileCollectionBridge: ({ items }) => ({ items }) },
     "./cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: { organisationId: owner.organisationId, userId: owner.userId, role: owner.cacheRole }, isReady: true, mode: h.mode }) },
   });
   function render() { cursor = 0; const result = hookModule.useCloudLocalCollection(owner.storageKey); effects.splice(0).forEach((effect) => effect()); return result; }
-  render(); await new Promise((resolve) => setImmediate(resolve));
+  const initialHook = render(); beforeReady?.(initialHook); await new Promise((resolve) => setImmediate(resolve));
   let hook = render(); assert.equal(hook.isReady, true);
-  return { update(change) { hook.setItems(change); hook = render(); return hook; } };
+  return { current: () => hook, refresh() { hook = render(); return hook; }, update(change) { hook.setItems(change); hook = render(); return hook; } };
 }
+
+for (const operation of ["update", "remove"]) test(`durable ${operation} reports an enqueue failure before changing hook state and permits retry`, async () => {
+  const h = harness(); const hook = await mountedCollection(h); const before = new Map(h.values);
+  const mutate = () => operation === "update" ? hook.current().updateItem(oldRecord.id, (record) => ({ ...record, title: "Saved edit" })) : hook.current().removeItem(oldRecord.id);
+  h.blocked.add(queueKey);
+  assert.throws(mutate, /Storage blocked/);
+  assert.deepEqual(h.values, before);
+  assert.equal(hook.refresh().items[0].title, "Original evidence");
+  h.blocked.delete(queueKey); mutate(); hook.refresh();
+  assert.equal(hook.current().items.length, operation === "update" ? 1 : 0);
+  if (operation === "update") assert.equal(hook.current().items[0].title, "Saved edit");
+  const change = h.queue().find((item) => item.sourceId === oldRecord.id);
+  assert.equal(change.baseVersion, 3); assert.equal(change.operation, operation === "update" ? "upsert" : "delete");
+  assert.deepEqual(h.queue()[0], h.foreignQueue);
+});
+
+test("durable consecutive updates use the latest record before rendering and retain other records", async () => {
+  const h = harness({ initial: [oldRecord, { id: "other", title: "Other record" }] });
+  const hook = await mountedCollection(h);
+  hook.current().updateItem(oldRecord.id, (record) => ({ ...record, title: "First edit" }));
+  hook.current().updateItem(oldRecord.id, (record) => ({ ...record, notes: record.title }));
+  hook.refresh();
+  assert.deepEqual(plain(hook.current().items), [{ ...oldRecord, title: "First edit", notes: "First edit" }, { id: "other", title: "Other record" }]);
+  assert.equal(h.queue().find((item) => item.sourceId === oldRecord.id).baseIntent, "update");
+  assert.equal(h.queue().filter((item) => item.sourceId === oldRecord.id).length, 1);
+});
+
+test("durable update and removal reject invalid identities and failed preconditions without writes", async () => {
+  const h = harness(); const hook = await mountedCollection(h); const before = new Map(h.values);
+  assert.throws(() => hook.current().updateItem("missing", (record) => record), /no longer available/);
+  assert.throws(() => hook.current().updateItem(oldRecord.id, (record) => ({ ...record, id: "new-id" })), /retain its existing id/);
+  assert.throws(() => hook.current().removeItem("missing"), /no longer available/);
+  assert.throws(() => hook.current().removeItem(oldRecord.id, () => { throw new Error("Record changed"); }), /Record changed/);
+  hook.current().updateItem(oldRecord.id, (record) => record);
+  assert.deepEqual(h.values, before);
+  assert.deepEqual(plain(hook.refresh().items), [oldRecord]);
+});
+
+test("durable update strips private file bytes from cache and queue while preserving display data", async () => {
+  const h = harness(); const hook = await mountedCollection(h, (_key, item) => { const safe = { ...item }; delete safe.privateBytes; return safe; });
+  hook.current().updateItem(oldRecord.id, (record) => ({ ...record, privateBytes: "device-only", title: "Reviewed file" }));
+  assert.equal(JSON.parse(h.raw())[0].privateBytes, undefined);
+  assert.equal(h.queue().find((item) => item.sourceId === oldRecord.id).payload.privateBytes, undefined);
+  assert.equal(hook.refresh().items[0].privateBytes, "device-only");
+});
+
+for (const operation of ["update", "remove"]) test(`durable local ${operation} retains state on storage failure and never enqueues`, async () => {
+  const h = harness({ mode: "local" }); const hook = await mountedCollection(h); const before = new Map(h.values);
+  const mutate = () => operation === "update" ? hook.current().updateItem(oldRecord.id, (record) => ({ ...record, title: "Saved locally" })) : hook.current().removeItem(oldRecord.id);
+  h.blocked.add(h.key); assert.throws(mutate, /Storage blocked/);
+  assert.deepEqual(h.values, before); assert.deepEqual(plain(hook.refresh().items), [oldRecord]);
+  h.blocked.delete(h.key); mutate(); hook.refresh();
+  assert.equal(JSON.parse(h.raw()).length, operation === "update" ? 1 : 0);
+  assert.deepEqual(h.queue(), [h.foreignQueue]);
+});
+
+test("network-only capability collections refuse durable mutations", async () => {
+  const h = harness(); const hook = await mountedCollection(h, undefined, { networkOnly: true }); const before = new Map(h.values);
+  assert.throws(() => hook.current().updateItem(oldRecord.id, (record) => ({ ...record, title: "Forbidden" })), /read-only/);
+  assert.throws(() => hook.current().removeItem(oldRecord.id), /read-only/);
+  assert.deepEqual(h.values, before);
+});
+
+test("durable mutations cannot act before collection loading finishes", async () => {
+  const h = harness();
+  await mountedCollection(h, undefined, { beforeReady(hook) {
+    const before = new Map(h.values); assert.equal(hook.isReady, false);
+    assert.throws(() => hook.updateItem(oldRecord.id, (record) => record), /not ready/);
+    assert.throws(() => hook.removeItem(oldRecord.id), /not ready/);
+    assert.deepEqual(h.values, before);
+  } });
+});
 
 for (const operation of ["create", "update", "remove"]) test(`collection-hook ${operation} must not prewrite the cache before a failed enqueue`, async () => {
   const h = harness(); const hook = await mountedCollection(h); const before = new Map(h.values);
