@@ -22,10 +22,10 @@ export function AssistantBriefing() {
   }
   // Remount collections, search and the clock before a different account can render.
   const scope = JSON.stringify([mode, identity?.organisationId, identity?.userId, identity?.role, identity?.customerSourceId]);
-  return <AccountBriefing key={scope} />;
+  return <AccountBriefing key={scope} canOpenTaskWorkspace={local || canAccessPath(identity?.role, "/job-tasks", identity?.email)} />;
 }
 
-function AccountBriefing() {
+function AccountBriefing({ canOpenTaskWorkspace }: { canOpenTaskWorkspace: boolean }) {
   const jobs = useJobsCollection();
   const documents = usePricingDocumentsCollection();
   const invoices = useInvoicesCollection();
@@ -47,7 +47,7 @@ function AccountBriefing() {
   }, []);
   const ready = [jobs, documents, invoices, payments, planner, purchases, reminders, certificates, tasks].every((store) => store.isReady);
   const records = useMemo(() => ({ jobs: jobs.items, documents: documents.items, invoices: invoices.items, payments: payments.items, planner: planner.items, purchases: purchases.items, reminders: reminders.items, certificates: certificates.items, tasks: tasks.items }), [jobs.items, documents.items, invoices.items, payments.items, planner.items, purchases.items, reminders.items, certificates.items, tasks.items]);
-  const briefing = useMemo(() => buildAssistantBriefing(records, now), [records, now]);
+  const briefing = useMemo(() => buildAssistantBriefing(records, now, canOpenTaskWorkspace), [records, now, canOpenTaskWorkspace]);
   if (!ready) return <Card role="status">Gathering your jobs, quotes and diary…</Card>;
   const visible = filterAssistantActions(briefing.actions, focus, query);
   const urgent = briefing.actions.filter((action) => action.priority === "Now").length;
@@ -61,7 +61,7 @@ function AccountBriefing() {
         <p className="mt-2 text-sm leading-6 text-slate-300">Based on the records loaded for this account. Check sync status and recent changes before acting.</p>
       </div></div>
     </Card>
-    <AssistantQuestions records={records} now={now} briefing={briefing} />
+    <AssistantQuestions records={records} now={now} briefing={briefing} canOpenTaskWorkspace={canOpenTaskWorkspace} />
 
     <div role="group" aria-label="Focus the briefing" className="grid grid-cols-3 gap-2 sm:grid-cols-4">
       {focuses.map((item) => <button key={item} type="button" aria-pressed={focus === item} onClick={() => choose(item)} className={`min-h-12 rounded-xl border px-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-cyan-400 ${focus === item ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-200" : "border-slate-800 bg-slate-900 text-slate-300"}`}>{item}<span className="ml-1 text-xs opacity-70">{item === "All" ? briefing.actions.length : briefing.actions.filter((action) => action.category === item).length}</span></button>)}
