@@ -1,13 +1,15 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Plus, Wrench } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useJobsCollection, useJobTasksCollection, useJobTimelineCollection, useTeamCollection } from "../../lib/cloud/coreBusinessCollections";
-import { jobTaskCounts, jobTaskStatuses, jobTaskTimelineEntry, sortJobTasks, transitionJobTask } from "../../lib/jobTasks-core.mjs";
+import { isOutstandingJobTask, jobTaskStatuses, jobTaskTimelineEntry, transitionJobTask } from "../../lib/jobTasks-core.mjs";
+import { assistantDateKey, assistantDay } from "../../lib/assistantSignals-core.mjs";
+import { filterTaskInbox, resolveTaskInboxLink, taskInboxFilters, taskMatchesInboxFilter, type TaskInboxFilter } from "../../lib/taskInbox";
 import { makeId } from "../../lib/storage";
 import type { JobPriority, JobTask, JobTaskCategory, JobTaskStatus, JobTaskType } from "../../lib/models";
 
@@ -34,10 +36,37 @@ export default function JobTasksPage() {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [message, setMessage] = useState("");
+  const [filter, setFilter] = useState<TaskInboxFilter>("Open");
+  const [query, setQuery] = useState("");
+  const [limit, setLimit] = useState(8);
+  const [targetTaskId, setTargetTaskId] = useState("");
+  const [missingLink, setMissingLink] = useState(false);
+  const [today, setToday] = useState(() => assistantDateKey(new Date()));
+  const deepLinkHandled = useRef(false);
 
-  const visibleTasks = useMemo(() => sortJobTasks(tasks.items.filter((task) => !selectedJobId || task.jobId === selectedJobId)), [selectedJobId, tasks.items]);
-  const selectedCounts = useMemo(() => selectedJobId ? jobTaskCounts(tasks.items, selectedJobId) : null, [selectedJobId, tasks.items]);
+  const visibleTasks = useMemo(() => missingLink ? [] : targetTaskId ? tasks.items.filter((task) => task.id === targetTaskId && (!selectedJobId || task.jobId === selectedJobId)) : filterTaskInbox(tasks.items, jobs.items, { jobId: selectedJobId, filter, query, today }), [missingLink, targetTaskId, selectedJobId, tasks.items, jobs.items, filter, query, today]);
+  const jobTasks = tasks.items.filter((task) => !selectedJobId || task.jobId === selectedJobId);
   const ready = jobs.isReady && tasks.isReady && timeline.isReady && team.isReady;
+
+  useEffect(() => {
+    const update = () => setToday(assistantDateKey(new Date()));
+    const timer = window.setInterval(update, 60_000);
+    window.addEventListener("focus", update);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", update); };
+  }, []);
+
+  useEffect(() => {
+    if (!ready || deepLinkHandled.current) return;
+    const frame = window.requestAnimationFrame(() => {
+      const link = resolveTaskInboxLink(tasks.items, jobs.items, window.location.search);
+      setTargetTaskId(link.taskId); setSelectedJobId(link.jobId); setMissingLink(link.missing);
+      deepLinkHandled.current = true;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [ready, tasks.items, jobs.items]);
+
+  function clearTarget() { setTargetTaskId(""); setMissingLink(false); setLimit(8); }
+  function resetInbox() { clearTarget(); setSelectedJobId(""); setFilter("Open"); setQuery(""); }
 
   function openForm(type: JobTaskType) {
     setForm({ ...blankForm, jobId: selectedJobId, type });
@@ -80,6 +109,7 @@ export default function JobTasksPage() {
       createdAt: now,
     }, ...current]);
     setSelectedJobId(task.jobId);
+    clearTarget(); setFilter("Open"); setQuery("");
     setForm(blankForm);
     setShowForm(false);
     setMessage(`${task.type} saved and added to the job timeline.`);
@@ -121,14 +151,22 @@ export default function JobTasksPage() {
     {message ? <div role="status" className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
 
     <Card>
-      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select value={selectedJobId} onChange={(event) => setSelectedJobId(event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">All jobs</option>{jobs.items.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"}</option>)}</select></label>
+      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select value={selectedJobId} onChange={(event) => { setSelectedJobId(event.target.value); clearTarget(); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">All jobs</option>{jobs.items.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"}</option>)}</select></label>
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <button type="button" onClick={() => openForm("Task")} className="min-h-12 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 text-sm font-semibold text-cyan-200"><Plus className="mx-auto mb-1 size-4" />Task</button>
         <button type="button" onClick={() => openForm("Snag")} className="min-h-12 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 text-sm font-semibold text-amber-200"><Wrench className="mx-auto mb-1 size-4" />Snag</button>
-        <div className="rounded-xl bg-slate-950 p-3"><p className="text-xs text-slate-500">Outstanding</p><p className="mt-1 text-xl font-black">{selectedCounts?.outstanding ?? visibleTasks.filter((task) => !["Completed", "Customer confirmed"].includes(task.status)).length}</p></div>
-        <div className="rounded-xl bg-slate-950 p-3"><p className="text-xs text-slate-500">Completed</p><p className="mt-1 text-xl font-black text-emerald-300">{selectedCounts?.completed ?? visibleTasks.filter((task) => ["Completed", "Customer confirmed"].includes(task.status)).length}</p></div>
+        <div className="rounded-xl bg-slate-950 p-3"><p className="text-xs text-slate-500">Outstanding</p><p className="mt-1 text-xl font-black">{jobTasks.filter(isOutstandingJobTask).length}</p></div>
+        <div className="rounded-xl bg-slate-950 p-3"><p className="text-xs text-slate-500">Completed</p><p className="mt-1 text-xl font-black text-emerald-300">{jobTasks.filter((task) => !isOutstandingJobTask(task)).length}</p></div>
       </div>
     </Card>
+
+    <section aria-label="Find tasks" className="space-y-3">
+      {targetTaskId || missingLink ? <Card role="status"><p className="font-semibold">{missingLink || !visibleTasks.length ? "This task link is unavailable in the loaded records." : "Showing the task you opened"}</p><p className="mt-1 text-sm text-slate-400">{missingLink || !visibleTasks.length ? "The record may have changed or may not be available to this account." : "Its current status is shown below, including any changes since the assistant answer."}</p><button type="button" onClick={resetInbox} className="mt-3 min-h-12 rounded-xl border border-slate-700 px-3 text-sm font-semibold text-cyan-200">Show all open tasks</button></Card> : null}
+      <div role="group" aria-label="Task filters" className="grid grid-cols-3 gap-2 sm:grid-cols-5">{taskInboxFilters.map((item) => <button key={item} type="button" aria-pressed={!targetTaskId && !missingLink && filter === item} onClick={() => { clearTarget(); setFilter(item); }} className={`min-h-12 rounded-xl border px-2 text-sm font-semibold ${!targetTaskId && !missingLink && filter === item ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-200" : "border-slate-700 bg-slate-900 text-slate-300"}`}>{item} <span className="text-xs opacity-70">{jobTasks.filter((task) => taskMatchesInboxFilter(task, item, today)).length}</span></button>)}</div>
+      <label className="block text-sm font-semibold">Search tasks or site address<input type="search" maxLength={160} autoComplete="off" value={query} onChange={(event) => { clearTarget(); setQuery(event.target.value); }} placeholder="Task, job, snag or address…" className="mt-2 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" /></label>
+      <p role="status" className="text-sm text-slate-400">{visibleTasks.length} matching {visibleTasks.length === 1 ? "item" : "items"} · Due includes today and earlier ({today}). Counts are for the selected job, before search.</p>
+      {query || selectedJobId || filter !== "Open" ? <button type="button" onClick={resetInbox} className="min-h-12 text-sm font-semibold text-cyan-200">Reset filters</button> : null}
+    </section>
 
     {showForm ? <Card><form onSubmit={createTask} className="space-y-4">
       <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">New {form.type}</p><h2 className="mt-1 text-lg font-bold">Record site action</h2></div><Button type="button" variant="secondary" onClick={() => setShowForm(false)}>Close</Button></div>
@@ -142,18 +180,19 @@ export default function JobTasksPage() {
     </form></Card> : null}
 
     <section className="space-y-3">
-      {visibleTasks.length ? visibleTasks.map((task) => {
+      {visibleTasks.length ? visibleTasks.slice(0, limit).map((task) => {
         const job = jobs.items.find((item) => item.id === task.jobId);
         const assignee = team.items.find((member) => member.id === task.assignedTo);
-        const complete = ["Completed", "Customer confirmed"].includes(task.status);
-        return <Card key={task.id} className={complete ? "border-emerald-500/20" : task.type === "Snag" ? "border-amber-500/20" : ""}>
+        const complete = !isOutstandingJobTask(task);
+        return <Card key={task.id} aria-label={`${task.type}: ${task.title}`} className={`break-words ${targetTaskId === task.id ? "border-cyan-400/50" : complete ? "border-emerald-500/20" : task.type === "Snag" ? "border-amber-500/20" : ""}`}>
           <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${task.type === "Snag" ? "bg-amber-500/10 text-amber-300" : "bg-cyan-500/10 text-cyan-300"}`}>{task.type}</span><span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">{task.priority}</span><span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">{task.status}</span></div><h2 className="mt-3 text-lg font-bold">{task.title}</h2><p className="mt-1 text-sm text-slate-400">{job?.title ?? "Unknown job"} · {task.category}</p></div>{complete ? <CheckCircle2 className="size-6 shrink-0 text-emerald-300" /> : task.priority === "Urgent" ? <AlertTriangle className="size-6 shrink-0 text-red-300" /> : null}</div>
           {task.description ? <p className="mt-4 whitespace-pre-wrap text-sm text-slate-300">{task.description}</p> : null}
-          <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-3"><span>Assigned: {assignee?.name ?? "Unassigned"}</span><span>Due: {task.dueDate ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString("en-GB") : "No date"}</span><span>Photos: {task.photos.length}</span></div>
-          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{jobTaskStatuses.map((status) => <button key={status} type="button" disabled={task.status === status} onClick={() => changeStatus(task, status as JobTaskStatus)} className="min-h-11 rounded-xl border border-slate-700 px-2 text-xs font-semibold text-slate-300 disabled:border-cyan-500/30 disabled:bg-cyan-500/10 disabled:text-cyan-200">{status}</button>)}</div>
-          <button type="button" onClick={() => removeTask(task)} className="mt-4 min-h-11 text-sm font-semibold text-red-300">Delete {task.type.toLowerCase()}</button>
+          <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-3"><span>Assigned: {assignee?.name ?? "Unassigned"}</span><span>Due: {assistantDay(task.dueDate) !== null ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString("en-GB") : task.dueDate ? "Date needs review" : "No date"}</span><span>Photos: {task.photos.length}</span></div>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{jobTaskStatuses.map((status) => <button key={status} type="button" disabled={task.status === status} onClick={() => changeStatus(task, status as JobTaskStatus)} className="min-h-12 rounded-xl border border-slate-700 px-2 text-xs font-semibold text-slate-300 disabled:border-cyan-500/30 disabled:bg-cyan-500/10 disabled:text-cyan-200">{status}</button>)}</div>
+          <button type="button" onClick={() => removeTask(task)} className="mt-4 min-h-12 text-sm font-semibold text-red-300">Delete {task.type.toLowerCase()}</button>
         </Card>;
-      }) : <Card><h2 className="font-bold">No tasks or snags</h2><p className="mt-2 text-sm text-slate-400">Choose a job and add the first action needed on site.</p></Card>}
+      }) : <Card><h2 className="font-bold">No matching tasks or snags</h2><p className="mt-2 text-sm text-slate-400">Try another filter or search, or choose a job to add an action. Only loaded records are included.</p></Card>}
+      {visibleTasks.length > limit ? <button type="button" onClick={() => setLimit((value) => value + 8)} className="min-h-12 w-full rounded-xl border border-slate-700 px-3 text-sm font-semibold">Show more tasks ({visibleTasks.length - limit} remaining)</button> : null}
     </section>
   </main>;
 }

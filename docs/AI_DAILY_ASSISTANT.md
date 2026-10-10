@@ -2,7 +2,7 @@
 
 `/ai/assistant` is a compact, read-only briefing for owner, admin and office
 accounts. It uses existing account-scoped collection hooks for jobs, quotes,
-invoices, recorded payments, planner entries, purchase lists, reminders and certificates. No external
+invoices, recorded payments, planner entries, purchase lists, reminders, certificates and job tasks. No external
 model, API key, new collection, schema change or write action is introduced.
 
 The assistant ranks individual actions by urgency, calendar due date and stable
@@ -32,6 +32,7 @@ control. Each card explains its reason, next step and saved evidence.
   a seven-day horizon and requires valid explicit times. Multiple shared
   resources for the same pair produce one card. Missing times are not treated
   as a confirmed clash.
+- **Tasks:** outstanding tasks and snags use their saved priority, category and due date. Urgent work, Safety-category records and past due dates appear first. High priority, due-today and work due through today plus six days follow. Completed/customer-confirmed records are excluded; closed-job and orphaned tasks remain reviewable with their actual source evidence. The Safety label comes from the saved record and is not a new assessment of the installation.
 - **Reminders:** incomplete reminders due today or earlier remain visible.
 
 The shared invoice/follow-up predicates also correct the existing Today’s
@@ -43,7 +44,9 @@ and when the app regains focus.
 
 ## Quick questions on phones
 
-The assistant includes six one-tap questions plus a short question field. Supported forms cover today, tomorrow, the next seven days, overdue invoices, all unpaid invoices, quote follow-ups, site preparation and priorities. Matching uses explicit local question forms and normalises common phrasing, case and punctuation. Unsupported scopes, compound questions and commands return an explanation and examples; they never trigger record changes or a guessed answer.
+The assistant includes eight one-tap questions plus a short question field. Supported forms cover today, tomorrow, the next seven days, overdue invoices, all unpaid invoices, quote follow-ups, site preparation, priorities, open tasks and open snags. Matching uses explicit local question forms and normalises common phrasing, case and punctuation. Unsupported scopes, compound questions and commands return an explanation and examples; they never trigger record changes or a guessed answer.
+
+Open-task answers include future and undated work as well as the briefing’s attention items. Snag answers only include outstanding snags. Missing/invalid dates and unknown historical statuses remain explicit in the source evidence. Task links carry encoded job/task IDs into the existing office task workspace, which shows only the exact loaded task. Missing or mismatched links cannot silently open another record. A completed task still opens with its current status; navigation does not create or change records.
 
 Diary answers include planned/confirmed visits that span the selected dates, with actual recorded times and addresses. Active job starts without a matching visit are listed separately as unconfirmed scheduling. Each distinct visit remains visible, but a job is not repeated as an unbooked start when it has a matching visit. Invalid dates are reported; missing or invalid times remain visible for review. Seven days means today plus six calendar days, including month/year changes. These results do not confirm availability or site readiness.
 
@@ -57,7 +60,7 @@ Four answer records show initially, with progressive reveal. Editing a question 
 
 Authorization is checked before mounting any business hooks. Identity resolution
 hides the briefing; a change to mode, organisation, user, role or customer scope
-remounts both collections and local search state. Every source, including the payment ledger, must be ready
+remounts both collections and local search state. Every source, including the payment ledger and task records, must be ready
 before recommendations appear. Existing RLS, cache, queue, tombstone and conflict
 handling remain in place. There is no new response cache or automatic mutation.
 
@@ -85,3 +88,5 @@ evidence remain separate requirements in `RELEASE_REVIEW.md`.
 Payment regression cases execute the actual ledger policy, assistant, Today and Smart Recommendations, including full/partial payments, credit notes, refunds, overpayments, unrelated invoices, avoiding duplicate paid amounts, ledger readiness and source immutability. Existing payment-policy semantics and records are unchanged.
 
 Quick-question regression tests execute the actual answer rules and form handlers, including unsupported intent, calendar boundaries, spanning visits, duplicate suppression, invalid data, payment totals, follow-up agreements, source links, progressive reveal, stale-answer clearing, record refresh and read-only planner navigation.
+
+`tests/task-inbox.test.mjs` executes task priorities, evidence and exact task links, mobile search/filters, progressive reveal, completed/deleted target updates and read-only navigation. Assistant tests also cover task readiness, narrow snag scope, unsupported task commands and live completion updates.

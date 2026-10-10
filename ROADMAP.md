@@ -15,6 +15,8 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Correct draft-invoice and scheduled-follow-up false alerts
 - [x] Connect assistant and dashboard balances to the payment ledger without double-counting
 - [x] One-tap assistant answers for diary, money, quote follow-ups and site preparation
+- [x] Task-aware JR AI priorities and open-task/snag answers linked to the exact record
+- [x] Phone task inbox with job/search/status filters and progressive loading
 - [x] Open the requested diary day and retain multi-day visits across calendar views
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off

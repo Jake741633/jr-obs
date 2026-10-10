@@ -1,11 +1,12 @@
-import type { AiReminder, Invoice, Job, PricingDocument, PurchaseList } from "./models";
+import type { AiReminder, Invoice, Job, JobTask, PricingDocument, PurchaseList } from "./models";
+import { assistantTaskActions } from "./assistantTasks";
 import { detectScheduleClashes, entryEndDate, type ScheduledPlannerEntry } from "./scheduling";
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import { outstandingCertificateJobs, type CertificateSignal } from "./dashboardIntelligence";
 import { assistantDateKey, assistantDay, assistantInvoiceBalance, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "./assistantSignals-core.mjs";
 import { effectiveInvoicePaid, type PaymentRecord } from "./payments";
 
-export type AssistantFocus = "All" | "Money" | "Quotes" | "Site" | "Diary" | "Reminders";
+export type AssistantFocus = "All" | "Money" | "Quotes" | "Site" | "Diary" | "Tasks" | "Reminders";
 export interface AssistantAction {
   id: string;
   category: Exclude<AssistantFocus, "All">;
@@ -27,6 +28,7 @@ export interface AssistantRecords {
   purchases: PurchaseList[];
   reminders: AiReminder[];
   certificates: CertificateSignal[];
+  tasks?: JobTask[];
 }
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const jobPath = (id: string) => `/jobs/${encodeURIComponent(id)}`;
@@ -132,6 +134,7 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
       reason: `Reminder due ${reminder.dueDate}${reminder.dueTime ? ` at ${reminder.dueTime}` : ""}.`, nextStep: "Open the reminder to review it or mark it complete.",
       href: "/ai#today", actionLabel: "Open reminders", dueDate: reminder.dueDate, evidence: [`Priority: ${reminder.priority}`, reminder.notes || "No additional notes"] });
   }
+  actions.push(...assistantTaskActions(records.tasks || [], jobs, now));
   return { today, actions: actions.toSorted((a, b) => rank[a.priority] - rank[b.priority] || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.id.localeCompare(b.id)) };
 }
 

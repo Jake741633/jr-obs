@@ -28,10 +28,10 @@ function compile(path, dependencies, window) {
   return mod.exports;
 }
 function harness() {
-  let snapshot = { identity: owner, mode: "cloud", isReady: true }, ready = true, paymentsReady = true;
+  let snapshot = { identity: owner, mode: "cloud", isReady: true }, ready = true, paymentsReady = true, tasksReady = true;
   let active, cursor;
   const state = new Map(), reads = [], clocks = [];
-  const hooks = Object.fromEntries(["Jobs", "PricingDocuments", "Invoices", "Payments", "Planner", "PurchaseLists", "AiReminders", "Certificates"].map((name) => [`use${name}Collection`, () => { reads.push(snapshot.identity?.organisationId); return { items: [], isReady: ready && (name !== "Payments" || paymentsReady) }; }]));
+  const hooks = Object.fromEntries(["Jobs", "PricingDocuments", "Invoices", "Payments", "Planner", "PurchaseLists", "AiReminders", "Certificates", "JobTasks"].map((name) => [`use${name}Collection`, () => { reads.push(snapshot.identity?.organisationId); return { items: [], isReady: ready && (name !== "Payments" || paymentsReady) && (name !== "JobTasks" || tasksReady) }; }]));
   const components = compile("../components/ai/AssistantBriefing.tsx", {
     react: {
       useState(initial) { const index = cursor++; if (!(index in active)) active[index] = typeof initial === "function" ? initial() : initial; const own = active; return [own[index], (value) => { own[index] = typeof value === "function" ? value(own[index]) : value; }]; },
@@ -52,7 +52,7 @@ function harness() {
     return { ...node, props: { ...node.props, children: expand(node.props?.children, `${path}/children`) } };
   }
   const render = () => expand(jsx(components.AssistantBriefing, {}));
-  return { reads, render, setSnapshot(value) { snapshot = { ...snapshot, ...value }; }, setReady(value) { ready = value; }, setPaymentsReady(value) { paymentsReady = value; }, search(query) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value: query } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
+  return { reads, render, setSnapshot(value) { snapshot = { ...snapshot, ...value }; }, setReady(value) { ready = value; }, setPaymentsReady(value) { paymentsReady = value; }, setTasksReady(value) { tasksReady = value; }, search(query) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value: query } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
 }
 
 test("assistant denies unauthorized or unresolved accounts before reading business collections", () => {
@@ -69,7 +69,7 @@ test("office, owner and admin can review the briefing with no mutation controls"
   for (const role of ["owner", "admin", "office"]) {
     const h = harness(); h.setSnapshot({ identity: { ...owner, role } });
     const view = h.render(); assert.match(text(view), /org-a invoice/);
-    assert.equal(h.reads.length, 8);
+    assert.equal(h.reads.length, 9);
     assert.ok(nodes(view).filter((n) => n.type === "Link").every((n) => permissions.canAccessPath(role, permissions.internalPathForAccess(n.props.href))));
   }
 });
@@ -153,4 +153,16 @@ test("Today's Assistant displays ledger-aware per-invoice amounts and their tota
   const view = mod.TodaysAssistant({ snapshot, customers: [], onAddReminder() {}, onToggleReminder() {} });
   assert.equal((text(view).match(/£140\.00/g) || []).length, 2);
   assert.doesNotMatch(text(view), /£200\.00|£100\.00/);
+});
+
+
+test("assistant waits for task readiness before mounting questions or showing priorities", () => {
+  const h = harness(); h.setTasksReady(false);
+  assert.match(text(h.render()), /Gathering your jobs/);
+  assert.equal(nodes(h.render()).some((n) => n.type === "AssistantQuestions"), false);
+  h.setTasksReady(true);
+  const view = h.render();
+  assert.equal(nodes(view).some((n) => n.type === "AssistantQuestions"), true);
+  assert.ok(nodes(view).find((n) => n.type === "AssistantQuestions").props.records.tasks);
+  h.click("Tasks"); assert.match(text(h.render()), /No matching actions/);
 });

@@ -33,6 +33,12 @@ can expose Workspace, Daily assistant and Quick quote. These are ordinary
 guarded routes: a shortcut never grants access to another role's workspace.
 Availability depends on the device and browser.
 
+## Task inbox
+
+The office Tasks & Snagging workspace starts with outstanding work. Open, Due, Snags, Completed and All filters, job selection and a combined task/job/address search narrow the list. Due means today or earlier using the device’s local calendar date; missing or invalid dates are not treated as overdue. Counts apply to the selected job before text search. Eight cards appear first, with Show more for the rest.
+
+JR AI links open the exact task and show its current status, even if it was completed after the answer. A missing or mismatched link shows an unavailable message with a way back to all open tasks. Loading and account changes retain the existing access boundaries. Search, filtering and navigation do not write business records.
+
 ## Install
 
 - **iPhone/iPad:** open the normal JR OS address in Safari, tap **Share → Add to
