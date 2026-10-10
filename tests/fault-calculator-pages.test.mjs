@@ -8,6 +8,7 @@ import * as adiabatic from "../lib/adiabaticCalculator-core.mjs";
 import * as earthFault from "../lib/earthFaultLoopCalculator-core.mjs";
 import * as maximumDemand from "../lib/maximumDemandCalculator-core.mjs";
 import * as protectiveDevice from "../lib/protectiveDeviceCalculator-core.mjs";
+import * as deviceCoordination from "../lib/deviceCoordinationCalculator-core.mjs";
 import * as numbers from "../lib/electricalCalculatorNumbers-core.mjs";
 import { buildCalculationSnapshot } from "../lib/calculationRecords-core.mjs";
 
@@ -41,9 +42,10 @@ function harness(route) {
     "../../../components/calculators/CalculationRecords": { SaveCalculation: "SaveCalculation" },
     "../../../components/ui/Card": { Card: "Card" },
     "../../../components/ui/PageHeader": { PageHeader: "PageHeader" },
-    "../../../components/ui/FormField": { InputField: "InputField" },
+    "../../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
     "../../../lib/adiabaticCalculator-core.mjs": adiabatic,
     "../../../lib/protectiveDeviceCalculator-core.mjs": protectiveDevice,
+    "../../../lib/deviceCoordinationCalculator-core.mjs": deviceCoordination,
     "../../../lib/maximumDemandCalculator-core.mjs": maximumDemand,
     "../../../lib/earthFaultLoopCalculator-core.mjs": earthFault,
     "../../../lib/electricalCalculatorNumbers-core.mjs": numbers,
@@ -59,7 +61,7 @@ function harness(route) {
     snapshot: () => { const node = nodes(render()).find((node) => node.type === "SaveCalculation"); return buildCalculationSnapshot(node.props.kind, node.props.input); },
     status: () => text(nodes(render()).find((node) => node.props?.role === "status")),
     fill(label, value, index = 0) {
-      const field = nodes(render()).filter((node) => node.type === "InputField" && node.props.label === label)[index];
+      const field = nodes(render()).filter((node) => ["InputField", "TextareaField"].includes(node.type) && node.props.label === label)[index];
       assert.ok(field, label);
       field.props.onChange({ target: { value } });
     },
@@ -67,6 +69,9 @@ function harness(route) {
       const select = nodes(render()).filter((node) => node.type === "select")[index];
       assert.ok(select);
       select.props.onChange({ target: { value } });
+    },
+    confirmEvidence(checked) {
+      nodes(render()).find((node) => node.type === "input" && node.props.type === "checkbox").props.onChange({ target: { checked } });
     },
     click(label) {
       const button = nodes(render()).find((node) => node.type === "button" && (text(node).trim() === label || node.props["aria-label"] === label));
@@ -289,4 +294,49 @@ test("removing invalid rows restores complete totals and removing all rows is un
   assert.match(text(h.render()), /Maximum phase demand— A/);
   h.click("Add load");
   assert.equal(h.status(), "Assessment unavailable");
+});
+
+const fillCoordination = (h) => {
+  for (const [label, value] of [
+    ["Upstream device identification", "Test upstream 100 A"], ["Downstream device identification", "Test downstream 32 A"],
+    ["Applicable supply voltage (V)", "400"], ["Supply and fault-case conditions", "Grid, AC 50 Hz, 3 poles, line-line fault"],
+    ["Upstream stand-alone breaking capacity (kA)", "25"], ["Maximum PFC at upstream device (kA)", "20"],
+    ["Downstream stand-alone breaking capacity (kA)", "6"], ["Maximum PFC at downstream device (kA)", "10"],
+    ["Device-rating and site fault-current evidence", "Synthetic rating sheets and site evidence rev 3"],
+  ]) h.fill(label, value);
+  h.selectPhase("manufacturer", 0);
+  h.fill("Documented backup combination limit (kA)", "15");
+  h.fill("Backup document, revision, table and conditions", "Synthetic backup document rev 2 table A");
+  h.selectPhase("documented", 1);
+  h.fill("Documented selectivity limit (kA)", "12");
+  h.fill("Selectivity document, revision, table and conditions", "Synthetic selectivity document rev 2 table B");
+};
+
+test("coordination page starts blank, with no assumed backup credit or selectivity", () => {
+  const h = harness("device-coordination");
+  assert.equal(h.status(), "Assessment unavailable"); assert.equal(h.snapshot(), null);
+  assert.ok(nodes(h.render()).filter((node) => ["InputField", "TextareaField"].includes(node.type)).every((node) => node.props.value === ""));
+  assert.deepEqual(nodes(h.render()).filter((node) => node.type === "select").map((node) => node.props.value), ["none", "unassessed"]);
+});
+
+test("coordination page requires confirmation, saves real entered evidence and invalidates it after edits", () => {
+  const h = harness("device-coordination"); fillCoordination(h);
+  assert.equal(h.snapshot(), null); h.confirmEvidence(true);
+  assert.equal(h.status(), "Meets entered checks");
+  assert.equal(h.snapshot().outputs.find((row) => row.label === "Downstream capacity used for comparison").value, 15);
+  for (const [label, value] of [["Upstream device identification", "Changed model"], ["Documented backup combination limit (kA)", "18"], ["Backup document, revision, table and conditions", "Changed table"], ["Maximum PFC at downstream device (kA)", "12"]]) {
+    h.fill(label, value); assert.equal(h.status(), "Assessment unavailable"); assert.equal(h.snapshot(), null); h.confirmEvidence(true);
+  }
+  assert.equal(h.status(), "Review required", "selectivity equality must not pass");
+});
+
+test("changing coordination modes clears confirmation and excludes stale hidden evidence", () => {
+  const h = harness("device-coordination"); fillCoordination(h); h.confirmEvidence(true);
+  h.selectPhase("none", 0); assert.equal(h.snapshot(), null); h.confirmEvidence(true);
+  assert.equal(h.status(), "Review required");
+  assert.equal(h.snapshot().inputs.some((row) => row.label.startsWith("Backup document")), false);
+  h.selectPhase("unassessed", 1); assert.equal(h.snapshot(), null); h.confirmEvidence(true);
+  assert.equal(h.snapshot().outputs.find((row) => row.label === "Documented selectivity comparison").value, "Not assessed");
+  h.click("Clear inputs"); assert.equal(h.snapshot(), null); assert.equal(h.status(), "Assessment unavailable");
+  assert.equal(nodes(h.render()).find((node) => node.props.type === "checkbox").props.checked, false);
 });

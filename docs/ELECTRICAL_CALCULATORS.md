@@ -1,6 +1,6 @@
 # Electrical calculator scope and validation
 
-The calculator suite is tracked in [issue #2](https://github.com/Jake741633/jr-obs/issues/2). It covers load/current, voltage drop, cable current capacity, earth-fault loop, adiabatic CPC sizing, protective-device checks and maximum demand. Complete calculations can be saved as standalone design notes or linked to jobs, quotes, estimates and surveys. Full manufacturer device selection and coordination remain separate roadmap work.
+The calculator suite is tracked in [issue #2](https://github.com/Jake741633/jr-obs/issues/2). It covers load/current, voltage drop, cable current capacity, earth-fault loop, adiabatic CPC sizing, protective-device checks, manufacturer-evidence coordination and maximum demand. Complete calculations can be saved as standalone design notes or linked to jobs, quotes, estimates and surveys. A maintained manufacturer catalogue and automatic device selection remain future roadmap work.
 
 ## Adiabatic CPC sizing
 
@@ -46,6 +46,18 @@ The dedicated page's basic device check covers only `Ib ≤ In ≤ Iz`. It does 
 The designer supplies verified operating data and checks its applicability to the installation and device standard. There is no device catalogue, automatic trip-curve multiplier, inferred fuse factor, upstream backup credit or selectivity claim. This tool takes corrected Iz, not tabulated capacity, and overload setting rather than breaker frame rating where applicable. I2 at or below the normal rating/setting is outside the supported overload-input scope and must be corrected. Maximum PFC must come from appropriate circuit evidence, not the simple earth-loop estimate.
 
 Each comparison and its unrounded margin is visible. Missing/malformed inputs, absent references or numeric overflow suppress every assessment. A failed comparison is reported individually, while the overall result requires all four. Saving retains all four comparisons and the evidence references; it does not approve the design.
+
+## Device coordination evidence
+
+`/electrical-calculators/device-coordination` compares one identified upstream/downstream pair for one supply and fault case. The form starts blank with no backup credit and selectivity unassessed. It requires both device references, supply voltage and conditions, device-rating/site-PFC evidence, both stand-alone capacities, both local maximum prospective RMS fault currents, and explicit confirmation that the evidence applies. Changing any input clears that confirmation.
+
+The upstream device must cover PFC at its own location. The downstream comparison uses either its stand-alone rating or an explicitly entered manufacturer-tested backup combination limit. Backup evidence never improves the upstream rating and never establishes selectivity. A backup limit below the entered stand-alone capacity is treated as inconsistent evidence and blocks assessment.
+
+Selectivity has its own document/revision/table/conditions and numeric limit. The app conservatively requires downstream PFC strictly below that limit; equality remains a review item. A manufacturer table marked T must be resolved to its actual numeric scope before entry. Explicit zero records no selectivity; blank, infinity and T are never interpreted as unlimited. No-backup and unassessed modes exclude hidden stale limits and sources from saved snapshots.
+
+All comparisons use unrounded values and expose individual margins. The overall positive status requires upstream capacity, downstream capacity and documented selectivity comparisons to pass. Unassessed selectivity is visibly retained as review required. Complete failed or unassessed-selectivity results may be saved for review with the existing job/quote/estimate/survey links. Saved snapshots include the original device pair, both active evidence sources, applicability confirmation, stand-alone comparison and scope limitations. No catalogue data, manufacturer approval, new storage collection or schema change is introduced.
+
+Each supply source/fault case requires a separate review. Overload coordination, RCD selectivity, ADS, Zs, conductor thermal withstand and assembly compatibility remain separate checks. Entered text and the confirmation record a designer's verification; the app cannot inspect or authenticate the documents.
 
 ## Maximum demand and diversity
 
@@ -103,8 +115,14 @@ These automated tests verify software behavior. They are not installation certif
 
 Maximum-demand core and page-handler tests cover mixed-phase known answers, every required field, explicit zero diversity, fractional quantities, unknown phases, empty schedules, adding/removing rows, and row/aggregate numeric extremes. The shared decimal parser also rejects nonzero decimal strings that underflow to zero.
 
-Saved-record tests execute snapshot creation and real UI handlers, covering all seven calculation types, unit conversion, incomplete inputs, historical independence, failed comparisons, account changes, unavailable jobs, storage failures, search and job filters. The SQL and full Supabase upgrade rehearsals both exercise real database reads/writes for owner/admin/office, field/customer, other-tenant, revoked/inactive and anonymous identities, as well as job-binding rejection and projection isolation. All rehearsal records and audit entries are rolled back.
+Saved-record tests execute snapshot creation and real UI handlers, covering the calculation types, unit conversion, incomplete inputs, historical independence, failed comparisons, account changes, unavailable jobs, storage failures, search and job filters. The SQL and full Supabase upgrade rehearsals both exercise real database reads/writes for owner/admin/office, field/customer, other-tenant, revoked/inactive and anonymous identities, as well as job-binding rejection and projection isolation. All rehearsal records and audit entries are rolled back.
 
 Quote/survey regression cases cover direct and derived bindings, customer-only and unassigned targets, estimates, type changes, matching IDs in different collections, unavailable/loading targets and jobs, storage failures, stale account handlers, historical metadata, malformed versions, exact detail filters, URL encoding, search and print exclusion. Both database rehearsals repeat the tenant/role/session boundary checks for quote/survey metadata with and without job bindings, including missing-customer rejection and field-projection exclusion.
 
 `tests/collection-write-failures.test.mjs` runs the actual TypeScript storage hook, collection adapter and sync repository together. It injects cache, queue, badge-cache and recovery failures; checks retry behavior, creator/version preservation and other-account isolation; and verifies successful updates, removals, file-safe ordering and local-only behavior. Cloud collection effects enqueue changed records before mirroring the resulting list order into the cache.
+
+Coordination tests cover independent upstream/downstream failures, backup/selectivity separation, exact boundaries, malformed numeric data, required sources, contradictory evidence, inactive inputs, immutable snapshots, and the actual page handlers for confirmation, editing, mode changes and clearing.
+
+Coordination references reviewed 10 October 2026:
+- [Schneider Electric: coordination between circuit-breakers](https://www.electrical-installation.org/enwiki/Coordination_between_circuit-breakers) — manufacturer-tested backup combinations, separate selectivity limits and source/fault-case scope.
+- [Schneider Electric: Selectivity, Cascading and Coordination Guide 2026](https://www.se.com/uk/en/download/document/LVPED318033EN/) — document LVPED318033EN, version 4.0, dated 3 August 2026. No rating tables are copied into JR OS; the designer must use the applicable current table and its conditions.
