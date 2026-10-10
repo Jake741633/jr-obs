@@ -15,7 +15,8 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Correct draft-invoice and scheduled-follow-up false alerts
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off
-- [ ] Full manufacturer device selection and coordination in Electrical Calculators
+- [x] Manufacturer-evidence device-pair coordination with saved backup and selectivity comparisons
+- [ ] Maintained manufacturer catalogue and automatic device selection in Electrical Calculators
 
 Implementation and checks: [Phone app](docs/MOBILE_APP.md),
 [Daily Assistant](docs/AI_DAILY_ASSISTANT.md),

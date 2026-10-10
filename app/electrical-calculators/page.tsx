@@ -79,6 +79,7 @@ export default function ElectricalCalculatorsPage() {
       />
 
       <div className="grid gap-3 lg:grid-cols-2">
+        <Link href="/electrical-calculators/device-coordination" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100"><span><span className="block font-bold">Open Device Coordination</span><span className="block text-sm text-cyan-100/70">Compare manufacturer backup and selectivity limits for an exact device pair and save the evidence.</span></span><ArrowRight className="size-5 shrink-0" /></Link>
         <Link href="/electrical-calculators/records" className="flex min-h-14 items-center justify-between rounded-2xl border border-slate-700 px-4 py-3 font-semibold text-cyan-200">Saved calculation records<ArrowRight className="size-5 shrink-0" /></Link>
         <Link href="/electrical-calculators/cable-sizing" className="flex min-h-14 items-center justify-between gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-cyan-100 transition hover:border-cyan-300 hover:bg-cyan-400/15">
           <span className="flex items-center gap-3">
