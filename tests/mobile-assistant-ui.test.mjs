@@ -38,6 +38,7 @@ function harness() {
       useMemo: (fn) => fn(), useEffect: () => {},
     },
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => snapshot },
+    "./AssistantQuestions": { AssistantQuestions: "AssistantQuestions" },
     "../../lib/cloud/coreBusinessCollections": hooks,
     "../../lib/assistantBriefing": {
       buildAssistantBriefing: (_, now) => { clocks.push(now); return { today: "2026-10-10", actions: Array.from({ length: 10 }, (_, i) => ({ id: `${snapshot.identity.organisationId}:${i}`, title: `${snapshot.identity.organisationId} invoice ${i}`, category: "Money", priority: "Now", reason: "Outstanding payment", nextStep: "Review", href: `/invoices?invoice=${i}`, actionLabel: "Review invoice", evidence: ["Saved amount"] })) }; },

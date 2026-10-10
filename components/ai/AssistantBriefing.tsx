@@ -8,6 +8,7 @@ import { canAccessPath } from "../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { useAiRemindersCollection, useCertificatesCollection, useInvoicesCollection, usePaymentsCollection, useJobsCollection, usePlannerCollection, usePricingDocumentsCollection, usePurchaseListsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { Card } from "../ui/Card";
+import { AssistantQuestions } from "./AssistantQuestions";
 
 const focuses: AssistantFocus[] = ["All", "Money", "Quotes", "Site", "Diary", "Reminders"];
 const tones = { Now: "bg-rose-400/10 text-rose-200", Today: "bg-amber-400/10 text-amber-200", Next: "bg-cyan-400/10 text-cyan-200" };
@@ -44,7 +45,8 @@ function AccountBriefing() {
     return () => { window.clearInterval(timer); window.removeEventListener("focus", update); };
   }, []);
   const ready = [jobs, documents, invoices, payments, planner, purchases, reminders, certificates].every((store) => store.isReady);
-  const briefing = useMemo(() => buildAssistantBriefing({ jobs: jobs.items, documents: documents.items, invoices: invoices.items, payments: payments.items, planner: planner.items, purchases: purchases.items, reminders: reminders.items, certificates: certificates.items }, now), [jobs.items, documents.items, invoices.items, payments.items, planner.items, purchases.items, reminders.items, certificates.items, now]);
+  const records = useMemo(() => ({ jobs: jobs.items, documents: documents.items, invoices: invoices.items, payments: payments.items, planner: planner.items, purchases: purchases.items, reminders: reminders.items, certificates: certificates.items }), [jobs.items, documents.items, invoices.items, payments.items, planner.items, purchases.items, reminders.items, certificates.items]);
+  const briefing = useMemo(() => buildAssistantBriefing(records, now), [records, now]);
   if (!ready) return <Card role="status">Gathering your jobs, quotes and diary…</Card>;
   const visible = filterAssistantActions(briefing.actions, focus, query);
   const urgent = briefing.actions.filter((action) => action.priority === "Now").length;
@@ -57,10 +59,8 @@ function AccountBriefing() {
         <h2 className="mt-1 text-2xl font-bold">{urgent ? `${urgent} ${urgent === 1 ? "action needs" : "actions need"} attention now` : briefing.actions.length ? `${briefing.actions.length} actions to review` : "No priority actions found"}</h2>
         <p className="mt-2 text-sm leading-6 text-slate-300">Based on the records loaded for this account. Check sync status and recent changes before acting.</p>
       </div></div>
-      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
-        {([["What should I do next?", "All"], ["What needs chasing?", "Money"], ["Am I ready for site?", "Site"]] as const).map(([label, target]) => <button key={target} type="button" onClick={() => { choose(target); setQuery(""); }} className="min-h-12 rounded-xl border border-cyan-400/20 bg-slate-950/50 px-3 text-left text-sm font-semibold text-cyan-100 hover:bg-cyan-400/10 focus-visible:outline-2 focus-visible:outline-cyan-400">{label}</button>)}
-      </div>
     </Card>
+    <AssistantQuestions records={records} now={now} briefing={briefing} />
 
     <div role="group" aria-label="Focus the briefing" className="grid grid-cols-3 gap-2 sm:grid-cols-6">
       {focuses.map((item) => <button key={item} type="button" aria-pressed={focus === item} onClick={() => choose(item)} className={`min-h-12 rounded-xl border px-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-cyan-400 ${focus === item ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-200" : "border-slate-800 bg-slate-900 text-slate-300"}`}>{item}<span className="ml-1 text-xs opacity-70">{item === "All" ? briefing.actions.length : briefing.actions.filter((action) => action.category === item).length}</span></button>)}
