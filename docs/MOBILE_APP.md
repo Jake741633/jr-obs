@@ -53,6 +53,12 @@ The page distinguishes a device save from cloud confirmation. Unsaved timeline r
 
 Next visit checks is a JR AI shortcut for accepted or on-site work needing another recorded work visit or a booking review. It uses the job selector and exact-name/address questions, starts with four answers and updates when bookings change. Job briefings include the same check without counting a survey or delivery as the next work visit. It keeps deposit/builder dependencies explicit and opens that saved job's diary scope for review; it does not book a visit.
 
+## Materials and deliveries
+
+JR AI offers Materials to order and Awaiting deliveries, with the existing job selector and exact-name/address questions. Four purchase-list answers appear first with progressive reveal. Each answer keeps the saved line quantities, supplier and stock code available under Source details. Unknown statuses and invalid quantities are explicitly reviewable; the assistant does not assume an order was placed or a delivery is late.
+
+Review purchase list opens just the exact saved list, with its current lines and totals. The initial link resolves before list results appear. Empty/duplicate/oversized link ids, missing lists and duplicate saved identities show a clear unavailable/invalid state instead of broader results. Show all purchase lists clears that selection for the mounted page; reloading replays the original link. Collection refreshes retain the saved identity, including when a title is reused. The link does not open the keyboard or perform an action. Quantity, unit-cost and status controls on the purchase page now have 48px touch targets. Existing creation/editing permissions and persistence behavior are retained.
+
 ## Diary booking saves
 
 New bookings persist each visit through the existing durable creation method before clearing the form. Failed first saves keep editable details and reuse the original record identities on retry. Success says saved on this device and asks the user to check sync status before switching devices.
