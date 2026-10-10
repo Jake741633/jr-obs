@@ -6,6 +6,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, Plus, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
+import { SavedCalculationRecords } from "../../../components/calculators/CalculationRecords";
 import { accountStorageKey } from "../../../lib/cloud/adapter";
 import { useCustomersCollection, useJobsCollection, usePricingDocumentsCollection, useSurveysCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { queueTargetSyncState } from "../../../lib/cloud/repository-core.mjs";
@@ -241,6 +242,8 @@ export default function SurveyDetailPage() {
 
     {step === 6 && <div className="space-y-4"><div className={`grid gap-4 ${fieldMode ? "md:grid-cols-3" : "md:grid-cols-4"}`}><Card><p className="text-sm text-slate-400">Health score</p><p className="mt-2 text-3xl font-bold">{activeSurvey.healthScore}%</p></Card><Card><p className="text-sm text-slate-400">Circuits</p><p className="mt-2 text-3xl font-bold">{activeSurvey.circuits.length}</p></Card><Card><p className="text-sm text-slate-400">Defects</p><p className="mt-2 text-3xl font-bold">{activeSurvey.defects.length}</p></Card>{!fieldMode ? <Card><p className="text-sm text-slate-400">Labour value</p><p className="mt-2 text-3xl font-bold">£{(activeSurvey.labourHours * activeSurvey.labourRate).toFixed(2)}</p></Card> : null}</div><Card><h2 className="text-xl font-bold">Voice/transcript notes</h2><textarea className={`${fieldClass} mt-4 min-h-32 py-3`} placeholder="Paste or type your spoken walkthrough here…" value={activeSurvey.voiceNotes} onChange={(e) => update({ voiceNotes: e.target.value })} /><h2 className="mt-6 text-xl font-bold">Survey notes</h2><textarea className={`${fieldClass} mt-4 min-h-32 py-3`} value={activeSurvey.surveyNotes} onChange={(e) => update({ surveyNotes: e.target.value })} /><div className="mt-6 flex flex-wrap items-center gap-3">{fieldMode ? <p className="text-sm text-amber-200">Survey recommendations are ready for office review. Quote creation is restricted to office roles.</p> : <Button onClick={createQuote}><Sparkles className="mr-2 size-4" />Generate draft quote</Button>}{message && <p className="flex items-center gap-2 text-sm text-emerald-300"><Check className="size-4" />{message}</p>}</div></Card></div>}
     </fieldset>
+
+    <SavedCalculationRecords surveyId={activeSurvey.id} />
 
     <div className="flex justify-between"><Button variant="secondary" disabled={step === 0} onClick={() => setStep((current) => Math.max(0, current - 1))}><ChevronLeft className="mr-2 size-4" />Previous</Button><Button disabled={step === steps.length - 1} onClick={() => setStep((current) => Math.min(steps.length - 1, current + 1))}>Next<ChevronRight className="ml-2 size-4" /></Button></div>
   </div>;
