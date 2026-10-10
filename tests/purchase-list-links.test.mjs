@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import * as links from "../lib/purchaseListLink.ts";
+import * as inbox from "../lib/purchaseInbox.ts";
 
 const jsx = (type, props) => ({ type, props });
 const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
@@ -38,7 +39,7 @@ function harness({ search = "", lists: initial = [], ready: initialReady = true,
     react: { useMemo: (fn) => fn(), useEffect: (fn) => { if (!mounted) effects.push(fn); }, useRef(initial) { const i = cursor++; if (!(i in state)) state[i] = { current: initial }; return state[i]; }, useState(initial) { const i = cursor++; if (!(i in state)) state[i] = typeof initial === "function" ? initial() : initial; return [state[i], (value) => { state[i] = typeof value === "function" ? value(state[i]) : value; }]; } },
     "next/link": { default: "Link" }, "lucide-react": {}, "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" },
     "../../lib/cloud/coreBusinessCollections": { usePurchaseListsCollection: () => ({ ...store(lists), createItem, updateItem, removeItem }) }, "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: { role } }) },
-    "../../lib/storage": { useCloudLocalCollection: (key) => store(key === "jr-os-pricing-documents" ? pricing : key === "jr-os-jobs" ? jobs : materials), makeId: (prefix) => `${prefix}-${++ids}` }, "../../lib/purchaseListLink": links,
+    "../../lib/storage": { useCloudLocalCollection: (key) => store(key === "jr-os-pricing-documents" ? pricing : key === "jr-os-jobs" ? jobs : materials), makeId: (prefix) => `${prefix}-${++ids}` }, "../../lib/purchaseListLink": links, "../../lib/purchaseInbox": inbox,
   };
   const mod = { exports: {} };
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/purchases/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Intl, Date, Error, window: { location: { search }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {}, confirm(message) { confirmations.push(message); return confirm; } }, require(name) { assert.ok(name in deps, name); return deps[name]; } });
@@ -52,6 +53,11 @@ function harness({ search = "", lists: initial = [], ready: initialReady = true,
     save(number, description) { this.saveHandler(number, description)(); },
     discard(number, description) { nodes(this.line(number, description)).find((n) => n.type === "button" && text(n) === "Use saved values").props.onClick(); },
     deleteHandler(number = "PO-1") { const button = nodes(render()).find((n) => n.type === "button" && n.props["aria-label"] === `Delete ${number}`); assert.ok(button); return button.props.onClick; },
+    search(value) { nodes(render()).find((n) => n.type === "input" && n.props.type === "search").props.onChange({ target: { value } }); },
+    filter(name) { const group = nodes(render()).find((n) => n.props["aria-label"] === "Purchase list filters"); const button = nodes(group).find((n) => n.type === "button" && text(n).startsWith(name)); assert.ok(button); button.props.onClick(); },
+    scopeJob(value) { const label = nodes(render()).find((n) => n.type === "label" && text(n).startsWith("Purchase list job")); nodes(label).find((n) => n.type === "select").props.onChange({ target: { value } }); },
+    more() { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith("Show more purchase lists")); assert.ok(button); button.props.onClick(); },
+    clearFilters() { nodes(render()).find((n) => n.type === "button" && text(n) === "Clear purchase filters").props.onClick(); },
     choose(label, value) { const control = nodes(render()).find((n) => n.type === "select" && n.props["aria-label"] === label); assert.ok(control, label); control.props.onChange({ target: { value } }); },
     createHandler() { const button = nodes(render()).find((n) => n.type === "Button" && /^(Create|Retry) purchase list$/.test(text(n))); assert.ok(button); return button.props.onClick; },
     create() { this.createHandler()(); },
@@ -248,7 +254,7 @@ test("unsupported purchase statuses require an explicit correction before saving
 test("purchase deletion requires confirmation and failed persistence retains the exact saved list", () => {
   const cancel = editingHarness({ confirm: false }); cancel.deleteHandler()(); assert.equal(cancel.writes(), 0); assert.equal(cancel.confirmations.length, 1);
   const h = editingHarness({ failRemoveAt: [1], search: "?list=p1", lists: [list(), list({ id: "p2", number: "PO-2", title: "Other list" })] }); const remove = h.deleteHandler(); remove();
-  assert.equal(h.lists().length, 2); assert.match(text(h.render()), /Deletion could not be confirmed.*remains available.*storage failed/); assert.match(h.confirmations[0], /Delete purchase list PO-1 “Cable order”/);
+  assert.equal(h.lists().length, 2); assert.match(text(h.render()), /Deletion could not be confirmed.*Review the saved purchase list.*storage failed/); assert.match(h.confirmations[0], /Delete purchase list PO-1 “Cable order”/);
   remove(); remove(); assert.equal(h.removals.length, 2); assert.equal(h.confirmations.length, 2); assert.equal(h.lists().length, 1); assert.equal(h.lists()[0].id, "p2"); assert.match(text(h.render()), /deleted on this device.*Check sync status/);
   assert.equal(renderedLists(h.render()).length, 0); assert.match(text(h.render()), /selected purchase list is unavailable/); assert.doesNotMatch(text(renderedLists(h.render())), /Other list/);
 });
@@ -270,4 +276,90 @@ test("drafts for removed lines remain visible and can be discarded without a rec
   h.deleteHandler()(); assert.equal(h.confirmations.length, 0); assert.match(text(h.render()), /1 unsaved line/);
   const clear = nodes(h.render()).find((n) => n.type === "button" && text(n) === "Discard all line drafts"); assert.ok(clear); clear.props.onClick(); stale();
   assert.equal(h.writes(), 0); assert.doesNotMatch(text(h.render()), /unsaved line/); h.deleteHandler()(); assert.equal(h.lists().length, 0);
+});
+
+const savedJob = (patch = {}) => ({ id: "j1", title: "Workshop", siteAddress: "10 High Street", status: "On Site", ...patch });
+const inboxOptions = (patch = {}) => ({ jobId: "", filter: "All", query: "", includeCosts: true, ...patch });
+
+test("purchase inbox filters classify whole saved lists without treating unsupported status as an order or receipt", () => {
+  const needed = list(); const ordered = list({ id: "ordered", items: [{ ...list().items[0], status: "Ordered" }] });
+  const delivered = list({ id: "delivered", items: [{ ...list().items[0], status: "Delivered" }] });
+  const mixed = list({ id: "mixed", items: [...needed.items, { ...ordered.items[0], id: "ordered-line" }, { ...delivered.items[0], id: "delivered-line" }] });
+  const unknown = list({ id: "unknown", items: [{ ...list().items[0], status: "Dispatched" }] }); const empty = list({ id: "empty", items: [] });
+  const lists = [needed, ordered, delivered, mixed, unknown, empty]; const before = structuredClone(lists);
+  for (const [filter, ids] of [["All", lists.map((record) => record.id)], ["Need ordering", ["p1", "mixed"]], ["Awaiting delivery", ["ordered", "mixed"]], ["Delivered", ["delivered"]], ["Review", ["unknown", "empty"]]]) {
+    assert.deepEqual(inbox.filterPurchaseInbox(lists, [savedJob()], inboxOptions({ filter })).map((record) => record.id), ids);
+  }
+  assert.deepEqual(lists, before); assert.equal(inbox.filterPurchaseInbox(lists, [savedJob()], inboxOptions({ filter: "Awaiting delivery" }))[1].items.length, 3);
+});
+
+test("purchase search joins recorded job, list and supplier details with every word required and no price search", () => {
+  const first = list({ notes: "collect tomorrow" }); const other = list({ id: "other", jobId: "j2", title: "Office order", items: [{ ...list().items[0], supplier: "TLC", unitCost: 2500 }] });
+  const lists = [first, other], jobs = [savedJob(), savedJob({ id: "j2", title: "Office", siteAddress: "11 Low Street" })];
+  for (const query of [" WORKSHOP  CEF c1 ", "high cable", "po-1 tomorrow"]) assert.deepEqual(inbox.filterPurchaseInbox(lists, jobs, inboxOptions({ query })).map((record) => record.id), ["p1"]);
+  assert.deepEqual(inbox.filterPurchaseInbox(lists, jobs, inboxOptions({ query: "office tlc" })).map((record) => record.id), ["other"]);
+  for (const query of ["workshop tlc", "2500"]) assert.equal(inbox.filterPurchaseInbox(lists, jobs, inboxOptions({ query })).length, 0);
+});
+
+test("purchase job scope uses only an exact unique saved job identity and retains global orphan review", () => {
+  const lists = [list(), list({ id: "other", jobId: "other-job" }), list({ id: "orphan", jobId: "missing" }), list({ id: "stock", jobId: undefined })];
+  const jobs = [savedJob(), savedJob({ id: "other-job" })];
+  assert.deepEqual(inbox.filterPurchaseInbox(lists, jobs, inboxOptions({ jobId: "j1" })).map((record) => record.id), ["p1"]);
+  assert.deepEqual(inbox.filterPurchaseInbox(lists, jobs, inboxOptions({ filter: "Review" })).map((record) => record.id), ["orphan"]);
+  assert.equal(inbox.filterPurchaseInbox(lists, [savedJob({ id: "replacement" })], inboxOptions({ jobId: "j1" })).length, 0);
+  assert.equal(inbox.filterPurchaseInbox(lists, [savedJob(), savedJob()], inboxOptions({ jobId: "j1" })).length, 0);
+  assert.equal(inbox.purchaseLinkedJob(list(), [savedJob(), savedJob()]), undefined);
+});
+
+test("purchase review includes invalid lines and identities while restricted review avoids hidden cost inference", () => {
+  for (const patch of [{ quantity: 0 }, { quantity: -1 }, { quantity: NaN }, { quantity: Infinity }, { description: " " }, { description: 3 }, { id: "" }, { id: 4 }, { unitCost: undefined }, { unitCost: NaN }, { unitCost: -1 }]) {
+    const current = list({ items: [{ ...list().items[0], ...patch }] }); assert.equal(inbox.filterPurchaseInbox([current], [savedJob()], inboxOptions({ filter: "Review" })).length, 1);
+  }
+  const badCost = list({ items: [{ ...list().items[0], unitCost: NaN }] }); assert.equal(inbox.filterPurchaseInbox([badCost], [savedJob()], inboxOptions({ filter: "Review", includeCosts: false })).length, 0);
+  const childDuplicate = list({ items: [list().items[0], { ...list().items[0] }] }); assert.equal(inbox.filterPurchaseInbox([childDuplicate], [savedJob()], inboxOptions({ filter: "Review" })).length, 1);
+  assert.equal(inbox.filterPurchaseInbox([list(), list()], [savedJob()], inboxOptions({ filter: "Review" })).length, 2);
+  for (const id of ["", undefined, 5]) assert.equal(inbox.filterPurchaseInbox([list({ id })], [savedJob()], inboxOptions({ filter: "Review" })).length, 1);
+});
+
+test("phone purchase lists reveal eight at a time and control changes reset the limit without changing records", () => {
+  const lists = Array.from({ length: 19 }, (_, i) => list({ id: `p${i}`, number: `PO-${i}`, title: `Saved order ${i}` })); const h = editingHarness({ lists, jobs: [savedJob()] });
+  assert.equal(renderedLists(h.render()).length, 8); assert.match(text(h.render()), /Show more purchase lists \(11 remaining\)/);
+  const metric = nodes(h.render()).find((n) => n.type === "Card" && text(n).startsWith("Purchase lists")); assert.equal(text(metric), "Purchase lists19");
+  h.more(); assert.equal(renderedLists(h.render()).length, 16); h.more(); assert.equal(renderedLists(h.render()).length, 19);
+  h.filter("Need ordering"); assert.equal(renderedLists(h.render()).length, 8); h.more(); h.search("saved"); assert.equal(renderedLists(h.render()).length, 8); h.more(); h.scopeJob("j1"); assert.equal(renderedLists(h.render()).length, 8);
+  const group = nodes(h.render()).find((n) => n.props["aria-label"] === "Purchase list filters"); assert.ok(nodes(group).filter((n) => n.type === "button").every((n) => n.props.className.includes("min-h-12"))); assert.equal(nodes(group).find((n) => n.type === "button" && text(n).startsWith("Need ordering")).props["aria-pressed"], true);
+  h.clearFilters(); assert.equal(renderedLists(h.render()).length, 8); assert.equal(h.writes(), 0); assert.deepEqual(h.lists(), lists);
+});
+
+test("purchase filters combine search and job scope with clear empty feedback and counts before search", () => {
+  const lists = [list(), list({ id: "other", number: "PO-2", jobId: "j2", items: [{ ...list().items[0], status: "Ordered", supplier: "TLC" }] })];
+  const h = editingHarness({ lists, jobs: [savedJob(), savedJob({ id: "j2", title: "Office" })] }); h.scopeJob("j1"); h.search("TLC");
+  assert.equal(renderedLists(h.render()).length, 0); assert.match(text(h.render()), /No purchase lists match these filters/); assert.doesNotMatch(text(h.render()), /No purchase lists yet/);
+  const group = nodes(h.render()).find((n) => n.props["aria-label"] === "Purchase list filters"); assert.match(text(group), /All 1Need ordering 1Awaiting delivery 0/);
+  h.clearFilters(); h.filter("Awaiting delivery"); assert.equal(renderedLists(h.render()).length, 1); assert.match(text(renderedLists(h.render())), /PO-2/); assert.equal(h.writes(), 0);
+});
+
+test("removed or ambiguous scoped purchase jobs stay unavailable and restoration uses the same identity", () => {
+  const h = editingHarness({ jobs: [savedJob()] }); h.scopeJob("j1"); h.replaceJobs([savedJob({ id: "new-id" })]); assert.equal(renderedLists(h.render()).length, 0); assert.match(text(h.render()), /selected job is unavailable/);
+  const option = nodes(h.render()).find((n) => n.type === "option" && n.props.value === "j1"); assert.match(text(option), /Selected job unavailable or ambiguous/);
+  h.replaceJobs([savedJob(), savedJob()]); assert.equal(renderedLists(h.render()).length, 0); h.replaceJobs([savedJob()]); assert.equal(renderedLists(h.render()).length, 1); assert.equal(h.writes(), 0);
+});
+
+test("exact purchase links bypass browsing filters and new creation opens its saved list before Show all resets browsing", () => {
+  const h = editingHarness({ search: "?list=p1", jobs: [savedJob()] }); assert.equal(nodes(h.render()).some((n) => n.props["aria-label"] === "Find purchase lists"), false); assert.equal(renderedLists(h.render()).length, 1); h.clear(); assert.equal(nodes(h.render()).some((n) => n.props["aria-label"] === "Find purchase lists"), true);
+  const created = creationHarness({ lists: [list()] }); created.filter("Delivered"); created.search("absent"); assert.equal(renderedLists(created.render()).length, 0); created.create(); assert.equal(renderedLists(created.render()).length, 1); assert.match(text(created.render()), /Showing PO-0002/);
+  created.clear(); assert.equal(renderedLists(created.render()).length, 2); assert.equal(nodes(created.render()).find((n) => n.type === "input" && n.props.type === "search").props.value, "");
+});
+
+test("phone purchase browsing retains hidden line drafts and uses saved status until successful persistence", () => {
+  const h = editingHarness({ jobs: [savedJob()] }); h.edit("Status", "Ordered"); h.filter("Awaiting delivery"); assert.equal(renderedLists(h.render()).length, 0); assert.match(text(h.render()), /1 unsaved line/); assert.equal(h.writes(), 0);
+  h.clearFilters(); assert.equal(nodes(h.line()).find((n) => n.type === "select").props.value, "Ordered"); h.save(); h.filter("Awaiting delivery"); assert.equal(renderedLists(h.render()).length, 1); assert.equal(h.writes(), 1);
+});
+
+test("purchase amount displays retain known values and never infer committed spend from an unsupported status", () => {
+  const items = [{ ...list().items[0], id: "ordered", status: "Ordered" }, { ...list().items[0], id: "delivered", quantity: 3, unitCost: 5, status: "Delivered" }, { ...list().items[0], id: "unknown", quantity: 100, unitCost: 100, status: "Dispatched" }, { ...list().items[0], id: "invalid", unitCost: Infinity, status: "Ordered" }];
+  const h = editingHarness({ lists: [list({ items })], jobs: [savedJob()] }); const card = nodes(h.render()).find((n) => n.type === "Card" && text(n).startsWith("Committed spend"));
+  assert.match(text(card), /£35\.00.*Known amount · line values need review/); assert.match(text(renderedLists(h.render())), /Known total · line values need review.*Value needs review/); assert.doesNotMatch(text(h.render()), /NaN|Infinity/);
+  assert.ok(nodes(h.render()).filter((node) => node.type === "input").every((node) => typeof node.props.value !== "number" || Number.isFinite(node.props.value)));
+  assert.deepEqual(inbox.purchaseSavedTotal([{ ...list().items[0], quantity: Number.MAX_VALUE, unitCost: 2 }, { ...list().items[0], quantity: 1, unitCost: 1 }]), { amount: 1, needsReview: true });
 });

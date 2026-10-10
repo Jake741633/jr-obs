@@ -34,6 +34,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] JR AI material-ordering and delivery-follow-up answers with exact job scope and purchase-list review links
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection
 - [x] Phone purchase-line drafts with explicit durable saves, conflict review and confirmed list deletion
+- [x] Phone purchase search, exact job/status filters, uncertain-record review and progressive list cards
 - [x] Check each upcoming visit’s readiness and open the affected diary day
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off
