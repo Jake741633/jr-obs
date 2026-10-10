@@ -73,6 +73,14 @@ Find a purchase list searches saved number, title, notes, linked job name/addres
 
 Exact JR AI purchase links bypass browsing filters and keep their existing unavailable/invalid identity states. The browsing controls appear after Show all purchase lists, which resets them. A newly created list also opens directly, even when the prior browse filters would exclude it. Summary values apply to all matched lists rather than only the revealed cards. Committed spend includes only Ordered/Delivered lines. Invalid, missing, negative or overflowing quantity/cost values are excluded from amounts and marked as a known partial total requiring review; they cannot become a clean zero, NaN or Infinity display.
 
+## Low-stock request saves
+
+The phone Materials & Stock workspace uses Review request before a replenishment save. The unsaved review shows the exact linked job, quantities with their saved stock units, supplier, stock code and unit cost. Save request persists through the existing durable purchase collection before reporting a device save. It opens the exact saved request for review and distinguishes device persistence from cloud sync and supplier ordering. Existing cloud electrician sessions remain read-only.
+
+A failed save keeps the review, request id, line ids and creation time for retry while the page stays open. Leaving loses the unsaved review. Repeated successful callbacks, discarded reviews and callbacks from an older review cannot create another request. Discard request changes no saved records. Review current stock rebuilds the unsaved review with the same request identity; changed or missing jobs, stock, material details, open requests and number collisions require this review before saving.
+
+Open material requests and undelivered lines from previous generated stock replenishment lists are excluded, including stock without a linked catalogue material. Delivered lines can be replenished again. Invalid, negative, nonfinite or overflowing quantities/costs, duplicate stock identities, unsupported stock units and missing/ambiguous material links cannot generate a request. Linked material/stock units must agree. These checks do not alter stock, purchase statuses or supplier orders.
+
 ## Diary booking saves
 
 New bookings persist each visit through the existing durable creation method before clearing the form. Failed first saves keep editable details and reuse the original record identities on retry. Success says saved on this device and asks the user to check sync status before switching devices.
