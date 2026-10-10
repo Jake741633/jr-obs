@@ -1,6 +1,6 @@
 # Electrical calculator scope and validation
 
-The calculator suite is tracked in [issue #2](https://github.com/Jake741633/jr-obs/issues/2). It covers load/current, voltage drop, cable current capacity, earth-fault loop, adiabatic CPC sizing, protective-device checks and maximum demand. Complete calculations can be saved as job records or standalone design notes. Direct quote/survey links and full manufacturer device selection remain separate roadmap work.
+The calculator suite is tracked in [issue #2](https://github.com/Jake741633/jr-obs/issues/2). It covers load/current, voltage drop, cable current capacity, earth-fault loop, adiabatic CPC sizing, protective-device checks and maximum demand. Complete calculations can be saved as standalone design notes or linked to jobs, quotes, estimates and surveys. Full manufacturer device selection and coordination remain separate roadmap work.
 
 ## Adiabatic CPC sizing
 
@@ -59,7 +59,7 @@ The page retains visible results for complete individual rows while withholding 
 
 The save controls on each calculator create versioned snapshots with labelled inputs and units, unrounded numeric results, the assessment, assumptions, timestamp, title, evidence source/revision and an optional design note. Inputs must be complete and metadata valid. Failed comparisons can be recorded for review. Inactive adiabatic method fields are omitted. Cable capacity and voltage drop are saved separately; the evidence reference should identify the installation method, conductor specification and source tables. Existing five-item personal cable history is unchanged.
 
-`/electrical-calculators/records` provides searchable, read-only historical records. Linked calculations also appear on the job detail page. Later form edits or calculator releases do not recalculate stored results. Unsupported record formats are retained and visibly reported instead of being overwritten. Saved records are design aids, not certification or final approval.
+`/electrical-calculators/records` provides searchable, read-only historical records. Linked calculations also appear on the relevant job, quote/estimate or survey detail page. Search includes saved document numbers and titles. Later form edits or calculator releases do not recalculate stored results. Unsupported record formats are retained and visibly reported instead of being overwritten. Saved records are design aids, not certification or final approval.
 
 The registered `jr-os-electrical-calculations` collection uses existing account-scoped storage, durable record creation, offline sync/conflict handling and account backup rules. Saving requires a signed-in account with access to the calculator route (currently owner/admin). It waits for job/record collections and checks the active organisation, user, role and customer scope again in the handler. Changing accounts remounts the draft. A selected job must still be available; customer/job bindings are copied from that record. Existing database triggers enforce tenant-local references and matching payload/envelope bindings.
 
@@ -67,7 +67,15 @@ The UI confirms device persistence and queueing rather than claiming a completed
 
 Collection writes restore the previous local records if the sync queue cannot be persisted, including failed creates, updates and removals. Creator metadata changes only after persistence succeeds. The derived status badge has an optional cache: a badge-cache failure does not invalidate a durable queued record. If local recovery itself fails or another tab has changed the collection, the error explicitly reports incomplete recovery and the newer cache is not overwritten. This is failure recovery for separate browser-storage writes, not a cross-tab database transaction.
 
-Quote and survey linking remain the next integration increment. Production recovery evidence and physical-phone acceptance remain separate release gates.
+### Quote, estimate and survey links
+
+The save form has one attachment type and one target selector. Changing the type clears the target, even when different collections contain the same ID. The selected target is resolved from the current account's loaded collection; the handler rejects missing targets, missing linked jobs and conflicting customer/job bindings. It copies the target's current job/customer references, deriving an omitted customer from the actual job. A quote or survey without a job is supported, including one with a customer or with no customer yet.
+
+Quote/survey snapshots use record schema version 2 and include the document number and, for quotes/estimates, the title and type. Version 1 job/standalone records remain readable without rewriting them. Historical job/customer references and document labels are frozen at save time. Later conversion, reassignment, renaming or deletion of the source does not rewrite saved evidence or automatically attach it to a different job. A deleted source can leave a historical link whose detail page reports that the record was not found.
+
+These links are metadata, never access grants. Target resolution and filtering use account-scoped collections, while the existing database policy and binding trigger continue to enforce tenant, customer and job access. There is no database foreign-key/existence guarantee for quote/survey metadata itself. No migration, route-permission expansion, customer PDF content or field/customer projection is introduced. The calculation section is hidden in print layouts and remains visible only to roles already permitted to use the calculators.
+
+Production recovery evidence and physical-phone acceptance remain separate release gates.
 
 ## Technical references
 
@@ -96,5 +104,7 @@ These automated tests verify software behavior. They are not installation certif
 Maximum-demand core and page-handler tests cover mixed-phase known answers, every required field, explicit zero diversity, fractional quantities, unknown phases, empty schedules, adding/removing rows, and row/aggregate numeric extremes. The shared decimal parser also rejects nonzero decimal strings that underflow to zero.
 
 Saved-record tests execute snapshot creation and real UI handlers, covering all seven calculation types, unit conversion, incomplete inputs, historical independence, failed comparisons, account changes, unavailable jobs, storage failures, search and job filters. The SQL and full Supabase upgrade rehearsals both exercise real database reads/writes for owner/admin/office, field/customer, other-tenant, revoked/inactive and anonymous identities, as well as job-binding rejection and projection isolation. All rehearsal records and audit entries are rolled back.
+
+Quote/survey regression cases cover direct and derived bindings, customer-only and unassigned targets, estimates, type changes, matching IDs in different collections, unavailable/loading targets and jobs, storage failures, stale account handlers, historical metadata, malformed versions, exact detail filters, URL encoding, search and print exclusion. Both database rehearsals repeat the tenant/role/session boundary checks for quote/survey metadata with and without job bindings, including missing-customer rejection and field-projection exclusion.
 
 `tests/collection-write-failures.test.mjs` runs the actual TypeScript storage hook, collection adapter and sync repository together. It injects cache, queue, badge-cache and recovery failures; checks retry behavior, creator/version preservation and other-account isolation; and verifies successful updates, removals, file-safe ordering and local-only behavior. Cloud collection effects enqueue changed records before mirroring the resulting list order into the cache.

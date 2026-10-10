@@ -67,6 +67,68 @@ test("malformed or unsupported records are rejected without reinterpreting histo
   assert.equal(isCalculationRecord(record), true, "format validation must not silently recalculate saved historical values");
 });
 
+test("quote, estimate and survey records preserve target metadata with or without a job", () => {
+  const job = { id: "job-a", title: "Workshop", customerId: "customer-a" };
+  for (const link of [
+    { quote: { id: "quote-a", number: "Q-014", title: "Workshop quote", type: "Quote" } },
+    { quote: { id: "estimate-a", number: "E-014", title: "Workshop estimate", type: "Estimate" } },
+    { survey: { id: "survey-a", number: "S-014" } },
+  ]) {
+    const field = link.quote ? "quote" : "survey";
+    const target = { ...link[field], customerId: "customer-a" };
+    const record = createCalculationRecord({ ...options, [field]: target });
+    assert.equal(record.schemaVersion, 2);
+    assert.equal(record[`${field}Id`], target.id);
+    assert.equal(record.customerId, "customer-a");
+    assert.equal(record.jobId, undefined);
+    assert.equal(isCalculationRecord(JSON.parse(JSON.stringify(record))), true);
+    const withJob = createCalculationRecord({ ...options, job, [field]: { ...target, jobId: job.id } });
+    assert.equal(withJob.jobId, job.id);
+    assert.equal(withJob.jobTitle, job.title);
+    assert.equal(isCalculationRecord(withJob), true);
+    const withoutCustomer = createCalculationRecord({ ...options, job, [field]: { ...target, customerId: undefined, jobId: job.id } });
+    assert.equal(withoutCustomer.customerId, job.customerId, "derive missing customer from the actual linked job");
+    const unassigned = createCalculationRecord({ ...options, [field]: link[field] });
+    assert.equal(unassigned.customerId, undefined);
+    assert.equal(isCalculationRecord(unassigned), true);
+  }
+});
+
+test("linked-record snapshots reject mismatched, missing and malformed relationships", () => {
+  const job = { id: "job-a", title: "Workshop", customerId: "customer-a" };
+  const quote = { id: "quote-a", number: "Q-014", title: "Workshop quote", type: "Quote", jobId: "job-a", customerId: "customer-a" };
+  const survey = { id: "survey-a", number: "S-014", jobId: "job-a", customerId: "customer-a" };
+  for (const patch of [
+    { quote }, { survey }, { quote, survey, job },
+    { quote, job: { ...job, id: "job-b" } },
+    { survey, job: { ...job, customerId: "customer-b" } },
+    { quote, job: { ...job, customerId: undefined } },
+    { quote: { ...quote, jobId: undefined }, job },
+    { quote: { ...quote, customerId: "" }, job },
+    { quote: { ...quote, type: "Invoice" }, job },
+    { quote: { ...quote, title: "" }, job },
+    { survey: { ...survey, number: "" }, job },
+    { survey: { ...survey, jobId: 123 }, job },
+  ]) assert.throws(() => createCalculationRecord({ ...options, ...patch }));
+  const record = createCalculationRecord({ ...options, quote, job });
+  for (const patch of [{ schemaVersion: 1 }, { quoteNumber: "" }, { quoteTitle: null }, { quoteType: "Invoice" }, { surveyId: "survey-a", surveyNumber: "S-014" }, { quoteId: undefined }]) assert.equal(isCalculationRecord({ ...record, ...patch }), false);
+  const surveyRecord = createCalculationRecord({ ...options, survey, job });
+  assert.equal(isCalculationRecord({ ...surveyRecord, surveyNumber: undefined }), false);
+  assert.equal(isCalculationRecord({ ...surveyRecord, surveyId: "" }), false);
+});
+
+test("saved relationships remain historical and input fields cannot inject links", () => {
+  const quote = { id: "quote-a", number: "Q-014", title: "Workshop quote", type: "Quote", customerId: "customer-a" };
+  const record = createCalculationRecord({ ...options, quote, input: { ...examples.load, quoteId: "forged", surveyId: "forged", customerId: "forged" } });
+  quote.title = "Revised quote";
+  quote.customerId = "customer-b";
+  assert.equal(record.quoteId, "quote-a");
+  assert.equal(record.quoteTitle, "Workshop quote");
+  assert.equal(record.customerId, "customer-a");
+  assert.equal(record.surveyId, undefined);
+  assert.equal(isCalculationRecord(createCalculationRecord(options)), true, "legacy standalone and job snapshots remain readable");
+});
+
 test("saved records participate only in the exact account backup and are denied field mutation", () => {
   const identity = { organisationId: "org-a", userId: "owner-a", role: "owner" };
   const key = (org, user, role) => `${CALCULATION_RECORDS_STORAGE_KEY}:organisation:${JSON.stringify([org])}:account:${JSON.stringify([user, role, null])}`;

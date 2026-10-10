@@ -22,10 +22,13 @@ function compile(path, dependencies) {
   return mod.exports;
 }
 const permissions = compile("../lib/cloud/permissions.ts", {});
-function harness({ identity = owner, initial = [], view = "save", jobId } = {}) {
+function harness({ identity = owner, initial = [], view = "save", jobId, quoteId, surveyId } = {}) {
   let current = identity, identityReady = true, ready = true, fail = false, activeState, cursor;
   let props = { kind: "load", label: "Load and design current", input: structuredClone(load) };
   let jobs = [{ id: "job-a", title: "Workshop", customerId: "customer-a" }];
+  let quotes = [{ id: "quote-a", number: "Q-014", title: "Workshop quote", type: "Quote", jobId: "job-a", customerId: "customer-a" }];
+  let surveys = [{ id: "survey-a", number: "S-014", jobId: "job-a", customerId: "customer-a" }];
+  let quotesReady = true, surveysReady = true;
   const state = new Map(), stores = new Map([[scope(identity), initial]]), saves = [], reads = [];
   const jsx = (type, props, key) => ({ type, props, key });
   const components = compile("../components/calculators/CalculationRecords.tsx", {
@@ -37,7 +40,11 @@ function harness({ identity = owner, initial = [], view = "save", jobId } = {}) 
     "../../lib/cloud/permissions": permissions,
     "../../lib/cloud/repository": { activeSyncAuthorizationMatches: (identity) => identityReady && scope(identity) === scope(current) },
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: current, isReady: identityReady, mode: "cloud" }) },
-    "../../lib/cloud/coreBusinessCollections": { useJobsCollection: () => ({ items: jobs, isReady: ready }) },
+    "../../lib/cloud/coreBusinessCollections": {
+      useJobsCollection: () => ({ items: jobs, isReady: ready }),
+      usePricingDocumentsCollection: () => ({ items: quotes, isReady: quotesReady }),
+      useSurveysCollection: () => ({ items: surveys, isReady: surveysReady }),
+    },
     "../../lib/storage": { useCloudLocalCollection(key) { assert.equal(key, core.CALCULATION_RECORDS_STORAGE_KEY); const keyScope = scope(current); reads.push(keyScope); return { items: stores.get(keyScope) ?? [], isReady: ready, createItem(record) { if (fail) throw new Error("Device storage is full"); saves.push({ scope: keyScope, record }); stores.set(keyScope, [record, ...(stores.get(keyScope) ?? [])]); } }; } },
   });
   function expand(node, path = "root") {
@@ -51,16 +58,18 @@ function harness({ identity = owner, initial = [], view = "save", jobId } = {}) 
     }
     return { ...node, props: { ...node.props, children: expand(node.props?.children, `${path}/${node.key ?? "children"}`) } };
   }
-  const render = () => expand(jsx(view === "save" ? components.SaveCalculation : components.SavedCalculationRecords, view === "save" ? props : { jobId }));
+  const render = () => expand(jsx(view === "save" ? components.SaveCalculation : components.SavedCalculationRecords, view === "save" ? props : { jobId, quoteId, surveyId }));
   const button = () => nodes(render()).find((node) => node.type === "button");
   return {
     render, saves, reads, button, text: () => text(render()),
     fill(label, value) { const field = nodes(render()).find((node) => ["InputField", "TextareaField"].includes(node.type) && node.props.label === label); assert.ok(field, label); field.props.onChange({ target: { value } }); },
-    selectJob(value) { nodes(render()).find((node) => node.type === "select").props.onChange({ target: { value } }); },
+    select(label, value) { const field = nodes(render()).find((node) => node.type === "select" && node.props["aria-label"] === label); assert.ok(field, label); field.props.onChange({ target: { value } }); },
+    selectJob(value) { this.select("Attach to", value ? "job" : "note"); if (value) this.select("Linked record", value); },
     save() { button().props.onClick(); },
     setInput(input) { props = { ...props, input }; },
     setIdentity(value) { current = value; }, setIdentityReady(value) { identityReady = value; }, setReady(value) { ready = value; },
-    setJobs(value) { jobs = value; }, failStorage() { fail = true; },
+    setJobs(value) { jobs = value; }, setQuotes(value) { quotes = value; }, setSurveys(value) { surveys = value; },
+    setQuotesReady(value) { quotesReady = value; }, setSurveysReady(value) { surveysReady = value; }, failStorage() { fail = true; },
   };
 }
 function fill(h) { h.fill("Calculation title", "Circuit A"); h.fill("Evidence source and revision", "Manufacturer sheet rev 2, survey 14"); }
@@ -121,7 +130,7 @@ test("changing accounts remounts the form and clears the previous account's draf
   const h = harness(); fill(h); h.selectJob("job-a");
   h.setIdentity({ ...owner, userId: "owner-b" });
   assert.equal(nodes(h.render()).find((node) => node.props?.label === "Calculation title").props.value, "");
-  assert.equal(nodes(h.render()).find((node) => node.type === "select").props.value, "");
+  assert.equal(nodes(h.render()).find((node) => node.type === "select").props.value, "note");
 });
 
 test("record lists filter by job/search, retain malformed rows and isolate account switches", () => {
@@ -135,4 +144,91 @@ test("record lists filter by job/search, retain malformed rows and isolate accou
   assert.doesNotMatch(jobView.text(), /Other job/);
   h.setIdentity({ ...owner, organisationId: "org-b" });
   assert.doesNotMatch(h.text(), /Workshop circuit/); assert.match(h.text(), /No saved calculations yet/);
+});
+
+test("saving selected quotes, estimates and surveys uses their account-scoped job and customer", () => {
+  for (const type of ["quote", "survey"]) {
+    const h = harness(); fill(h);
+    h.select("Attach to", type); h.select("Linked record", `${type}-a`);
+    assert.match(h.text(), /Also linked to job: Workshop/);
+    h.save();
+    assert.equal(h.saves.length, 1);
+    assert.equal(h.saves[0].record[`${type}Id`], `${type}-a`);
+    assert.equal(h.saves[0].record.jobId, "job-a");
+    assert.equal(h.saves[0].record.customerId, "customer-a");
+  }
+  const h = harness(); fill(h);
+  h.setQuotes([{ id: "estimate-a", number: "E-001", title: "New works", type: "Estimate", customerId: "customer-a" }]);
+  h.select("Attach to", "quote"); h.select("Linked record", "estimate-a"); h.save();
+  assert.equal(h.saves[0].record.quoteType, "Estimate");
+  assert.equal(h.saves[0].record.jobId, undefined);
+  assert.equal(h.saves[0].record.customerId, "customer-a");
+});
+
+test("target removal, loading, missing jobs and customer mismatches block both UI and save handler", () => {
+  for (const type of ["quote", "survey"]) {
+    for (const invalidate of [
+      (h) => type === "quote" ? h.setQuotes([]) : h.setSurveys([]),
+      (h) => type === "quote" ? h.setQuotesReady(false) : h.setSurveysReady(false),
+      (h) => h.setJobs([]),
+      (h) => h.setJobs([{ id: "job-a", title: "Workshop", customerId: "customer-b" }]),
+    ]) {
+      const h = harness(); fill(h); h.select("Attach to", type); h.select("Linked record", `${type}-a`);
+      invalidate(h);
+      assert.equal(h.button().props.disabled, true);
+      h.save(); assert.equal(h.saves.length, 0);
+      assert.doesNotMatch(h.text(), /Saved on this device/);
+    }
+  }
+});
+
+test("changing target type clears the selection even when record ids overlap", () => {
+  const h = harness(); fill(h);
+  h.setSurveys([{ id: "quote-a", number: "S-014" }]);
+  h.select("Attach to", "quote"); h.select("Linked record", "quote-a");
+  h.select("Attach to", "survey");
+  assert.equal(h.button().props.disabled, true);
+  h.save(); assert.equal(h.saves.length, 0);
+  h.select("Linked record", "quote-a"); h.save();
+  assert.equal(h.saves[0].record.surveyId, "quote-a");
+  assert.equal(h.saves[0].record.quoteId, undefined);
+  assert.equal(h.saves[0].record.jobId, undefined);
+});
+
+test("quote and survey drafts retain values on failure and clear at account boundaries", () => {
+  for (const type of ["quote", "survey"]) {
+    const h = harness(); fill(h); h.select("Attach to", type); h.select("Linked record", `${type}-a`);
+    h.failStorage(); h.save(); assert.equal(h.saves.length, 0);
+    assert.equal(nodes(h.render()).find((node) => node.props?.["aria-label"] === "Linked record").props.value, `${type}-a`);
+    const staleSave = h.button().props.onClick;
+    h.setIdentity({ ...owner, organisationId: "org-b" }); staleSave();
+    assert.equal(h.saves.length, 0);
+    assert.equal(nodes(h.render()).find((node) => node.props?.["aria-label"] === "Attach to").props.value, "note");
+  }
+});
+
+test("quote and survey detail filters, search and navigation use exact linked identifiers", () => {
+  const base = { createdAt: "2026-10-10T12:00:00Z", evidenceReference: "Sheet rev 2", input: load, kind: "load" };
+  const q = core.createCalculationRecord({ ...base, id: "q-record", title: "Quotation evidence", quote: { id: "same/id?", number: "Q-014", title: "Kitchen estimate", type: "Estimate" } });
+  const s = core.createCalculationRecord({ ...base, id: "s-record", title: "Survey evidence", survey: { id: "same/id?", number: "S-014" } });
+  const initial = [q, s];
+  const quoteView = harness({ view: "list", quoteId: q.quoteId, initial });
+  assert.match(quoteView.text(), /Quotation evidence/); assert.doesNotMatch(quoteView.text(), /Survey evidence/);
+  assert.ok(nodes(quoteView.render()).some((node) => node.type === "Link" && node.props.href === "/quotes/same%2Fid%3F"));
+  const surveyView = harness({ view: "list", surveyId: s.surveyId, initial });
+  assert.match(surveyView.text(), /Survey evidence/); assert.doesNotMatch(surveyView.text(), /Quotation evidence/);
+  assert.ok(nodes(surveyView.render()).some((node) => node.type === "Link" && node.props.href === "/surveys/same%2Fid%3F"));
+  assert.doesNotMatch(harness({ view: "list", quoteId: "", initial }).text(), /Quotation evidence|Survey evidence/);
+  const all = harness({ view: "list", initial });
+  for (const query of ["Q-014", "Kitchen estimate", "S-014"]) {
+    all.fill("Search saved calculations", query);
+    assert.match(all.text(), query === "S-014" ? /Survey evidence/ : /Quotation evidence/);
+  }
+  assert.ok(nodes(quoteView.render()).find((node) => node.type === "section").props.className.includes("print:hidden"));
+  for (const identity of [null, { ...owner, role: "office" }, { ...owner, role: "electrician" }, { ...owner, role: "customer" }]) {
+    for (const filter of [{ quoteId: q.quoteId }, { surveyId: s.surveyId }]) {
+      const h = harness({ view: "list", initial, identity, ...filter });
+      assert.equal(h.text(), ""); assert.equal(h.reads.length, 0);
+    }
+  }
 });

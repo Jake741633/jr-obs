@@ -55,8 +55,33 @@ export async function checkSavedCalculationAccess(db, actors) {
     await assert.rejects(asActor(actors.owner, insert, forged), { code: "42501" }, "Envelope and payload job bindings must match");
     const standalone = await asActor(actors.owner, insert, values(actors.owner, actors.owner.org, { id: `${source}-note`, title: "Standalone design note" }));
     assert.equal(standalone.length, 1);
+
+    // Quote/survey references are private historical metadata. In particular,
+    // having access to the related job or survey must not grant calculation access.
+    for (const link of [{ quoteId: "quote", quoteNumber: "Q-014", quoteTitle: "Private quote", quoteType: "Quote" }, { surveyId: "survey", surveyNumber: "S-014" }]) {
+      for (const linkedJob of [true, false]) {
+        const data = { ...payload, ...link, id: `${source}-${link.quoteId ? "quote" : "survey"}-${linkedJob}`, schemaVersion: 2 };
+        if (!linkedJob) delete data.jobId;
+        for (const actor of [actors.owner, actors.other]) await db.query(insert, values(actor, actor.org, data));
+        for (const name of ["owner", "admin", "office", "other"]) {
+          const actor = actors[name];
+          const rows = await asActor(actor, read, [key,data.id]);
+          assert.equal(rows.length, 1);
+          assert.equal(rows[0].organisation_id, actor.org);
+          assert.equal(rows[0].payload.quoteId ?? rows[0].payload.surveyId, link.quoteId ?? link.surveyId);
+          assert.equal((await asActor(actor, insert, values(actor, actor.org, { ...data, id: `${data.id}-create` }))).length, 1);
+        }
+        for (const name of ["field", "customer", "stale", "revoked", "inactive"]) {
+          assert.deepEqual(await asActor(actors[name], read, [key,data.id]), [], `${name}: linked calculation remains private`);
+          await assert.rejects(asActor(actors[name], insert, values(actors[name], actors.owner.org, { ...data, id: `${data.id}-denied` })), { code: "42501" });
+        }
+        await assert.rejects(asActor(actors.owner, insert, values(actors.owner, actors.other.org, { ...data, id: `${data.id}-cross` })), { code: "42501" });
+        await assert.rejects(asActor(actors.owner, insert, values(actors.owner, actors.owner.org, { ...data, id: `${data.id}-bad-customer`, customerId: "missing-customer" })), { code: "42501" });
+      }
+    }
+    assert.deepEqual(await asActor(actors.field, "select source_id from public.field_cloud_collections where collection_key=$1", [key]), [], "Quote/survey links do not expose calculations through field projections");
   } finally {
     await db.exec("rollback");
   }
-  console.log("Saved calculation tenant, role, session and job-binding assertions passed; fixtures rolled back");
+  console.log("Saved calculation tenant, role, session, job-binding and quote/survey metadata assertions passed; fixtures rolled back");
 }
