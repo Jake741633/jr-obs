@@ -6,6 +6,7 @@ import { entryEndDate } from "./scheduling";
 import { assistantTaskActions } from "./assistantTasks";
 import { assistantVisitActions } from "./assistantVisits";
 import { assistantMaterialsAnswer } from "./assistantMaterials";
+import { assistantJobIdentityIndex } from "./assistantIdentity";
 
 export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries";
 export interface AssistantAnswerItem { id: string; title: string; detail: string; evidence: string[]; href: string; actionLabel: string }
@@ -66,15 +67,19 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
 
   if (intent === "tasks" || intent === "snags" || intent === "job" || intent === "visits" || intent === "materials" || intent === "deliveries") {
     const matchingJobs = namedJob ? records.jobs.filter((job) => namedJob.keys.has(jobKey(job.title)) || (job.siteAddress.trim() && namedJob.keys.has(jobKey(job.siteAddress)))) : records.jobs;
-    const selectedJob = selectedJobId ? matchingJobs.find((job) => job.id === selectedJobId) : namedJob && matchingJobs.length === 1 ? matchingJobs[0] : undefined;
+    const identities = assistantJobIdentityIndex(records.jobs);
+    const selectableJobs = matchingJobs.filter((job) => identities.uniqueJobs.has(job.id));
+    const selectedJob = selectedJobId ? selectableJobs.find((job) => job.id === selectedJobId) : namedJob && matchingJobs.length === 1 && selectableJobs.length === 1 ? selectableJobs[0] : undefined;
+    const ambiguousSelection = Boolean(selectedJobId && (identities.counts.get(selectedJobId) || 0) > 1);
+    const unusableMatches = matchingJobs.length - selectableJobs.length;
     const needsChoice = Boolean((namedJob || intent === "job") && !selectedJob);
     if (needsChoice || (selectedJobId && !selectedJob)) {
-      const choices = matchingJobs.toSorted((a, b) => a.title.localeCompare(b.title) || a.siteAddress.localeCompare(b.siteAddress) || a.id.localeCompare(b.id)).map((job) => ({ id: job.id, title: job.title, address: job.siteAddress, status: job.status }));
+      const choices = selectableJobs.toSorted((a, b) => a.title.localeCompare(b.title) || a.siteAddress.localeCompare(b.siteAddress) || a.id.localeCompare(b.id)).map((job) => ({ id: job.id, title: job.title, address: job.siteAddress, status: job.status }));
       const showChoices = Boolean(namedJob || (intent === "job" && !selectedJobId));
-      return { recognized: true, title: showChoices && choices.length ? "Choose a job" : "Job unavailable",
-        summary: namedJob ? choices.length ? `${plural(choices.length, "loaded job")} ${choices.length === 1 ? "matches" : "match"} “${namedJob.label}”. Choose a job before I show its records.` : `No exact saved job name or site address matches “${namedJob.label}”.` : selectedJobId ? "The selected job is no longer available in the loaded records." : records.jobs.length ? "Choose one loaded job for its briefing." : "No job records are available for a briefing.",
+      return { recognized: true, title: ambiguousSelection || (!choices.length && unusableMatches) ? "Job identity needs review" : showChoices && choices.length ? "Choose a job" : "Job unavailable",
+        summary: ambiguousSelection ? "Multiple loaded jobs share the selected identity. Review the saved job records before using this scope." : namedJob ? choices.length ? `${plural(choices.length, "loaded job")} ${choices.length === 1 ? "matches" : "match"} “${namedJob.label}”. Choose a job before I show its records.` : unusableMatches ? `Matching job records for “${namedJob.label}” have missing or duplicate identities and cannot be selected.` : `No exact saved job name or site address matches “${namedJob.label}”.` : selectedJobId ? "The selected job is no longer available in the loaded records." : records.jobs.length ? "Choose one loaded job for its briefing." : "No job records are available for a briefing.",
         scope: "Job names and site addresses must match in full, ignoring case and repeated spaces. I have not broadened this answer to other jobs.",
-        warnings: selectedJobId ? ["The previous selection is unavailable or no longer matches this question. Choose a current record or clear the job scope."] : [], items: [], jobChoices: showChoices ? choices : [] };
+        warnings: [...(selectedJobId ? ["The previous selection is unavailable, ambiguous or no longer matches this question. Choose a current record or clear the job scope."] : []), ...(unusableMatches ? [`${plural(unusableMatches, "matching job record")} with missing or duplicate identities cannot be chosen. Review Jobs before using those records.`] : [])], items: [], jobChoices: showChoices ? choices : [] };
     }
     if (intent === "materials" || intent === "deliveries") return assistantMaterialsAnswer(records, intent, selectedJob);
     if (intent === "job" && selectedJob) {

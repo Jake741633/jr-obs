@@ -18,12 +18,13 @@ const jobLink = compile("../lib/assistantJobLink.ts", {}, false, { URLSearchPara
 const scheduling = compile("../lib/scheduling.ts");
 const assistantVisits = compile("../lib/assistantVisits.ts", { "./jobManagement-core.mjs": jobsCore, "./scheduling": scheduling });
 const purchaseLink = compile("../lib/purchaseListLink.ts", {}, false, { URLSearchParams });
-const assistantMaterials = compile("../lib/assistantMaterials.ts", { "./purchaseListLink": purchaseLink });
+const assistantIdentity = compile("../lib/assistantIdentity.ts");
+const assistantMaterials = compile("../lib/assistantMaterials.ts", { "./purchaseListLink": purchaseLink, "./assistantIdentity": assistantIdentity });
 const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
 const briefing = compile("../lib/assistantBriefing.ts", { "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
-const questions = compile("../lib/assistantQuestions.ts", { "./assistantMaterials": assistantMaterials, "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
+const questions = compile("../lib/assistantQuestions.ts", { "./assistantIdentity": assistantIdentity, "./assistantMaterials": assistantMaterials, "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
 const now = new Date(2026, 9, 10, 10);
 const records = (patch = {}) => ({ jobs: [], documents: [], invoices: [], payments: [], planner: [], purchases: [], reminders: [], certificates: [], ...patch });
 const visit = (patch = {}) => ({ id: "v1", title: "First fix", type: "Job", status: "Confirmed", date: "2026-10-11", startTime: "09:00", endTime: "12:00", location: "1 High Street", teamMemberIds: ["worker"], ...patch });
@@ -125,7 +126,7 @@ function ui(data = records(), canOpenTaskWorkspace = true, search = "") {
   const component = compile("../components/ai/AssistantQuestions.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx },
     react: { useEffect: (fn) => { if (!mounted) effects.push(fn); }, useMemo: (fn) => fn(), useRef: () => ({ current: { blur: () => blurred++ } }), useState(initial) { const index = cursor++; if (!(index in states)) states[index] = initial; return [states[index], (value) => { states[index] = typeof value === "function" ? value(states[index]) : value; }]; } },
-    "next/link": { default: "Link" }, "../ui/Card": { Card: "Card" }, "../../lib/assistantQuestions": questions, "../../lib/assistantJobLink": jobLink,
+    "next/link": { default: "Link" }, "../ui/Card": { Card: "Card" }, "../../lib/assistantQuestions": questions, "../../lib/assistantJobLink": jobLink, "../../lib/assistantIdentity": assistantIdentity,
   }, true, { window: { location: { search }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame(id) { frames[id - 1] = null; } } });
   let recordsNow = data;
   const render = () => { cursor = 0; const tree = component.AssistantQuestions({ records: recordsNow, now, briefing: briefing.buildAssistantBriefing(recordsNow, now, canOpenTaskWorkspace), canOpenTaskWorkspace }); mounted = true; return tree; };
@@ -684,4 +685,97 @@ test("material review links retain opaque saved ids and permitted office destina
     assert.equal(permissions.canAccessPath(role, permissions.internalPathForAccess(result.items[0].href)), true); assert.equal(purchaseLink.purchaseListFromLink(link.search).listId, id);
   }
   assert.equal(JSON.stringify(data), before);
+});
+
+test("every job-scoped question refuses duplicate saved identities even when only one copy matches a typed name", () => {
+  const data = { jobs: [job(), job({ title: "Other saved copy", siteAddress: "Elsewhere" })], tasks: [siteTask()], purchases: [purchaseList()], planner: [visit({ jobId: "j1" })] };
+  for (const query of ["Show job briefing", "Show open tasks", "Show open snags", "Show next visit checks", "Show materials to order", "Show awaiting deliveries"]) {
+    const scoped = answerFor(query, data, "j1"); assert.equal(scoped.title, "Job identity needs review", query); assert.equal(scoped.items.length, 0); assert.equal(scoped.resolvedJobId, undefined); assert.match(scoped.warnings.join(" "), /ambiguous/);
+    const named = answer(`${query} for Workshop`, data); assert.equal(named.title, "Job identity needs review", query); assert.equal(named.items.length, 0); assert.equal(named.jobChoices.length, 0);
+  }
+});
+
+test("named job choices retain unique matching identities while malformed or duplicate matches require explicit review", () => {
+  const data = { jobs: [job(), job({ siteAddress: "2 High Street" }), job({ id: "unique", siteAddress: "3 High Street" }), job({ id: " " })], purchases: [purchaseList({ id: "chosen", jobId: "unique" })] };
+  const before = JSON.stringify(data), result = answer("Show materials to order for Workshop", data);
+  assert.equal(result.title, "Choose a job"); assert.equal(result.items.length, 0); assert.deepEqual(Array.from(result.jobChoices, (choice) => choice.id), ["unique"]); assert.match(result.warnings.join(" "), /3 matching job records/);
+  assert.equal(answerFor("Show materials to order for Workshop", data, "unique").items[0].id, "purchase:chosen"); assert.equal(JSON.stringify(data), before);
+  for (const id of ["", " ", undefined]) { const unavailable = answer("Show job briefing for Workshop", { jobs: [job({ id })] }); assert.equal(unavailable.title, "Job identity needs review"); assert.equal(unavailable.items.length, 0); }
+});
+
+test("phone job scope excludes unusable identities and preserves exact opaque saved ids", () => {
+  const id = " j /?# +&action=create ", data = records({ jobs: [job(), job({ title: "Duplicate" }), job({ id: " " }), job({ id, title: "Opaque job" })], purchases: [purchaseList({ jobId: id })] }), h = ui(data);
+  const options = nodes(h.render()).filter((node) => node.type === "option"); assert.deepEqual(options.map((node) => node.props.value), ["", id]); assert.match(text(h.render()), /3 job record\(s\).*missing or duplicate/);
+  h.scope(id); h.click("Materials to order"); assert.match(text(h.render()), /Only purchase lists explicitly linked to Opaque job/); assert.match(nodes(h.render()).find((node) => node.type === "select").props.className, /min-h-12/);
+});
+
+test("submitted job scope becomes unavailable on duplicate identity refresh and restores only the same unique record", () => {
+  const data = records({ jobs: [job()], purchases: [purchaseList()] }), h = ui(data); h.scope("j1"); h.click("Materials to order");
+  h.replaceRecords({ ...data, jobs: [job(), job({ title: "Conflicting copy" }), job({ id: "replacement" })] }); assert.match(text(h.render()), /Job identity needs review/); assert.equal(nodes(h.render()).filter((node) => node.type === "Link").length, 0);
+  const selected = nodes(h.render()).find((node) => node.type === "select"); assert.equal(selected.props.value, "j1"); assert.match(text(selected), /Selected job unavailable or ambiguous/);
+  h.replaceRecords({ ...data, jobs: [job({ id: "replacement" })] }); assert.match(text(h.render()), /Job unavailable/); h.replaceRecords(data); assert.match(text(h.render()), /1 line\(s\) marked Needed/);
+});
+
+test("an exact job briefing link cannot select an arbitrary duplicate record", () => {
+  const h = ui(records({ jobs: [job(), job({ title: "Conflicting copy" })], tasks: [siteTask()] }), true, "?job=j1"); h.flush(); assert.match(text(h.render()), /Job identity needs review/); assert.equal(nodes(h.render()).filter((node) => node.type === "Link").length, 0); assert.equal(h.blurred(), 0);
+});
+
+test("duplicate purchase identities form one source review without inflating ordering or delivery counts", () => {
+  const data = { jobs: [job()], purchases: [purchaseList(), purchaseList({ number: "PO-02", title: "Other copy", items: [purchaseLine({ description: "Conflicting sockets", status: "Ordered", quantity: 9 })] }), purchaseList({ id: "valid", number: "PO-03" })] }, before = JSON.stringify(data);
+  const result = answer("Show materials to order", data); assert.match(result.summary, /1 line\(s\) marked Needed.*1 source identity review/); assert.equal(result.items.length, 2);
+  const review = result.items.find((item) => item.actionLabel === "Review purchase identity"); assert.match(review.detail, /2 loaded records.*counts are withheld/); assert.match(review.evidence.join(" "), /Saved copy 1.*Cable.*Needed.*Saved copy 2.*Conflicting sockets.*Ordered/); assert.equal(review.href, "/purchases?list=p1"); assert.equal(new Set(result.items.map((item) => item.id)).size, 2);
+  const delivery = answer("Show awaiting deliveries", data); assert.match(delivery.summary, /0 line\(s\) marked Ordered.*1 source identity review/); assert.equal(delivery.items.length, 1); assert.equal(JSON.stringify(data), before);
+});
+
+test("cross-job purchase collisions remain source reviews without broadening selected-job evidence", () => {
+  const data = { jobs: [job(), job({ id: "other", title: "Other site" })], purchases: [purchaseList({ items: [purchaseLine({ status: "Delivered" })] }), purchaseList({ jobId: "other", title: "Other site order", items: [purchaseLine({ description: "Other site cable", status: "Needed" })] })] };
+  const result = answerFor("Show materials to order", data, "j1"); assert.equal(result.items.length, 1); assert.match(result.summary, /0 line\(s\) marked Needed.*1 source identity review/); assert.match(result.items[0].detail, /2 loaded records/); assert.match(result.items[0].evidence.join(" "), /Workshop.*Delivered/); assert.doesNotMatch(result.items[0].evidence.join(" "), /Other site/);
+  const delivered = answer("Show materials to order", { ...data, purchases: data.purchases.map((list) => ({ ...list, items: list.items.map((line) => ({ ...line, status: "Delivered" })) })) }); assert.equal(delivered.items.length, 0);
+});
+
+test("conflicting line copies are reviewed together and withheld while unique lines keep their recorded counts", () => {
+  const data = { purchases: [purchaseList({ items: [purchaseLine(), purchaseLine({ description: "Delivered copy", status: "Delivered" }), purchaseLine({ id: "valid", description: "Unique cable" }), purchaseLine({ id: "uncertain", status: "Dispatched" }), purchaseLine({ id: "ordered", status: "Ordered" })] })] };
+  const result = answer("Show materials to order", data); assert.match(result.summary, /1 line\(s\) marked Needed.*1 uncertain line.*1 source identity review/); assert.match(result.items[0].evidence.join(" "), /identity ambiguous; count withheld.*Delivered copy.*Delivered.*Unique cable/); assert.match(result.warnings.join(" "), /Ambiguous lines are excluded/);
+  const deliveries = answer("Show awaiting deliveries", data); assert.match(deliveries.summary, /1 line\(s\) marked Ordered.*1 uncertain/); assert.doesNotMatch(deliveries.items[0].evidence.join(" "), /Delivered copy/);
+  const independent = answer("Show materials to order", { purchases: [purchaseList(), purchaseList({ id: "other" })] }); assert.match(independent.summary, /2 line\(s\) marked Needed/); assert.doesNotMatch(independent.warnings.join(" "), /identity/);
+});
+
+test("missing and unsupported purchase identities retain evidence with explicit inbox review rather than an exact-record claim", () => {
+  const purchases = ["", " ", undefined, null, 123, "x".repeat(301)].map((id, index) => purchaseList({ id, number: `PO-${index}` }));
+  const result = answer("Show materials to order", { purchases }); assert.match(result.summary, /0 line\(s\) marked Needed.*6 source identity review/); assert.equal(result.items.length, 6); assert.equal(new Set(result.items.map((item) => item.id)).size, 6);
+  for (const item of result.items) { assert.equal(item.actionLabel, "Review purchase inbox"); assert.equal(item.href, "/purchases"); assert.match(item.evidence.join(" "), /Cable.*Quantity: 12.5.*CEF.*CABLE-10/); assert.doesNotMatch(item.evidence.join(" "), /unitCost|£/); }
+  const id = " p /?# +&action=create ", opaque = answer("Show materials to order", { purchases: [purchaseList({ id })] }); assert.match(opaque.summary, /1 line\(s\) marked Needed/); assert.equal(purchaseLink.purchaseListFromLink(new URL(opaque.items[0].href, "https://jr.example").search).listId, id);
+});
+
+test("missing line identities and descriptions remain reviewable and cannot inflate status counts", () => {
+  const result = answer("Show materials to order", { purchases: [purchaseList({ items: ["", " ", undefined].map((id) => purchaseLine({ id, description: " ", quantity: 0, supplier: " ", stockCode: " " })) })] });
+  assert.match(result.summary, /0 line\(s\) marked Needed.*3 source identity review/); assert.match(result.warnings.join(" "), /3 outstanding line.*invalid quantity.*3 outstanding line.*no recorded description.*3 line identity review/);
+  assert.match(result.items[0].evidence.join(" "), /Description not recorded.*identity missing.*Quantity needs review.*Supplier: Not recorded.*Stock code: Not recorded/);
+});
+
+test("empty saved purchase lists are explicit reviews in both modes and remain different from unloaded or empty collections", () => {
+  for (const query of ["Show materials to order", "Show awaiting deliveries"]) {
+    const result = answer(query, { purchases: [purchaseList({ items: [] })] }); assert.equal(result.items.length, 1); assert.match(result.summary, /1 empty list/); assert.match(result.items[0].detail, /empty list does not confirm/); assert.match(result.warnings.join(" "), /requirements are covered/);
+    assert.match(answer(query, { purchases: undefined }).summary, /not ready/); assert.equal(answer(query, { purchases: [] }).items.length, 0);
+  }
+});
+
+test("global material evidence never substitutes the last duplicate job and ignores closed delivery-only source warnings", () => {
+  const data = { jobs: [job(), job({ title: "Wrong job name" }), job({ id: "valid", title: "Unique site" })], purchases: [purchaseList(), purchaseList({ id: "orphan", jobId: "missing" }), purchaseList({ id: "valid", jobId: "valid" }), purchaseList({ id: "unlinked", jobId: undefined }), purchaseList({ id: "done", jobId: "gone", items: [purchaseLine({ status: "Delivered" })] })] };
+  const result = answer("Show materials to order", data); assert.equal(result.items.length, 4); assert.match(result.items.find((item) => item.id === "purchase:p1").evidence[0], /Linked job identity ambiguous/); assert.doesNotMatch(result.items[0].evidence[0], /Wrong job name|Workshop/); assert.match(result.warnings.join(" "), /2 reviewed purchase records?\(s\).*unavailable or ambiguous/);
+  assert.match(result.items.find((item) => item.id === "purchase:valid").evidence[0], /Unique site/);
+});
+
+test("phone source reviews retain four-card reveal and 48px evidence and clear controls without changing records", () => {
+  const data = records({ purchases: Array.from({ length: 6 }, (_, index) => purchaseList({ id: `p${index}`, number: `PO-${index}`, items: index === 0 ? [] : [purchaseLine()] })) }), before = JSON.stringify(data), h = ui(data); h.click("Materials to order");
+  assert.equal(nodes(h.render()).filter((node) => node.type === "Link").length, 4); h.click("Show more records"); assert.equal(nodes(h.render()).filter((node) => node.type === "Link").length, 6);
+  for (const summary of nodes(h.render()).filter((node) => node.type === "summary")) assert.match(summary.props.className, /min-h-12/); assert.match(nodes(h.render()).find((node) => node.type === "button" && text(node) === "Clear answer").props.className, /min-h-12/);
+  h.click("Clear answer"); assert.equal(nodes(h.render()).some((node) => node.props["aria-label"] === "JR AI answer"), false); assert.equal(JSON.stringify(data), before);
+});
+
+test("corrected purchase and line identities restore counts on refresh without re-asking or selecting another job", () => {
+  const data = records({ jobs: [job()], purchases: [purchaseList(), purchaseList({ number: "PO-02", items: [purchaseLine({ description: "Second record" })] })] }), h = ui(data); h.scope("j1"); h.click("Materials to order"); assert.match(text(h.render()), /0 line\(s\) marked Needed.*1 source identity review/);
+  h.replaceRecords({ ...data, purchases: [data.purchases[0], { ...data.purchases[1], id: "p2" }] }); assert.match(text(h.render()), /2 line\(s\) marked Needed/);
+  h.replaceRecords({ ...data, purchases: [purchaseList({ items: [purchaseLine(), purchaseLine({ description: "Conflicting line" })] })] }); assert.match(text(h.render()), /0 line\(s\) marked Needed.*1 source identity review/);
+  h.replaceRecords({ ...data, purchases: [purchaseList({ items: [purchaseLine(), purchaseLine({ id: "fixed", description: "Conflicting line" })] })] }); assert.match(text(h.render()), /2 line\(s\) marked Needed/); assert.equal(nodes(h.render()).find((node) => node.type === "select").props.value, "j1");
 });
