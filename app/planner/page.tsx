@@ -9,7 +9,7 @@ import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { useCustomersCollection, useJobsCollection, usePlannerCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
-import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, plannerViewDate, plannerDateKey, shiftPlannerDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
+import { dateWithinView, detectScheduleClashes, entryCustomer, entryEndDate, jobVisitPlan, plannerViewDate, plannerDateKey, shiftPlannerDate, recurringDates, type DiaryView, type RecurrenceFrequency, type ScheduledPlannerEntry, type VisitPhase } from "../../lib/scheduling";
 import type { FleetVehicle, Job, PlannerEntryType, TeamMember } from "../../lib/models";
 import { isJobInactiveStatus, isJobOnSiteStatus, normaliseJobStatus } from "../../lib/jobManagement-core.mjs";
 
@@ -42,12 +42,23 @@ export default function PlannerPage() {
   const bookingGeneration = useRef(0);
   const [generation, setGeneration] = useState(0);
   const [bookingProgress, setBookingProgress] = useState<{ saved: number; total: number; remaining: { id: string; date: string }[] } | null>(null);
+  const [currentDay, setCurrentDay] = useState(today);
+  const [visitQuery, setVisitQuery] = useState("");
+  const [visitLimit, setVisitLimit] = useState(4);
   const ready = [entries, jobs, customers, team, vehicles].every((store) => store.isReady);
 
   const clashes = useMemo(() => detectScheduleClashes(entries.items, team.items, vehicles.items), [entries.items, team.items, vehicles.items]);
   const visible = useMemo(() => entries.items.filter((entry) => dateWithinView(entry.date, anchor, view, entryEndDate(entry))).toSorted((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime)), [entries.items, anchor, view]);
-  const allocatedJobIds = useMemo(() => new Set(entries.items.filter((entry) => entry.status !== "Cancelled").map((entry) => entry.jobId).filter(Boolean)), [entries.items]);
-  const unallocatedJobs = jobs.items.filter((job) => !allocatedJobIds.has(job.id) && !isJobInactiveStatus(job.status));
+  const visitChecks = useMemo(() => jobs.items.filter((job) => !isJobInactiveStatus(job.status)).map((job) => ({ job, plan: jobVisitPlan(job.id, entries.items, currentDay) })).filter(({ plan }) => !plan.upcoming.length || plan.uncertain.length), [jobs.items, entries.items, currentDay]);
+  const visitWords = visitQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const matchingVisitChecks = visitChecks.filter(({ job }) => visitWords.every((word) => `${job.title} ${job.siteAddress} ${job.status}`.toLowerCase().includes(word)));
+
+  useEffect(() => {
+    const update = () => setCurrentDay(today());
+    const timer = window.setInterval(update, 60_000);
+    window.addEventListener("focus", update);
+    return () => { window.clearInterval(timer); window.removeEventListener("focus", update); };
+  }, []);
 
   useEffect(() => {
     if (deepLinkHandled.current || !customers.isReady || !jobs.isReady) return;
@@ -95,11 +106,18 @@ export default function PlannerPage() {
     if (!showForm && bookingDraft.current?.complete) { bookingDraft.current = null; setForm(freshForm()); }
     setShowForm(!showForm);
   }
-  function addUnallocated(job: Job) {
+  function prepareNextVisit(job: Job) {
     if (bookingDraft.current?.saved && !bookingDraft.current.complete) return;
+    const plan = jobVisitPlan(job.id, entries.items, currentDay);
+    if (isJobInactiveStatus(job.status) || plan.upcoming.length || plan.uncertain.length) return;
     nextBookingGeneration();
     bookingDraft.current = null;
-    setForm({ ...freshForm(), customerId: job.customerId || "", jobId: job.id, title: job.title, location: job.siteAddress, date: job.startDate || today(), endDate: job.targetCompletionDate || job.startDate || today() }); setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" });
+    const savedStart = plannerViewDate(job.startDate || null);
+    const start = savedStart && savedStart >= currentDay ? savedStart : currentDay;
+    const savedEnd = plannerViewDate(job.targetCompletionDate || null);
+    const end = savedEnd && savedEnd >= start ? savedEnd : start;
+    setForm({ ...freshForm(), customerId: job.customerId || "", jobId: job.id, title: job.title, location: job.siteAddress, date: start, endDate: end });
+    setShowForm(true); window.scrollTo({ top: 0, behavior: "smooth" });
   }
   function keepSavedVisits() {
     const draft = bookingDraft.current;
@@ -209,7 +227,7 @@ export default function PlannerPage() {
 
     <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
       <Card><CalendarDays className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Visible diary entries</p><p className="mt-2 text-3xl font-bold">{visible.length}</p></Card>
-      <Card><Users className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Unallocated jobs</p><p className="mt-2 text-3xl font-bold">{unallocatedJobs.length}</p></Card>
+      <Card><Users className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Jobs needing visit review</p><p className="mt-2 text-3xl font-bold">{visitChecks.length}</p></Card>
       <Card><CarFront className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Active vehicles</p><p className="mt-2 text-3xl font-bold">{vehicles.items.filter((item) => item.status === "Active").length}</p></Card>
       <Card><AlertTriangle className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Scheduling clashes</p><p className="mt-2 text-3xl font-bold">{clashes.length}</p></Card>
     </section>
@@ -242,7 +260,22 @@ export default function PlannerPage() {
     </form></Card> : null}
 
     <section className="grid gap-6 xl:grid-cols-[1fr_2fr]">
-      <Card><div className="flex items-center justify-between"><div><h2 className="text-lg font-bold">Unallocated jobs</h2><p className="text-sm text-slate-500">Assign these into the diary.</p></div><span className="rounded-full bg-slate-800 px-3 py-1 text-sm">{unallocatedJobs.length}</span></div><div className="mt-4 space-y-3">{unallocatedJobs.length ? unallocatedJobs.map((job) => <button key={job.id} disabled={Boolean(bookingProgress)} onClick={() => addUnallocated(job)} className="disabled:opacity-40 w-full rounded-xl border border-slate-800 p-4 text-left hover:border-cyan-400/40"><p className="font-semibold">{job.title}</p><p className="mt-1 text-sm text-slate-500">{job.siteAddress || "No address"}</p><p className="mt-2 text-xs text-cyan-300">Assign to diary</p></button>) : <p className="text-sm text-slate-500">All active jobs are allocated.</p>}</div></Card>
+      <Card>
+        <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-bold">Next visit planning</h2><span className="rounded-full bg-slate-800 px-3 py-1 text-sm">{visitChecks.length}</span></div>
+        <p className="mt-2 text-sm text-slate-400">Active jobs without an ongoing or future planned/confirmed work visit, plus uncertain work bookings. Past visits, surveys and deliveries do not book the next work visit.</p>
+        <div className="mt-4"><InputField label="Find a job for its next visit" type="search" value={visitQuery} onChange={(event) => { setVisitQuery(event.target.value); setVisitLimit(4); }} /></div>
+        <p role="status" className="mt-3 text-sm text-slate-400">{matchingVisitChecks.length} of {visitChecks.length} jobs match · loaded records as of {currentDay}.</p>
+        {visitQuery ? <button onClick={() => { setVisitQuery(""); setVisitLimit(4); }} className="mt-2 min-h-12 rounded-xl border border-slate-700 px-3 text-sm">Clear job search</button> : null}
+        <div className="mt-4 space-y-3">{matchingVisitChecks.slice(0, visitLimit).map(({ job, plan }) => <article key={job.id} aria-label={`Next visit · ${job.title}`} className="min-w-0 break-words rounded-xl border border-slate-800 p-4">
+          <h3 className="font-semibold">{job.title}</h3><p className="mt-1 text-sm text-slate-400">{job.siteAddress || "No address"} · {job.status}</p>
+          <p className="mt-2 text-sm text-amber-200">{plan.uncertain.length ? "Review uncertain work bookings before creating another visit." : "No ongoing or future work visit found in loaded records."}</p>
+          {plan.upcoming.length ? <p className="mt-1 text-sm text-slate-400">{plan.upcoming.length} planned/confirmed work visit(s) also recorded.</p> : null}
+          {plan.uncertain.length ? <ul className="mt-2 space-y-1 text-sm text-slate-400">{plan.uncertain.map((entry) => <li key={entry.id}>{entry.title} · {entry.status} · {entry.date || "Start missing"} to {entryEndDate(entry) || "End missing"} · dates or status need review</li>)}</ul> : null}
+          <div className="mt-3 flex flex-wrap gap-2"><button disabled={Boolean(bookingProgress) || Boolean(plan.uncertain.length) || Boolean(plan.upcoming.length)} onClick={() => prepareNextVisit(job)} className="min-h-12 rounded-xl border border-cyan-400/30 px-3 text-sm text-cyan-200 disabled:opacity-40">Book next visit</button><Link href={`/jobs/${encodeURIComponent(job.id)}`} className="inline-flex min-h-12 items-center rounded-xl border border-slate-700 px-3 text-sm">Review job</Link></div>
+        </article>)}</div>
+        {matchingVisitChecks.length > visitLimit ? <button onClick={() => setVisitLimit((value) => value + 4)} className="mt-4 min-h-12 w-full rounded-xl border border-slate-700 px-3 text-sm">Show more jobs ({matchingVisitChecks.length - visitLimit} remaining)</button> : null}
+        {!matchingVisitChecks.length ? <p className="mt-4 text-sm text-slate-400">{visitChecks.length ? "No jobs match this search." : "No next-visit checks flagged in loaded records. Check sync status and the diary before planning more work."}</p> : null}
+      </Card>
 
       <div className="space-y-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex rounded-xl border border-slate-800 p-1">{(["day", "week", "month"] as DiaryView[]).map((item) => <button key={item} onClick={() => setView(item)} className={`min-h-12 rounded-lg px-4 py-2 text-sm font-semibold capitalize ${view === item ? "bg-cyan-400 text-slate-950" : "text-slate-400"}`}>{item}</button>)}</div><div className="flex items-center gap-2"><button aria-label={`Previous ${view}`} onClick={() => setAnchor(shiftPlannerDate(anchor, -1, view) || anchor)} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronLeft className="size-4" /></button><button onClick={() => setAnchor(today())} className="min-h-12 rounded-xl border border-slate-800 px-3 py-2 text-sm">Today</button><button aria-label={`Next ${view}`} onClick={() => setAnchor(shiftPlannerDate(anchor, 1, view) || anchor)} className="min-h-12 min-w-12 rounded-xl border border-slate-800 p-2"><ChevronRight className="size-4" /></button></div></div>
         <Card><p className="text-sm text-slate-400">{view[0].toUpperCase() + view.slice(1)} diary centred on</p><p className="mt-1 text-xl font-bold">{displayDate(anchor)}</p></Card>

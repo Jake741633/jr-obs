@@ -52,9 +52,12 @@ const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && type
 const text = (tree) => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 const entry = (patch = {}) => ({ id: "e1", title: "Site visit", type: "Job", date: "2026-01-31", endDate: "2026-02-01", startTime: "09:00", endTime: "12:00", teamMemberIds: [], location: "", status: "Planned", ...patch });
 const job = (patch = {}) => ({ id: "j1", title: "Workshop", status: "Scheduled", siteAddress: "Site", notes: "Saved job notes", updatedAt: "2026-01-01T10:00:00Z", ...patch });
-function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: initialJobs = [], failEntries = 0, failJobs = 0, failCreateAt = [], ready: initialReady = true } = {}) {
+function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: initialJobs = [], failEntries = 0, failJobs = 0, failCreateAt = [], ready: initialReady = true, now: initialNow = "2026-10-10T10:00:00" } = {}) {
   const state = [], effects = [];
   let cursor = 0, entries = initial, jobs = initialJobs, writes = 0, ids = 0, ready = initialReady;
+  let now = initialNow, tick;
+  const listeners = new Map();
+  class TestDate extends Date { constructor(...args) { super(...(args.length ? args : [now])); } }
   const attempts = [];
   const creations = [];
   function createItem(item) {
@@ -83,14 +86,15 @@ function harness({ search = "?date=2026-01-31", entries: initial = [], jobs: ini
   const deps = {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState, useRef: (value) => useState({ current: value })[0], useMemo: (fn) => fn(), useEffect: (fn) => effects.push(fn) }, "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
-    "../../lib/scheduling": scheduling, "../../lib/jobManagement-core.mjs": jobCore, "../../lib/storage": { makeId: () => `id-${++ids}`, useCloudLocalCollection: () => store() },
+    "../../lib/scheduling": { ...scheduling, plannerDateKey: () => scheduling.plannerDateKey(new Date(now)) }, "../../lib/jobManagement-core.mjs": jobCore, "../../lib/storage": { makeId: () => `id-${++ids}`, useCloudLocalCollection: () => store() },
     "../../lib/cloud/coreBusinessCollections": { useCustomersCollection: () => store(), useJobsCollection: () => ({ ...store(jobs), updateItem: (id, update) => updateItem("job", id, update), setItems() { throw new Error("Dispatch must use durable job writes"); } }), usePlannerCollection: () => ({ ...store(entries), createItem, updateItem: (id, update) => updateItem("visit", id, update), setItems() { throw new Error("Bookings must use durable creation"); } }) },
   };
   const mod = { exports: {} };
-  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/planner/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Date, Error, URLSearchParams, window: { location: { search }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {} }, require(name) { assert.ok(name in deps, name); return deps[name]; } });
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/planner/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Date: TestDate, Error, URLSearchParams, window: { location: { search }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {}, setInterval(fn) { tick = fn; return 1; }, clearInterval() {}, addEventListener(event, fn) { listeners.set(event, fn); }, removeEventListener() {}, scrollTo() {} }, require(name) { assert.ok(name in deps, name); return deps[name]; } });
   const render = () => { cursor = 0; effects.length = 0; return mod.exports.default(); };
   render(); effects.splice(0).forEach((fn) => fn());
   return { render, writes: () => writes, entries: () => entries, jobs: () => jobs, attempts, creations, replaceEntries(value) { entries = value; }, replaceJobs(value) { jobs = value; }, setReady(value) { ready = value; },
+    advance(value, focus = false) { now = value; (focus ? listeners.get("focus") : tick)(); },
     handler(label) { const node = nodes(render()).find((n) => ["button", "Button"].includes(n.type) && text(n) === label); assert.ok(node, label); return node.props.onClick; },
     click(label) { const node = nodes(render()).find((n) => ["button", "Button"].includes(n.type) && (n.props["aria-label"] === label || text(n) === label)); assert.ok(node, label); node.props.onClick(); },
     add() { nodes(render()).find((n) => n.type === "PageHeader").props.action.props.onClick(); },
@@ -307,4 +311,82 @@ test("unallocated jobs exclude closed and held records and loading cannot expose
   assert.deepEqual(h.jobs(), savedJobs); assert.equal(h.writes(), 0);
   const loading = harness({ ready: false, entries: [entry({ jobId: "j1" })], jobs: [job()] });
   assert.match(text(loading.render()), /Loading scheduling centre/); assert.doesNotMatch(text(loading.render()), /Start job|Site visit/);
+});
+
+test("next work visit planning ignores history and non-work appointments without guessing job links", () => {
+  const saved = [entry({ jobId: "j1", status: "Complete", date: "2026-10-12", endDate: undefined }), entry({ id: "past", jobId: "j1", date: "2026-10-08", endDate: "2026-10-09" }),
+    ...["Survey", "Delivery", "Office", "Other"].map((type) => entry({ id: type, jobId: "j1", type, date: "2026-10-12", endDate: undefined })),
+    entry({ id: "cancelled", jobId: "j1", status: "Cancelled", date: "2026-10-12", endDate: undefined }), entry({ id: "other-job", jobId: "other", date: "2026-10-12", endDate: undefined }), entry({ id: "unlinked", jobId: undefined, date: "2026-10-12", endDate: undefined })];
+  const before = structuredClone(saved);
+  assert.deepEqual(scheduling.jobVisitPlan("j1", saved, "2026-10-10"), { upcoming: [], uncertain: [] });
+  assert.deepEqual(scheduling.jobVisitPlan("", saved, "2026-10-10"), { upcoming: [], uncertain: [] });
+  assert.deepEqual(saved, before);
+  const h = harness({ entries: saved, jobs: [job()] });
+  assert.match(text(h.render()), /No ongoing or future work visit found/); assert.equal(h.writes(), 0);
+});
+
+test("ongoing and future work visits count independently of calendar view and the job start date", () => {
+  const current = entry({ jobId: "j1", date: "2026-10-08", endDate: "2026-10-10" });
+  const future = entry({ id: "future", jobId: "j1", status: "Confirmed", date: "2027-01-01", endDate: undefined });
+  assert.deepEqual(scheduling.jobVisitPlan("j1", [current, future], "2026-10-10").upcoming, [current, future]);
+  assert.deepEqual(scheduling.jobVisitPlan("j1", [current, future], "2026-10-11").upcoming, [future]);
+  const h = harness({ entries: [future], jobs: [job({ title: "Future allocated job", startDate: "2020-01-01" })] });
+  assert.doesNotMatch(text(h.render()), /Future allocated job|Book next visit/);
+  assert.match(text(h.render()), /No next-visit checks flagged in loaded records/); assert.equal(h.writes(), 0);
+});
+
+test("invalid dates and unknown upcoming status remain reviewable even alongside a real booking", () => {
+  const uncertain = [entry({ jobId: "j1", date: "2026-02-30", endDate: undefined }), entry({ id: "reversed", jobId: "j1", date: "2026-10-12", endDate: "2026-10-11" }), entry({ id: "legacy", jobId: "j1", status: "Tentative", date: "2026-10-12", endDate: undefined })];
+  const pastUnknown = entry({ id: "past-legacy", jobId: "j1", status: "Legacy", date: "2026-01-01", endDate: undefined });
+  const future = entry({ id: "future", jobId: "j1", date: "2026-10-12", endDate: undefined });
+  assert.deepEqual(scheduling.jobVisitPlan("j1", [...uncertain, pastUnknown, future], "2026-10-10"), { upcoming: [future], uncertain });
+  const h = harness({ entries: [...uncertain, future], jobs: [job({ id: "j1", title: "Uncertain job" })] });
+  const view = h.render(); assert.match(text(view), /Review uncertain work bookings.*2026-02-30.*Tentative/);
+  const book = nodes(view).find((n) => n.type === "button" && text(n) === "Book next visit");
+  assert.equal(book.props.disabled, true); book.props.onClick();
+  assert.equal(nodes(h.render()).some((n) => n.type === "form"), false); assert.equal(h.writes(), 0);
+});
+
+test("phone next-visit search combines job name address and status with four-card reveal and exact links", () => {
+  const savedJobs = Array.from({ length: 9 }, (_, i) => job({ id: i === 8 ? "j /?# +" : `j${i}`, title: `Workshop ${i}`, siteAddress: i === 8 ? "12 High Street" : "2 Station Road", status: i === 8 ? "Testing" : "Scheduled" }));
+  const h = harness({ jobs: savedJobs });
+  assert.equal(nodes(h.render()).filter((n) => n.type === "article").length, 4);
+  h.click("Show more jobs (5 remaining)"); assert.equal(nodes(h.render()).filter((n) => n.type === "article").length, 8);
+  h.fill("Find a job for its next visit", " workshop HIGH testing ");
+  const view = h.render(); assert.equal(nodes(view).filter((n) => n.type === "article").length, 1);
+  const link = nodes(view).find((n) => n.type === "Link" && text(n) === "Review job"); assert.equal(link.props.href, "/jobs/j%20%2F%3F%23%20%2B");
+  assert.match(text(view), /1 of 9 jobs match/);
+  h.fill("Find a job for its next visit", "No match"); assert.match(text(h.render()), /No jobs match this search/);
+  h.click("Clear job search"); assert.equal(nodes(h.render()).filter((n) => n.type === "article").length, 4);
+  assert.ok(nodes(h.render()).filter((n) => n.type === "button" && text(n) === "Book next visit").every((n) => n.props.className.includes("min-h-12")));
+  assert.equal(h.writes(), 0); assert.deepEqual(h.jobs(), savedJobs);
+});
+
+test("preparing the next visit keeps saved job identity and clamps old or invalid dates to today", () => {
+  for (const [startDate, targetCompletionDate, start, end] of [["2026-01-01", "2026-02-01", "2026-10-10", "2026-10-10"], ["invalid", "2026-02-30", "2026-10-10", "2026-10-10"], ["2026-10-12", "2026-10-11", "2026-10-12", "2026-10-12"], ["2026-10-12", "2026-10-15", "2026-10-12", "2026-10-15"]]) {
+    const savedJob = job({ id: "j /?#", startDate, targetCompletionDate, customerId: "customer-1" });
+    const h = harness({ search: "", jobs: [savedJob] }); h.click("Book next visit");
+    const all = nodes(h.render()); const field = (label) => all.find((n) => n.props?.label === label).props.value;
+    assert.equal(field("Entry title"), savedJob.title); assert.equal(field("Start date"), start); assert.equal(field("End date"), end);
+    assert.equal(nodes(all.find((n) => n.type === "label" && text(n).startsWith("Linked job"))).find((n) => n.type === "select").props.value, savedJob.id);
+    assert.equal(h.writes(), 0); assert.deepEqual(h.jobs(), [savedJob]);
+  }
+});
+
+test("a partially saved series cannot be replaced by the next-visit shortcut", () => {
+  const h = harness({ jobs: [job()], failCreateAt: [2] }); const oldBook = h.handler("Book next visit");
+  oldBook(); h.fill("Repeat", "Weekly"); h.fill("Number of visits", "3"); h.submit();
+  assert.equal(h.entries().length, 1);
+  oldBook(); assert.match(text(h.render()), /1 of 3 visits saved.*original booking details are locked/);
+  h.submit(); assert.equal(h.entries().length, 3); assert.equal(h.creations.length, 4);
+  assert.equal(new Set(h.entries().map((e) => e.id)).size, 3);
+});
+
+test("next-visit planning refreshes after local midnight and when the app regains focus", () => {
+  const h = harness({ jobs: [job({ title: "Continuing work" })], entries: [entry({ jobId: "j1", date: "2026-10-10", endDate: undefined })] });
+  assert.doesNotMatch(text(h.render()), /Continuing work/);
+  h.advance("2026-10-11T00:01:00"); assert.match(text(h.render()), /Continuing work.*No ongoing or future work visit found/);
+  h.replaceEntries([entry({ jobId: "j1", date: "2026-10-11", endDate: undefined })]); assert.doesNotMatch(text(h.render()), /Continuing work/);
+  h.advance("2026-10-12T07:00:00", true); assert.match(text(h.render()), /Continuing work.*No ongoing or future work visit found/);
+  assert.equal(h.writes(), 0);
 });
