@@ -15,6 +15,24 @@ accounts clears the submitted password and hides it again. A verified account
 can open its role-appropriate workspace directly. Cloud configuration and data
 migration tools remain available in a collapsed section below installation help.
 
+## Faster everyday actions
+
+The phone header's **+ Quick actions** button opens a native modal sheet with
+large targets. Office accounts can open quick quotes, JR AI, customers, surveys
+and the planner; field accounts get assigned jobs, diary, materials, testing and
+snags. The sheet closes on navigation and resets with the account. Signed-out,
+unresolved and customer sessions do not receive office or field shortcuts.
+
+Office bottom tabs now put **JR AI** within one tap. Customers remain available
+from Quick actions and More → Daily tools, including workspace search. The
+assistant opens a compact priority list rather than the full command centre.
+See [Daily Assistant](AI_DAILY_ASSISTANT.md) for the checks and their limits.
+
+On browsers that support app-icon shortcuts, long-pressing the installed icon
+can expose Workspace, Daily assistant and Quick quote. These are ordinary
+guarded routes: a shortcut never grants access to another role's workspace.
+Availability depends on the device and browser.
+
 ## Install
 
 - **iPhone/iPad:** open the normal JR OS address in Safari, tap **Share → Add to
@@ -61,3 +79,10 @@ the Apple touch icon, and the account/menu installation instructions. Before a
 production release, check installation and relaunch on iPhone and Android,
 including signed-out, office, field and customer accounts. Do not change
 Supabase configuration or switch cloud mode merely to test installation.
+Also check the Quick actions sheet at narrow portrait and landscape widths,
+keyboard focus and dismissal, the JR AI bottom tab, and app-icon shortcuts where
+supported. Confirm that the keyboard does not prevent searching or opening an
+assistant action, and verify account switching with the sheet open.
+
+Platform references: [native dialog](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/dialog)
+and [manifest shortcuts](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Manifest/Reference/shortcuts).

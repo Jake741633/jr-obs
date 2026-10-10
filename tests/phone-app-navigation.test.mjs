@@ -49,7 +49,7 @@ test("signed-out cloud navigation exposes one full-width Account tab", () => {
 test("local and migration workspaces retain all five daily tabs before sign-in", () => {
   for (const mode of ["local", "migration"]) {
     const nav = navigation(null, mode, "/");
-    assert.deepEqual(links(nav), ["/", "/jobs", "/quotes/mobile", "/customers", "/menu"]);
+    assert.deepEqual(links(nav), ["/", "/jobs", "/quotes/mobile", "/ai/assistant", "/menu"]);
     assert.ok(nav.props.className.split(" ").includes("grid-cols-5"));
   }
 });
@@ -66,6 +66,15 @@ test("field and customer navigation keep only their permitted destinations", () 
   }
   const fieldJob = navigation({ role: "electrician" }, "cloud", "/jobs/job-1/workspace");
   assert.deepEqual(Array.from(fieldJob.props.children).filter((link) => link.props["aria-current"] === "page").map((link) => link.props.href), ["/field/jobs"]);
+});
+
+test("every AI screen activates only the direct JR AI mobile tab", () => {
+  for (const path of ["/ai", "/ai/assistant", "/ai/quote-builder", "/ai/daily-briefing"]) {
+    const nav = navigation({ role: "office" }, "cloud", path);
+    assert.deepEqual(Array.from(nav.props.children).filter((link) => link.props["aria-current"] === "page").map((link) => link.props.href), ["/ai/assistant"]);
+  }
+  const customers = navigation({ role: "office" }, "cloud", "/customers");
+  assert.deepEqual(Array.from(customers.props.children).filter((link) => link.props["aria-current"] === "page").map((link) => link.props.href), ["/menu"]);
 });
 
 function indicatorHarness(snapshot, initialStatus = "Synced") {

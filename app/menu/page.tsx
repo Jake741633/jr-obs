@@ -13,7 +13,7 @@ import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 type NavigationItem = (typeof secondaryNavigation)[number];
 type WorkspaceSectionId = "sales" | "quotes" | "jobs" | "money" | "materials" | "compliance" | "ai" | "system";
 
-const officeDailyHrefs = ["/crm/follow-ups", "/quotes/mobile", "/planner", "/invoices", "/surveys", "/field"] as const;
+const officeDailyHrefs = ["/ai/assistant", "/customers", "/quotes/mobile", "/planner", "/invoices", "/surveys"] as const;
 const electricianDailyHrefs = ["/field/day-planner", "/field/jobs", "/field/site-diary", "/field/materials", "/field/snags", "/field/testing"] as const;
 
 const workspaceSections: Array<{ id: WorkspaceSectionId; title: string; description: string }> = [
@@ -28,7 +28,7 @@ const workspaceSections: Array<{ id: WorkspaceSectionId; title: string; descript
 ];
 
 function workspaceSectionFor(href: string): WorkspaceSectionId {
-  if (href === "/leads" || href.startsWith("/crm") || href === "/customer-portal") return "sales";
+  if (href === "/customers" || href === "/builders" || href === "/leads" || href.startsWith("/crm") || href === "/customer-portal") return "sales";
   if (href.startsWith("/quotes") || href === "/price-book" || href === "/electrical-calculators" || href === "/room-estimator" || href.startsWith("/estimates")) return "quotes";
   if (href.startsWith("/field") || href === "/site-management" || href === "/planner" || href === "/team" || href === "/surveys" || href === "/job-packs") return "jobs";
   if (href === "/invoices" || href.startsWith("/payments") || href === "/finance-director" || href === "/labour-costs" || href === "/expenses" || href === "/job-finance" || href === "/starter-library" || href === "/business") return "money";

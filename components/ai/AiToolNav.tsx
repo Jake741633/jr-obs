@@ -12,9 +12,9 @@ import {
 
 const tools = [
   {
-    title: "Today's Assistant",
-    detail: "Jobs, reminders and urgent work",
-    href: "/ai#today",
+    title: "Daily Assistant",
+    detail: "Your next action, evidence and site readiness",
+    href: "/ai/assistant",
     icon: CalendarCheck2,
     colour: "text-cyan-300",
   },
