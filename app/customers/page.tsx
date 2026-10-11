@@ -8,6 +8,8 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
+import { ContactImportPanel } from "../../components/crm/ContactImportPanel";
+import { contactMatchSnapshot, matchingContacts } from "../../lib/contactImport";
 import { useCustomersCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { contactEmailHref, contactPhoneHref } from "../../lib/contactLinks";
@@ -177,6 +179,12 @@ export default function CustomersPage() {
     {editRestricted ? <Card>Customer changes are managed by the office. Deletion requires an owner or administrator.</Card> : null}
     {error && (!showForm || editRestricted) ? <p role="alert" className="rounded-xl border border-red-400/20 bg-red-400/5 px-4 py-3 text-sm text-red-300">{error}</p> : null}
     {message ? <p role="status" className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</p> : null}
+    {!editRestricted ? <ContactImportPanel key={scopeKey} scopeKey={scopeKey} customers={items} ready={formReady && !showForm} createCustomer={(customer, matches) => {
+      requireAccess();
+      if (draft.current?.scope === scope) throw new Error("Close the open customer form before importing.");
+      if (contactMatchSnapshot(matchingContacts(customer, latest.current.customers)) !== matches) throw new Error("Matching customers have changed. Review the import again.");
+      customers.createItem(customer);
+    }} /> : null}
     {showForm && !editRestricted ? <Card><form aria-label={editingId ? "Edit customer" : "Create customer"} onSubmit={submit} className="grid gap-4 md:grid-cols-2">
       <p className="text-sm text-slate-400 md:col-span-2">Keep this page open until the customer is saved. Leaving or closing this form loses unsaved changes.</p>
       <InputField required label="Customer name" value={form.name} onChange={(e) => changeForm({ ...form, name: e.target.value })} />

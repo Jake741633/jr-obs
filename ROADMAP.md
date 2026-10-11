@@ -44,6 +44,10 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Durable quick job-stage changes with live account/source guards, fresh conflict checks and server-authored field history
 - [x] Phone customer inbox with multiword/contact search, progressive cards and direct call/email actions
 - [x] Durable customer forms with retained drafts, changed-record review, stable retries and guarded linked-job deletion
+- [x] Reviewed phone contacts: native picker where available, iPhone vCard-file import, editable choices, duplicate review and durable partial-save retries
+- [x] Job evidence capture from camera/photo library with optimised copies, video links and clearly attributed user-entered spoken notes
+- [ ] Direct large video-file uploads with durable private binary storage and progress/retry controls
+- [ ] Connected video/speech analysis and reviewed quote drafts from job media, with explicit AI service setup
 - [x] Phone customer profiles with section shortcuts, progressive linked records, searchable activity and exact job-to-JR-AI links
 - [x] Explicit customer-profile job completion with durable saves and separate history-note retries
 - [x] Editable review-request preparation with user-confirmed sent records and durable partial-save retries

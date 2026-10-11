@@ -5,6 +5,7 @@ import ts from "typescript";
 import * as contactLinks from "../../lib/contactLinks.ts";
 import * as identities from "../../lib/assistantIdentity.ts";
 import * as permissions from "../../lib/cloud/permissions.ts";
+import * as contactImport from "../../lib/contactImport.ts";
 
 export const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
 export const text = tree => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
@@ -32,6 +33,7 @@ export function harness(initial = [], readOnly = false) {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState, useMemo, useRef: value => useState({ current: value })[0], useLayoutEffect },
     "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/crm/EntityEmptyState": { EntityEmptyState: "Empty" },
+    "../../components/crm/ContactImportPanel": { ContactImportPanel: "ContactImportPanel" }, "../../lib/contactImport": contactImport,
     "../../lib/cloud/coreBusinessCollections": { useCustomersCollection: () => ({ items: data.customers, isReady: data.ready, setItems: failWrite, remove: failWrite,
       createItem(item) { if (data.customers.some(record => record.id === item.id)) throw new Error("Customer identity already exists"); return commit("create", item, [item, ...data.customers]); },
       updateItem(id, update) { const index = data.customers.findIndex(item => item.id === id); assert.ok(index >= 0); const item = update(data.customers[index]); return commit("update", item, data.customers.map((record, i) => i === index ? item : record)); },
