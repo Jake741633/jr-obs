@@ -81,6 +81,7 @@ export default function CustomerDetailPage() {
   const params = useParams<{ id: string }>();
   const [browse, setBrowse] = useState(() => customerBrowseDefaults(params.id));
   const view = browse.customerId === params.id ? browse : customerBrowseDefaults(params.id);
+  if (browse.customerId !== params.id) setBrowse(view);
   function updateBrowse(changes: Partial<ReturnType<typeof customerBrowseDefaults>>) {
     setBrowse((current) => ({ ...(current.customerId === params.id ? current : customerBrowseDefaults(params.id)), ...changes }));
   }

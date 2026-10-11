@@ -72,6 +72,8 @@ test("customer profile changes reset browsing and never show another customer's 
   assert.match(text(h.render()), /Other customer/); assert.doesNotMatch(text(h.section("Customer history")), /own-history/);
   assert.equal(nodes(h.render()).find(n => n.type === "input").props.value, ""); assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, "All");
   assert.doesNotMatch(text(h.section("Customer quotes and estimates")), /own-quote/); assert.match(text(h.section("Customer quotes and estimates")), /other-quote/);
+  h.route("customer-1"); const returned = h.render();
+  assert.equal(nodes(returned).find(n => n.type === "input").props.value, ""); assert.equal(nodes(returned).find(n => n.type === "select").props.value, "All"); assert.equal(h.cards("Customer jobs").length, 4);
 });
 
 test("customer detail requires ready sources and one exact nonblank saved identity", () => {
