@@ -27,7 +27,7 @@ type Form = typeof blank;
 type Prepared = { record: SalesLead; activity: LeadActivity; source?: SalesLead[] };
 type Common = { scope: object; parties: Party[]; saved: boolean; prepared?: Prepared };
 type Capture = Common & { kind: "capture"; form: Form; linkIssue: string };
-type Stage = Common & { kind: "stage"; original: SalesLead; expected: string; target: LeadStage; method: string };
+type Stage = Common & { kind: "stage"; original: SalesLead; expected: string; target: LeadStage; method: string; correcting: boolean };
 type Activity = Common & { kind: "activity"; original: SalesLead; expected: string; channel: ActivityType | ""; summary: string };
 type Outcome = Common & { kind: "outcome"; original: SalesLead; expected: string; reason: string };
 type RemovedActivity = { record: LeadActivity; expected: string; removed: boolean; source?: LeadActivity[] };
@@ -152,7 +152,7 @@ export function useLeadPipelineActions(stores: Stores) {
       const parties: Party[] = [];
       if (current.customerId) parties.push(party("customer", current.customerId));
       if (current.builderId) parties.push(party("builder", current.builderId));
-      showDraft({ scope, kind: "stage", original: current, expected: stageSnapshot(current), target, method, parties, saved: false }); setError(""); setMessage("");
+      showDraft({ scope, kind: "stage", original: current, expected: stageSnapshot(current), target, method, correcting, parties, saved: false }); setError(""); setMessage("");
     } catch (error) { setError(error instanceof Error ? error.message : "Stage change is unavailable."); }
   }
   function reviewStage(lead: SalesLead, target: LeadStage, method = "Pipeline") { openStageReview(lead, target, method, false); }
@@ -261,6 +261,7 @@ export function useLeadPipelineActions(stores: Stores) {
             if (actionSnapshot(active.kind, record) !== active.expected) throw new Error("This lead changed before the save. Close the action and review it again.");
             if (active.kind === "activity") return { ...record, ...(active.channel !== "Note" ? { lastContactAt: at, ...(!closedStages.includes(normaliseLeadStage(record.stage)) ? { nextAction: "Follow up" } : {}) } : {}), updatedAt: at };
             if (active.kind === "outcome") return { ...record, ...(normaliseLeadStage(record.stage) === "Lost" ? { lostReason: active.reason.trim() } : { cancelledReason: active.reason.trim() }), updatedAt: at };
+            if (active.correcting) return { ...record, stage: active.target, updatedAt: at };
             return { ...record, stage: active.target, ...(active.target === "Contacted" ? { lastContactAt: at } : {}), ...(active.target === "Completed" ? { completedAt: at } : {}), ...(active.target === "Follow-up Due" ? { nextAction: "Contact customer today" } : active.target === "Accepted" ? { nextAction: "Book work" } : {}), updatedAt: at };
           });
         }
@@ -361,7 +362,7 @@ export function useLeadPipelineActions(stores: Stores) {
           <TextareaField label="Notes" aria-label="Notes" value={capture.form.notes} onChange={event => editCapture(capture, { notes: event.target.value })} />
           <Button type="submit" className="min-h-12" disabled={disabled || Boolean(capture.linkIssue)}>Save lead</Button>
         </fieldset>
-      </form> : active.kind === "stage" ? <><p className="mt-4 break-words font-semibold">{active.original.name}: {leadStageLabel(active.original.stage)} → {active.target}</p><p className="mt-2 break-words text-sm text-slate-400">{active.original.workRequired}</p>{!active.saved ? <p className="mt-2 text-sm text-slate-400">{!knownStage(active.original.stage) ? "This saved stage is unrecognised. Your chosen stage will replace it after confirmation. " : ""}Confirm that this stage reflects the work. Contacted records contact now; Completed records completion now.</p> : null}</> : active.kind === "capture" ? <p className="mt-4 font-semibold">{capture?.prepared?.record.name}</p> : <>
+      </form> : active.kind === "stage" ? <><p className="mt-4 break-words font-semibold">{active.original.name}: {leadStageLabel(active.original.stage)} → {active.target}</p><p className="mt-2 break-words text-sm text-slate-400">{active.original.workRequired}</p>{!active.saved ? <p className="mt-2 text-sm text-slate-400">{active.correcting ? "This saved stage is unrecognised. Your chosen stage will replace it after confirmation. This correction keeps the existing contact and completion times and next action." : "Confirm that this stage reflects the work. Contacted records contact now; Completed records completion now."}</p> : null}</> : active.kind === "capture" ? <p className="mt-4 font-semibold">{capture?.prepared?.record.name}</p> : <>
         <p className="mt-4 break-words font-semibold">{active.original.name} · {leadStageLabel(active.original.stage)}</p><p className="mt-2 break-words text-sm text-slate-400">{active.original.workRequired}</p>
         {active.kind === "activity" ? <>
           <p className="mt-3 text-sm text-slate-400">Record contact you have already made, or an internal note. A note keeps the contact time and next action. Contact logs record contact now and set the next action to Follow up for open leads.</p>

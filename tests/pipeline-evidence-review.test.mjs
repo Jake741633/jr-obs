@@ -98,10 +98,10 @@ test("refreshed corrected records replace review states and figures without chan
 });
 
 test("correcting an unknown stage needs confirmation and records the actual original stage", () => {
-  for (const target of ["New Lead", "Contacted", "Completed"]) {
-    const h = harness(); h.data.leads = [lead({ stage: "Imported completion", lastContactAt: "old contact", notes: "Keep notes" })]; correction(h, target); assert.equal(h.writes.length, 0); assert.match(text(h.render()), /Your chosen stage will replace it after confirmation/);
+  for (const target of ["New Lead", "Contacted", "Completed", "Accepted", "Follow-up Due"]) {
+    const h = harness(); h.data.leads = [lead({ stage: "Imported completion", lastContactAt: "old contact", completedAt: "old completion", notes: "Keep notes" })]; correction(h, target); assert.equal(h.writes.length, 0); assert.match(text(h.render()), /Your chosen stage will replace it after confirmation/);
     const confirm = h.button("Confirm stage change").props.onClick; confirm(); confirm(); assert.equal(h.writes.length, 2); assert.equal(h.writes[0].collection, "leads"); assert.equal(h.data.leads[0].stage, target); assert.equal(h.data.leads[0].notes, "Keep notes"); assert.match(h.data.activities[0].summary, /Saved stage correction: Unrecognised stage: Imported completion →/);
-    assert.equal(h.data.leads[0].lastContactAt, target === "Contacted" ? "2026-10-11T12:00:00.000Z" : "old contact");
+    assert.equal(h.data.leads[0].lastContactAt, "old contact"); assert.equal(h.data.leads[0].completedAt, "old completion"); assert.equal(h.data.leads[0].nextAction, "Book a visit");
   }
 });
 
@@ -110,8 +110,8 @@ test("discarding a proposed stage correction invalidates the old confirm without
 });
 
 test("a failed correction keeps the reviewed choice and retry timestamp without duplicate writes", () => {
-  const h = harness(); h.data.leads = [lead({ stage: "Imported" })]; correction(h, "Contacted"); h.failures.add("leads:update"); h.click("Confirm stage change"); assert.equal(h.writes.length, 0); assert.match(text(h.render()), /draft is retained/); const at = h.attempts[0].item.lastContactAt;
-  h.failures.clear(); h.clock("2026-10-12T12:00:00Z"); h.click("Confirm stage change"); assert.equal(h.data.leads[0].lastContactAt, at); assert.equal(h.data.activities.length, 1);
+  const h = harness(); h.data.leads = [lead({ stage: "Imported" })]; correction(h, "Contacted"); h.failures.add("leads:update"); h.click("Confirm stage change"); assert.equal(h.writes.length, 0); assert.match(text(h.render()), /draft is retained/); const at = h.attempts[0].item.updatedAt;
+  h.failures.clear(); h.clock("2026-10-12T12:00:00Z"); h.click("Confirm stage change"); assert.equal(h.data.leads[0].updatedAt, at); assert.equal(h.data.leads[0].lastContactAt, undefined); assert.equal(h.data.leads[0].completedAt, undefined); assert.equal(h.data.activities.length, 1); assert.equal(h.data.activities[0].completedAt, at);
 });
 
 test("partial correction history remains retryable after the reviewed card leaves the filter and never rewinds later stages", () => {

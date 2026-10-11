@@ -165,7 +165,8 @@ Choose the correct stage on an unrecognised lead to open the existing confirmati
 panel. No swipe, drag, browse or filter automatically repairs a stage. Confirmation
 retains the original saved stage in history and uses the same durable source-first
 save, retained failure draft, stale/account/sync checks and history-only retries.
-Contacted and Completed retain their disclosed timestamp effects. Other missing
+Corrections preserve contact/completion times and the saved next action; routine
+stage changes retain their disclosed effects. Other missing
 evidence remains visible for source review; this change does not rewrite records
 or infer missing values, dates, priorities or sources.
 
