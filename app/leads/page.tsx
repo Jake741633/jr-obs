@@ -32,6 +32,10 @@ import {
   useSalesLeadsCollection,
 } from "../../lib/cloud/coreBusinessCollections";
 import { crmLeadStages, moveLeadStage, normaliseLeadStage } from "../../lib/crmPro";
+import { savedIdentityIndex } from "../../lib/assistantIdentity";
+import { contactEmailHref, contactPhoneHref } from "../../lib/contactLinks";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
+import { plannerDateKey, plannerViewDate } from "../../lib/scheduling";
 import { makeId } from "../../lib/storage";
 import type { LeadActivity, LeadPriority, LeadSource, LeadStage, SalesLead } from "../../lib/models";
 
@@ -54,7 +58,6 @@ const stageColours: Record<LeadStage, string> = {
   Cancelled: "border-slate-600 bg-slate-900/70",
 };
 const priorityOrder: Record<LeadPriority, number> = { Urgent: 4, High: 3, Normal: 2, Low: 1 };
-const today = new Date().toISOString().slice(0, 10);
 const blank = {
   name: "",
   company: "",
@@ -84,6 +87,13 @@ function contactHref(lead: SalesLead) {
 }
 
 export default function LeadsPage() {
+  const identity = useCloudIdentity();
+  const key = JSON.stringify([identity.mode, identity.identity?.organisationId, identity.identity?.userId, identity.identity?.role, identity.identity?.customerSourceId]);
+  return <LeadsSession key={key} />;
+}
+
+function LeadsSession() {
+  const today = plannerDateKey();
   const leads = useSalesLeadsCollection();
   const activities = useLeadActivitiesCollection();
   const customers = useCustomersCollection();
@@ -97,6 +107,9 @@ export default function LeadsPage() {
   const [stageFilter, setStageFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [search, setSearch] = useState("");
+  const [limit, setLimit] = useState(8);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [linkReady, setLinkReady] = useState(false);
   const [activityText, setActivityText] = useState<Record<string, string>>({});
   const [activityKind, setActivityKind] = useState<Record<string, Exclude<LeadActivity["type"], "Stage change">>>({});
   const [outcomeText, setOutcomeText] = useState<Record<string, string>>({});
@@ -108,10 +121,11 @@ export default function LeadsPage() {
     if (deepLinkHandled.current || !ready) return;
     const frame = window.requestAnimationFrame(() => {
       const parameters = new URLSearchParams(window.location.search);
-      const selectedLead = leads.items.find((lead) => lead.id === parameters.get("lead"));
-      if (selectedLead) {
-        setSearch(selectedLead.name);
-        setStageFilter(normaliseLeadStage(selectedLead.stage));
+      setLinkReady(true);
+      if (parameters.has("lead")) {
+        setSelectedLeadId(parameters.get("lead"));
+        deepLinkHandled.current = true;
+        return;
       }
       if (parameters.get("action") === "create") {
         const customer = customers.items.find((item) => item.id === parameters.get("customerId"));
@@ -134,7 +148,8 @@ export default function LeadsPage() {
     return () => window.cancelAnimationFrame(frame);
   }, [builders.items, customers.items, leads.items, ready]);
 
-  const normalisedLeads = useMemo(() => leads.items.map((lead) => ({ lead, stage: normaliseLeadStage(lead.stage) })), [leads.items]);
+  const leadIndex = useMemo(() => savedIdentityIndex(leads.items), [leads.items]);
+  const normalisedLeads = useMemo(() => leadIndex.selectable.map((lead) => ({ lead, stage: normaliseLeadStage(lead.stage) })), [leadIndex]);
   const openLeads = normalisedLeads.filter(({ stage }) => !closedStages.includes(stage));
   const wonLeads = normalisedLeads.filter(({ stage }) => stage === "Accepted" || stage === "Completed");
   const lostLeads = normalisedLeads.filter(({ stage }) => stage === "Lost");
@@ -142,19 +157,31 @@ export default function LeadsPage() {
   const pipelineValue = openLeads.reduce((sum, { lead }) => sum + lead.estimatedValue, 0);
   const quotePipelineValue = normalisedLeads.filter(({ stage }) => stage === "Quote Sent" || stage === "Follow-up Due").reduce((sum, { lead }) => sum + lead.estimatedValue, 0);
   const conversionRate = decidedLeads ? wonLeads.length / decidedLeads * 100 : 0;
-  const dueFollowUps = openLeads.filter(({ lead, stage }) => stage === "Follow-up Due" || Boolean(lead.followUpDate && lead.followUpDate <= today)).length;
+  const dueFollowUps = openLeads.filter(({ lead, stage }) => {
+    const date = plannerViewDate(lead.followUpDate);
+    if (date && date > today) return false;
+    return stage === "Follow-up Due" || Boolean(date && date <= today);
+  }).length;
   const builderOpportunities = openLeads.filter(({ lead }) => lead.source === "Builder" || Boolean(lead.builderId)).length;
   const recordedQuotes = documents.items.filter((document) => document.type === "Quote");
   const quoteDecisions = recordedQuotes.filter((document) => document.status === "Accepted" || document.status === "Declined");
   const quoteConversion = quoteDecisions.length ? quoteDecisions.filter((document) => document.status === "Accepted").length / quoteDecisions.length * 100 : 0;
 
   const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return leads.items
+    const words = search.trim().toLocaleLowerCase("en-GB").split(/\s+/).filter(Boolean);
+    return leadIndex.selectable
+      .filter((lead) => selectedLeadId === null || lead.id === selectedLeadId)
       .filter((lead) => (!stageFilter || normaliseLeadStage(lead.stage) === stageFilter) && (!sourceFilter || lead.source === sourceFilter))
-      .filter((lead) => !term || `${lead.name} ${lead.company} ${lead.workRequired} ${lead.siteAddress} ${lead.phone} ${lead.email}`.toLowerCase().includes(term))
+      .filter((lead) => {
+        const searchable = [lead.name, lead.company, lead.workRequired, lead.siteAddress, lead.phone, lead.email, typeof lead.phone === "string" ? lead.phone.replace(/[\s().-]/g, "") : ""].filter(value => typeof value === "string").join(" ").toLocaleLowerCase("en-GB");
+        return words.every(word => searchable.includes(word));
+      })
       .toSorted((left, right) => priorityOrder[right.priority] - priorityOrder[left.priority] || left.followUpDate.localeCompare(right.followUpDate) || right.updatedAt.localeCompare(left.updatedAt));
-  }, [leads.items, search, sourceFilter, stageFilter]);
+  }, [leadIndex, search, sourceFilter, stageFilter, selectedLeadId]);
+  const visible = filtered.slice(0, limit);
+  const selectedLead = selectedLeadId === null ? undefined : leadIndex.unique.get(selectedLeadId);
+
+  function clearFilters() { setSearch(""); setStageFilter(""); setSourceFilter(""); setLimit(8); }
 
   const sourcePerformance = useMemo(() => sources.map((source) => {
     const sourceLeads = normalisedLeads.filter(({ lead }) => lead.source === source);
@@ -280,6 +307,7 @@ export default function LeadsPage() {
   }
 
   function leadCard(lead: SalesLead, mobile: boolean) {
+    const phoneHref = contactPhoneHref(lead.phone), emailHref = contactEmailHref(lead.email);
     const stage = normaliseLeadStage(lead.stage);
     const stageIndex = stages.indexOf(stage);
     const leadActivities = activities.items.filter((activity) => activity.leadId === lead.id).toSorted((left, right) => right.completedAt.localeCompare(left.completedAt)).slice(0, 3);
@@ -296,12 +324,14 @@ export default function LeadsPage() {
       <p className="mt-3 line-clamp-3 text-sm leading-5 text-slate-200">{lead.workRequired}</p>
       <div className="mt-3 rounded-xl bg-slate-950/60 p-3 text-xs text-slate-400"><p className="font-semibold text-slate-200">Next: {lead.nextAction || "Not set"}</p><p className={lead.followUpDate && lead.followUpDate <= today ? "mt-1 text-amber-300" : "mt-1"}>Follow up {displayDate(lead.followUpDate)}</p></div>
       <div className="mt-3 grid grid-cols-5 gap-1">
-        <a aria-label={`Call ${lead.name}`} href={lead.phone ? `tel:${lead.phone}` : undefined} className={`flex min-h-11 items-center justify-center rounded-xl bg-slate-950/70 ${lead.phone ? "text-cyan-300" : "pointer-events-none text-slate-700"}`}><Phone className="size-4" /></a>
-        <a aria-label={`Text ${lead.name}`} href={lead.phone ? `sms:${lead.phone}` : undefined} className={`flex min-h-11 items-center justify-center rounded-xl bg-slate-950/70 ${lead.phone ? "text-cyan-300" : "pointer-events-none text-slate-700"}`}><MessageSquareText className="size-4" /></a>
-        <a aria-label={`Email ${lead.name}`} href={lead.email ? `mailto:${lead.email}` : undefined} className={`flex min-h-11 items-center justify-center rounded-xl bg-slate-950/70 ${lead.email ? "text-cyan-300" : "pointer-events-none text-slate-700"}`}><Mail className="size-4" /></a>
+        {phoneHref ? <a aria-label={`Call ${lead.name}`} href={phoneHref} className="flex min-h-12 items-center justify-center rounded-xl bg-slate-950/70 text-cyan-300"><Phone className="size-4" /></a> : <button type="button" disabled aria-label={`Call ${lead.name}`} className="min-h-12 rounded-xl bg-slate-950/70 text-slate-700"><Phone className="mx-auto size-4" /></button>}
+        {phoneHref ? <a aria-label={`Text ${lead.name}`} href={phoneHref.replace("tel:", "sms:")} className="flex min-h-12 items-center justify-center rounded-xl bg-slate-950/70 text-cyan-300"><MessageSquareText className="size-4" /></a> : <button type="button" disabled aria-label={`Text ${lead.name}`} className="min-h-12 rounded-xl bg-slate-950/70 text-slate-700"><MessageSquareText className="mx-auto size-4" /></button>}
+        {emailHref ? <a aria-label={`Email ${lead.name}`} href={emailHref} className="flex min-h-12 items-center justify-center rounded-xl bg-slate-950/70 text-cyan-300"><Mail className="size-4" /></a> : <button type="button" disabled aria-label={`Email ${lead.name}`} className="min-h-12 rounded-xl bg-slate-950/70 text-slate-700"><Mail className="mx-auto size-4" /></button>}
         <Link aria-label={`Create quote for ${lead.name}`} href={quoteLink(lead)} className="flex min-h-11 items-center justify-center rounded-xl bg-slate-950/70 text-violet-300"><FilePlus2 className="size-4" /></Link>
         {relationshipLink ? <Link aria-label={`Open relationship for ${lead.name}`} href={relationshipLink} className="flex min-h-11 items-center justify-center rounded-xl bg-slate-950/70 text-emerald-300"><UserRoundSearch className="size-4" /></Link> : <span className="flex min-h-11 items-center justify-center rounded-xl bg-slate-950/70 text-slate-700"><UserRoundSearch className="size-4" /></span>}
       </div>
+      {lead.phone && !phoneHref ? <p className="mt-2 break-words text-xs text-amber-200">Review phone format: {lead.phone}</p> : null}
+      {lead.email && !emailHref ? <p className="mt-2 break-words text-xs text-amber-200">Review email format: {lead.email}</p> : null}
       {mobile ? <div className="mt-3 grid grid-cols-[3rem_1fr_3rem] items-center gap-2">
         <button type="button" aria-label="Previous lead stage" disabled={stageIndex === 0} onClick={() => moveBy(lead, -1, "Mobile action")} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 disabled:opacity-30"><ArrowLeft className="size-4" /></button>
         <select aria-label={`Stage for ${lead.name}`} value={stage} onChange={(event) => changeStage(lead, event.target.value as LeadStage, "Stage selector")} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-semibold"><option>{stage}</option>{stages.filter((item) => item !== stage).map((item) => <option key={item}>{item}</option>)}</select>
@@ -321,20 +351,21 @@ export default function LeadsPage() {
     </Card>;
   }
 
-  if (!ready) return <Card>Loading sales pipeline…</Card>;
+  if (!ready || !linkReady) return <Card>Loading sales pipeline…</Card>;
 
   return <main className="space-y-6 pb-8">
     <PageHeader eyebrow="CRM Pro" title="Sales Pipeline" description="Move every enquiry from first contact through survey, quote, acceptance and completion." action={<div className="grid gap-2 sm:grid-cols-2"><Link href="/crm/follow-ups" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-amber-400/30 px-4 text-sm font-semibold text-amber-200">Follow-ups</Link><Button onClick={() => showForm ? resetForm() : setShowForm(true)}><Plus className="size-4" />{showForm ? "Close form" : "New lead"}</Button></div>} />
     {message ? <div role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{message}</div> : null}
 
-    <section className="grid grid-cols-2 gap-3 xl:grid-cols-6 xl:gap-4">
+    {leadIndex.unusableCount ? <p role="alert" className="rounded-xl border border-amber-400/30 p-4 text-sm text-amber-200">{leadIndex.unusableCount} opportunities have missing or duplicate identities and are withheld from this pipeline and its totals. Review their source records.</p> : null}
+    <details className="rounded-2xl border border-slate-800 p-4"><summary className="min-h-12 cursor-pointer font-semibold">Pipeline overview</summary><p className="my-3 text-sm text-slate-400">Figures describe all uniquely identified opportunities, independently of filters and the selected lead.</p><section className="grid grid-cols-2 gap-3 xl:grid-cols-6 xl:gap-4">
       <Card><UserRoundSearch className="size-5 text-sky-300" /><p className="mt-3 text-2xl font-bold">{openLeads.length}</p><p className="text-xs text-slate-400">Open opportunities</p></Card>
       <Card><CirclePoundSterling className="size-5 text-emerald-300" /><p className="mt-3 text-2xl font-bold">{money.format(pipelineValue)}</p><p className="text-xs text-slate-400">Open pipeline</p></Card>
       <Card><FilePlus2 className="size-5 text-violet-300" /><p className="mt-3 text-2xl font-bold">{money.format(quotePipelineValue)}</p><p className="text-xs text-slate-400">Quote pipeline</p></Card>
       <Card><TrendingUp className="size-5 text-cyan-300" /><p className="mt-3 text-2xl font-bold">{conversionRate.toFixed(1)}%</p><p className="text-xs text-slate-400">Lead win rate · quotes {quoteConversion.toFixed(1)}%</p></Card>
       <Card><CalendarClock className="size-5 text-amber-300" /><p className="mt-3 text-2xl font-bold">{dueFollowUps}</p><p className="text-xs text-slate-400">Follow-ups due</p></Card>
       <Card><Building2 className="size-5 text-fuchsia-300" /><p className="mt-3 text-2xl font-bold">{builderOpportunities}</p><p className="text-xs text-slate-400">Builder opportunities</p></Card>
-    </section>
+    </section></details>
 
     {showForm ? <Card><form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Link customer</span><select value={form.customerId} onChange={(event) => selectCustomer(event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">New or unlinked contact</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
@@ -355,13 +386,16 @@ export default function LeadsPage() {
     </form></Card> : null}
 
     <Card><div className="grid gap-3 md:grid-cols-3">
-      <label className="relative"><span className="sr-only">Search pipeline</span><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search contacts, work or address" className="min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-3 text-sm" /></label>
-      <select aria-label="Filter by stage" className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm" value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="">All stages</option>{stages.map((stage) => <option key={stage}>{stage}</option>)}</select>
-      <select aria-label="Filter by source" className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)}><option value="">All sources</option>{sources.map((source) => <option key={source}>{source}</option>)}</select>
+      <label className="relative"><span className="sr-only">Search pipeline</span><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setLimit(8); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} placeholder="Name, work, address, phone or email" className="min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-3 text-base" /></label>
+      <select aria-label="Filter by stage" className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" value={stageFilter} onChange={(event) => { setStageFilter(event.target.value); setLimit(8); }}><option value="">All stages</option>{stages.map((stage) => <option key={stage}>{stage}</option>)}</select>
+      <select aria-label="Filter by source" className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" value={sourceFilter} onChange={(event) => { setSourceFilter(event.target.value); setLimit(8); }}><option value="">All sources</option>{sources.map((source) => <option key={source}>{source}</option>)}</select>
     </div></Card>
 
+    {selectedLeadId !== null ? <Card><p role={selectedLead ? "status" : "alert"} className="text-sm">{selectedLead ? `Selected opportunity: ${selectedLead.name}. Only this exact saved lead is shown.` : "The linked opportunity is unavailable or has a missing or duplicate identity. No other lead has been selected."}</p><Button type="button" variant="secondary" className="mt-3 min-h-12" onClick={() => { setSelectedLeadId(null); clearFilters(); }}>Show all opportunities</Button></Card> : null}
+    <div className="flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-sm text-slate-400">Showing {Math.min(limit, filtered.length)} of {filtered.length} matching opportunities</p><Button type="button" variant="secondary" className="min-h-12" onClick={clearFilters}>Clear pipeline filters</Button></div>
+
     <section className="space-y-4 lg:hidden" aria-label="Mobile sales pipeline">
-      {filtered.map((lead) => <article key={lead.id} onTouchStart={(event) => startSwipe(lead, event)} onTouchEnd={(event) => finishSwipe(lead, event)}>{leadCard(lead, true)}</article>)}
+      {visible.map((lead) => <article key={lead.id} onTouchStart={(event) => startSwipe(lead, event)} onTouchEnd={(event) => finishSwipe(lead, event)}>{leadCard(lead, true)}</article>)}
       {filtered.length === 0 ? <Card><p className="text-sm text-slate-400">No opportunities match these filters.</p></Card> : null}
     </section>
 
@@ -370,19 +404,21 @@ export default function LeadsPage() {
       <div className="flex snap-x gap-4 overflow-x-auto pb-4">
         {stages.map((stage) => {
           const stageItems = filtered.filter((lead) => normaliseLeadStage(lead.stage) === stage);
+          const visibleStageItems = visible.filter((lead) => normaliseLeadStage(lead.stage) === stage);
           return <section key={stage} data-pipeline-stage={stage} onDragOver={(event: ReactDragEvent) => event.preventDefault()} onDrop={() => dropInto(stage)} className={`min-h-64 w-[19rem] shrink-0 snap-start rounded-2xl border p-3 ${stageColours[stage]}`}>
-            <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-sm font-bold">{stage}</h2><span className="rounded-full bg-slate-950/80 px-2 py-1 text-xs">{stageItems.length}</span></div>
-            <div className="space-y-3">{stageItems.map((lead) => <article key={lead.id} draggable onDragStart={() => setDraggedLeadId(lead.id)} onDragEnd={() => setDraggedLeadId("")} className={draggedLeadId === lead.id ? "opacity-40" : "opacity-100"}>{leadCard(lead, false)}</article>)}{stageItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700/70 p-4 text-center text-xs text-slate-500">Drop an opportunity here</div> : null}</div>
+            <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-sm font-bold">{stage}</h2><span className="rounded-full bg-slate-950/80 px-2 py-1 text-xs">{visibleStageItems.length} of {stageItems.length}</span></div>
+            <div className="space-y-3">{visibleStageItems.map((lead) => <article key={lead.id} draggable onDragStart={() => setDraggedLeadId(lead.id)} onDragEnd={() => setDraggedLeadId("")} className={draggedLeadId === lead.id ? "opacity-40" : "opacity-100"}>{leadCard(lead, false)}</article>)}{stageItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700/70 p-4 text-center text-xs text-slate-500">Drop an opportunity here</div> : visibleStageItems.length < stageItems.length ? <p className="mt-3 text-xs text-slate-400">Use Show more opportunities below or filter to this stage.</p> : null}</div>
           </section>;
         })}
       </div>
     </section>
+    {filtered.length > limit ? <Button type="button" variant="secondary" className="min-h-12 w-full" onClick={() => setLimit(current => current + 8)}>Show more opportunities</Button> : null}
 
-    <section className="space-y-4">
+    <details className="rounded-2xl border border-slate-800 p-4"><summary className="min-h-12 cursor-pointer font-semibold">Win / loss reporting</summary><section className="mt-4 space-y-4">
       <div><p className="text-xs font-semibold uppercase tracking-wider text-fuchsia-300">Win / loss reporting</p><h2 className="mt-1 text-2xl font-bold">What is converting</h2><p className="mt-1 text-sm text-slate-400">Decided opportunities are grouped by source so the strongest routes are visible.</p></div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{sourcePerformance.map((result) => <Card key={result.source}><div className="flex items-center justify-between gap-2"><h3 className="font-bold">{result.source}</h3><Target className="size-4 text-cyan-300" /></div><p className="mt-3 text-2xl font-bold">{result.conversion.toFixed(1)}%</p><p className="mt-1 text-xs text-slate-400">{result.won} won · {result.lost} lost · {result.total} total</p><p className="mt-3 text-sm font-semibold text-emerald-300">{money.format(result.value)} won value</p></Card>)}</div>
       {sourcePerformance.length === 0 ? <Card><p className="text-sm text-slate-400">Win/loss reporting will appear once opportunities have been recorded.</p></Card> : null}
       {lossReasons.length > 0 ? <Card><h3 className="font-bold">Recorded loss reasons</h3><div className="mt-3 grid gap-2 sm:grid-cols-2">{lossReasons.map(([reason, count]) => <div key={reason} className="flex items-center justify-between gap-3 rounded-xl bg-slate-950 p-3 text-sm"><span>{reason}</span><span className="rounded-full bg-rose-500/10 px-2 py-1 text-xs font-bold text-rose-300">{count}</span></div>)}</div></Card> : null}
-    </section>
+    </section></details>
   </main>;
 }

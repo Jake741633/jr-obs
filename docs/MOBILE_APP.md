@@ -177,6 +177,34 @@ after navigation. Success confirms a device save and asks the user to check sync
 Populated fixture checks cover browsing, storage failures, partial retries, identity
 boundaries and local dates; signed-in physical-phone acceptance remains pending.
 
+## Sales Pipeline browsing
+
+The pipeline renders eight uniquely identified opportunities first, with eight more
+per tap. Phone and desktop share the reveal limit so hidden desktop cards do not
+mount the full collection on a phone. Desktop columns show visible versus matching
+counts and distinguish hidden cards from an empty stage. Pipeline overview and
+win/loss reporting are initially collapsed; their lead figures use the whole
+uniquely identified collection rather than the current filters.
+
+Search combines all words across name, company, work, site, phone and email, including
+phone numbers without spaces or brackets. Search, source/stage changes and Clear
+reset the reveal count; Enter dismisses the keyboard. Account changes reset browsing
+and in-memory form/note drafts. Call, Text and Email validate and encode recipients;
+unsupported values remain visible for review with disabled composer controls.
+
+`/leads?lead=<encoded saved ID>` selects exactly that unique lead, not other leads
+with the same name or stage. The page waits for source loading and link resolution
+before showing cards. A missing, blank or duplicated linked identity keeps the list
+empty with a review message. Clear pipeline filters keeps the exact selection;
+Show all opportunities explicitly leaves it. Missing/duplicated lead identities
+are withheld from cards and lead totals. Due counts use the device-local calendar
+and honour valid future postponements, including the Follow-up Due stage.
+
+This batch changes browsing, not the existing lead write paths: capture, stage
+changes (including swipe/drag), activity/outcome saves and deletion still need the
+durable-action treatment tracked in the roadmap. Populated read-only fixture checks
+cover browsing and identity boundaries; physical-phone acceptance remains pending.
+
 ## Jobs inbox
 
 Jobs opens with labelled search and a stage filter, with eight cards shown first
