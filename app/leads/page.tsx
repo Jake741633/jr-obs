@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type TouchEvent as ReactTouchEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type TouchEvent as ReactTouchEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
-import { InputField, TextareaField } from "../../components/ui/FormField";
+import { leadSources, useLeadPipelineActions } from "../../components/crm/LeadPipelineActions";
 import { PageHeader } from "../../components/ui/PageHeader";
 import {
   useBuildersCollection,
@@ -37,12 +37,11 @@ import { contactEmailHref, contactPhoneHref } from "../../lib/contactLinks";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { plannerDateKey, plannerViewDate } from "../../lib/scheduling";
 import { makeId } from "../../lib/storage";
-import type { LeadActivity, LeadPriority, LeadSource, LeadStage, SalesLead } from "../../lib/models";
+import type { LeadActivity, LeadPriority, LeadStage, SalesLead } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 const stages: readonly LeadStage[] = crmLeadStages;
-const sources: LeadSource[] = ["Website", "Google", "Referral", "Builder", "Repeat customer", "Social media", "MyJobsQuote", "MyBuilder", "Checkatrade", "Other"];
-const priorities: LeadPriority[] = ["Low", "Normal", "High", "Urgent"];
+const sources = leadSources;
 const activityTypes: Exclude<LeadActivity["type"], "Stage change">[] = ["Call", "Text", "Email", "WhatsApp", "Site visit", "Note"];
 const closedStages: LeadStage[] = ["Accepted", "Lost", "Completed", "Cancelled"];
 const stageColours: Record<LeadStage, string> = {
@@ -58,23 +57,6 @@ const stageColours: Record<LeadStage, string> = {
   Cancelled: "border-slate-600 bg-slate-900/70",
 };
 const priorityOrder: Record<LeadPriority, number> = { Urgent: 4, High: 3, Normal: 2, Low: 1 };
-const blank = {
-  name: "",
-  company: "",
-  email: "",
-  phone: "",
-  siteAddress: "",
-  workRequired: "",
-  source: "Website" as LeadSource,
-  stage: "New Lead" as LeadStage,
-  priority: "Normal" as LeadPriority,
-  estimatedValue: "0",
-  nextAction: "Call customer",
-  followUpDate: "",
-  customerId: "",
-  builderId: "",
-  notes: "",
-};
 
 function displayDate(value: string) {
   return value ? new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "Not set";
@@ -102,8 +84,6 @@ function LeadsSession() {
   const deepLinkHandled = useRef(false);
   const touchOrigin = useRef<Record<string, { x: number; y: number }>>({});
   const [draggedLeadId, setDraggedLeadId] = useState("");
-  const [form, setForm] = useState(blank);
-  const [showForm, setShowForm] = useState(false);
   const [stageFilter, setStageFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -115,7 +95,9 @@ function LeadsSession() {
   const [outcomeText, setOutcomeText] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
 
-  const ready = leads.isReady && activities.isReady && customers.isReady && builders.isReady && documents.isReady;
+  const actions = useLeadPipelineActions({ leads, activities, customers, builders });
+  const { openCapture } = actions;
+  const ready = actions.ready && leads.isReady && activities.isReady && customers.isReady && builders.isReady && documents.isReady;
 
   useEffect(() => {
     if (deepLinkHandled.current || !ready) return;
@@ -127,26 +109,11 @@ function LeadsSession() {
         deepLinkHandled.current = true;
         return;
       }
-      if (parameters.get("action") === "create") {
-        const customer = customers.items.find((item) => item.id === parameters.get("customerId"));
-        const builder = builders.items.find((item) => item.id === parameters.get("builderId"));
-        setForm({
-          ...blank,
-          name: customer?.name || builder?.contactName || "",
-          company: builder?.companyName || "",
-          email: customer?.email || builder?.email || "",
-          phone: customer?.phone || builder?.phone || "",
-          siteAddress: customer?.address || builder?.address || "",
-          customerId: customer?.id || "",
-          builderId: builder?.id || "",
-          source: builder ? "Builder" : customer ? "Repeat customer" : (parameters.get("source") as LeadSource) || "Website",
-        });
-        setShowForm(true);
-      }
+      if (parameters.get("action") === "create") openCapture(parameters);
       deepLinkHandled.current = true;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [builders.items, customers.items, leads.items, ready]);
+  }, [openCapture, ready]);
 
   const leadIndex = useMemo(() => savedIdentityIndex(leads.items), [leads.items]);
   const normalisedLeads = useMemo(() => leadIndex.selectable.map((lead) => ({ lead, stage: normaliseLeadStage(lead.stage) })), [leadIndex]);
@@ -199,53 +166,8 @@ function LeadsSession() {
     return [...counts.entries()].toSorted((left, right) => right[1] - left[1]);
   }, [lostLeads]);
 
-  function resetForm() {
-    setForm(blank);
-    setShowForm(false);
-  }
-
-  function selectCustomer(customerId: string) {
-    const customer = customers.items.find((item) => item.id === customerId);
-    setForm((current) => ({ ...current, customerId, builderId: "", name: customer?.name || current.name, email: customer?.email || current.email, phone: customer?.phone || current.phone, siteAddress: customer?.address || current.siteAddress, source: customer ? "Repeat customer" : current.source }));
-  }
-
-  function selectBuilder(builderId: string) {
-    const builder = builders.items.find((item) => item.id === builderId);
-    setForm((current) => ({ ...current, builderId, customerId: "", name: builder?.contactName || current.name, company: builder?.companyName || current.company, email: builder?.email || current.email, phone: builder?.phone || current.phone, siteAddress: builder?.address || current.siteAddress, source: builder ? "Builder" : current.source }));
-  }
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    const now = new Date().toISOString();
-    const lead: SalesLead = {
-      id: makeId("lead"),
-      ...form,
-      customerId: form.customerId || undefined,
-      builderId: form.builderId || undefined,
-      estimatedValue: Number(form.estimatedValue) || 0,
-      createdAt: now,
-      updatedAt: now,
-    };
-    leads.setItems((current) => [lead, ...current]);
-    activities.setItems((current) => [{ id: makeId("activity"), leadId: lead.id, type: "Note", summary: `Enquiry captured from ${lead.source}.`, completedBy: "JR OS CRM", completedAt: now, createdAt: now }, ...current]);
-    resetForm();
-    setMessage(`${lead.name} added to New Lead.`);
-  }
-
   function changeStage(lead: SalesLead, stage: LeadStage, method = "Pipeline") {
-    const previous = normaliseLeadStage(lead.stage);
-    if (previous === stage) return;
-    const now = new Date().toISOString();
-    leads.setItems((current) => current.map((item) => item.id === lead.id ? {
-      ...item,
-      stage,
-      lastContactAt: stage === "Contacted" ? now : item.lastContactAt,
-      completedAt: stage === "Completed" ? now : item.completedAt,
-      nextAction: stage === "Follow-up Due" ? "Contact customer today" : stage === "Accepted" ? "Book work" : item.nextAction,
-      updatedAt: now,
-    } : item));
-    activities.setItems((current) => [{ id: makeId("activity"), leadId: lead.id, type: "Stage change", summary: `${method}: ${previous} → ${stage}`, completedBy: "JR OS CRM", completedAt: now, createdAt: now }, ...current]);
-    setMessage(`${lead.name} moved to ${stage}.`);
+    actions.reviewStage(lead, stage, method);
   }
 
   function moveBy(lead: SalesLead, direction: -1 | 1, method: string) {
@@ -253,13 +175,15 @@ function LeadsSession() {
   }
 
   function dropInto(stage: LeadStage) {
-    const lead = leads.items.find((item) => item.id === draggedLeadId);
+    const lead = leadIndex.unique.get(draggedLeadId);
     if (lead) changeStage(lead, stage, "Drag and drop");
     setDraggedLeadId("");
   }
 
   function startSwipe(lead: SalesLead, event: ReactTouchEvent) {
+    if (!actions.canStart || (event.target as HTMLElement | undefined)?.closest?.("button,a,input,select,textarea,summary,details")) return;
     const touch = event.touches[0];
+    if (!touch) return;
     touchOrigin.current[lead.id] = { x: touch.clientX, y: touch.clientY };
   }
 
@@ -274,6 +198,7 @@ function LeadsSession() {
   }
 
   function addActivity(lead: SalesLead) {
+    if (!actions.canStart) return;
     const summary = activityText[lead.id]?.trim();
     if (!summary) return;
     const now = new Date().toISOString();
@@ -285,6 +210,7 @@ function LeadsSession() {
   }
 
   function saveOutcome(lead: SalesLead) {
+    if (!actions.canStart) return;
     const reason = outcomeText[lead.id]?.trim();
     if (!reason) return;
     const stage = normaliseLeadStage(lead.stage);
@@ -296,6 +222,7 @@ function LeadsSession() {
   }
 
   function removeLead(lead: SalesLead) {
+    if (!actions.canStart) return;
     if (!window.confirm(`Delete ${lead.name}'s opportunity and activity history?`)) return;
     leads.remove((item) => item.id === lead.id);
     activities.setItems((current) => current.filter((activity) => activity.leadId !== lead.id));
@@ -333,28 +260,29 @@ function LeadsSession() {
       {lead.phone && !phoneHref ? <p className="mt-2 break-words text-xs text-amber-200">Review phone format: {lead.phone}</p> : null}
       {lead.email && !emailHref ? <p className="mt-2 break-words text-xs text-amber-200">Review email format: {lead.email}</p> : null}
       {mobile ? <div className="mt-3 grid grid-cols-[3rem_1fr_3rem] items-center gap-2">
-        <button type="button" aria-label="Previous lead stage" disabled={stageIndex === 0} onClick={() => moveBy(lead, -1, "Mobile action")} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 disabled:opacity-30"><ArrowLeft className="size-4" /></button>
-        <select aria-label={`Stage for ${lead.name}`} value={stage} onChange={(event) => changeStage(lead, event.target.value as LeadStage, "Stage selector")} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-semibold"><option>{stage}</option>{stages.filter((item) => item !== stage).map((item) => <option key={item}>{item}</option>)}</select>
-        <button type="button" aria-label="Next lead stage" disabled={stageIndex === stages.length - 1} onClick={() => moveBy(lead, 1, "Mobile action")} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 disabled:opacity-30"><ArrowRight className="size-4" /></button>
-        <p className="col-span-3 text-center text-[10px] text-slate-500">Swipe left or right to move this opportunity</p>
+        <button type="button" aria-label="Previous lead stage" disabled={!actions.canStart || stageIndex === 0} onClick={() => moveBy(lead, -1, "Mobile action")} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 disabled:opacity-30"><ArrowLeft className="size-4" /></button>
+        <select aria-label={`Stage for ${lead.name}`} value={stage} disabled={!actions.canStart} onChange={(event) => changeStage(lead, event.target.value as LeadStage, "Stage selector")} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-semibold"><option>{stage}</option>{stages.filter((item) => item !== stage).map((item) => <option key={item}>{item}</option>)}</select>
+        <button type="button" aria-label="Next lead stage" disabled={!actions.canStart || stageIndex === stages.length - 1} onClick={() => moveBy(lead, 1, "Mobile action")} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 disabled:opacity-30"><ArrowRight className="size-4" /></button>
+        <p className="col-span-3 text-center text-[10px] text-slate-500">Swipe left or right to review a stage change</p>
       </div> : null}
-      {(stage === "Lost" || stage === "Cancelled") ? <div className="mt-3 rounded-xl border border-rose-400/20 bg-slate-950/70 p-3"><p className="text-xs font-semibold text-rose-200">{stage} reason</p><p className="mt-1 text-xs text-slate-400">{reason || "Not recorded yet"}</p><div className="mt-2 flex gap-2"><input aria-label={`${stage} reason for ${lead.name}`} value={outcomeText[lead.id] || ""} onChange={(event) => setOutcomeText((current) => ({ ...current, [lead.id]: event.target.value }))} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm" placeholder="Reason for reporting" /><Button type="button" onClick={() => saveOutcome(lead)}>Save</Button></div></div> : null}
+      {(stage === "Lost" || stage === "Cancelled") ? <div className="mt-3 rounded-xl border border-rose-400/20 bg-slate-950/70 p-3"><p className="text-xs font-semibold text-rose-200">{stage} reason</p><p className="mt-1 text-xs text-slate-400">{reason || "Not recorded yet"}</p><div className="mt-2 flex gap-2"><input aria-label={`${stage} reason for ${lead.name}`} value={outcomeText[lead.id] || ""} onChange={(event) => setOutcomeText((current) => ({ ...current, [lead.id]: event.target.value }))} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm" placeholder="Reason for reporting" /><Button type="button" disabled={!actions.canStart} onClick={() => saveOutcome(lead)}>Save</Button></div></div> : null}
       <details className="mt-3 rounded-xl border border-slate-700/70 bg-slate-950/40 p-3">
         <summary className="cursor-pointer text-xs font-semibold text-slate-300">Contact log · {leadActivities.length} recent</summary>
         <div className="mt-3 grid gap-2">
           <select aria-label={`Activity type for ${lead.name}`} value={activityKind[lead.id] || "Note"} onChange={(event) => setActivityKind((current) => ({ ...current, [lead.id]: event.target.value as Exclude<LeadActivity["type"], "Stage change"> }))} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm">{activityTypes.map((type) => <option key={type}>{type}</option>)}</select>
-          <div className="flex gap-2"><input aria-label={`Activity note for ${lead.name}`} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm" placeholder="What happened?" value={activityText[lead.id] || ""} onChange={(event) => setActivityText((current) => ({ ...current, [lead.id]: event.target.value }))} /><Button type="button" onClick={() => addActivity(lead)}>Log</Button></div>
+          <div className="flex gap-2"><input aria-label={`Activity note for ${lead.name}`} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm" placeholder="What happened?" value={activityText[lead.id] || ""} onChange={(event) => setActivityText((current) => ({ ...current, [lead.id]: event.target.value }))} /><Button type="button" disabled={!actions.canStart} onClick={() => addActivity(lead)}>Log</Button></div>
           {leadActivities.map((activity) => <p key={activity.id} className="text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-200">{activity.type}:</span> {activity.summary}</p>)}
         </div>
       </details>
-      <button type="button" onClick={() => removeLead(lead)} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-slate-500 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 className="size-4" />Delete opportunity</button>
+      <button type="button" disabled={!actions.canStart} onClick={() => removeLead(lead)} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-slate-500 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 className="size-4" />Delete opportunity</button>
     </Card>;
   }
 
-  if (!ready || !linkReady) return <Card>Loading sales pipeline…</Card>;
+  if (!ready || !linkReady) return <>{actions.panel}<Card>Loading sales pipeline…</Card></>;
 
   return <main className="space-y-6 pb-8">
-    <PageHeader eyebrow="CRM Pro" title="Sales Pipeline" description="Move every enquiry from first contact through survey, quote, acceptance and completion." action={<div className="grid gap-2 sm:grid-cols-2"><Link href="/crm/follow-ups" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-amber-400/30 px-4 text-sm font-semibold text-amber-200">Follow-ups</Link><Button onClick={() => showForm ? resetForm() : setShowForm(true)}><Plus className="size-4" />{showForm ? "Close form" : "New lead"}</Button></div>} />
+    <PageHeader eyebrow="CRM Pro" title="Sales Pipeline" description="Move every enquiry from first contact through survey, quote, acceptance and completion." action={<div className="grid gap-2 sm:grid-cols-2"><Link href="/crm/follow-ups" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-amber-400/30 px-4 text-sm font-semibold text-amber-200">Follow-ups</Link><Button disabled={!actions.canStart} onClick={() => openCapture()}><Plus className="size-4" />New lead</Button></div>} />
+    {actions.panel}
     {message ? <div role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{message}</div> : null}
 
     {leadIndex.unusableCount ? <p role="alert" className="rounded-xl border border-amber-400/30 p-4 text-sm text-amber-200">{leadIndex.unusableCount} opportunities have missing or duplicate identities and are withheld from this pipeline and its totals. Review their source records.</p> : null}
@@ -366,24 +294,6 @@ function LeadsSession() {
       <Card><CalendarClock className="size-5 text-amber-300" /><p className="mt-3 text-2xl font-bold">{dueFollowUps}</p><p className="text-xs text-slate-400">Follow-ups due</p></Card>
       <Card><Building2 className="size-5 text-fuchsia-300" /><p className="mt-3 text-2xl font-bold">{builderOpportunities}</p><p className="text-xs text-slate-400">Builder opportunities</p></Card>
     </section></details>
-
-    {showForm ? <Card><form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
-      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Link customer</span><select value={form.customerId} onChange={(event) => selectCustomer(event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">New or unlinked contact</option>{customers.items.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select></label>
-      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Link builder / contractor</span><select value={form.builderId} onChange={(event) => selectBuilder(event.target.value)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">No builder linked</option>{builders.items.map((builder) => <option key={builder.id} value={builder.id}>{builder.companyName}</option>)}</select></label>
-      <InputField label="Customer/contact" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required />
-      <InputField label="Company" value={form.company} onChange={(event) => setForm({ ...form, company: event.target.value })} />
-      <InputField label="Phone" value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} />
-      <InputField label="Email" type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
-      <InputField label="Site address" value={form.siteAddress} onChange={(event) => setForm({ ...form, siteAddress: event.target.value })} />
-      <InputField label="Estimated value (£)" type="number" min="0" value={form.estimatedValue} onChange={(event) => setForm({ ...form, estimatedValue: event.target.value })} />
-      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Source</span><select className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3" value={form.source} onChange={(event) => setForm({ ...form, source: event.target.value as LeadSource })}>{sources.map((source) => <option key={source}>{source}</option>)}</select></label>
-      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Priority</span><select className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as LeadPriority })}>{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label>
-      <InputField label="Next action" value={form.nextAction} onChange={(event) => setForm({ ...form, nextAction: event.target.value })} />
-      <InputField label="Follow-up date" type="date" value={form.followUpDate} onChange={(event) => setForm({ ...form, followUpDate: event.target.value })} />
-      <div className="md:col-span-2"><TextareaField label="Work required" value={form.workRequired} onChange={(event) => setForm({ ...form, workRequired: event.target.value })} required /></div>
-      <div className="md:col-span-2"><TextareaField label="Notes" value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} /></div>
-      <div className="md:col-span-2"><Button type="submit" className="min-h-12 w-full md:w-auto">Save lead</Button></div>
-    </form></Card> : null}
 
     <Card><div className="grid gap-3 md:grid-cols-3">
       <label className="relative"><span className="sr-only">Search pipeline</span><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setLimit(8); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} placeholder="Name, work, address, phone or email" className="min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-3 text-base" /></label>
@@ -400,14 +310,14 @@ function LeadsSession() {
     </section>
 
     <section className="hidden lg:block" aria-label="Desktop sales pipeline">
-      <div className="mb-3 flex items-center gap-2 text-sm text-slate-400"><GripVertical className="size-4" />Drag cards between stages. The board scrolls horizontally without compressing the cards.</div>
+      <div className="mb-3 flex items-center gap-2 text-sm text-slate-400"><GripVertical className="size-4" />Drag cards to review a stage change. The board scrolls horizontally without compressing the cards.</div>
       <div className="flex snap-x gap-4 overflow-x-auto pb-4">
         {stages.map((stage) => {
           const stageItems = filtered.filter((lead) => normaliseLeadStage(lead.stage) === stage);
           const visibleStageItems = visible.filter((lead) => normaliseLeadStage(lead.stage) === stage);
           return <section key={stage} data-pipeline-stage={stage} onDragOver={(event: ReactDragEvent) => event.preventDefault()} onDrop={() => dropInto(stage)} className={`min-h-64 w-[19rem] shrink-0 snap-start rounded-2xl border p-3 ${stageColours[stage]}`}>
             <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-sm font-bold">{stage}</h2><span className="rounded-full bg-slate-950/80 px-2 py-1 text-xs">{visibleStageItems.length} of {stageItems.length}</span></div>
-            <div className="space-y-3">{visibleStageItems.map((lead) => <article key={lead.id} draggable onDragStart={() => setDraggedLeadId(lead.id)} onDragEnd={() => setDraggedLeadId("")} className={draggedLeadId === lead.id ? "opacity-40" : "opacity-100"}>{leadCard(lead, false)}</article>)}{stageItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700/70 p-4 text-center text-xs text-slate-500">Drop an opportunity here</div> : visibleStageItems.length < stageItems.length ? <p className="mt-3 text-xs text-slate-400">Use Show more opportunities below or filter to this stage.</p> : null}</div>
+            <div className="space-y-3">{visibleStageItems.map((lead) => <article key={lead.id} draggable={actions.canStart} onDragStart={() => setDraggedLeadId(lead.id)} onDragEnd={() => setDraggedLeadId("")} className={draggedLeadId === lead.id ? "opacity-40" : "opacity-100"}>{leadCard(lead, false)}</article>)}{stageItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700/70 p-4 text-center text-xs text-slate-500">Drop an opportunity here</div> : visibleStageItems.length < stageItems.length ? <p className="mt-3 text-xs text-slate-400">Use Show more opportunities below or filter to this stage.</p> : null}</div>
           </section>;
         })}
       </div>

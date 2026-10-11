@@ -200,10 +200,41 @@ Show all opportunities explicitly leaves it. Missing/duplicated lead identities
 are withheld from cards and lead totals. Due counts use the device-local calendar
 and honour valid future postponements, including the Follow-up Due stage.
 
-This batch changes browsing, not the existing lead write paths: capture, stage
-changes (including swipe/drag), activity/outcome saves and deletion still need the
-durable-action treatment tracked in the roadmap. Populated read-only fixture checks
-cover browsing and identity boundaries; physical-phone acceptance remains pending.
+Populated read-only fixture checks cover browsing and identity boundaries;
+physical-phone acceptance remains pending.
+
+## Lead capture and stage changes
+
+New lead capture now saves the lead durably before its capture note. Failed saves
+keep the form editable; unchanged retries reuse the prepared identity and time.
+Capture validates required contact/work text, non-negative money with at most two
+decimal places, source, priority and real date-only follow-up dates. Customer and
+builder pickers list unique saved identities. Deep links naming missing, duplicated,
+blank or competing contacts require an explicit selection or unlinked choice.
+Selected contact details and identities are checked again before saving.
+
+Stage selectors, arrows, deliberate horizontal swipes and desktop drops open a
+review panel. Only confirmation saves. Gestures starting on interactive controls
+are ignored. Stage updates use the latest stored record, recheck reviewed fields
+inside the durable updater, preserve unrelated metadata and reject unsupported
+saved stages. Contacted stamps contact time; Completed stamps completion time;
+Accepted and Follow-up Due retain their existing next-action behaviour.
+
+If the lead saves but its history fails, the panel remains available outside cards,
+filters and loading states. Retry saves only the exact prepared history and never
+recreates a lead or reapplies a stage over later changes. Removed, replaced, relinked
+or ambiguous records and failed/conflicting sync block the retry; exact existing
+history is accepted without duplication. Office/local access, loaded sources,
+account scope and current draft identity gate every capture and stage callback.
+Pending/offline durable saves remain usable, with device-save and sync wording.
+
+Keep the page open until saving finishes: drafts and pending history receipts are
+in-memory and are lost on navigation or account change. Other lead mutations are
+disabled while an action is open. Activity logging, outcome saves and deletion
+remain separate roadmap work. Behavioural fixtures exercise storage failures,
+partial retries, refreshed records, stale callbacks, source loading, account/role
+changes, linked contacts and stage gestures. Signed-in physical-phone acceptance
+remains pending.
 
 ## Jobs inbox
 

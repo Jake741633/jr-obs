@@ -14,7 +14,7 @@ test("sales pipeline uses cloud collections and preserves all requested stages",
 
 test("desktop pipeline supports drag and drop between stages", () => {
   assert.match(pipeline, /aria-label="Desktop sales pipeline"/);
-  assert.match(pipeline, /draggable onDragStart=/);
+  assert.match(pipeline, /draggable=\{actions.canStart\} onDragStart=/);
   assert.match(pipeline, /onDragOver=/);
   assert.match(pipeline, /onDrop=\{\(\) => dropInto\(stage\)\}/);
   assert.match(pipeline, /data-pipeline-stage=\{stage\}/);
