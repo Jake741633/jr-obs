@@ -17,6 +17,7 @@ function harness() {
   const page = load("app/crm/follow-ups/page.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: runtime.hooks, "lucide-react": {}, "next/link": { default: "Link" },
     "../../../components/ui/Button": { Button: "Button" }, "../../../components/ui/Card": { Card: "Card" }, "../../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../../components/crm/FollowUpRules": { FollowUpRules: "Rules" },
+    "../../../components/crm/FollowUpActions": { useFollowUpActions: () => ({ panel: null, canStart: true, openContact: failWrite, openPostpone: failWrite }) },
     "../../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity, mode: "cloud", isReady: true }) },
     "../../../lib/cloud/coreBusinessCollections": Object.fromEntries(Object.entries(hooks).map(([key, hook]) => [hook, () => ({ items: data[key], isReady: ready[key], createItem: failWrite, updateItem: failWrite, setItems: failWrite })])),
     "../../../lib/crmPro": { ...crm, buildFollowUpCentre(input) { calculations++; return crm.buildFollowUpCentre(input); } }, "../../../lib/crmFollowUpSettings": rules, "../../../lib/contactLinks": contacts, "../../../lib/storage": { makeId: failWrite },
@@ -65,7 +66,7 @@ test("follow-up call text and email links validate and encode recipients while i
   h.data.leads = [lead({ phone: "07700 900123?body=Injected", email: "customer@example.test?bcc=other@example.test" })];
   const invalid = h.cards()[0]; assert.equal(nodes(invalid).filter(n => n.type === "a").length, 0);
   for (const label of ["Call", "Text", "Email"]) assert.equal(nodes(invalid).find(n => n.type === "button" && text(n) === label).props.disabled, true);
-  assert.match(text(invalid), /Review phone format/); assert.match(text(invalid), /Review email format/); assert.equal(nodes(invalid).find(n => n.type === "Button" && text(n) === "Mark contacted and log").props.disabled, true);
+  assert.match(text(invalid), /Review phone format/); assert.match(text(invalid), /Review email format/); assert.equal(nodes(invalid).find(n => n.type === "Button" && text(n) === "Log contact").props.disabled, false, "Completed site visits can be logged without a supported composer link");
   assert.match(text(h.overview()), /0Ready to contact/);
 });
 
@@ -98,6 +99,14 @@ test("unsupported contact strings no longer earn a contactability priority boost
   for (const make of [contact => ({ leads: [lead(contact)] }), contact => ({ documents: [quote()], customers: [customer(contact)] }), contact => ({ profiles: [profile()], customers: [customer(contact)] })]) {
     const valid = build(make(normal)), unsupported = build(make(invalid)); assert.equal(valid.length, 1); assert.equal(unsupported.length, 1); assert.equal(valid[0].priorityScore - unsupported[0].priorityScore, 15);
   }
+});
+
+test("a saved quote due day resurfaces that morning even before 24 hours have elapsed", () => {
+  const recent = quote({ lastFollowUpAt: "2026-10-10T18:00:00Z", nextFollowUpDate: "2026-10-11" });
+  const due = build({ documents: [recent], customers: [customer()] }); assert.equal(due.length, 1); assert.equal(due[0].dueDate, "2026-10-11");
+  assert.equal(build({ documents: [{ ...recent, nextFollowUpDate: "2026-10-12" }], customers: [customer()] }).length, 0);
+  assert.equal(build({ documents: [{ ...recent, nextFollowUpDate: "" }], customers: [customer()] }).length, 0, "Unscheduled quotes still need their initial waiting period");
+  assert.equal(build({ documents: [quote({ nextFollowUpDate: "invalid" })], customers: [customer()] }).length, 1, "Malformed dates cannot hide an aged quote indefinitely");
 });
 
 test("quote and customer recommendations retain opaque saved identities in record links", () => {

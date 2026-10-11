@@ -19,6 +19,7 @@ import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { FollowUpRules } from "../../../components/crm/FollowUpRules";
+import { useFollowUpActions } from "../../../components/crm/FollowUpActions";
 import { contactEmailHref, contactPhoneHref } from "../../../lib/contactLinks";
 import { followUpRulesError, resolveFollowUpSettings } from "../../../lib/crmFollowUpSettings";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
@@ -33,12 +34,9 @@ import {
 } from "../../../lib/cloud/coreBusinessCollections";
 import {
   buildFollowUpCentre,
-  normaliseLeadStage,
   type CrmFollowUpItem,
   type CrmFollowUpReason,
 } from "../../../lib/crmPro";
-import { makeId } from "../../../lib/storage";
-import type { CustomerInteraction, LeadActivity, LeadStage } from "../../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 const reasons: CrmFollowUpReason[] = ["Quote ageing", "No response", "Survey not booked", "Awaiting acceptance", "Lost opportunity", "Customer reminder"];
@@ -50,14 +48,6 @@ const reasonTone: Record<CrmFollowUpReason, string> = {
   "Lost opportunity": "border-fuchsia-400/30 bg-fuchsia-500/5 text-fuchsia-200",
   "Customer reminder": "border-emerald-400/30 bg-emerald-500/5 text-emerald-200",
 };
-const today = new Date().toISOString().slice(0, 10);
-
-function addDays(value: string, days: number) {
-  const date = new Date(`${value}T12:00:00`);
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 function recommendationReason(item: CrmFollowUpItem) {
   const signals = [`${item.priorityScore}/100 priority`, `${item.ageDays} day${item.ageDays === 1 ? "" : "s"} waiting`];
   if (item.estimatedValue > 0) signals.push(`${money.format(item.estimatedValue)} opportunity`);
@@ -87,8 +77,7 @@ function FollowUpCentreSession() {
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState(8);
   const [reasonFilter, setReasonFilter] = useState<CrmFollowUpReason | "">("");
-  const [snoozeDays, setSnoozeDays] = useState<Record<string, number>>({});
-  const [message, setMessage] = useState("");
+  const actions = useFollowUpActions({ leads, leadActivities, documents, customers, profiles, interactions, settingsStore });
   const ready = leads.isReady && leadActivities.isReady && documents.isReady && customers.isReady && profiles.isReady && interactions.isReady && settingsStore.isReady;
 
   const followUps = useMemo(() => rulesIssue ? [] : buildFollowUpCentre({
@@ -109,65 +98,15 @@ function FollowUpCentreSession() {
   const urgent = followUps.filter((item) => item.priorityScore >= 70).length;
   const topRecommendations = filtered.filter(canContact).slice(0, 5);
 
-  function logCustomerContact(item: CrmFollowUpItem, now: string) {
-    if (!item.customerId) return;
-    const interaction: CustomerInteraction = {
-      id: makeId("interaction"),
-      customerId: item.customerId,
-      type: item.phone ? "Call" : "Email",
-      summary: `Follow-up completed: ${item.reason}. ${item.detail}`,
-      outcome: `Next review in ${savedSettings.noResponseDays} day${savedSettings.noResponseDays === 1 ? "" : "s"}`,
-      completedBy: "JR OS CRM",
-      interactionAt: now,
-      createdAt: now,
-    };
-    interactions.setItems((current) => [interaction, ...current]);
-  }
-
-  function markContacted(item: CrmFollowUpItem) {
-    const now = new Date().toISOString();
-    const nextDate = addDays(today, savedSettings.noResponseDays);
-    if (item.id.startsWith("quote-follow-up-") && item.quoteId) {
-      documents.setItems((current) => current.map((document) => document.id === item.quoteId ? { ...document, lastFollowUpAt: now, nextFollowUpDate: nextDate, updatedAt: now } : document));
-    } else if (item.leadId) {
-      leads.setItems((current) => current.map((lead) => {
-        if (lead.id !== item.leadId) return lead;
-        const currentStage = normaliseLeadStage(lead.stage);
-        const stage: LeadStage = currentStage === "New Lead" || currentStage === "Follow-up Due" ? "Contacted" : currentStage;
-        return { ...lead, stage, lastContactAt: now, lostFollowUpCompletedAt: currentStage === "Lost" ? now : lead.lostFollowUpCompletedAt, followUpDate: currentStage === "Lost" ? "" : nextDate, nextAction: currentStage === "Lost" ? "Re-engagement completed" : "Await response", updatedAt: now };
-      }));
-      const activity: LeadActivity = { id: makeId("activity"), leadId: item.leadId, type: item.phone ? "Call" : "Email", summary: `Follow-up completed: ${item.reason}.`, completedBy: "JR OS CRM", completedAt: now, createdAt: now };
-      leadActivities.setItems((current) => [activity, ...current]);
-    } else if (item.customerId) {
-      profiles.setItems((current) => current.map((profile) => profile.customerId === item.customerId ? { ...profile, nextFollowUpDate: "", updatedAt: now } : profile));
-    }
-    logCustomerContact(item, now);
-    setMessage(`${item.title} marked contacted. The action is in CRM history${item.reason === "Lost opportunity" || item.reason === "Customer reminder" ? "." : ` and JR OS will check again on ${new Date(`${nextDate}T12:00:00`).toLocaleDateString("en-GB")}.`}`);
-  }
-
-  function postpone(item: CrmFollowUpItem) {
-    const days = snoozeDays[item.id] || 3;
-    const date = addDays(today, days);
-    const now = new Date().toISOString();
-    if (item.id.startsWith("quote-follow-up-") && item.quoteId) {
-      documents.setItems((current) => current.map((document) => document.id === item.quoteId ? { ...document, nextFollowUpDate: date, updatedAt: now } : document));
-    } else if (item.leadId) {
-      leads.setItems((current) => current.map((lead) => lead.id === item.leadId ? { ...lead, followUpDate: date, updatedAt: now } : lead));
-    } else if (item.customerId) {
-      profiles.setItems((current) => current.map((profile) => profile.customerId === item.customerId ? { ...profile, nextFollowUpDate: date, updatedAt: now } : profile));
-    }
-    setMessage(`${item.title} postponed until ${new Date(`${date}T12:00:00`).toLocaleDateString("en-GB")}.`);
-  }
-
   const header = <PageHeader eyebrow="CRM Pro" title="Follow-up Centre" description="JR OS ranks the people and opportunities most worth contacting today from live CRM and quote history." action={<Link href="/leads" className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-slate-700 px-4 text-sm font-semibold text-slate-200">Sales pipeline <ArrowRight className="size-4" /></Link>} />;
   const rulesEditor = <FollowUpRules key="rules" store={settingsStore} />;
-  if (!ready) return <main className="space-y-6 pb-8">{header}{rulesEditor}<Card>Loading follow-up centre…</Card></main>;
-  if (rulesIssue) return <main className="space-y-6 pb-8">{header}{rulesEditor}<Card><h1 className="text-xl font-bold">Follow-up rules need review</h1><p className="mt-2 text-sm text-amber-200">{rulesIssue}</p><p className="mt-2 text-sm text-slate-400">The queue is paused until one valid set of rules is available.</p></Card></main>;
+  if (!ready) return <main className="space-y-6 pb-8">{header}{rulesEditor}{actions.panel}<Card>Loading follow-up centre…</Card></main>;
+  if (rulesIssue) return <main className="space-y-6 pb-8">{header}{rulesEditor}{actions.panel}<Card><h1 className="text-xl font-bold">Follow-up rules need review</h1><p className="mt-2 text-sm text-amber-200">{rulesIssue}</p><p className="mt-2 text-sm text-slate-400">The queue is paused until one valid set of rules is available.</p></Card></main>;
 
   return <main className="space-y-6 pb-8">
     {header}
     {rulesEditor}
-    {message ? <div role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{message}</div> : null}
+    {actions.panel}
 
     <details className="rounded-2xl border border-slate-800 p-4"><summary className="min-h-12 cursor-pointer font-semibold">Follow-up overview</summary><p className="my-3 text-sm text-slate-400">Figures describe the full loaded queue, independently of search and reason filters.</p><section className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
       <Card><CalendarClock className="size-5 text-amber-300" /><p className="mt-3 text-3xl font-bold">{followUps.length}</p><p className="text-xs text-slate-400">Follow-ups surfaced</p></Card>
@@ -198,8 +137,7 @@ function FollowUpCentreSession() {
         </div>
         {item.phone && !phoneHref ? <p className="mt-2 break-words text-xs text-amber-200">Review phone format before calling or texting: {item.phone}</p> : null}
         {item.email && !emailHref ? <p className="mt-2 break-words text-xs text-amber-200">Review email format before composing: {item.email}</p> : null}
-        <Button type="button" onClick={() => markContacted(item)} className="mt-3 min-h-12 w-full" disabled={!phoneHref && !emailHref}><CheckCircle2 className="size-4" />Mark contacted and log</Button>
-        <div className="mt-3 grid grid-cols-[1fr_auto] gap-2"><select aria-label={`Postpone ${item.title}`} value={snoozeDays[item.id] || 3} onChange={(event) => setSnoozeDays((current) => ({ ...current, [item.id]: Number(event.target.value) }))} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value={1}>Tomorrow</option><option value={3}>In 3 days</option><option value={7}>In 1 week</option><option value={14}>In 2 weeks</option></select><Button type="button" variant="secondary" className="min-h-12" onClick={() => postpone(item)}>Postpone</Button></div>
+        <div className="mt-3 grid grid-cols-2 gap-2"><Button type="button" onClick={() => actions.openContact(item)} className="min-h-12" disabled={!actions.canStart}><CheckCircle2 className="size-4" />Log contact</Button><Button type="button" variant="secondary" className="min-h-12" onClick={() => actions.openPostpone(item)} disabled={!actions.canStart}>Postpone</Button></div>
       </Card>; })}</div>
       {filtered.length > limit ? <Button type="button" variant="secondary" className="min-h-12 w-full" onClick={() => setLimit(current => current + 8)}>Show more follow-ups</Button> : null}
       {filtered.length === 0 ? <Card><p className="text-sm text-emerald-300">No follow-ups match this filter.</p></Card> : null}
