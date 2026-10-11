@@ -149,10 +149,33 @@ Rule changes require loaded settings and office permissions in cloud mode, with
 local mode retaining local access. Old callbacks cannot save after an account
 change or replace newer edits. Loading retains drafts; leaving the page or changing
 account loses unsaved edits. Success confirms the device save and asks the user to
-check sync. Contact logging and postponement still use their existing save paths;
-their durability and explicit contact-channel selection remain separate work.
-Populated fixture checks cover browsing and rule failures; signed-in physical-phone
-acceptance remains pending.
+check sync.
+
+Log contact opens a review panel without writing anything. Choose the method actually
+used (Call, Text, Email, WhatsApp or Site visit), add an optional outcome and confirm
+the displayed schedule. Composer links never log contact or confirm delivery; a site
+visit can be recorded without a supported phone/email link. Postpone has its own
+review panel with tomorrow, 3-day, 1-week and 2-week choices. Dates use the current
+device-local calendar and date-only arithmetic; a draft left overnight requires
+fresh review. The queue uses that same local day when it recalculates.
+
+Both actions save the exact source through durable update methods. Contact history
+uses durable creates with stable identities and timestamps. Lead-linked quote IDs
+do not redirect a lead action to its quote, and customer reminders update only the
+selected profile. Lost re-engagement and completed reminders do not claim a new
+follow-up date. Updates preserve unrelated metadata. Changed/closed records,
+ambiguous identities, replaced or relinked sources/customers, changed rules and
+failed/conflicting sync require review before the initial write.
+
+If the source saves but a history write fails, Retry remaining history stays above
+the queue even when the item disappears or filters/rules/loading hide the queue.
+It writes only missing original history and preserves later source stages/dates.
+Different, ambiguous or missing refreshed evidence blocks a retry. Account changes,
+revoked permissions and old callbacks cannot write. Keep the page open until all
+steps finish: drafts and retry state are held for this page session, not restored
+after navigation. Success confirms a device save and asks the user to check sync.
+Populated fixture checks cover browsing, storage failures, partial retries, identity
+boundaries and local dates; signed-in physical-phone acceptance remains pending.
 
 ## Jobs inbox
 

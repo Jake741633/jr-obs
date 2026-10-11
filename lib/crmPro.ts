@@ -18,7 +18,7 @@ import type {
 } from "./models";
 import type { ComplianceCertificate } from "./complianceCertificates";
 import { contactEmailHref, contactPhoneHref } from "./contactLinks";
-import { assistantDay } from "./assistantSignals-core.mjs";
+import { assistantDateKey, assistantDay } from "./assistantSignals-core.mjs";
 import { variationFinancials } from "./jobManagement-core.mjs";
 import { paymentEffect, type PaymentRecord } from "./payments";
 import {
@@ -461,6 +461,7 @@ export interface CrmFollowUpItem {
   customerId?: string;
   leadId?: string;
   quoteId?: string;
+  profileId?: string;
   phone: string;
   email: string;
   href: string;
@@ -495,11 +496,12 @@ export function buildFollowUpCentre({
 }) {
   const items: CrmFollowUpItem[] = [];
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
-  const today = now.toISOString().slice(0, 10);
+  const today = assistantDateKey(now);
   documents.filter((document) => document.type === "Quote" && document.status === "Sent").forEach((quote) => {
-    if (quote.nextFollowUpDate && quote.nextFollowUpDate > today) return;
+    const scheduled = Boolean(quote.nextFollowUpDate && assistantDay(quote.nextFollowUpDate) !== null);
+    if (scheduled && quote.nextFollowUpDate! > today) return;
     const ageDays = ageInDays(quote.lastFollowUpAt || quote.updatedAt || quote.createdAt, now);
-    if (ageDays < 1) return;
+    if (ageDays < 1 && !scheduled) return;
     const reason: CrmFollowUpReason = ageDays >= settings.quoteAgeDays ? "Quote ageing" : "Awaiting acceptance";
     const contact = quoteContact(quote, customerMap);
     const value = documentTotal(quote);
@@ -511,7 +513,7 @@ export function buildFollowUpCentre({
       priorityScore: followUpPriority({ ageDays, estimatedValue: value, highValueThreshold: settings.highValueThreshold, overdue: ageDays >= settings.quoteAgeDays, contactable: Boolean(contactPhoneHref(contact.phone) || contactEmailHref(contact.email)) }),
       ageDays,
       estimatedValue: value,
-      dueDate: today,
+      dueDate: scheduled ? quote.nextFollowUpDate! : today,
       customerId: quote.customerId,
       quoteId: quote.id,
       phone: contact.phone,
@@ -571,6 +573,7 @@ export function buildFollowUpCentre({
       estimatedValue: 0,
       dueDate: profile.nextFollowUpDate,
       customerId: customer.id,
+      profileId: profile.id,
       phone: customer.phone,
       email: customer.email,
       href: `/customers/${encodeURIComponent(customer.id)}`,

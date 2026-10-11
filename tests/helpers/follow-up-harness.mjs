@@ -26,7 +26,7 @@ export function hookRuntime() {
   const changed = (previous, deps) => !previous || deps.some((value, index) => !Object.is(value, previous.deps[index]));
   const useState = value => { const i = cursor++; if (!(i in slots)) slots[i] = typeof value === "function" ? value() : value; const current = slots; return [current[i], next => { current[i] = typeof next === "function" ? next(current[i]) : next; }]; };
   const useLayoutEffect = (fn, deps) => { const i = cursor++, previous = slots[i]; if (changed(previous, deps)) { const current = { deps, cleanup: previous?.cleanup }; slots[i] = current; layouts.push(() => { current.cleanup?.(); current.cleanup = fn(); }); } };
-  const hooks = { useState, useMemo(fn, deps) { const i = cursor++; if (changed(slots[i], deps)) slots[i] = { deps, value: fn() }; return slots[i].value; }, useRef: value => useState({ current: value })[0], useLayoutEffect };
+  const hooks = { useState, useMemo(fn, deps) { const i = cursor++; if (changed(slots[i], deps)) slots[i] = { deps, value: fn() }; return slots[i].value; }, useRef: value => useState({ current: value })[0], useLayoutEffect, useEffect: useLayoutEffect };
   const unmount = () => slots.forEach(slot => slot?.cleanup?.());
   return { hooks, unmount, render(component, props = {}) { const element = component(props); if (key !== element.key) { unmount(); slots = []; layouts = []; key = element.key; } cursor = 0; const view = element.type(element.props); layouts.splice(0).forEach(fn => fn()); return view; } };
 }

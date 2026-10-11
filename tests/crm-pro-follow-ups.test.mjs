@@ -4,6 +4,7 @@ import test from "node:test";
 
 const followUps = await readFile(new URL("../app/crm/follow-ups/page.tsx", import.meta.url), "utf8");
 const crm = await readFile(new URL("../lib/crmPro.ts", import.meta.url), "utf8");
+const actions = await readFile(new URL("../components/crm/FollowUpActions.tsx", import.meta.url), "utf8");
 const navigation = await readFile(new URL("../components/navigation.ts", import.meta.url), "utf8");
 
 test("follow-up centre surfaces every requested reason from live cloud collections", () => {
@@ -21,10 +22,11 @@ test("AI contact recommendations explain their ranking signals", () => {
 });
 
 test("follow-up actions are mobile friendly and write back to CRM history", () => {
-  assert.match(followUps, /Mark contacted and log/);
-  assert.match(followUps, /interactions\.setItems/);
-  assert.match(followUps, /leadActivities\.setItems/);
-  assert.match(followUps, /nextFollowUpDate/);
+  assert.match(followUps, /Log contact/);
+  assert.match(actions, /store\.createItem/);
+  assert.match(actions, /current\.leads\.updateItem/);
+  assert.match(actions, /nextFollowUpDate/);
+  assert.doesNotMatch(actions + followUps, /\.setItems/);
   assert.match(followUps, /min-h-12/);
   assert.match(followUps, /contactPhoneHref/);
   assert.match(followUps, /sms:/);
@@ -32,10 +34,10 @@ test("follow-up actions are mobile friendly and write back to CRM history", () =
 });
 
 test("future snoozes and completed lost-opportunity contact suppress premature resurfacing", () => {
-  assert.match(crm, /quote\.nextFollowUpDate && quote\.nextFollowUpDate > today/);
+  assert.match(crm, /scheduled && quote\.nextFollowUpDate! > today/);
   assert.match(crm, /!lead\.lostFollowUpCompletedAt/);
-  assert.match(followUps, /lostFollowUpCompletedAt:/);
-  assert.match(followUps, /function postpone/);
+  assert.match(actions, /lostFollowUpCompletedAt:/);
+  assert.match(followUps, /actions\.openPostpone/);
 });
 
 test("follow-up centre is reachable from mobile and desktop workspace navigation", () => {
