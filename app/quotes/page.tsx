@@ -65,6 +65,9 @@ export default function QuotesPage() {
   const [savePackName, setSavePackName] = useState("");
   const [savePackCategory, setSavePackCategory] = useState("Custom");
   const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState<PricingDocumentType | "All">("All");
+  const [statusFilter, setStatusFilter] = useState<PricingDocumentStatus | "All" | "Review">("All");
+  const [visibleLimit, setVisibleLimit] = useState(8);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [pageMessage, setPageMessage] = useState("");
@@ -119,7 +122,19 @@ export default function QuotesPage() {
     ...builders.items.map((item) => [item.id, item.companyName] as const),
   ]), [customers.items, builders.items]);
 
-  const filtered = useMemo(() => documents.items.filter((doc) => `${doc.number} ${doc.title} ${doc.status} ${names.get(doc.customerId ?? "")} ${names.get(doc.builderId ?? "")}`.toLowerCase().includes(search.toLowerCase())), [documents.items, names, search]);
+  const filtered = useMemo(() => {
+    const words = search.trim().toLocaleLowerCase("en-GB").split(/\s+/).filter(Boolean);
+    return documents.items.filter((doc) => {
+      const haystack = [doc.number, doc.title, doc.type, doc.status, doc.siteAddress, names.get(doc.customerId ?? ""), names.get(doc.builderId ?? "")].filter(Boolean).join(" ").toLocaleLowerCase("en-GB");
+      return (typeFilter === "All" || doc.type === typeFilter)
+        && (statusFilter === "All" || (statusFilter === "Review" ? !statuses.includes(doc.status) : doc.status === statusFilter))
+        && words.every((word) => haystack.includes(word));
+    });
+  }, [documents.items, names, search, typeFilter, statusFilter]);
+  const inboxReady = documents.isReady && customers.isReady && builders.isReady;
+  const hasInboxFilters = Boolean(search || typeFilter !== "All" || statusFilter !== "All");
+
+  function clearInboxFilters() { setSearch(""); setTypeFilter("All"); setStatusFilter("All"); setVisibleLimit(8); }
 
   const materialOptions = useMemo(() => {
     const query = materialSearch.trim().toLowerCase();
@@ -496,12 +511,16 @@ export default function QuotesPage() {
     <PageHeader eyebrow="Sales" title="Quotes & Estimates" description="Build professional pricing documents with live material costs, margins and reusable job packs." action={<Button onClick={() => showForm ? reset() : startNewDocument()}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New document"}</Button>} />
     {pageMessage ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{pageMessage}</div> : null}
 
-    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+    <details className="rounded-2xl border border-slate-800 bg-slate-900/30">
+      <summary className="min-h-12 cursor-pointer px-4 py-3 font-semibold text-slate-200">Quote overview</summary>
+      <p className="px-4 pb-3 text-sm text-slate-400">Across all loaded quotes. The inbox filters below do not change these figures.</p>
+      <section className="grid gap-3 p-3 pt-0 sm:grid-cols-2 xl:grid-cols-4">
       <Card><FileText className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Open quote pipeline</p><p className="mt-2 text-2xl font-bold">{money.format(dashboard.pipelineValue)}</p></Card>
       <Card><TrendingUp className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Expected quote profit</p><p className="mt-2 text-2xl font-bold text-emerald-300">{money.format(dashboard.expectedProfit)}</p></Card>
       <Card><BriefcaseBusiness className="size-5 text-violet-300" /><p className="mt-3 text-sm text-slate-400">Accepted quotes</p><p className="mt-2 text-2xl font-bold">{dashboard.accepted}</p></Card>
       <Card><Clock3 className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Drafts to finish</p><p className="mt-2 text-2xl font-bold">{dashboard.drafts}</p></Card>
-    </section>
+      </section>
+    </details>
 
     {showForm ? <Card><form id="quote-builder-form" onSubmit={submit} className="space-y-6">
       <div className="flex items-center justify-between gap-4"><div><h2 className="text-lg font-bold">{editingId ? "Edit pricing document" : "Create pricing document"}</h2><p className="text-sm text-slate-500">Use current library prices, then tailor every line to the actual job.</p></div>{editingId ? <Button type="button" variant="secondary" onClick={reset}>Cancel edit</Button> : null}</div>
@@ -609,7 +628,26 @@ export default function QuotesPage() {
       </MobileActionDock>
     </> : null}
 
-    <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search documents" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
-    {!documents.isReady ? <Card>Loading documents…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<FileText className="size-6" />} title={documents.items.length ? "No matching documents" : "No quotes or estimates yet"} description={documents.items.length ? "Try a different search." : "Create your first pricing document and link it to a customer, builder or job."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((doc) => <Card key={doc.id}><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{doc.type} · {doc.number}</p><h2 className="mt-1 text-lg font-bold">{doc.title}</h2><p className="text-sm text-slate-500">{names.get(doc.customerId ?? "") || names.get(doc.builderId ?? "") || "Unassigned"}</p></div><div className="flex items-center"><Link href={`/quotes/${doc.id}`} aria-label={`View ${doc.number}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Eye className="size-4" /></Link><button onClick={() => startEdit(doc)} aria-label={`Edit ${doc.number}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Pencil className="size-4" /></button><button onClick={() => deleteDocument(doc)} aria-label={`Delete ${doc.number}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button></div></div><div className="mt-5 grid gap-3 border-t border-slate-800 pt-4"><label className="grid gap-2 text-xs text-slate-500"><span>Document status</span><select value={doc.status} onChange={(e) => updateStatus(doc.id, e.target.value as PricingDocumentStatus)} className="min-h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200">{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>{doc.jobId ? <Link href={`/jobs/${doc.jobId}`} className="flex min-h-10 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20"><BriefcaseBusiness className="mr-2 size-4" />View linked job</Link> : doc.status === "Accepted" ? <Button type="button" onClick={() => convertToJob(doc)}><BriefcaseBusiness className="mr-2 size-4" />Create live job</Button> : null}<div className="flex items-end justify-between"><div className="text-xs text-slate-500">{doc.items.length} line{doc.items.length === 1 ? "" : "s"}</div><strong className="text-lg">{money.format(total(doc))}</strong></div></div></Card>)}</section>}
+    <section aria-label="Find quotes and estimates" className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-bold">Saved quotes and estimates</h2>{!showForm ? <Link href="/quotes/mobile" className="inline-flex min-h-12 items-center rounded-xl border border-cyan-500/30 px-3 text-sm font-semibold text-cyan-200">Quick fixed-price quote</Link> : null}</div>
+      <label className="block text-sm font-semibold">Find a quote or estimate<span className="relative mt-2 block"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input type="search" value={search} maxLength={160} autoComplete="off" autoCapitalize="none" spellCheck={false} enterKeyHint="search" onChange={(event) => { setSearch(event.target.value); setVisibleLimit(8); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} placeholder="Number, title, customer or site address…" className="min-h-12 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-base outline-none focus:border-cyan-400" /></span></label>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="grid gap-2 text-sm font-semibold">Document type filter<select value={typeFilter} onChange={(event) => { setTypeFilter(event.target.value as typeof typeFilter); setVisibleLimit(8); }} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="All">Quotes and estimates</option><option value="Quote">Quotes</option><option value="Estimate">Estimates</option></select></label>
+        <label className="grid gap-2 text-sm font-semibold">Saved status filter<select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value as typeof statusFilter); setVisibleLimit(8); }} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="All">All saved statuses</option>{statuses.map((status) => <option key={status}>{status}</option>)}<option value="Review">Needs status review</option></select></label>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-sm text-slate-400">{inboxReady ? `Showing ${Math.min(visibleLimit, filtered.length)} of ${filtered.length} matching saved documents.` : "Loading documents and customer names…"} Status filters use the saved status, not a calculated expiry date.</p>{hasInboxFilters ? <button type="button" onClick={clearInboxFilters} className="min-h-12 rounded-xl border border-slate-700 px-4 text-sm font-semibold text-cyan-200">Clear filters</button> : null}</div>
+    </section>
+    {!inboxReady ? <Card>Loading documents…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<FileText className="size-6" />} title={documents.items.length ? "No matching documents" : "No quotes or estimates yet"} description={documents.items.length ? "Try another search or clear the filters." : "Create your first pricing document and link it to a customer, builder or job."} /> : <section aria-label="Saved pricing documents" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.slice(0, visibleLimit).map((doc) => <Card key={doc.id} className="min-w-0 break-words">
+      <div className="flex flex-col items-start justify-between gap-3 sm:flex-row"><div className="min-w-0"><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{doc.type} · {doc.number}</p><h2 className="mt-1 text-lg font-bold">{doc.title}</h2><p className="text-sm text-slate-500">{names.get(doc.customerId ?? "") || names.get(doc.builderId ?? "") || "Unassigned"}</p>{doc.siteAddress ? <p className="mt-1 text-sm text-slate-400">{doc.siteAddress}</p> : null}</div><div className="flex shrink-0 items-center gap-1">
+        <Link href={`/quotes/${encodeURIComponent(doc.id)}`} aria-label={`View ${doc.number}`} className="grid min-h-12 min-w-12 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-cyan-300"><Eye className="size-4" /></Link>
+        <button type="button" onClick={() => startEdit(doc)} aria-label={`Edit ${doc.number}`} className="grid min-h-12 min-w-12 place-items-center rounded-lg text-slate-400 hover:bg-slate-800 hover:text-cyan-300"><Pencil className="size-4" /></button>
+        <button type="button" onClick={() => deleteDocument(doc)} aria-label={`Delete ${doc.number}`} className="grid min-h-12 min-w-12 place-items-center rounded-lg text-slate-400 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button>
+      </div></div>
+      <div className="mt-5 grid gap-3 border-t border-slate-800 pt-4"><label className="grid gap-2 text-xs text-slate-400"><span>Document status</span><select value={doc.status} onChange={(event) => updateStatus(doc.id, event.target.value as PricingDocumentStatus)} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base text-slate-200">{!statuses.includes(doc.status) ? <option value={doc.status}>{doc.status || "Not recorded"} · needs review</option> : null}{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
+        {doc.jobId ? <Link href={`/jobs/${encodeURIComponent(doc.jobId)}`} className="flex min-h-12 items-center justify-center rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3 text-sm font-semibold text-emerald-300 hover:bg-emerald-500/20"><BriefcaseBusiness className="mr-2 size-4" />View linked job</Link> : doc.status === "Accepted" ? <Button type="button" className="min-h-12" onClick={() => convertToJob(doc)}><BriefcaseBusiness className="mr-2 size-4" />Create live job</Button> : null}
+        <div className="flex flex-wrap items-end justify-between gap-2"><div className="text-xs text-slate-500">{doc.items.length} line{doc.items.length === 1 ? "" : "s"}</div><strong className="text-lg">{money.format(total(doc))}</strong></div>
+      </div>
+    </Card>)}</section>}
+    {inboxReady && filtered.length > visibleLimit ? <button type="button" onClick={() => setVisibleLimit((current) => current + 8)} className="min-h-12 w-full rounded-xl border border-slate-700 px-3 text-sm font-semibold">Show more documents ({filtered.length - visibleLimit} remaining)</button> : null}
   </div>;
 }
