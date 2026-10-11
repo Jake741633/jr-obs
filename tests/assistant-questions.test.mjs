@@ -22,8 +22,8 @@ const purchaseLink = compile("../lib/purchaseListLink.ts", {}, false, { URLSearc
 const assistantIdentity = compile("../lib/assistantIdentity.ts");
 const assistantMoney = compile("../lib/assistantMoney.ts", { "./invoiceLink": invoiceLink, "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });
 const assistantMaterials = compile("../lib/assistantMaterials.ts", { "./purchaseListLink": purchaseLink, "./assistantIdentity": assistantIdentity });
-const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
-const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
+const taskInbox = compile("../lib/taskInbox.ts", { "./assistantIdentity": assistantIdentity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
+const assistantTasks = compile("../lib/assistantTasks.ts", { "./assistantIdentity": assistantIdentity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
 const briefing = compile("../lib/assistantBriefing.ts", { "./assistantMoney": assistantMoney, "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
 const questions = compile("../lib/assistantQuestions.ts", { "./assistantMoney": assistantMoney, "./assistantIdentity": assistantIdentity, "./assistantMaterials": assistantMaterials, "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
@@ -35,6 +35,30 @@ const invoice = (patch = {}) => ({ id: "i1", number: "INV-1", title: "Lighting",
 const siteTask = (patch = {}) => ({ id: "t1", jobId: "j1", type: "Task", title: "Fit labels", status: "Open", priority: "Normal", category: "General", dueDate: "", ...patch });
 const answer = (question, data = {}, date = now) => questions.answerAssistantQuestion(records(data), question, date);
 const answerFor = (question, data, id) => questions.answerAssistantQuestion(records(data), question, now, undefined, id);
+
+test("task and job answers withhold ambiguous counts using all loaded task identities", () => {
+  const data = { jobs: [job(), job({ id: "other", title: "Other site" })], tasks: [siteTask({ type: "Snag", priority: "Urgent" }), siteTask({ jobId: "other", title: "Other job copy details", status: "Completed" }), siteTask({ id: "valid", title: "Known open work" })] };
+  for (const query of ["Show open tasks", "Show open snags", "Show job briefing"]) {
+    const result = answerFor(query, data, "j1");
+    assert.match(result.summary, /1 task identity review.*count incomplete/);
+    assert.match(result.summary, query.includes("snags") ? /0 open items/ : query.includes("briefing") ? /1 open task or snag/ : /1 open item/);
+    assert.match(result.warnings.join(" "), /excluded from the open-work count/);
+    assert.equal(result.items.filter(i => i.id.startsWith("task-source:")).length, 1);
+    assert.ok(!result.items.some(i => i.id === "task:t1"));
+    assert.doesNotMatch(JSON.stringify(result), /Other job copy details|Other site/);
+  }
+  const all = answer("Show open tasks", data); assert.match(all.summary, /1 open item.*count incomplete/);
+  assert.match(JSON.stringify(all.items), /Other job copy details/);
+});
+
+test("job task source reviews preserve role destinations and refresh after conflicts are resolved", () => {
+  const data = records({ jobs: [job()], tasks: [siteTask(), siteTask({ status: "Completed" })] });
+  const restricted = questions.answerAssistantQuestion(data, "Show job briefing", now, undefined, "j1", false);
+  const item = restricted.items.find(i => i.id.startsWith("task-source:")); assert.equal(item.href, "/jobs/j1"); assert.match(item.detail, /owner or admin/);
+  assert.ok(restricted.items.every(i => !i.href.startsWith("/job-tasks")));
+  const recovered = answerFor("Show open tasks", { ...data, tasks: [siteTask()] }, "j1");
+  assert.match(recovered.summary, /1 open item/); assert.equal(recovered.warnings.length, 0); assert.equal(recovered.items[0].href, "/job-tasks?job=j1&task=t1");
+});
 
 test("question matching accepts normal phrasing and punctuation, and rejects ambiguous scopes or commands", () => {
   for (const [query, intent] of [["What's booked tomorrow?", "tomorrow"], ["Please show my diary next seven days!", "week"], ["Can you tell me how much is overdue?", "overdue"], ["Who owes me money?", "unpaid"], ["Show quote follow-ups", "quotes"], ["Am I ready for site?", "site"], ["What should I do next?", "priorities"]]) assert.equal(questions.assistantQuestionIntent(query), intent, query);

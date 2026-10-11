@@ -3,7 +3,7 @@ import { assistantDateKey, assistantDay, assistantQuoteFollowUpDue } from "./ass
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import { assistantMoneyAnswer } from "./assistantMoney";
 import { entryEndDate } from "./scheduling";
-import { assistantTaskActions } from "./assistantTasks";
+import { assistantTaskSnapshot } from "./assistantTasks";
 import { assistantVisitActions } from "./assistantVisits";
 import { assistantMaterialsAnswer } from "./assistantMaterials";
 import { assistantJobIdentityIndex } from "./assistantIdentity";
@@ -98,15 +98,17 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
     if (intent === "job" && selectedJob) {
       const jobId = selectedJob.id;
       const priorityRank = { Now: 0, Today: 1, Next: 2 };
-      const actions = [...(briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => action.jobIds?.includes(jobId) && !action.id.startsWith("invoice-source:") && !action.id.startsWith("invoice-payment-review:")),
+      const taskSnapshot = assistantTaskSnapshot(records.tasks || [], records.jobs, now, { onlyAttention: false, canOpenTaskWorkspace, jobId });
+      const taskPriorities = assistantTaskSnapshot(records.tasks || [], records.jobs, now, { canOpenTaskWorkspace, jobId });
+      const actions = [...(briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => action.category !== "Tasks" && action.jobIds?.includes(jobId) && !action.id.startsWith("invoice-source:") && !action.id.startsWith("invoice-payment-review:")), ...taskPriorities.actions,
         ...assistantVisitActions([selectedJob], records.planner, today)].toSorted((a, b) => priorityRank[a.priority] - priorityRank[b.priority] || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.id.localeCompare(b.id));
       // Keep global identities for validation, but never include another job's copies as evidence.
       const unpaid = assistantMoneyAnswer(records, "unpaid", now, jobId);
-      const openTasks = assistantTaskActions((records.tasks || []).filter((task) => task.jobId === jobId), records.jobs, now, false, canOpenTaskWorkspace);
+      const openTasks = taskSnapshot.actions;
       const activeVisits = records.planner.filter((visit) => visit.jobId === jobId && ["Planned", "Confirmed"].includes(visit.status));
       const validVisits = activeVisits.filter((visit) => assistantDay(visit.date) !== null && assistantDay(entryEndDate(visit)) !== null && visit.date <= entryEndDate(visit));
       const visits = validVisits.filter((visit) => entryEndDate(visit) >= today).toSorted((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime) || a.id.localeCompare(b.id));
-      const warnings = [...unpaid.warnings];
+      const warnings = [...unpaid.warnings, ...taskSnapshot.warnings];
       if (records.tasks === undefined) warnings.push("Task records are not ready for this briefing; their absence does not mean no work remains.");
       if (activeVisits.length !== validVisits.length) warnings.push(`${plural(activeVisits.length - validVisits.length, "linked visit")} with invalid or reversed dates excluded. Review the job and diary.`);
       const context: AssistantAnswerItem = { id: `job:${jobId}`, title: selectedJob.title, detail: `Job status: ${selectedJob.status} · ${selectedJob.siteAddress || "Address not recorded"}`,
@@ -118,7 +120,7 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
       // Keep ranked checks first; add all unpaid invoices and future/undated tasks once.
       for (const item of [...actions.map(actionItem), context, ...unpaid.items, ...visitItems, ...openTasks.map(actionItem)]) if (!items.has(item.id)) items.set(item.id, item);
       return { recognized: true, title: `Job briefing · ${selectedJob.title}`, resolvedJobId: jobId,
-        summary: `${plural(actions.length, "priority check")} · ${records.tasks === undefined ? "Task records not ready" : plural(openTasks.length, "open task or snag", "open tasks and snags")} · ${plural(visits.length, "upcoming or ongoing visit")} in the loaded records.`,
+        summary: `${plural(actions.length, "priority check")} · ${records.tasks === undefined ? "Task records not ready" : plural(taskSnapshot.openCount, "open task or snag", "open tasks and snags")}${taskSnapshot.reviewCount ? ` · ${plural(taskSnapshot.reviewCount, "task identity review")}; open-work count incomplete` : ""} · ${plural(visits.length, "upcoming or ongoing visit")} in the loaded records.`,
         scope: `Only records explicitly linked to ${selectedJob.title} · ${selectedJob.siteAddress || "Address not recorded"} · Job status: ${selectedJob.status}. Diary clash checks retain the other affected visit. Priorities check site visits through ${dateAt(day + 6)}; later bookings and future or undated tasks are also listed. Billing includes loaded unpaid invoices after recorded payments. This is not a site inspection, confirmation of electrical compliance, or clearance to travel.`, warnings, items: [...items.values()] };
     }
     if (intent === "visits") {
@@ -127,9 +129,8 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
         summary: `${plural(actions.length, "job")} with missing or uncertain work bookings in the loaded records.`,
         scope: `${selectedJob ? `Only ${selectedJob.title} · ${selectedJob.siteAddress || "Address not recorded"} · Job status: ${selectedJob.status}. ` : "All loaded jobs. "}Accepted, awaiting-deposit, scheduled and on-site work only; enquiries, unaccepted quotes, closed and held jobs are excluded. Planned/confirmed Job visits ending on or after ${today} count, including distant future bookings. Surveys, deliveries and history do not book the next work visit. Review uncertain dates or statuses before creating another visit. This does not confirm availability, payment, access or site readiness.`, warnings: [], items: actions.map(actionItem), ...(selectedJob ? { resolvedJobId: selectedJob.id } : {}) };
     }
-    const tasks = (records.tasks || []).filter((task) => (!selectedJob || task.jobId === selectedJob.id) && (intent !== "snags" || task.type === "Snag"));
-    const actions = assistantTaskActions(tasks, records.jobs, now, false, canOpenTaskWorkspace);
-    return { recognized: true, title: `${intent === "snags" ? "Open snags" : "Open tasks and snags"}${selectedJob ? ` · ${selectedJob.title}` : ""}`, summary: records.tasks === undefined ? "Task records are not ready for this answer." : `${plural(actions.length, "open item")} in the loaded records.`, scope: `${selectedJob ? `Only ${selectedJob.title} · ${selectedJob.siteAddress || "Address not recorded"} · Job status: ${selectedJob.status}. ` : "All loaded jobs. "}Includes future and undated work. Saved urgency, Safety category and past due dates come first. Completed and customer-confirmed items are excluded. These are recorded tasks, not a site inspection or safety assessment.`, warnings: records.tasks === undefined ? ["Task records have not been supplied. Open Tasks & Snagging to review them."] : [], items: actions.map(actionItem), ...(selectedJob ? { resolvedJobId: selectedJob.id } : {}) };
+    const snapshot = assistantTaskSnapshot(records.tasks || [], records.jobs, now, { onlyAttention: false, canOpenTaskWorkspace, jobId: selectedJob?.id, snagsOnly: intent === "snags" });
+    return { recognized: true, title: `${intent === "snags" ? "Open snags" : "Open tasks and snags"}${selectedJob ? ` · ${selectedJob.title}` : ""}`, summary: records.tasks === undefined ? "Task records are not ready for this answer." : `${plural(snapshot.openCount, "open item")} in the loaded records.${snapshot.reviewCount ? ` ${plural(snapshot.reviewCount, "task identity review")}; open-work count incomplete.` : ""}`, scope: `${selectedJob ? `Only ${selectedJob.title} · ${selectedJob.siteAddress || "Address not recorded"} · Job status: ${selectedJob.status}. ` : "All loaded jobs. "}Includes future and undated work. Saved urgency, Safety category and past due dates come first. Completed and customer-confirmed items are excluded from open-work counts; conflicting copies may appear in source review. These are recorded tasks, not a site inspection or safety assessment.`, warnings: [...snapshot.warnings, ...(records.tasks === undefined ? ["Task records have not been supplied. Open Tasks & Snagging to review them."] : [])], items: snapshot.actions.map(actionItem), ...(selectedJob ? { resolvedJobId: selectedJob.id } : {}) };
   }
 
   if (["today", "tomorrow", "week"].includes(intent)) {

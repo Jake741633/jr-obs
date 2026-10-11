@@ -1,6 +1,7 @@
 import type { Job, JobTask } from "./models";
 import { isOutstandingJobTask, sortJobTasks } from "./jobTasks-core.mjs";
 import { assistantDateKey, assistantDay } from "./assistantSignals-core.mjs";
+import { savedIdentityIndex, hasSavedIdentity } from "./assistantIdentity";
 
 export const taskInboxFilters = ["Open", "Due", "Snags", "Completed", "All"] as const;
 export type TaskInboxFilter = typeof taskInboxFilters[number];
@@ -17,7 +18,7 @@ export function taskMatchesInboxFilter(task: JobTask, filter: TaskInboxFilter, t
 }
 
 export function filterTaskInbox(tasks: JobTask[], jobs: Job[], options: { jobId: string; filter: TaskInboxFilter; query: string; today: string }) {
-  const jobById = new Map(jobs.map((job) => [job.id, job]));
+  const jobById = savedIdentityIndex(jobs).unique;
   const words = options.query.toLocaleLowerCase("en-GB").trim().split(/\s+/).filter(Boolean);
   return sortJobTasks(tasks.filter((task) => {
     const job = jobById.get(task.jobId);
@@ -31,9 +32,22 @@ export function resolveTaskInboxLink(tasks: JobTask[], jobs: Job[], search: stri
   const params = new URLSearchParams(search);
   const taskId = params.get("task") || "";
   const jobId = params.get("job") || "";
-  const task = tasks.find((item) => item.id === taskId);
-  const missing = Boolean(taskId ? !task || (jobId && task.jobId !== jobId) : jobId && !jobs.some((job) => job.id === jobId));
-  return { taskId: missing ? "" : taskId, jobId: missing ? "" : jobs.some((job) => job.id === (task?.jobId || jobId)) ? task?.jobId || jobId : "", missing };
+  const invalid = ["task", "job"].some((key) => params.has(key) && (params.getAll(key).length !== 1 || !taskLinkIdentity(params.get(key))));
+  if (invalid) return { taskId: "", jobId: "", missing: true };
+  const task = savedIdentityIndex(tasks).unique.get(taskId);
+  const jobIndex = savedIdentityIndex(jobs);
+  // A uniquely identified orphan task can still be reviewed. Never choose a job copy.
+  const missing = Boolean(taskId ? !task || (jobId && task.jobId !== jobId) : jobId && !jobIndex.unique.has(jobId));
+  return { taskId, jobId: jobId || (task && jobIndex.unique.has(task.jobId) ? task.jobId : ""), missing };
+}
+
+export function taskLinkIdentity(id: unknown): id is string {
+  return hasSavedIdentity(id) && id.length <= 300;
+}
+
+export function taskReviewHref(task: JobTask) {
+  if (!taskLinkIdentity(task.id)) return "/job-tasks";
+  return `/job-tasks?${taskLinkIdentity(task.jobId) ? `job=${encodeURIComponent(task.jobId)}&` : ""}task=${encodeURIComponent(task.id)}`;
 }
 
 export function taskReviewSignal(task: JobTask, now: Date) {
