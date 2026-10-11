@@ -1,40 +1,10 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
-import ts from "typescript";
 import * as contactLinks from "../lib/contactLinks.ts";
+import { harness as customerHarness, nodes, text, customer } from "./helpers/customer-page-harness.mjs";
 
-const jsx = (type, props) => ({ type, props });
-const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
-const text = tree => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
-const customer = (patch = {}) => ({ id: "customer-1", name: "Example customer", phone: "07700 900123", email: "customer@example.test", address: "1 High Street", notes: "Private note", ...patch });
+const harness = initial => customerHarness(initial, true);
 const cards = view => nodes(nodes(view).find(n => n.props["aria-label"] === "Customer records")).filter(n => n.type === "Card");
-
-function harness(initial = []) {
-  const slots = []; let cursor = 0, blurred = 0;
-  const data = { customers: initial, jobs: [], ready: true, jobsReady: true };
-  const failWrite = () => { throw new Error("Browsing, typing and contact links must not write records or create identities"); };
-  const dependencies = {
-    "react/jsx-runtime": { jsx, jsxs: jsx },
-    react: { useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; }, useMemo: fn => fn() },
-    "next/link": { default: "Link" }, "lucide-react": {},
-    "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/crm/EntityEmptyState": { EntityEmptyState: "Empty" },
-    "../../lib/cloud/coreBusinessCollections": { useCustomersCollection: () => ({ items: data.customers, isReady: data.ready, setItems: failWrite, remove: failWrite }) },
-    "../../lib/storage": { makeId: failWrite, useCloudLocalCollection: () => ({ items: data.jobs, isReady: data.jobsReady }) }, "../../lib/contactLinks": contactLinks,
-  };
-  const mod = { exports: {} };
-  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/customers/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, require(name) { assert.ok(name in dependencies, name); return dependencies[name]; } });
-  const render = () => { cursor = 0; return mod.exports.default(); };
-  const search = () => nodes(render()).find(n => n.type === "input" && n.props.type === "search");
-  return { data, render, blurred: () => blurred,
-    search(value) { search().props.onChange({ target: { value } }); },
-    enter() { search().props.onKeyDown({ key: "Enter", preventDefault() {}, currentTarget: { blur() { blurred++; } } }); },
-    click(label) { const control = nodes(render()).find(n => n.type === "button" && text(n).startsWith(label)); assert.ok(control, label); control.props.onClick(); },
-    openForm() { nodes(render()).find(n => n.type === "PageHeader").props.action.props.onClick(); },
-    field(label, value) { nodes(render()).find(n => n.type === "InputField" && n.props.label === label).props.onChange({ target: { value } }); },
-  };
-}
 
 test("phone customers reveal eight at a time and retain an open draft through search and clear", () => {
   const h = harness(Array.from({ length: 19 }, (_, i) => customer({ id: `c${i}`, name: `Customer ${i}` })));

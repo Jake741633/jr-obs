@@ -49,8 +49,48 @@ phone keyboard, long contact details wrap, and the page leaves room for bottom
 navigation. Call and Email open the user's phone/mail app with the saved contact;
 they do not log an interaction, send a message or add a subject/body. Unsupported
 formats remain visible for review instead of creating an uncertain dialing or
-recipient link. These browsing changes retain the existing CRM write/access
-behavior. Signed-in physical-phone acceptance remains pending.
+recipient link. Signed-in physical-phone acceptance remains pending.
+
+Customer creation and edits now use the durable collection methods before
+closing the form. Failed saves retain editable details, with the same new-record
+identity and creation time on retry. Older form callbacks and repeated successful
+taps cannot save another copy or overwrite a newer draft. A changed name,
+contact, address, note or creation identity requires explicit Use saved values
+review; unrelated current metadata is preserved. Closing or leaving still loses
+unsaved changes, and the form explains this. Success confirms the device save and
+asks the user to check sync before switching devices.
+
+Owner/admin deletion waits for loaded customer and linked-job records, checks
+the exact unique saved customer and rejects an open edit for that customer.
+It rechecks account permissions, current details and loaded job links after
+confirmation; failed deletion leaves the customer visible. Office users can
+create and edit, while cloud field/customer or unresolved identities cannot
+write from this inbox. Local mode keeps its existing local workspace behavior.
+These are client workflow guards using existing persistence and access rules;
+they do not make customer/job changes into one atomic transaction.
+
+## Customer profiles
+
+Customer profiles provide 48px section shortcuts for jobs, quotes/estimates,
+invoices and history. Relationship metrics stay available in a native disclosure.
+Linked record groups start with four cards each and reveal four more per tap;
+their headings retain the full loaded counts. Job cards offer a direct JR AI
+briefing for the exact saved identity. Job, quote and invoice review links encode
+that identity. The page leaves room for both the contact dock and app navigation.
+
+History starts with eight activities, supports type and multiword searches across
+the visible activity labels, descriptions and status, and reveals eight more per
+tap. Changing or clearing filters resets history paging; Enter dismisses the
+search keyboard. Switching customer routes starts with that customer's default
+browsing controls. Filters and progressive browsing do not change saved records.
+
+The profile requires one exact nonblank customer identity before showing contact
+actions or CRM records; missing and duplicate identities need review. Call, Text
+and Email use the same validated contact targets as the inbox. Unsupported saved
+formats stay visible with review prompts, and the review-request composer cannot
+use an unsupported recipient. Profile completion/review logging and financial
+calculations otherwise retain their existing workflows. Deterministic fixtures
+cover populated browsing; signed-in physical-phone acceptance remains pending.
 
 ## Jobs inbox
 

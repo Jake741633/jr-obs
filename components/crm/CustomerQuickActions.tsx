@@ -13,6 +13,7 @@ import {
   Star,
 } from "lucide-react";
 import type { Customer, Job } from "../../lib/models";
+import { contactEmailHref, contactPhoneHref } from "../../lib/contactLinks";
 
 interface QuickActionProps {
   label: string;
@@ -46,19 +47,21 @@ export function CustomerQuickActions({
 }) {
   const query = `customerId=${encodeURIComponent(customer.id)}&action=create`;
   const mapAddress = encodeURIComponent(customer.address);
+  const phoneHref = contactPhoneHref(customer.phone);
+  const emailHref = contactEmailHref(customer.email);
 
   return <section aria-label="Customer quick actions" className="mobile-safe-inline fixed inset-x-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-30 px-2 lg:static lg:px-0">
     <div className="mx-auto flex max-w-2xl gap-1 overflow-x-auto rounded-2xl border border-slate-700/80 bg-slate-950/95 p-2 shadow-2xl shadow-black/40 backdrop-blur [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:max-w-none lg:grid-cols-5 lg:gap-2 lg:border-slate-800 lg:bg-slate-900/80 lg:shadow-none">
-      <QuickAction label="Call" icon={<Phone className="size-5 text-cyan-300" />} href={customer.phone ? `tel:${customer.phone}` : undefined} disabled={!customer.phone} />
-      <QuickAction label="Text" icon={<MessageSquareText className="size-5 text-cyan-300" />} href={customer.phone ? `sms:${customer.phone}` : undefined} disabled={!customer.phone} />
-      <QuickAction label="Email" icon={<Mail className="size-5 text-cyan-300" />} href={customer.email ? `mailto:${customer.email}` : undefined} disabled={!customer.email} />
+      <QuickAction label="Call" icon={<Phone className="size-5 text-cyan-300" />} href={phoneHref ?? undefined} disabled={!phoneHref} />
+      <QuickAction label="Text" icon={<MessageSquareText className="size-5 text-cyan-300" />} href={phoneHref?.replace("tel:", "sms:")} disabled={!phoneHref} />
+      <QuickAction label="Email" icon={<Mail className="size-5 text-cyan-300" />} href={emailHref ?? undefined} disabled={!emailHref} />
       <QuickAction label="Navigate" icon={<MapPinned className="size-5 text-cyan-300" />} href={customer.address ? `https://www.google.com/maps/search/?api=1&query=${mapAddress}` : undefined} disabled={!customer.address} />
       <QuickAction label="Invoice" icon={<ReceiptText className="size-5 text-emerald-300" />} href={`/invoices?${query}`} />
       <QuickAction label="Quote" icon={<FilePlus2 className="size-5 text-violet-300" />} href={`/quotes?${query}`} />
       <QuickAction label="Book survey" icon={<ClipboardCheck className="size-5 text-amber-300" />} href={`/planner?${query}&type=Survey`} />
       <QuickAction label="Book work" icon={<CalendarPlus className="size-5 text-amber-300" />} href={`/planner?${query}&type=Job${activeJob ? `&jobId=${encodeURIComponent(activeJob.id)}` : ""}`} />
       <QuickAction label="Complete" icon={<CheckCircle2 className="size-5 text-emerald-300" />} onClick={onMarkComplete} disabled={!activeJob} />
-      <QuickAction label="Review" icon={<Star className="size-5 text-yellow-300" />} onClick={onRequestReview} disabled={!customer.phone && !customer.email} />
+      <QuickAction label="Review" icon={<Star className="size-5 text-yellow-300" />} onClick={onRequestReview} disabled={!phoneHref && !emailHref} />
     </div>
   </section>;
 }
