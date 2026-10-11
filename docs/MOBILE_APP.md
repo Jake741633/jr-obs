@@ -15,6 +15,54 @@ accounts clears the submitted password and hides it again. A verified account
 can open its role-appropriate workspace directly. Cloud configuration and data
 migration tools remain available in a collapsed section below installation help.
 
+## Phone contacts and job evidence
+
+Customers includes **Import phone contacts** for owner/admin/office roles and local
+mode. Direct selection is capability-detected and requests only supported name,
+phone, email and address fields after a tap. The file route accepts UTF-8 vCard
+3.0/4.0 files up to 2 MB and 500 contacts. On iPhone: Contacts → Lists → touch and
+hold a list → Export → save the contact file to Files, then select it in JR OS.
+Exporting without contact photos keeps files small. Personal notes, contact
+photos, URLs and other unrequested properties are not imported.
+
+Nothing is saved on selection. Review cards show eight contacts at a time with
+search, additional phone/email/address choices and editable details. Select
+contacts without matches selects complete entries that match neither saved
+customers nor another imported entry. Manual selection is also available. Names,
+normalised phone numbers and case-insensitive emails flag possible duplicates;
+an explicit separate-customer choice is required for an existing match. No
+existing record is updated or merged. Partial failures retain unsaved choices and
+stable IDs, while completed records are not added again. Async contact reads and
+stale save callbacks are rejected after scope/readiness changes or unmount.
+Imported addresses remain customer contact addresses, not confirmed job sites.
+
+Job records include **Add job photos or a video link**. Camera and photo-library
+controls are separate. JPEG, PNG, WebP and browser-decodable HEIC/HEIF inputs up to
+25 MB become JPEG copies with a maximum 1600-pixel edge and 1.5 MB size. The original
+remains on the phone; fine-detail evidence should retain that original. Unsupported
+decoding produces an actionable error. The existing private-file queue is persisted
+before a cloud-mode photo is reported saved on the device. A partial metadata/photo
+save retains the prepared photo and retries its queue entry using the same record;
+it does not duplicate metadata. Account/job/permission and ambiguous-identity
+guards apply after asynchronous preparation. Local mode saves the photo directly.
+
+Video support in this batch means a validated HTTPS link to a video the user
+already stores elsewhere, with manually entered site notes or spoken details.
+These notes are labelled as user-entered. Direct video-file upload, automatic
+transcription, visual analysis and media-generated quote drafts are **not yet
+implemented or enabled**. Large video files need a separate durable binary-upload
+path; the existing private-file queue uses browser localStorage and the deployed
+bucket contract does not allow video MIME types. No bucket, schema, permission,
+credential or external AI service settings change in this batch.
+
+Physical iPhone/Android contact selection, camera orientation/HEIC decoding and
+signed-in media sync remain acceptance checks. Automated coverage exercises
+contact parsing/duplicates, partial saves, role/account changes, queued photo
+persistence, resizing boundaries and exact job linkage.
+
+References: [Chrome contact picker](https://developer.chrome.com/docs/capabilities/web-apis/contact-picker),
+[Apple contact export](https://support.apple.com/en-gb/guide/iphone/iph075ddebf2/ios).
+
 ## Faster everyday actions
 
 JR AI puts Your question before the job selector and shortcut grid, without automatically opening the keyboard. Today, Tomorrow, Job briefing and Materials to order stay immediately visible. More questions reveals the other eight shortcuts, including money, quotes, tasks, snags, next visits and deliveries. How job scope works keeps longer guidance available on demand. Both are native keyboard-accessible disclosures with 48px targets; the visible job selection and ambiguous-identity warnings never hide inside them. Opening help or extra questions does not submit, change scope or clear a typed question/answer. No new storage or account state is introduced.
