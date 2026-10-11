@@ -8,6 +8,7 @@ import * as jobsCore from "../lib/jobManagement-core.mjs";
 import * as taskCore from "../lib/jobTasks-core.mjs";
 import * as payments from "../lib/payments.ts";
 import * as permissions from "../lib/cloud/permissions.ts";
+import * as invoiceLink from "../lib/invoiceLink.ts";
 
 function compile(path, dependencies = {}, jsx = false, globals = {}) {
   const mod = { exports: {} };
@@ -19,7 +20,7 @@ const scheduling = compile("../lib/scheduling.ts");
 const assistantVisits = compile("../lib/assistantVisits.ts", { "./jobManagement-core.mjs": jobsCore, "./scheduling": scheduling });
 const purchaseLink = compile("../lib/purchaseListLink.ts", {}, false, { URLSearchParams });
 const assistantIdentity = compile("../lib/assistantIdentity.ts");
-const assistantMoney = compile("../lib/assistantMoney.ts", { "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });
+const assistantMoney = compile("../lib/assistantMoney.ts", { "./invoiceLink": invoiceLink, "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });
 const assistantMaterials = compile("../lib/assistantMaterials.ts", { "./purchaseListLink": purchaseLink, "./assistantIdentity": assistantIdentity });
 const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
@@ -217,6 +218,12 @@ test("money source reviews are order-independent read-only and office-accessible
   assert.equal(JSON.stringify(data), before);
   for (const item of result.items) assert.equal(permissions.canAccessPath("office", permissions.internalPathForAccess(item.href)), true);
   assert.equal(new Set(result.items.map((item) => item.id)).size, result.items.length);
+});
+
+test("oversized historical invoice identities use the explicitly labelled invoice inbox", () => {
+  const data = records({ invoices: [invoice({ id: "x".repeat(301) })] });
+  const item = answer("How much is overdue?", data).items[0]; assert.equal(item.href, "/invoices"); assert.equal(item.actionLabel, "Review invoice inbox");
+  const action = briefing.buildAssistantBriefing(data, now).actions[0]; assert.equal(action.href, "/invoices"); assert.equal(action.actionLabel, "Review invoice inbox");
 });
 
 test("phone money answers refresh from a balance to review and back without stale claims", () => {

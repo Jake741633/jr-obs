@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { FileText, Plus, Search, Trash2 } from "lucide-react";
 import { InvoicePreview } from "../../components/invoices/InvoicePreview";
 import { Button } from "../../components/ui/Button";
@@ -21,6 +21,7 @@ import {
 import { useInvoicesCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { nextInvoiceNumber } from "../../lib/workflow";
+import { invoiceFromLink } from "../../lib/invoiceLink";
 import type { Builder, BusinessBankDetails, BusinessProfile, Customer, DocumentBrandingSettings, Invoice, InvoiceStatus, Job, JobTimelineEntry, PaymentTermsTemplate, PricingDocument, PricingLineItem, VatSettings } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -52,6 +53,13 @@ export default function InvoicesPage() {
   const [items, setItems] = useState<PricingLineItem[]>([]);
   const [line, setLine] = useState(blankLine);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [invoiceLimit, setInvoiceLimit] = useState(8);
+  const [focusedInvoiceId, setFocusedInvoiceId] = useState("");
+  const [invalidInvoiceLink, setInvalidInvoiceLink] = useState(false);
+  const [linkReady, setLinkReady] = useState(false);
+  const [reviewMessage, setReviewMessage] = useState("");
+  const latestInvoices = useRef({ items: invoices.items, ready: false });
   const [error, setError] = useState("");
   const businessProfile = profileStore.items[0] ?? defaultBusinessProfile;
   const vatSettings = vatStore.items[0] ?? defaultVatSettings;
@@ -59,13 +67,21 @@ export default function InvoicesPage() {
   const branding = brandingStore.items[0] ?? defaultDocumentBranding;
   const ready = invoices.isReady && customers.isReady && builders.isReady && jobs.isReady && quotes.isReady && timeline.isReady
     && profileStore.isReady && vatStore.isReady && bankStore.isReady && brandingStore.isReady && paymentTermsStore.isReady;
+  useLayoutEffect(() => {
+    latestInvoices.current = { items: invoices.items, ready: ready && linkReady };
+    return () => { latestInvoices.current = { items: [], ready: false }; };
+  }, [invoices.items, ready, linkReady]);
 
   useEffect(() => {
     if (deepLinkHandled.current || !ready) return;
     const frame = window.requestAnimationFrame(() => {
       const parameters = new URLSearchParams(window.location.search);
+      const requested = invoiceFromLink(window.location.search);
       const customerId = parameters.get("customerId") || "";
-      if (parameters.get("action") === "create" && customerId) {
+      if (requested) {
+        setFocusedInvoiceId(requested.invoiceId || "");
+        setInvalidInvoiceLink(requested.invoiceId === null);
+      } else if (parameters.get("action") === "create" && customerId) {
         const customer = customers.items.find((item) => item.id === customerId);
         if (customer) {
           const issueDate = new Date().toISOString().slice(0, 10);
@@ -88,12 +104,9 @@ export default function InvoicesPage() {
           setError("");
           setShowForm(true);
         }
-      } else {
-        const invoiceId = parameters.get("invoice") || "";
-        const invoice = invoices.items.find((item) => item.id === invoiceId);
-        if (invoice) setSearch(invoice.number);
       }
       deepLinkHandled.current = true;
+      setLinkReady(true);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [bankDetails, customers.items, invoices.items, paymentTermsStore.items, ready, vatSettings]);
@@ -103,7 +116,15 @@ export default function InvoicesPage() {
     ...builders.items.map((item) => [item.id, item.companyName] as const),
   ]), [customers.items, builders.items]);
 
-  const filtered = useMemo(() => invoices.items.filter((invoice) => `${invoice.number} ${invoice.title} ${invoice.status} ${names.get(invoice.customerId ?? "")} ${names.get(invoice.builderId ?? "")}`.toLowerCase().includes(search.toLowerCase())), [invoices.items, names, search]);
+  const focused = Boolean(focusedInvoiceId || invalidInvoiceLink);
+  const matches = invoices.items.filter((invoice) => invoice.id === focusedInvoiceId);
+  const focusUnavailable = focused && (invalidInvoiceLink || matches.length !== 1);
+  const identityCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const invoice of invoices.items) if (typeof invoice.id === "string" && invoice.id.trim()) counts.set(invoice.id, (counts.get(invoice.id) || 0) + 1);
+    return counts;
+  }, [invoices.items]);
+  const filtered = useMemo(() => !ready || !linkReady || focusUnavailable ? [] : invoices.items.filter((invoice) => focusedInvoiceId ? invoice.id === focusedInvoiceId : (!statusFilter || invoice.status === statusFilter) && `${invoice.number} ${invoice.title} ${invoice.status} ${names.get(invoice.customerId ?? "") || ""} ${names.get(invoice.builderId ?? "") || ""}`.toLowerCase().includes(search.trim().toLowerCase())), [invoices.items, names, search, statusFilter, focusedInvoiceId, focusUnavailable, ready, linkReady]);
   const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
   const vat = form.vatEnabled ? subtotal * Number(form.vatRate || 0) / 100 : 0;
   const total = subtotal + vat;
@@ -187,20 +208,30 @@ export default function InvoicesPage() {
       : [{ id: makeId("timeline"), jobId: invoice.jobId!, milestone, note, completedBy: "JR OS", completedAt: now, createdAt: now }, ...current]);
   }
 
-  function updateStatus(id: string, status: InvoiceStatus) {
-    const invoice = invoices.items.find((item) => item.id === id);
-    if (!invoice) return;
+  function canUpdateInvoice(invoice: Invoice) {
+    const current = latestInvoices.current;
+    const matches = current.items.filter((item) => item.id === invoice.id);
+    if (!current.ready || typeof invoice.id !== "string" || !invoice.id.trim() || matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(invoice)) {
+      setReviewMessage("This invoice is unavailable, has an ambiguous identity or has changed. Review its current saved record before updating it.");
+      return false;
+    }
+    setReviewMessage(""); return true;
+  }
+
+  function updateStatus(invoice: Invoice, status: InvoiceStatus) {
+    if (!statuses.includes(status) || !canUpdateInvoice(invoice)) return;
     const now = new Date().toISOString();
     const paidAmount = status === "Paid" ? invoiceTotal(invoice) : invoice.amountPaid;
-    invoices.setItems((current) => current.map((item) => item.id === id ? { ...item, status, amountPaid: paidAmount, updatedAt: now } : item));
+    invoices.setItems((current) => current.map((item) => item.id === invoice.id ? { ...item, status, amountPaid: paidAmount, updatedAt: now } : item));
     if (status === "Sent") addInvoiceMilestone(invoice, "Invoice sent", `${invoice.number} sent to the customer.`, now);
     if (status === "Paid") addInvoiceMilestone(invoice, "Payment received", `${invoice.number} paid in full.`, now);
   }
 
   function recordPayment(invoice: Invoice) {
+    if (!canUpdateInvoice(invoice)) return;
     const gross = invoiceTotal(invoice);
     const response = window.prompt(`Amount received for ${invoice.number}`, String(invoice.amountPaid || gross));
-    if (response === null) return;
+    if (response === null || !canUpdateInvoice(invoice)) return;
     const amountPaid = Number(response);
     if (!Number.isFinite(amountPaid) || amountPaid < 0 || amountPaid > gross) { window.alert(`Enter an amount between £0.00 and ${money.format(gross)}.`); return; }
     const now = new Date().toISOString();
@@ -209,8 +240,14 @@ export default function InvoicesPage() {
     if (status === "Paid") addInvoiceMilestone(invoice, "Payment received", `${invoice.number} paid in full.`, now);
   }
 
+  function clearInvoiceFilters() { setSearch(""); setStatusFilter(""); setInvoiceLimit(8); }
+
+  if (!ready || !linkReady) return <Card>Loading invoices…</Card>;
+
   return <div className="space-y-6">
-    <PageHeader eyebrow="Finance" title="Invoices" description="Create invoices from accepted quotes or build them manually, then track payment status." action={<Button disabled={!ready} onClick={() => showForm ? reset() : startNewInvoice()}><Plus className="mr-2 size-4" />{showForm ? "Close form" : "New invoice"}</Button>} />
+    <PageHeader eyebrow="Finance" title="Invoices" description="Create invoices from accepted quotes or build them manually, then track payment status." action={<Button className="min-h-12" onClick={() => showForm ? reset() : startNewInvoice()}><Plus className="mr-2 size-4" />{showForm ? "Close form" : "New invoice"}</Button>} />
+    {focused ? <section aria-label="Invoice selection" className="space-y-3 rounded-xl border border-cyan-400/30 p-4"><p role="status" className="break-words text-sm text-cyan-100">{invalidInvoiceLink ? "This invoice link is invalid. Show all invoices to choose a saved record." : focusUnavailable ? "The selected invoice is unavailable or its identity is ambiguous. Other invoices have not been substituted." : `Showing ${filtered[0].number} · ${filtered[0].title}. This is the exact saved invoice, with its current status.`}</p><button type="button" onClick={() => { setFocusedInvoiceId(""); setInvalidInvoiceLink(false); clearInvoiceFilters(); setReviewMessage(""); }} className="min-h-12 rounded-xl border border-slate-700 px-3 text-sm font-semibold">Show all invoices</button></section> : null}
+    {reviewMessage ? <p role="status" className="rounded-xl border border-amber-400/30 p-3 text-sm text-amber-200">{reviewMessage}</p> : null}
 
     {showForm ? <Card><form onSubmit={submit} className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -236,7 +273,27 @@ export default function InvoicesPage() {
       <div className="flex items-end justify-between border-t border-slate-800 pt-5"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Subtotal {money.format(subtotal)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Total {money.format(total)}</p><Button type="submit" className="mt-3">Save invoice</Button></div></div>
     </form></Card> : null}
 
-    <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search invoices" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
-    {!ready ? <Card>Loading invoices…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<FileText className="size-6" />} title={invoices.items.length ? "No matching invoices" : "No invoices yet"} description={invoices.items.length ? "Try a different search." : "Create an invoice manually or import an accepted quote."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((invoice) => { const gross = invoiceTotal(invoice); const outstanding = Math.max(0, gross - invoice.amountPaid); return <Card key={invoice.id}><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{invoice.number}</p><h2 className="mt-1 text-lg font-bold">{invoice.title}</h2><p className="text-sm text-slate-500">{names.get(invoice.customerId ?? "") || names.get(invoice.builderId ?? "") || "Unassigned"}</p><div className="mt-4 grid gap-3 border-t border-slate-800 pt-4"><label className="grid gap-2 text-xs text-slate-500"><span>Status</span><select value={invoice.status} onChange={(e) => updateStatus(invoice.id, e.target.value as InvoiceStatus)} className="min-h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm text-slate-200">{statuses.map((status) => <option key={status}>{status}</option>)}</select></label><div className="flex justify-between text-sm"><span className="text-slate-500">Due {invoice.dueDate ? new Date(`${invoice.dueDate}T12:00:00`).toLocaleDateString("en-GB") : "—"}</span><strong>{money.format(gross)}</strong></div><div className="flex justify-between text-sm"><span className="text-slate-500">Outstanding</span><span className={outstanding > 0 ? "font-semibold text-amber-300" : "font-semibold text-emerald-300"}>{money.format(outstanding)}</span></div>{invoice.status !== "Cancelled" ? <Button type="button" variant="secondary" onClick={() => recordPayment(invoice)}>{invoice.status === "Paid" ? "Update payment" : "Record payment"}</Button> : null}</div></Card>; })}</section>}
+    {!focused ? <section aria-label="Find invoices" className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="grid gap-2 text-sm text-slate-400"><span>Find an invoice</span><span className="relative"><Search aria-hidden="true" className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setInvoiceLimit(8); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} placeholder="Number, title or customer" autoCapitalize="none" spellCheck={false} className="min-h-12 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-base outline-none focus:border-cyan-400" /></span></label>
+        <label className="grid gap-2 text-sm text-slate-400"><span>Invoice status filter</span><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setInvoiceLimit(8); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">All saved statuses</option>{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
+      </div>
+      {search || statusFilter ? <button type="button" onClick={clearInvoiceFilters} className="min-h-12 rounded-xl border border-slate-700 px-4 text-sm font-semibold">Clear invoice filters</button> : null}
+    </section> : null}
+    {filtered.length ? <p role="status" className="text-sm text-slate-400">Showing {Math.min(filtered.length, focused ? 1 : invoiceLimit)} of {filtered.length} {focused ? "selected" : "matching"} invoice{filtered.length === 1 ? "" : "s"}. Balances below use saved invoice paid amounts, not the payment ledger. Check Payments &amp; Cash Flow before acting.</p> : null}
+    {filtered.length === 0 ? <EntityEmptyState icon={<FileText className="size-6" />} title={focused ? "No invoice available for this link" : invoices.items.length ? "No matching invoices" : "No invoices yet"} description={focused ? "Review the selection above or explicitly show all invoices." : invoices.items.length ? "Try a different search or status filter." : "Create an invoice manually or import an accepted quote."} /> : <section aria-label="Invoice records" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.slice(0, focused ? 1 : invoiceLimit).map((invoice, index) => {
+      const gross = invoiceTotal(invoice); const outstanding = Math.max(0, gross - invoice.amountPaid); const ambiguous = identityCounts.get(invoice.id) !== 1;
+      return <Card key={JSON.stringify([invoice.id, index])} className="min-w-0 break-words">
+        <p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{invoice.number}</p><h2 className="mt-1 text-lg font-bold">{invoice.title}</h2><p className="text-sm text-slate-500">{names.get(invoice.customerId ?? "") || names.get(invoice.builderId ?? "") || "Unassigned"}</p>
+        {ambiguous ? <p className="mt-3 text-sm text-amber-200">Invoice identity missing or ambiguous. Updates are blocked until the saved copies are reviewed.</p> : null}
+        <div className="mt-4 grid gap-3 border-t border-slate-800 pt-4">
+          <label className="grid gap-2 text-xs text-slate-500"><span>Status</span><select disabled={ambiguous} value={invoice.status} onChange={(event) => updateStatus(invoice, event.target.value as InvoiceStatus)} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base text-slate-200">{!statuses.includes(invoice.status) ? <option value={invoice.status}>{invoice.status || "Not recorded"} · review</option> : null}{statuses.map((status) => <option key={status}>{status}</option>)}</select></label>
+          <div className="flex justify-between gap-3 text-sm"><span className="text-slate-500">Due {invoice.dueDate ? new Date(`${invoice.dueDate}T12:00:00`).toLocaleDateString("en-GB") : "—"}</span><strong>{money.format(gross)}</strong></div>
+          <div className="flex justify-between gap-3 text-sm"><span className="text-slate-500">Saved invoice balance</span><span className={outstanding > 0 ? "font-semibold text-amber-300" : "font-semibold text-emerald-300"}>{money.format(outstanding)}</span></div>
+          {invoice.status !== "Cancelled" ? <Button type="button" variant="secondary" className="min-h-12" disabled={ambiguous} onClick={() => recordPayment(invoice)}>{invoice.status === "Paid" ? "Update payment" : "Record payment"}</Button> : null}
+        </div>
+      </Card>;
+    })}</section>}
+    {!focused && filtered.length > invoiceLimit ? <button type="button" onClick={() => setInvoiceLimit((value) => value + 8)} className="min-h-12 w-full rounded-xl border border-slate-700 px-4 text-sm font-semibold">Show more invoices ({filtered.length - invoiceLimit} remaining)</button> : null}
   </div>;
 }

@@ -7,6 +7,7 @@ import * as signals from "../lib/assistantSignals-core.mjs";
 import * as paymentsCore from "../lib/payments-core.mjs";
 import * as jobsCore from "../lib/jobManagement-core.mjs";
 import * as taskCore from "../lib/jobTasks-core.mjs";
+import * as invoiceLink from "../lib/invoiceLink.ts";
 
 function compile(path, dependencies = {}) {
   const mod = { exports: {} };
@@ -16,7 +17,7 @@ function compile(path, dependencies = {}) {
 }
 const payments = compile("../lib/payments.ts", { "./payments-core.mjs": paymentsCore });
 const assistantIdentity = compile("../lib/assistantIdentity.ts");
-const assistantMoney = compile("../lib/assistantMoney.ts", { "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });
+const assistantMoney = compile("../lib/assistantMoney.ts", { "./invoiceLink": invoiceLink, "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });
 const scheduling = compile("../lib/scheduling.ts");
 const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
