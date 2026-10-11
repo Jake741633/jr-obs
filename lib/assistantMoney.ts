@@ -5,6 +5,7 @@ import type { PaymentRecord } from "./payments";
 import { effectiveInvoicePaid, invoiceGross } from "./payments";
 import { assistantDateKey, assistantDay, assistantInvoiceBalance } from "./assistantSignals-core.mjs";
 import { hasSavedIdentity } from "./assistantIdentity";
+import { invoiceReviewHref } from "./invoiceLink";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -90,7 +91,7 @@ export function assistantMoneyAnswer(records: AssistantRecords, mode: "overdue" 
     summary: Number.isSafeInteger(totalPence) ? `${warnings.length ? "Verified subtotal: " : ""}${money.format(totalPence / 100)} across ${plural(entries.length, "invoice")} in the loaded records.${warnings.length ? " Total incomplete until the flagged records are reviewed." : ""}` : "The combined amount is outside the supported total range. Review the individual invoices.",
     scope: `${mode === "overdue" ? `Due before ${assistantDateKey(now)}, with a positive remaining balance after recorded payments. Invoices due today are not overdue.` : "Sent, part-paid or overdue invoices with a positive remaining balance after recorded payments, including invoices not yet due. Draft, paid and cancelled invoices are excluded."} Uncertain invoice identities and linked payment evidence are review items, not debt claims.`, warnings,
     items: [...reviews.map((action) => ({ id: action.id, title: action.title, detail: `${action.reason} ${action.nextStep}`, evidence: action.evidence, href: action.href, actionLabel: action.actionLabel })),
-      ...entries.map(({ invoice, paid, pence, due }) => ({ id: `invoice:${invoice.id}`, title: `${invoice.number} · ${invoice.title}`, detail: `${money.format(pence / 100)} outstanding · ${due === null ? "Due date needs review" : `Due ${invoice.dueDate}`}`, evidence: [`Status: ${invoice.status}`, `Effective recorded paid: ${money.format(paid)}`, "Invoice and ledger paid amounts are not added together. Check recent payments before contacting the customer."], href: `/invoices?invoice=${encodeURIComponent(invoice.id)}`, actionLabel: "Review invoice" }))] };
+      ...entries.map(({ invoice, paid, pence, due }) => ({ id: `invoice:${invoice.id}`, title: `${invoice.number} · ${invoice.title}`, detail: `${money.format(pence / 100)} outstanding · ${due === null ? "Due date needs review" : `Due ${invoice.dueDate}`}`, evidence: [`Status: ${invoice.status}`, `Effective recorded paid: ${money.format(paid)}`, "Invoice and ledger paid amounts are not added together. Check recent payments before contacting the customer."], href: invoiceReviewHref(invoice.id), actionLabel: invoiceReviewHref(invoice.id) === "/invoices" ? "Review invoice inbox" : "Review invoice" }))] };
 }
 
 export function assistantMoneyActions(records: AssistantRecords, now: Date): AssistantAction[] {
@@ -98,6 +99,6 @@ export function assistantMoneyActions(records: AssistantRecords, now: Date): Ass
   const today = assistantDay(assistantDateKey(now))!;
   return [...reviews, ...entries.map(({ invoice, paid, pence, due }): AssistantAction => ({ id: `invoice:${invoice.id}`, category: "Money", priority: "Now", title: `Chase ${invoice.number}`,
     reason: `${money.format(pence / 100)} remains unpaid, ${plural(today - due!, "day")} after the due date.`, nextStep: "Check for a recent payment, then review the invoice before contacting the customer.",
-    href: `/invoices?invoice=${encodeURIComponent(invoice.id)}`, actionLabel: "Review invoice", dueDate: invoice.dueDate, jobIds: invoice.jobId ? [invoice.jobId] : [],
+    href: invoiceReviewHref(invoice.id), actionLabel: invoiceReviewHref(invoice.id) === "/invoices" ? "Review invoice inbox" : "Review invoice", dueDate: invoice.dueDate, jobIds: invoice.jobId ? [invoice.jobId] : [],
     evidence: [invoice.title, `Status: ${invoice.status}`, `Due: ${invoice.dueDate}`, `Effective recorded paid: ${money.format(paid)}`, "Uses the higher of the invoice paid amount and linked ledger payments, including credits/refunds; these amounts are not added together."] }))];
 }

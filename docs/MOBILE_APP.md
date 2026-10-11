@@ -171,6 +171,14 @@ payment links and authentication responses are not cached by this feature.
 
 ## Verification
 
+### Phone invoice review
+
+Invoice links now resolve one exact saved identity before rendering cards. Missing, duplicate or invalid identities do not fall back to a matching invoice number/title or the wider inbox. Show all invoices explicitly clears the link scope. The existing customer quick-create link still prefills only when no invoice review parameter is present. Loading/initial-link resolution prevents a flash of unrelated cards; refreshed sources determine availability without replacing the selected identity.
+
+The inbox has labelled 48px/16px search and saved-status controls, eight cards initially, and 48px Show more/Clear controls. Search includes number, title, status and linked customer/builder names; unknown names do not become the searchable word "undefined". Search, status changes and Clear reset paging without changing records or discarding an unsaved creation form. Exact review hides browsing filters until Show all is chosen. Enter dismisses the search keyboard. Status and payment buttons have 48px targets, and saved invoice balances are explicitly distinguished from the separate payment ledger.
+
+Missing or duplicate invoice identities block status/payment controls even when a filter hides another saved copy. Retained callbacks recheck current readiness, unique identity and the displayed saved version; changed or removed invoices require fresh review, including refresh during the existing payment prompt. Leaving the page clears the update snapshot, including while a prompt is open. Valid manual updates retain the existing calculation and status behavior. This is not a durable/atomic invoice-write upgrade: invoice and timeline saves keep their existing workflow, and no schema, route permissions or account boundary changes are introduced. Browser acceptance is read-only; populated/source-change behavior is tested with executable component fixtures.
+
 JR AI money answers show source reviews before verified balances when invoice or linked-payment identities are missing or ambiguous. An incomplete subtotal cannot read as a zero-debt clearance. Existing four-card progressive reveal, source-detail disclosures and 48px question controls are retained. Refreshed collections replace stale balances with review feedback without persisting questions or editing invoices/payments.
 
 Run `npm test`, `npm run lint`, `npm run build`, `npx tsc --noEmit`, and
