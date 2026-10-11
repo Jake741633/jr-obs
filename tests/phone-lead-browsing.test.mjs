@@ -12,7 +12,7 @@ function harness(query = "") {
   const page = load("app/leads/page.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: runtime.hooks, "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
-    "../../components/crm/LeadPipelineActions": { leadSources: ["Website", "Google", "Referral", "Builder", "Repeat customer", "Social media", "MyJobsQuote", "MyBuilder", "Checkatrade", "Other"], useLeadPipelineActions: () => ({ openCapture: failWrite, reviewStage: failWrite, panel: null, canStart: true, ready: true }) },
+    "../../components/crm/LeadPipelineActions": { leadSources: ["Website", "Google", "Referral", "Builder", "Repeat customer", "Social media", "MyJobsQuote", "MyBuilder", "Checkatrade", "Other"], useLeadPipelineActions: () => ({ openCapture: failWrite, reviewStage: failWrite, openRecordAction: failWrite, panel: null, canStart: true, canDelete: true, ready: true }) },
     "../../lib/cloud/coreBusinessCollections": Object.fromEntries(Object.entries(hooks).map(([key, hook]) => [hook, () => ({ items: data[key], isReady: ready[key], setItems: failWrite, remove: failWrite })])),
     "../../lib/crmPro": crm, "../../lib/assistantIdentity": identities, "../../lib/contactLinks": contacts,
     "../../lib/scheduling": scheduling,
@@ -87,10 +87,10 @@ test("source loading retains the selection and waits before interpreting deep li
   h.ready.customers = false; assert.match(text(h.render()), /Loading sales pipeline/); h.ready.customers = true; assert.equal(h.cards("Mobile")[0].key, "lead-1");
 });
 
-test("account changes reset browsing and per-card note drafts without reviving the former account's state", () => {
+test("account changes reset browsing without reviving the former account's filters", () => {
   const h = harness(); h.data.leads = Array.from({ length: 12 }, (_, i) => lead({ id: `lead-${i}` })); h.click("Show more opportunities");
-  h.field("Activity note for Workshop").props.onChange({ target: { value: "Private unsaved note" } }); h.search("no match"); h.filter("Filter by source", "Builder");
-  h.account({ organisationId: "org-2" }); assert.equal(h.cards("Mobile").length, 8); assert.equal(h.field("Activity note for Workshop").props.value, ""); h.account({ organisationId: "org-1" }); assert.equal(h.cards("Mobile").length, 8); assert.equal(h.field("Activity note for Workshop").props.value, "");
+  h.search("no match"); h.filter("Filter by source", "Builder");
+  h.account({ organisationId: "org-2" }); assert.equal(h.cards("Mobile").length, 8); h.account({ organisationId: "org-1" }); assert.equal(h.cards("Mobile").length, 8);
 });
 
 test("desktop stage counts describe both visible and filtered cards instead of implying hidden stages are empty", () => {

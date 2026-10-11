@@ -6,22 +6,24 @@ export { nodes, text };
 export const customer = (patch = {}) => ({ id: "customer-1", name: "Workshop customer", phone: "07700 900123", email: "customer@example.test", address: "Epsom", notes: "", createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", ...patch });
 export const builder = (patch = {}) => ({ id: "builder-1", companyName: "Workshop contractor", contactName: "Site manager", phone: "07700 900124", email: "builder@example.test", address: "Guildford", notes: "", createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", ...patch });
 export const lead = (patch = {}) => ({ id: "lead-1", name: "Workshop", company: "Contractor", phone: "07700 900123", email: "work@example.test", stage: "New Lead", source: "Referral", priority: "Normal", estimatedValue: 100, siteAddress: "Epsom High Street", workRequired: "Entrance lighting", nextAction: "Book a visit", followUpDate: "2026-10-10", notes: "Keep notes", createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", ...patch });
+export const activity = (patch = {}) => ({ id: "activity-1", leadId: "lead-1", type: "Note", summary: "Saved enquiry", completedBy: "Jake", completedAt: "2026-10-01T12:00:00Z", createdAt: "2026-10-01T12:00:00Z", ...patch });
 
 export function harness(query = "") {
   const runtime = hookRuntime(), frames = new Map();
   const data = { leads: [lead()], activities: [], customers: [customer()], builders: [builder()], documents: [] }, ready = Object.fromEntries(Object.keys(data).map(key => [key, true]));
-  let mode = "cloud", identityReady = true, identity = { organisationId: "org-1", userId: "user-1", role: "owner" }, clock = Date.parse("2026-10-11T12:00:00Z"), sequence = 0, frameId = 0, beforeUpdate;
+  let mode = "cloud", identityReady = true, identity = { organisationId: "org-1", userId: "user-1", role: "owner" }, clock = Date.parse("2026-10-11T12:00:00Z"), sequence = 0, frameId = 0, beforeUpdate, beforeDelete;
   const writes = [], attempts = [], queue = [], failures = new Set(), navigator = { onLine: true };
   class TestDate extends Date { constructor(...args) { super(...(args.length ? args : [clock])); } static now() { return clock; } }
   const scheduling = load("lib/scheduling.ts", {}, { Date: TestDate });
   function commit(kind, collection, item, next) {
     attempts.push({ kind, collection, item });
-    if (failures.has(`${collection}:${kind}`)) throw new Error("Device storage or sync queue is full");
+    if (failures.has(`${collection}:${kind}`) || failures.has(`${collection}:${kind}:${item.id}`)) throw new Error("Device storage or sync queue is full");
     data[collection] = next; writes.push({ kind, collection, item }); return item;
   }
   const store = collection => ({ items: data[collection], isReady: ready[collection], setItems() { assert.fail("Lead actions must save durably"); }, remove() { assert.fail("Unrelated deletion"); },
     createItem(item) { if (data[collection].some(record => record.id === item.id)) throw new Error("Identity already exists"); return commit("create", collection, item, [item, ...data[collection]]); },
     updateItem(id, update) { beforeUpdate?.(collection, id); const index = data[collection].findIndex(record => record.id === id); if (index < 0) throw new Error("Record no longer exists"); const current = data[collection][index], item = update(current); return item === current ? current : commit("update", collection, item, data[collection].map((record, i) => i === index ? item : record)); },
+    removeItem(id, validate) { beforeDelete?.(collection, id); const current = data[collection].find(record => record.id === id); if (!current) throw new Error("Record no longer exists"); validate?.(current); return commit("delete", collection, current, data[collection].filter(record => record.id !== id)); },
   });
   const identityModule = { useCloudIdentity: () => ({ mode, identity, isReady: identityReady }) };
   const actions = load("components/crm/LeadPipelineActions.tsx", {
@@ -48,7 +50,9 @@ export function harness(query = "") {
     submit() { const control = form(); assert.ok(control, "Lead form"); control.props.onSubmit({ preventDefault() {} }); },
     capture() { this.click("New lead"); this.edit("Customer/contact", "New enquiry"); this.edit("Work required", "Outside lights"); },
     stage(target = "Contacted") { this.edit("Stage for Workshop", target); },
-    clock(value) { clock = Date.parse(value); }, beforeUpdate(fn) { beforeUpdate = fn; }, account(patch) { identity = { ...identity, ...patch }; render(); },
+    activity(channel = "Note", summary = "Spoke about outside lights") { this.click("Log activity"); if (channel) this.edit("Lead activity type", channel); this.edit("Lead activity note", summary); },
+    outcome(reason = "Customer postponed the work") { this.click("Edit outcome reason"); this.edit("Lead outcome reason", reason); },
+    clock(value) { clock = Date.parse(value); }, beforeUpdate(fn) { beforeUpdate = fn; }, beforeDelete(fn) { beforeDelete = fn; }, account(patch) { identity = { ...identity, ...patch }; render(); },
     mode(value) { mode = value; render(); }, signedOut() { identity = null; render(); }, identityReady(value) { identityReady = value; render(); },
   };
 }

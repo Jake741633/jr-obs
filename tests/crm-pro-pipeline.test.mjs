@@ -32,8 +32,8 @@ test("mobile pipeline supports deliberate horizontal swipe and accessible stage 
 
 test("pipeline exposes conversion builder and win-loss reporting", () => {
   for (const label of ["Lead win rate", "Builder opportunities", "Win / loss reporting", "Recorded loss reasons", "Quote pipeline"]) assert.match(pipeline, new RegExp(label));
-  assert.match(pipeline, /lostReason:/);
-  assert.match(pipeline, /cancelledReason:/);
+  assert.match(pipeline, /lead\.lostReason/);
+  assert.match(pipeline, /lead\.cancelledReason/);
 });
 
 test("linked builder opportunities can prefill the existing quote builder", () => {

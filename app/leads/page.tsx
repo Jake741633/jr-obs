@@ -36,13 +36,11 @@ import { savedIdentityIndex } from "../../lib/assistantIdentity";
 import { contactEmailHref, contactPhoneHref } from "../../lib/contactLinks";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { plannerDateKey, plannerViewDate } from "../../lib/scheduling";
-import { makeId } from "../../lib/storage";
-import type { LeadActivity, LeadPriority, LeadStage, SalesLead } from "../../lib/models";
+import type { LeadPriority, LeadStage, SalesLead } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
 const stages: readonly LeadStage[] = crmLeadStages;
 const sources = leadSources;
-const activityTypes: Exclude<LeadActivity["type"], "Stage change">[] = ["Call", "Text", "Email", "WhatsApp", "Site visit", "Note"];
 const closedStages: LeadStage[] = ["Accepted", "Lost", "Completed", "Cancelled"];
 const stageColours: Record<LeadStage, string> = {
   "New Lead": "border-sky-400/35 bg-sky-500/5",
@@ -90,10 +88,6 @@ function LeadsSession() {
   const [limit, setLimit] = useState(8);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [linkReady, setLinkReady] = useState(false);
-  const [activityText, setActivityText] = useState<Record<string, string>>({});
-  const [activityKind, setActivityKind] = useState<Record<string, Exclude<LeadActivity["type"], "Stage change">>>({});
-  const [outcomeText, setOutcomeText] = useState<Record<string, string>>({});
-  const [message, setMessage] = useState("");
 
   const actions = useLeadPipelineActions({ leads, activities, customers, builders });
   const { openCapture } = actions;
@@ -197,37 +191,6 @@ function LeadsSession() {
     if (Math.abs(horizontal) >= 64 && Math.abs(horizontal) > Math.abs(vertical) * 1.2) moveBy(lead, horizontal < 0 ? 1 : -1, "Mobile swipe");
   }
 
-  function addActivity(lead: SalesLead) {
-    if (!actions.canStart) return;
-    const summary = activityText[lead.id]?.trim();
-    if (!summary) return;
-    const now = new Date().toISOString();
-    const type = activityKind[lead.id] || "Note";
-    activities.setItems((current) => [{ id: makeId("activity"), leadId: lead.id, type, summary, completedBy: "Jake", completedAt: now, createdAt: now }, ...current]);
-    leads.setItems((current) => current.map((item) => item.id === lead.id ? { ...item, nextAction: "Follow up", lastContactAt: type === "Note" ? item.lastContactAt : now, updatedAt: now } : item));
-    setActivityText((current) => ({ ...current, [lead.id]: "" }));
-    setMessage(`${type} logged for ${lead.name}.`);
-  }
-
-  function saveOutcome(lead: SalesLead) {
-    if (!actions.canStart) return;
-    const reason = outcomeText[lead.id]?.trim();
-    if (!reason) return;
-    const stage = normaliseLeadStage(lead.stage);
-    const now = new Date().toISOString();
-    leads.setItems((current) => current.map((item) => item.id === lead.id ? { ...item, lostReason: stage === "Lost" ? reason : item.lostReason, cancelledReason: stage === "Cancelled" ? reason : item.cancelledReason, updatedAt: now } : item));
-    activities.setItems((current) => [{ id: makeId("activity"), leadId: lead.id, type: "Note", summary: `${stage} reason: ${reason}`, completedBy: "JR OS CRM", completedAt: now, createdAt: now }, ...current]);
-    setOutcomeText((current) => ({ ...current, [lead.id]: "" }));
-    setMessage(`${stage} reason saved for reporting.`);
-  }
-
-  function removeLead(lead: SalesLead) {
-    if (!actions.canStart) return;
-    if (!window.confirm(`Delete ${lead.name}'s opportunity and activity history?`)) return;
-    leads.remove((item) => item.id === lead.id);
-    activities.setItems((current) => current.filter((activity) => activity.leadId !== lead.id));
-  }
-
   function quoteLink(lead: SalesLead) {
     const party = lead.customerId ? `customerId=${encodeURIComponent(lead.customerId)}` : lead.builderId ? `builderId=${encodeURIComponent(lead.builderId)}` : "";
     return party ? `/quotes?action=create&${party}` : "/quotes";
@@ -265,16 +228,15 @@ function LeadsSession() {
         <button type="button" aria-label="Next lead stage" disabled={!actions.canStart || stageIndex === stages.length - 1} onClick={() => moveBy(lead, 1, "Mobile action")} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 disabled:opacity-30"><ArrowRight className="size-4" /></button>
         <p className="col-span-3 text-center text-[10px] text-slate-500">Swipe left or right to review a stage change</p>
       </div> : null}
-      {(stage === "Lost" || stage === "Cancelled") ? <div className="mt-3 rounded-xl border border-rose-400/20 bg-slate-950/70 p-3"><p className="text-xs font-semibold text-rose-200">{stage} reason</p><p className="mt-1 text-xs text-slate-400">{reason || "Not recorded yet"}</p><div className="mt-2 flex gap-2"><input aria-label={`${stage} reason for ${lead.name}`} value={outcomeText[lead.id] || ""} onChange={(event) => setOutcomeText((current) => ({ ...current, [lead.id]: event.target.value }))} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm" placeholder="Reason for reporting" /><Button type="button" disabled={!actions.canStart} onClick={() => saveOutcome(lead)}>Save</Button></div></div> : null}
+      {(stage === "Lost" || stage === "Cancelled") ? <div className="mt-3 rounded-xl border border-rose-400/20 bg-slate-950/70 p-3"><p className="text-xs font-semibold text-rose-200">{stage} reason</p><p className="mt-1 break-words text-sm text-slate-400">{reason || "Not recorded yet"}</p><Button type="button" className="mt-3 min-h-12 w-full" disabled={!actions.canStart} onClick={() => actions.openRecordAction(lead, "outcome")}>Edit outcome reason</Button></div> : null}
       <details className="mt-3 rounded-xl border border-slate-700/70 bg-slate-950/40 p-3">
-        <summary className="cursor-pointer text-xs font-semibold text-slate-300">Contact log · {leadActivities.length} recent</summary>
+        <summary className="flex min-h-12 cursor-pointer items-center text-sm font-semibold text-slate-300">Contact log · {leadActivities.length} recent</summary>
         <div className="mt-3 grid gap-2">
-          <select aria-label={`Activity type for ${lead.name}`} value={activityKind[lead.id] || "Note"} onChange={(event) => setActivityKind((current) => ({ ...current, [lead.id]: event.target.value as Exclude<LeadActivity["type"], "Stage change"> }))} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm">{activityTypes.map((type) => <option key={type}>{type}</option>)}</select>
-          <div className="flex gap-2"><input aria-label={`Activity note for ${lead.name}`} className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm" placeholder="What happened?" value={activityText[lead.id] || ""} onChange={(event) => setActivityText((current) => ({ ...current, [lead.id]: event.target.value }))} /><Button type="button" disabled={!actions.canStart} onClick={() => addActivity(lead)}>Log</Button></div>
+          <Button type="button" className="min-h-12 w-full" disabled={!actions.canStart} onClick={() => actions.openRecordAction(lead, "activity")}>Log activity</Button>
           {leadActivities.map((activity) => <p key={activity.id} className="text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-200">{activity.type}:</span> {activity.summary}</p>)}
         </div>
       </details>
-      <button type="button" disabled={!actions.canStart} onClick={() => removeLead(lead)} className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-slate-500 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 className="size-4" />Delete opportunity</button>
+      <button type="button" disabled={!actions.canDelete} onClick={() => actions.openRecordAction(lead, "delete")} className="mt-3 inline-flex min-h-12 items-center gap-2 rounded-xl px-3 text-xs font-semibold text-slate-500 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 className="size-4" />Delete opportunity</button>
     </Card>;
   }
 
@@ -283,7 +245,6 @@ function LeadsSession() {
   return <main className="space-y-6 pb-8">
     <PageHeader eyebrow="CRM Pro" title="Sales Pipeline" description="Move every enquiry from first contact through survey, quote, acceptance and completion." action={<div className="grid gap-2 sm:grid-cols-2"><Link href="/crm/follow-ups" className="inline-flex min-h-12 items-center justify-center rounded-xl border border-amber-400/30 px-4 text-sm font-semibold text-amber-200">Follow-ups</Link><Button disabled={!actions.canStart} onClick={() => openCapture()}><Plus className="size-4" />New lead</Button></div>} />
     {actions.panel}
-    {message ? <div role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{message}</div> : null}
 
     {leadIndex.unusableCount ? <p role="alert" className="rounded-xl border border-amber-400/30 p-4 text-sm text-amber-200">{leadIndex.unusableCount} opportunities have missing or duplicate identities and are withheld from this pipeline and its totals. Review their source records.</p> : null}
     <details className="rounded-2xl border border-slate-800 p-4"><summary className="min-h-12 cursor-pointer font-semibold">Pipeline overview</summary><p className="my-3 text-sm text-slate-400">Figures describe all uniquely identified opportunities, independently of filters and the selected lead.</p><section className="grid grid-cols-2 gap-3 xl:grid-cols-6 xl:gap-4">
