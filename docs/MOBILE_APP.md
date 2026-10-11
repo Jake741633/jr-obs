@@ -118,6 +118,42 @@ the separate job/note and interaction/profile writes are not atomic transactions
 Deterministic fixtures cover browsing, persistence failures and stale callbacks;
 signed-in physical-phone acceptance remains pending.
 
+## Follow-up Centre
+
+The contact queue starts with eight ranked records and reveals eight more per tap.
+Find a follow-up matches every search word across the visible name, work/detail,
+reason, phone and email, including phone numbers without spaces or brackets.
+Search, reason changes and Clear follow-up filters reset the reveal; Enter dismisses
+the phone keyboard. Controls use 48px targets and phone-sized text. Account changes
+reset browsing filters.
+
+Overview figures and Who to contact today sit in native disclosures. The overview
+describes the whole loaded queue; recommendations follow the active search/reason
+filters and open the source record directly, including when it is outside the
+first eight cards. Quote/customer paths encode their exact saved IDs. Call, Text
+and Email use validated recipient links; unsupported formats remain visible with
+review prompts and disabled contact controls. These strings no longer earn the
+contactability score boost or count as ready-to-contact recommendations. Valid
+future lead follow-up dates suppress all surfaced lead stages until the saved day.
+
+Follow-up rules use durable create/update methods. Editing does not recalculate
+the queue until the rules save. Failed saves retain the draft; first-save retries
+use the same settings identity. Whole-day windows accept 1–3650; the value threshold
+must be finite, non-negative and have at most two decimal places. A changed saved
+record requires Use saved values before editing again, and updates preserve other
+record fields. Failed/conflicting sync requires review. Missing identities or
+multiple settings records pause the queue rather than choosing the first record;
+invalid saved numbers can be repaired explicitly in the editor.
+
+Rule changes require loaded settings and office permissions in cloud mode, with
+local mode retaining local access. Old callbacks cannot save after an account
+change or replace newer edits. Loading retains drafts; leaving the page or changing
+account loses unsaved edits. Success confirms the device save and asks the user to
+check sync. Contact logging and postponement still use their existing save paths;
+their durability and explicit contact-channel selection remain separate work.
+Populated fixture checks cover browsing and rule failures; signed-in physical-phone
+acceptance remains pending.
+
 ## Jobs inbox
 
 Jobs opens with labelled search and a stage filter, with eight cards shown first
