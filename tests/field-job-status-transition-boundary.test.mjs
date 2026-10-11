@@ -148,8 +148,13 @@ function jsxAttributeExpression(element, source, attributeName) {
   return compact(attributes[0].initializer.expression.getText(source));
 }
 
-function assertOnlyMappedOptions(element, source, expectedExpression) {
+function assertOnlyMappedOptions(element, source, expectedExpression, reviewPlaceholder = false) {
   const children = element.children.filter((child) => !(ts.isJsxText(child) && !child.text.trim()));
+  if (reviewPlaceholder) {
+    const placeholder = children.shift();
+    assert.ok(ts.isJsxExpression(placeholder) && placeholder.expression);
+    assert.equal(compact(placeholder.expression.getText(source)), 'jobBrowseStatus(job,fieldJobStatusRestricted)===null?<optionvalue=""disabled>Reviewsavedstatus</option>:null');
+  }
   assert.equal(children.length, 1, "A field status select must have exactly one option source");
   assert.ok(ts.isJsxExpression(children[0]) && children[0].expression, "Expected mapped status options");
   assert.equal(compact(children[0].expression.getText(source)), expectedExpression);
@@ -441,12 +446,13 @@ test("field controls expose only current and server-approved next stages while o
     && node.openingElement.tagName.getText(jobsSource) === "select"
     && node.openingElement.getText(jobsSource).includes("updateStatus(job.id"));
   assert.equal(listSelects.length, 1, "Expected exactly one quick-status select");
-  assert.equal(jsxAttributeExpression(listSelects[0], jobsSource, "value"), "jobCurrentStatus(job,fieldJobStatusRestricted)");
+  assert.equal(jsxAttributeExpression(listSelects[0], jobsSource, "value"), 'jobBrowseStatus(job,fieldJobStatusRestricted)??""');
   assert.equal(jsxAttributeExpression(listSelects[0], jobsSource, "disabled"), "jobStatusLocked(job)");
   assertOnlyMappedOptions(
     listSelects[0],
     jobsSource,
-    "jobStatusOptions(job).map((item)=><optionkey={item}>{item}</option>)",
+    "jobStatusOptions(job).filter((item)=>canonicalJobStatuses.includes(item)).map((item)=><optionkey={item}>{item}</option>)",
+    true,
   );
   assert.match(jobsPage, /jobStatusNotice\(job\)/);
 

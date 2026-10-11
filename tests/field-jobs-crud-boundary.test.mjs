@@ -118,7 +118,7 @@ test("field users retain job viewing and status controls without office CRUD con
 
   const viewLinks = collectNodes((node) => ts.isJsxElement(node)
     && node.openingElement.tagName.getText(jobsSource) === "Link"
-    && node.openingElement.getText(jobsSource).includes("href={`/jobs/${job.id}`}"));
+    && node.openingElement.getText(jobsSource).includes("href={`/jobs/${encodeURIComponent(job.id)}`}"));
   const statusSelects = collectNodes((node) => ts.isJsxElement(node)
     && node.openingElement.tagName.getText(jobsSource) === "select"
     && node.openingElement.getText(jobsSource).includes("updateStatus(job.id"));

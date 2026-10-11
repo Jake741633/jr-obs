@@ -8,9 +8,11 @@ import { assistantVisitActions } from "./assistantVisits";
 import { assistantMaterialsAnswer } from "./assistantMaterials";
 import { assistantJobIdentityIndex } from "./assistantIdentity";
 import { assistantQuoteSnapshot } from "./assistantQuotes";
+import type { Job } from "./models";
 
 export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries";
-type JobQuestionIntent = Extract<AssistantQuestionIntent, "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries">;
+type JobQuestionIntent = Extract<AssistantQuestionIntent, "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries" | "overdue" | "unpaid" | "quotes">;
+const jobQuestionIntents = new Set<AssistantQuestionIntent>(["tasks", "snags", "job", "visits", "materials", "deliveries", "overdue", "unpaid", "quotes"]);
 export interface AssistantAnswerItem { id: string; title: string; detail: string; evidence: string[]; href: string; actionLabel: string }
 export interface AssistantJobChoice { id: string; title: string; address: string; status: string }
 export interface AssistantAnswer { recognized: boolean; title: string; summary: string; scope: string; warnings: string[]; items: AssistantAnswerItem[]; jobChoices?: AssistantJobChoice[]; resolvedJobId?: string }
@@ -38,13 +40,13 @@ export function assistantQuestionIntent(question: string): AssistantQuestionInte
 /** Explicit conversational follow-ups require a chosen job; never infer a global scope. */
 export function assistantJobFollowUpIntent(question: string): JobQuestionIntent | null {
   if (question.length > 180) return null;
-  const query = question.toLowerCase().trim().replace(/[?.!]+$/g, "").replace(/\s+/g, " ").replace(/^please /, "").replace(/^can you /, "").replace(/^tell me /, "").replace(/ please$/, "").trim();
-  const subjects: Record<string, JobQuestionIntent> = { tasks: "tasks", "open tasks": "tasks", snags: "snags", "open snags": "snags", materials: "materials", "materials to order": "materials", deliveries: "deliveries", "awaiting deliveries": "deliveries", "next visit": "visits", "next visit checks": "visits", "job briefing": "job" };
+  const query = question.toLowerCase().trim().replace(/[?.!]+$/g, "").replace(/\s+/g, " ").replace(/\bfollow-ups\b/g, "follow ups").replace(/^please /, "").replace(/^can you /, "").replace(/^tell me /, "").replace(/ please$/, "").trim();
+  const subjects: Record<string, JobQuestionIntent> = { tasks: "tasks", "open tasks": "tasks", snags: "snags", "open snags": "snags", materials: "materials", "materials to order": "materials", deliveries: "deliveries", "awaiting deliveries": "deliveries", "next visit": "visits", "next visit checks": "visits", "job briefing": "job", "unpaid invoices": "unpaid", "overdue invoices": "overdue", "overdue money": "overdue", "quotes": "quotes", "quote follow ups": "quotes" };
   const followUp = query.match(/^(?:what about|and) (?:the )?(.+?)(?: for (?:this|that|the same) job)?$/);
   if (followUp && Object.hasOwn(subjects, followUp[1])) return subjects[followUp[1]];
   const explicitJob = query.match(/^(.+?) for (?:this|that|the same) job$/);
   const intent = explicitJob ? assistantQuestionIntent(explicitJob[1]) : null;
-  return intent && ["tasks", "snags", "job", "visits", "materials", "deliveries"].includes(intent) ? intent as JobQuestionIntent : null;
+  return intent && jobQuestionIntents.has(intent) ? intent as JobQuestionIntent : null;
 }
 
 const plural = (count: number, word: string, pluralWord = `${word}s`) => `${count} ${count === 1 ? word : pluralWord}`;
@@ -52,6 +54,15 @@ const actionItem = (action: AssistantAction): AssistantAnswerItem => ({ id: acti
 const dateAt = (day: number) => new Date(day * 86400000).toISOString().slice(0, 10);
 const validTime = (time: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
 const jobKey = (value: string) => value.trim().replace(/\s+/g, " ").replace(/’/g, "'").toLocaleLowerCase("en-GB");
+const jobScope = (job: Job) => `${job.title} · ${job.siteAddress || "Address not recorded"} · Job status: ${job.status}.`;
+
+function quoteFollowUpAnswer(records: AssistantRecords, now: Date, job?: Job): AssistantAnswer {
+  const snapshot = assistantQuoteSnapshot(records.documents, records.jobs, now, { followUpsOnly: true, jobId: job?.id });
+  return { recognized: true, title: `Quote follow-ups due${job ? ` · ${job.title}` : ""}`,
+    summary: `${plural(snapshot.followUpCount, "confirmed follow-up")} in the loaded records.${snapshot.reviewCount ? ` ${plural(snapshot.reviewCount, "quote source review")}; follow-up count incomplete.` : ""}`,
+    scope: `${job ? `Only quotes linked by a saved quote or job reference to ${jobScope(job)} Unlinked quotes and customer-name matches are not included. ` : "All loaded jobs, including unlinked quotes. "}Sent quotes due for follow-up, plus uncertain quote sources needing review. Saved contact dates and recent recorded contact take precedence; review pricing before following up an expired quote. A source review does not recommend customer contact.`,
+    warnings: snapshot.warnings, items: snapshot.actions.map(actionItem), ...(job ? { resolvedJobId: job.id } : {}) };
+}
 
 function namedJobQuestion(question: string) {
   if (question.length > 180) return null;
@@ -60,7 +71,7 @@ function namedJobQuestion(question: string) {
   if (!match) return null;
   const parsedIntent = assistantQuestionIntent(match[1]);
   const intent = parsedIntent === "priorities" ? "job" : parsedIntent;
-  if (intent !== "tasks" && intent !== "snags" && intent !== "job" && intent !== "visits" && intent !== "materials" && intent !== "deliveries") return null;
+  if (!intent || !jobQuestionIntents.has(intent)) return null;
   const raw = match[2].trim();
   const quoted = raw.match(/^["“](.+)["”][?.!]*$/);
   const label = quoted ? quoted[1].trim() : raw.replace(/[?.!]+$/, "").trim();
@@ -79,7 +90,9 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
   const day = assistantDay(today);
   if (!intent || day === null) return { recognized: false, title: "Try a supported question", summary: "I could not reliably match that question. Try “What is booked tomorrow?”, “How much is overdue?” or “Which quotes need chasing?”.", scope: "Quick answers use local rules and your loaded records. Use the record search below for a particular job, quote or invoice.", warnings: [], items: [] };
 
-  if (intent === "tasks" || intent === "snags" || intent === "job" || intent === "visits" || intent === "materials" || intent === "deliveries") {
+  // Money and quote shortcuts stay global. Finance needs an explicit named-job
+  // question or this-job follow-up before the saved job selection is used.
+  if (intent === "tasks" || intent === "snags" || intent === "job" || intent === "visits" || intent === "materials" || intent === "deliveries" || ((namedJob || followUpIntent) && jobQuestionIntents.has(intent))) {
     const matchingJobs = namedJob ? records.jobs.filter((job) => namedJob.keys.has(jobKey(job.title)) || (job.siteAddress.trim() && namedJob.keys.has(jobKey(job.siteAddress)))) : records.jobs;
     const identities = assistantJobIdentityIndex(records.jobs);
     const selectableJobs = matchingJobs.filter((job) => identities.uniqueJobs.has(job.id));
@@ -95,6 +108,12 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
         scope: followUpIntent ? "This follow-up needs a chosen saved job. I have not guessed a job or broadened the answer to all jobs." : "Job names and site addresses must match in full, ignoring case and repeated spaces. I have not broadened this answer to other jobs.",
         warnings: [...(selectedJobId ? ["The previous selection is unavailable, ambiguous or no longer matches this question. Choose a current record or clear the job scope."] : []), ...(unusableMatches ? [`${plural(unusableMatches, "matching job record")} with missing or duplicate identities cannot be chosen. Review Jobs before using those records.`] : [])], items: [], jobChoices: showChoices ? choices : [] };
     }
+    if ((intent === "overdue" || intent === "unpaid") && selectedJob) {
+      const answer = assistantMoneyAnswer(records, intent, now, selectedJob.id);
+      return { ...answer, title: `${answer.title} · ${selectedJob.title}`, resolvedJobId: selectedJob.id,
+        scope: `Only invoices explicitly linked to ${jobScope(selectedJob)} Unlinked invoices and customer-name matches are not included. ${answer.scope}` };
+    }
+    if (intent === "quotes" && selectedJob) return quoteFollowUpAnswer(records, now, selectedJob);
     if (intent === "materials" || intent === "deliveries") return assistantMaterialsAnswer(records, intent, selectedJob);
     if (intent === "job" && selectedJob) {
       const jobId = selectedJob.id;
@@ -161,15 +180,11 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
   }
 
   if (intent === "overdue" || intent === "unpaid") {
-    return assistantMoneyAnswer(records, intent, now);
+    const answer = assistantMoneyAnswer(records, intent, now);
+    return { ...answer, scope: `All loaded invoices, including unlinked records. ${answer.scope}` };
   }
 
-  if (intent === "quotes") {
-    const snapshot = assistantQuoteSnapshot(records.documents, records.jobs, now, { followUpsOnly: true });
-    return { recognized: true, title: "Quote follow-ups due",
-      summary: `${plural(snapshot.followUpCount, "confirmed follow-up")} in the loaded records.${snapshot.reviewCount ? ` ${plural(snapshot.reviewCount, "quote source review")}; follow-up count incomplete.` : ""}`,
-      scope: "Sent quotes due for follow-up, plus uncertain quote sources needing review. Saved contact dates and recent recorded contact take precedence; review pricing before following up an expired quote. A source review does not recommend customer contact.", warnings: snapshot.warnings, items: snapshot.actions.map(actionItem) };
-  }
+  if (intent === "quotes") return quoteFollowUpAnswer(records, now);
   const actions = (briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => intent === "priorities" || action.id.startsWith("readiness:"));
   return { recognized: true, title: intent === "site" ? "Site preparation" : "Your next actions",
     summary: actions.length ? `${plural(actions.length, intent === "site" ? "job" : "action")} to review in the loaded records.` : "No matching checks flagged in the loaded records.",
