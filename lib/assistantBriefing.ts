@@ -3,9 +3,10 @@ import { assistantTaskActions } from "./assistantTasks";
 import { detectScheduleClashes, entryEndDate, type ScheduledPlannerEntry } from "./scheduling";
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import { outstandingCertificateJobs, type CertificateSignal } from "./dashboardIntelligence";
-import { assistantDateKey, assistantDay, assistantQuoteFollowUpDue } from "./assistantSignals-core.mjs";
+import { assistantDateKey, assistantDay } from "./assistantSignals-core.mjs";
 import type { PaymentRecord } from "./payments";
 import { assistantMoneyActions } from "./assistantMoney";
+import { assistantQuoteSnapshot } from "./assistantQuotes";
 
 export type AssistantFocus = "All" | "Money" | "Quotes" | "Site" | "Diary" | "Tasks" | "Reminders";
 export interface AssistantAction {
@@ -34,7 +35,6 @@ export interface AssistantRecords {
   tasks?: JobTask[];
 }
 const jobPath = (id: string) => `/jobs/${encodeURIComponent(id)}`;
-const quotePath = (id: string) => `/quotes/${encodeURIComponent(id)}`;
 const rank = { Now: 0, Today: 1, Next: 2 };
 const plural = (value: number, singular: string) => `${value} ${singular}${value === 1 ? "" : "s"}`;
 const validVisitTimes = (entry: ScheduledPlannerEntry) => /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.startTime) && /^([01]\d|2[0-3]):[0-5]\d$/.test(entry.endTime) && entry.startTime < entry.endTime;
@@ -48,26 +48,7 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
   const { jobs, documents, invoices, planner, purchases, reminders, certificates } = records;
   actions.push(...assistantMoneyActions(records, now));
 
-  const linkedQuoteIds = new Set(jobs.flatMap((job) => [job.sourceQuoteId, job.quoteSnapshot?.quoteId].filter(Boolean)));
-  for (const quote of documents.filter((item) => item.type === "Quote")) {
-    const jobIds = quote.jobId ? [quote.jobId] : jobs.filter((job) => job.sourceQuoteId === quote.id || job.quoteSnapshot?.quoteId === quote.id).map((job) => job.id);
-    if (quote.status === "Accepted" && !quote.jobId && !linkedQuoteIds.has(quote.id)) {
-      add({ id: `convert:${quote.id}`, category: "Quotes", priority: "Today", title: `Plan ${quote.number}`,
-        reason: "This quote is accepted and no linked job was found in the loaded records.", nextStep: "Open the accepted quote and review its conversion to a job.",
-        href: quotePath(quote.id), actionLabel: "Open accepted quote", dueDate: "", evidence: [quote.title, "Status: Accepted", "No quote or job-side link found"] });
-    }
-    if (quote.status !== "Sent") continue;
-    const expiry = assistantDay(quote.validUntil);
-    const expired = expiry !== null && expiry < todayDay;
-    const followUp = assistantQuoteFollowUpDue(quote, now);
-    // One action per quote; expiry is a pricing review, never permission to chase early.
-    if (expired || followUp) add({ id: `follow-up:${quote.id}`, category: "Quotes", priority: "Today",
-      title: `${expired ? "Review expired quote" : "Follow up"} ${quote.number}`,
-      reason: expired ? "The saved validity date has passed. Check pricing before making a new offer." : quote.nextFollowUpDate ? `The saved follow-up date is ${quote.nextFollowUpDate}.` : "This sent quote is due for review based on its last recorded contact or validity date.",
-      nextStep: expired ? "Review validity and pricing; keep any future follow-up date agreed with the customer." : "Review the quote and recent contact, then record the outcome and next follow-up date.",
-      href: quotePath(quote.id), actionLabel: "Review quote", dueDate: expired ? quote.validUntil : quote.nextFollowUpDate || "", jobIds,
-      evidence: [quote.title, `Status: ${quote.status}`, `Valid until: ${quote.validUntil || "Not recorded"}`, `Next follow-up: ${quote.nextFollowUpDate || "Not set"}`, `Last contact: ${quote.lastFollowUpAt || quote.updatedAt}`] });
-  }
+  actions.push(...assistantQuoteSnapshot(documents, jobs, now).actions);
 
   const visits = planner.filter((entry) => ["Planned", "Confirmed"].includes(entry.status)
     && assistantDay(entry.date) !== null && assistantDay(entryEndDate(entry)) !== null

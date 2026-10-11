@@ -37,6 +37,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] JR AI invoice/payment evidence checks with withheld ambiguous balances and explicit incomplete totals
 - [x] Exact saved-invoice review links with phone search, saved-status filters and progressive cards
 - [x] Phone quote inbox with type/status filters, site search, progressive cards and expandable overview
+- [x] JR AI quote-source checks with uncertain-date reviews, withheld follow-up counts and job-scoped evidence
 - [x] Job-aware JR AI follow-up questions and one-tap related answers retaining the exact saved job
 - [x] Compact phone question panel with question-first layout and expandable shortcuts/scope help
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection

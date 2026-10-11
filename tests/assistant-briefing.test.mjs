@@ -17,12 +17,13 @@ function compile(path, dependencies = {}) {
 }
 const payments = compile("../lib/payments.ts", { "./payments-core.mjs": paymentsCore });
 const assistantIdentity = compile("../lib/assistantIdentity.ts");
+const assistantQuotes = compile("../lib/assistantQuotes.ts", { "./assistantIdentity": assistantIdentity, "./assistantSignals-core.mjs": signals });
 const assistantMoney = compile("../lib/assistantMoney.ts", { "./invoiceLink": invoiceLink, "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });
 const scheduling = compile("../lib/scheduling.ts");
 const taskInbox = compile("../lib/taskInbox.ts", { "./assistantIdentity": assistantIdentity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./assistantIdentity": assistantIdentity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
-const { buildAssistantBriefing, filterAssistantActions } = compile("../lib/assistantBriefing.ts", { "./assistantMoney": assistantMoney, "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
+const { buildAssistantBriefing, filterAssistantActions } = compile("../lib/assistantBriefing.ts", { "./assistantQuotes": assistantQuotes, "./assistantMoney": assistantMoney, "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
 const now = new Date(2026, 9, 10, 10, 0, 0);
 const invoice = (patch = {}) => ({ id: "i/1?#", number: "INV-01", title: "Workshop lights", status: "Sent", dueDate: "2026-10-09", items: [{ quantity: 2, unitPrice: 100 }], vatEnabled: true, vatRate: 20, amountPaid: 40, ...patch });
 const quote = (patch = {}) => ({ id: "q1", number: "Q-01", title: "Workshop", type: "Quote", status: "Sent", validUntil: "2026-11-01", updatedAt: "2026-10-01T12:00:00Z", ...patch });
