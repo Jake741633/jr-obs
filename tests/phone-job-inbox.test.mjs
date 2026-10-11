@@ -7,6 +7,8 @@ import * as jobCore from "../lib/jobManagement-core.mjs";
 import * as policy from "../lib/cloud/fieldMutationPolicy-core.mjs";
 import * as permissions from "../lib/cloud/permissions.ts";
 import * as links from "../lib/assistantJobLink.ts";
+import * as identities from "../lib/assistantIdentity.ts";
+import * as signals from "../lib/assistantSignals-core.mjs";
 
 const jsx = (type, props) => ({ type, props });
 const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
@@ -15,12 +17,12 @@ const job = (patch = {}) => ({ id: "j1", title: "Workshop", status: "Scheduled",
 const cards = (view) => nodes(nodes(view).find(n => n.props["aria-label"] === "Job records")).filter(n => n.type === "Card");
 
 function harness({ jobs: initial = [], role = "owner", ready: initialReady = true } = {}) {
-  const slots = []; let cursor = 0, jobs = initial, ready = initialReady, blurred = 0;
+  const slots = [], layouts = []; let cursor = 0, jobs = initial, ready = initialReady, blurred = 0;
   const failWrite = () => { throw new Error("Browsing must not write any record or create an identity"); };
   const collection = (items = []) => ({ items, isReady: ready, setItems: failWrite, remove: failWrite });
   const dependencies = {
     "react/jsx-runtime": { jsx, jsxs: jsx },
-    react: { useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], (value) => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; }, useMemo: fn => fn(), useEffect() {} },
+    react: { useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = initial; return [slots[i], (value) => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; }, useRef(value) { const i = cursor++; if (!(i in slots)) slots[i] = { current: value }; return slots[i]; }, useMemo: fn => fn(), useEffect() {}, useLayoutEffect(fn) { layouts.push(fn); } },
     "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/ui/StatusBadge": { StatusBadge: "StatusBadge" }, "../../components/crm/EntityEmptyState": { EntityEmptyState: "Empty" },
     "../../lib/cloud/adapter": { accountStorageKey: (...parts) => parts.join(":") },
@@ -29,11 +31,11 @@ function harness({ jobs: initial = [], role = "owner", ready: initialReady = tru
     "../../lib/cloud/repository-core.mjs": {}, "../../lib/cloud/repository": {},
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ mode: "cloud", isReady: ready, identity: { role, organisationId: "org", userId: "user" } }) },
     "../../lib/jobManagement-core.mjs": jobCore, "../../lib/siteDiaryIdentity-core.mjs": { fieldOperatorMemberId: () => "member" },
-    "../../lib/assistantJobLink": links, "../../lib/storage": { makeId: failWrite },
+    "../../lib/assistantJobLink": links, "../../lib/assistantIdentity": identities, "../../lib/assistantSignals-core.mjs": signals, "../../lib/storage": { makeId: failWrite },
   };
   const mod = { exports: {} };
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/jobs/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Date, Intl, require(name) { assert.ok(name in dependencies, name); return dependencies[name]; } });
-  const render = () => { cursor = 0; return mod.exports.default(); };
+  const render = () => { cursor = 0; const view = mod.exports.default(); layouts.splice(0).forEach(fn => fn()); return view; };
   const input = () => nodes(render()).find(n => n.type === "input" && n.props.type === "search");
   return { render, replace(value) { jobs = value; }, setReady(value) { ready = value; },
     search(value) { input().props.onChange({ target: { value } }); },

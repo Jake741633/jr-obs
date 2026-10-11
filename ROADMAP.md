@@ -40,6 +40,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] JR AI quote-source checks with uncertain-date reviews, withheld follow-up counts and job-scoped evidence
 - [x] Explicit job-specific unpaid/overdue invoice and quote-follow-up answers with retained identity and compact phone shortcuts
 - [x] Phone Jobs inbox with active/closed/stage review filters, multiword search, progressive cards and exact job-to-JR-AI links
+- [x] Durable job forms with retained failed drafts, changed-record checks, separate timeline retries and confirmed deletion
 - [x] Job-aware JR AI follow-up questions and one-tap related answers retaining the exact saved job
 - [x] Compact phone question panel with question-first layout and expandable shortcuts/scope help
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection

@@ -50,8 +50,39 @@ Search, stage changes and Clear job filters reset the eight-card reveal and reta
 an open job draft. Enter dismisses the search keyboard. Controls have 48px targets
 and phone-sized text. Office job cards offer Ask JR AI about this job, preserving
 the exact saved identity; field roles retain their existing job routes and do not
-receive office assistant links. These changes do not alter job persistence or sync.
+receive office assistant links. Browsing does not write job records.
 Physical-device and populated signed-in acceptance remain pending.
+
+Job creation and the edit form now confirm the existing durable device/queue save
+before closing. Storage failures retain the editable draft, and creation retries
+reuse the same job identity and creation time. Repeated submissions and callbacks
+from an earlier draft cannot create another job. Leaving or closing the form loses
+unsaved changes, as the form explains. Finite, nonnegative values, valid optional
+dates, a reviewed stage and unique current customer/builder selections are required.
+Unsupported saved stages require an explicit choice; their review note does not
+invent a previous Enquiry stage.
+
+Edits preserve newer unrelated job metadata and refuse to overwrite changed form
+fields, stages or replacement records. Use saved values explicitly reloads the
+current job into the form. Missing or ambiguous job identities cannot be edited or
+deleted. Creation, edits, note retries and deletion recheck current readiness and
+account permissions, including old callbacks after account changes or unmount.
+Office editing and owner/admin deletion retain their existing access boundaries.
+The separate quick-status field workflow keeps its existing transition and sync
+rules.
+
+If the job saves but its creation or edited-stage timeline note fails, a separate
+panel identifies the saved job and retries only that original note. Multiple notes
+remain separate, keep their IDs and event details, and cannot replace conflicting
+or duplicated timeline records. Retries require the same uniquely identified job
+and never repeat the job write or change a later stage. Pending notes stay only
+while the page is open; the panel explains this. Device-save messages do not claim
+cloud confirmation.
+
+Deletion retains its confirmation and removes the card only after the durable
+remove succeeds. It rechecks the record and permission after confirmation and
+refuses changed records or an open edit draft. Failed deletion keeps the saved job
+available to review and retry.
 
 ## Quote inbox
 

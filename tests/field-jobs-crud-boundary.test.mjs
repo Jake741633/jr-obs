@@ -90,13 +90,13 @@ test("every job CRUD handler checks its live restriction before mutating UI stat
   const submit = between("function submit", "function updateStatus");
   const deleteJob = between("function deleteJob", "const relatedName");
 
-  assert.match(blockJobEdit, /if \(!jobEditRestricted\) return false;[\s\S]*setError\(jobEditHandoffMessage\);[\s\S]*return true;/);
-  assert.match(blockJobDelete, /if \(!jobDeleteRestricted\) return false;[\s\S]*setError\(jobDeleteHandoffMessage\);[\s\S]*return true;/);
+  assert.match(blockJobEdit, /if \(!jobEditRestricted && !latestSources\.current\.editRestricted && latestSources\.current\.scopeKey === jobMutationScopeKey\) return false;[\s\S]*setError\(jobEditHandoffMessage\);[\s\S]*return true;/);
+  assert.match(blockJobDelete, /if \(!jobDeleteRestricted && !latestSources\.current\.deleteRestricted && latestSources\.current\.scopeKey === jobMutationScopeKey\) return false;[\s\S]*setError\(jobDeleteHandoffMessage\);[\s\S]*return true;/);
 
   for (const [handler, guardText, sideEffects] of [
     [startEdit, "if (blockJobEdit()) return;", ["setForm(", "setEditingId(", "setShowForm("]],
-    [submit, "if (blockJobEdit()) return;", ["jobs.setItems", "timeline.setItems", "resetForm()"]],
-    [deleteJob, "if (blockJobDelete()) return;", ["window.confirm", "jobs.remove"]],
+    [submit, "if (blockJobEdit()) return;", ["jobs.createItem", "jobs.updateItem", "saveJobNote(", "resetForm()"]],
+    [deleteJob, "if (blockJobDelete()) return;", ["window.confirm", "jobs.removeItem"]],
   ]) {
     const guard = handler.indexOf(guardText);
     assert.ok(guard >= 0, `The handler must retain the fail-closed guard: ${guardText}`);
