@@ -114,3 +114,71 @@ test("quote and customer recommendations retain opaque saved identities in recor
   const quotes = build({ documents: [quote({ id, customerId: id })], customers: [customer({ id })] }); assert.equal(quotes[0].href, `/quotes/${encodeURIComponent(id)}`);
   const customers = build({ profiles: [profile({ customerId: id })], customers: [customer({ id })] }); assert.equal(customers[0].href, `/customers/${encodeURIComponent(id)}`);
 });
+
+const activity = (patch = {}) => ({ id: "activity-1", leadId: "lead-1", type: "Call", summary: "Discussed the enquiry", completedBy: "Office", completedAt: "2026-10-11T11:00:00Z", createdAt: "2026-10-11T11:00:00Z", ...patch });
+
+test("notes stage history and general edits cannot postpone an unanswered lead or unlinked quote", () => {
+  for (const stage of ["Contacted", "Quote Sent"]) {
+    const original = lead({ stage, createdAt: "2026-10-08T12:00:00Z", updatedAt: "2026-10-08T12:00:00Z" });
+    const before = build({ leads: [original] })[0];
+    const data = { leads: [{ ...original, updatedAt: "2026-10-11T11:00:00Z", notes: "Internal update" }], leadActivities: [activity({ type: "Note" }), activity({ id: "stage-1", type: "Stage change" })] };
+    const snapshot = JSON.stringify(data), after = build(data)[0];
+    assert.ok(after, stage); assert.equal(after.reason, before.reason); assert.equal(after.ageDays, 3); assert.equal(after.ageBasis, "enquiry"); assert.equal(after.priorityScore, before.priorityScore); assert.equal(JSON.stringify(data), snapshot);
+  }
+});
+
+test("each genuine completed contact channel restarts the unanswered interval", () => {
+  for (const type of ["Call", "Text", "Email", "WhatsApp", "Site visit"]) {
+    const source = lead({ stage: "Contacted", createdAt: "2026-10-01T12:00:00Z" });
+    const history = activity({ type });
+    assert.equal(build({ leads: [source], leadActivities: [history] }).length, 0, type);
+    const due = build({ leads: [{ ...source, stage: "Follow-up Due" }], leadActivities: [history] })[0];
+    assert.equal(due.ageDays, 0); assert.equal(due.ageBasis, "contact");
+    const aged = build({ leads: [source], leadActivities: [{ ...history, completedAt: "2026-10-09T12:00:00Z" }] })[0];
+    assert.equal(aged.reason, "No response"); assert.equal(aged.ageDays, 2);
+  }
+});
+
+test("newest genuine contact wins across the lead and unsorted history using actual instants", () => {
+  const source = lead({ stage: "Follow-up Due", lastContactAt: "2026-10-01T12:00:00Z" });
+  const histories = [activity({ id: "older", completedAt: "2026-10-09T12:30:00+02:00" }), activity({ id: "newer", completedAt: "2026-10-09T11:30:00-01:00" })];
+  for (const leadActivities of [histories, histories.toReversed()]) {
+    const item = build({ leads: [source], leadActivities })[0]; assert.equal(item.ageDays, 1); assert.equal(item.ageBasis, "contact");
+  }
+  const item = build({ leads: [{ ...source, lastContactAt: "2026-10-11T11:00:00Z" }], leadActivities: histories })[0]; assert.equal(item.ageDays, 0); assert.equal(item.ageBasis, "contact");
+});
+
+test("malformed and future contact dates cannot hide older genuine contact or enquiry evidence", () => {
+  for (const invalid of [undefined, null, "", "invalid", "2026-02-30", "2026-02-30T11:00:00Z", "2026-13-01T11:00:00Z", "2026-10-11T25:00:00Z", "2026-10-11T11:00:00", "2026-10-11T13:00:00Z", "2026-10-12", "2030-01-01T00:00:00Z", 123, {}]) {
+    const source = lead({ stage: "Contacted", lastContactAt: invalid, createdAt: "2026-10-08T12:00:00Z", updatedAt: "2026-10-11T11:00:00Z" });
+    const leadActivities = [activity({ completedAt: invalid }), activity({ id: "valid", completedAt: "2026-10-09T12:00:00Z" })];
+    const known = build({ leads: [source], leadActivities })[0]; assert.equal(known?.ageDays, 2, String(invalid)); assert.equal(known.ageBasis, "contact");
+    const fallback = build({ leads: [source], leadActivities: leadActivities.slice(0, 1) })[0]; assert.equal(fallback?.ageDays, 3, String(invalid)); assert.equal(fallback.ageBasis, "enquiry");
+  }
+});
+
+test("contact on another lead and unsupported activity types do not change this lead's age", () => {
+  const source = lead({ stage: "Contacted", createdAt: "2026-10-08T12:00:00Z" });
+  const item = build({ leads: [source], leadActivities: [activity({ leadId: "other-lead" }), activity({ id: "unknown-type", type: "Imported update" })] })[0];
+  assert.equal(item.reason, "No response"); assert.equal(item.ageDays, 3); assert.equal(item.ageBasis, "enquiry");
+});
+
+test("date-only contact on the current day remains valid before noon", () => {
+  const items = crm.buildFollowUpCentre({ ...emptyData(), leads: [lead({ lastContactAt: "2026-10-11" })], now: new FixedDate("2026-10-11T08:00:00") });
+  assert.equal(items[0].ageDays, 0); assert.equal(items[0].ageBasis, "contact");
+});
+
+test("phone cards and recommendations distinguish contact age from enquiry age", () => {
+  const h = harness();
+  h.data.leads = [lead({ id: "no-contact", name: "Older enquiry", createdAt: "2026-10-08T12:00:00Z", updatedAt: "2026-10-11T11:00:00Z" }), lead({ id: "contacted", name: "Contacted enquiry", lastContactAt: "2026-10-10T12:00:00Z" })];
+  h.data.leadActivities = [activity({ leadId: "no-contact", type: "Note" })];
+  const cards = h.cards(); assert.match(text(cards[0]), /Older enquiry/); assert.match(text(cards[0]), /3 days since enquiry/); assert.match(text(cards[1]), /1 day since contact/);
+  assert.match(text(h.recommendations()), /3 days since enquiry/); assert.match(text(h.recommendations()), /1 day since contact/);
+});
+
+test("surfaced leads without valid age evidence say unavailable instead of claiming zero days", () => {
+  for (const createdAt of ["", "invalid", "2026-02-30T12:00:00Z", "2030-01-01T00:00:00Z"]) {
+    const h = harness(); h.data.leads = [lead({ createdAt, updatedAt: "2026-10-11T11:00:00Z", lastContactAt: "invalid" })];
+    assert.match(text(h.cards()[0]), /Age unavailable/); assert.doesNotMatch(text(h.cards()[0]), /0 days/); assert.match(text(h.recommendations()), /Age unavailable/); assert.doesNotMatch(text(h.recommendations()), /0 days/);
+  }
+});
