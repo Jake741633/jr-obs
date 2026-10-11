@@ -1,5 +1,5 @@
 import { buildAssistantBriefing, type AssistantAction, type AssistantRecords } from "./assistantBriefing";
-import { assistantDateKey, assistantDay, assistantQuoteFollowUpDue } from "./assistantSignals-core.mjs";
+import { assistantDateKey, assistantDay } from "./assistantSignals-core.mjs";
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import { assistantMoneyAnswer } from "./assistantMoney";
 import { entryEndDate } from "./scheduling";
@@ -7,6 +7,7 @@ import { assistantTaskSnapshot } from "./assistantTasks";
 import { assistantVisitActions } from "./assistantVisits";
 import { assistantMaterialsAnswer } from "./assistantMaterials";
 import { assistantJobIdentityIndex } from "./assistantIdentity";
+import { assistantQuoteSnapshot } from "./assistantQuotes";
 
 export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries";
 type JobQuestionIntent = Extract<AssistantQuestionIntent, "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries">;
@@ -100,7 +101,8 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
       const priorityRank = { Now: 0, Today: 1, Next: 2 };
       const taskSnapshot = assistantTaskSnapshot(records.tasks || [], records.jobs, now, { onlyAttention: false, canOpenTaskWorkspace, jobId });
       const taskPriorities = assistantTaskSnapshot(records.tasks || [], records.jobs, now, { canOpenTaskWorkspace, jobId });
-      const actions = [...(briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => action.category !== "Tasks" && action.jobIds?.includes(jobId) && !action.id.startsWith("invoice-source:") && !action.id.startsWith("invoice-payment-review:")), ...taskPriorities.actions,
+      const quoteSnapshot = assistantQuoteSnapshot(records.documents, records.jobs, now, { jobId });
+      const actions = [...(briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => action.category !== "Tasks" && action.category !== "Quotes" && action.jobIds?.includes(jobId) && !action.id.startsWith("invoice-source:") && !action.id.startsWith("invoice-payment-review:")), ...taskPriorities.actions, ...quoteSnapshot.actions,
         ...assistantVisitActions([selectedJob], records.planner, today)].toSorted((a, b) => priorityRank[a.priority] - priorityRank[b.priority] || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.id.localeCompare(b.id));
       // Keep global identities for validation, but never include another job's copies as evidence.
       const unpaid = assistantMoneyAnswer(records, "unpaid", now, jobId);
@@ -108,7 +110,7 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
       const activeVisits = records.planner.filter((visit) => visit.jobId === jobId && ["Planned", "Confirmed"].includes(visit.status));
       const validVisits = activeVisits.filter((visit) => assistantDay(visit.date) !== null && assistantDay(entryEndDate(visit)) !== null && visit.date <= entryEndDate(visit));
       const visits = validVisits.filter((visit) => entryEndDate(visit) >= today).toSorted((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime) || a.id.localeCompare(b.id));
-      const warnings = [...unpaid.warnings, ...taskSnapshot.warnings];
+      const warnings = [...unpaid.warnings, ...taskSnapshot.warnings, ...quoteSnapshot.warnings];
       if (records.tasks === undefined) warnings.push("Task records are not ready for this briefing; their absence does not mean no work remains.");
       if (activeVisits.length !== validVisits.length) warnings.push(`${plural(activeVisits.length - validVisits.length, "linked visit")} with invalid or reversed dates excluded. Review the job and diary.`);
       const context: AssistantAnswerItem = { id: `job:${jobId}`, title: selectedJob.title, detail: `Job status: ${selectedJob.status} · ${selectedJob.siteAddress || "Address not recorded"}`,
@@ -162,9 +164,14 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
     return assistantMoneyAnswer(records, intent, now);
   }
 
-  const dueQuotes = new Set(records.documents.filter((quote) => assistantQuoteFollowUpDue(quote, now)).map((quote) => `follow-up:${quote.id}`));
-  const actions = (briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => intent === "priorities" || (intent === "quotes" ? dueQuotes.has(action.id) : action.id.startsWith("readiness:")));
-  return { recognized: true, title: intent === "quotes" ? "Quote follow-ups due" : intent === "site" ? "Site preparation" : "Your next actions",
+  if (intent === "quotes") {
+    const snapshot = assistantQuoteSnapshot(records.documents, records.jobs, now, { followUpsOnly: true });
+    return { recognized: true, title: "Quote follow-ups due",
+      summary: `${plural(snapshot.followUpCount, "confirmed follow-up")} in the loaded records.${snapshot.reviewCount ? ` ${plural(snapshot.reviewCount, "quote source review")}; follow-up count incomplete.` : ""}`,
+      scope: "Sent quotes due for follow-up, plus uncertain quote sources needing review. Saved contact dates and recent recorded contact take precedence; review pricing before following up an expired quote. A source review does not recommend customer contact.", warnings: snapshot.warnings, items: snapshot.actions.map(actionItem) };
+  }
+  const actions = (briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => intent === "priorities" || action.id.startsWith("readiness:"));
+  return { recognized: true, title: intent === "site" ? "Site preparation" : "Your next actions",
     summary: actions.length ? `${plural(actions.length, intent === "site" ? "job" : "action")} to review in the loaded records.` : "No matching checks flagged in the loaded records.",
-    scope: intent === "quotes" ? "Sent quotes due for follow-up. Saved contact dates and recent recorded contact take precedence; review pricing before following up an expired quote." : intent === "site" ? "Readiness gaps on active jobs and visits in the coming seven days. A clear list does not confirm that access, materials or safety requirements are satisfied." : `Priorities as of ${today}, ranked by urgency and saved evidence.`, warnings: [], items: actions.map(actionItem) };
+    scope: intent === "site" ? "Readiness gaps on active jobs and visits in the coming seven days. A clear list does not confirm that access, materials or safety requirements are satisfied." : `Priorities as of ${today}, ranked by urgency and saved evidence.`, warnings: [], items: actions.map(actionItem) };
 }

@@ -20,13 +20,14 @@ const scheduling = compile("../lib/scheduling.ts");
 const assistantVisits = compile("../lib/assistantVisits.ts", { "./jobManagement-core.mjs": jobsCore, "./scheduling": scheduling });
 const purchaseLink = compile("../lib/purchaseListLink.ts", {}, false, { URLSearchParams });
 const assistantIdentity = compile("../lib/assistantIdentity.ts");
+const assistantQuotes = compile("../lib/assistantQuotes.ts", { "./assistantIdentity": assistantIdentity, "./assistantSignals-core.mjs": signals });
 const assistantMoney = compile("../lib/assistantMoney.ts", { "./invoiceLink": invoiceLink, "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });
 const assistantMaterials = compile("../lib/assistantMaterials.ts", { "./purchaseListLink": purchaseLink, "./assistantIdentity": assistantIdentity });
 const taskInbox = compile("../lib/taskInbox.ts", { "./assistantIdentity": assistantIdentity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./assistantIdentity": assistantIdentity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
-const briefing = compile("../lib/assistantBriefing.ts", { "./assistantMoney": assistantMoney, "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
-const questions = compile("../lib/assistantQuestions.ts", { "./assistantMoney": assistantMoney, "./assistantIdentity": assistantIdentity, "./assistantMaterials": assistantMaterials, "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
+const briefing = compile("../lib/assistantBriefing.ts", { "./assistantQuotes": assistantQuotes, "./assistantMoney": assistantMoney, "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
+const questions = compile("../lib/assistantQuestions.ts", { "./assistantQuotes": assistantQuotes, "./assistantMoney": assistantMoney, "./assistantIdentity": assistantIdentity, "./assistantMaterials": assistantMaterials, "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
 const now = new Date(2026, 9, 10, 10);
 const records = (patch = {}) => ({ jobs: [], documents: [], invoices: [], payments: [], planner: [], purchases: [], reminders: [], certificates: [], ...patch });
 const visit = (patch = {}) => ({ id: "v1", title: "First fix", type: "Job", status: "Confirmed", date: "2026-10-11", startTime: "09:00", endTime: "12:00", location: "1 High Street", teamMemberIds: ["worker"], ...patch });
@@ -35,6 +36,28 @@ const invoice = (patch = {}) => ({ id: "i1", number: "INV-1", title: "Lighting",
 const siteTask = (patch = {}) => ({ id: "t1", jobId: "j1", type: "Task", title: "Fit labels", status: "Open", priority: "Normal", category: "General", dueDate: "", ...patch });
 const answer = (question, data = {}, date = now) => questions.answerAssistantQuestion(records(data), question, date);
 const answerFor = (question, data, id) => questions.answerAssistantQuestion(records(data), question, now, undefined, id);
+
+test("quote answers separate verified follow-up counts from identity and date reviews", () => {
+  const quote = { id: "q1", type: "Quote", status: "Sent", number: "Q-1", title: "Lighting", validUntil: "2026-11-01", updatedAt: "2026-10-01T10:00:00Z" };
+  const data = records({ documents: [quote, { ...quote, type: "Estimate" }, { ...quote, id: "valid" }, { ...quote, id: "bad-date", nextFollowUpDate: "invalid" }] });
+  const result = questions.answerAssistantQuestion(data, "Show quote follow-ups", now, { today: "2026-10-10", actions: [] });
+  assert.match(result.summary, /1 confirmed follow-up.*2 quote source reviews.*count incomplete/);
+  assert.equal(result.items.length, 3); assert.match(result.warnings.join(" "), /count is incomplete/);
+  assert.ok(!result.items.some(i => i.id === "follow-up:q1" || i.id === "follow-up:bad-date"));
+  const recovered = answer("Show quote follow-ups", { documents: [quote] });
+  assert.match(recovered.summary, /1 confirmed follow-up/); assert.equal(recovered.warnings.length, 0);
+});
+
+test("job briefing rebuilds quote evidence in scope even with a cached global briefing", () => {
+  const quote = { id: "q1", jobId: "j1", type: "Quote", status: "Sent", number: "Q-1", title: "Lighting", validUntil: "2026-11-01", updatedAt: "2026-10-01T10:00:00Z" };
+  const data = records({ jobs: [job(), job({ id: "other", title: "Other site" })], documents: [quote, { ...quote, jobId: "other", type: "Estimate", title: "Hidden other quote details" }] });
+  const global = briefing.buildAssistantBriefing(data, now);
+  assert.match(JSON.stringify(global), /Hidden other quote details/);
+  const result = questions.answerAssistantQuestion(data, "Show job briefing", now, global, "j1");
+  assert.equal(result.items.filter(i => i.id.startsWith("quote-source:")).length, 1);
+  assert.ok(!result.items.some(i => i.id === "follow-up:q1")); assert.match(result.warnings.join(" "), /quote source review/);
+  assert.doesNotMatch(JSON.stringify(result), /Hidden other quote details|Other site/);
+});
 
 test("task and job answers withhold ambiguous counts using all loaded task identities", () => {
   const data = { jobs: [job(), job({ id: "other", title: "Other site" })], tasks: [siteTask({ type: "Snag", priority: "Urgent" }), siteTask({ jobId: "other", title: "Other job copy details", status: "Completed" }), siteTask({ id: "valid", title: "Known open work" })] };
