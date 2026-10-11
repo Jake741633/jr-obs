@@ -38,6 +38,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Phone purchase search, exact job/status filters, uncertain-record review and progressive list cards
 - [x] Reviewed low-stock requests with durable saves, stable retries and changed-source checks
 - [x] Phone stock-code choices by saved identity and location, with stale-selection checks and progressive results
+- [x] Phone supplier lookup with labelled controls, cancellation, retry and stale-response protection
 - [x] Check each upcoming visit’s readiness and open the affected diary day
 - [ ] Physical iPhone/Android install, relaunch, keyboard and signed-in workflow acceptance
 - [ ] Production recovery evidence and release sign-off
