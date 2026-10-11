@@ -125,7 +125,7 @@ function ui(data = records(), canOpenTaskWorkspace = true, search = "") {
   const states = [], effects = [], frames = []; let cursor = 0, blurred = 0, mounted = false;
   const component = compile("../components/ai/AssistantQuestions.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx },
-    react: { useEffect: (fn) => { if (!mounted) effects.push(fn); }, useMemo: (fn) => fn(), useRef: () => ({ current: { blur: () => blurred++ } }), useState(initial) { const index = cursor++; if (!(index in states)) states[index] = initial; return [states[index], (value) => { states[index] = typeof value === "function" ? value(states[index]) : value; }]; } },
+    react: { useEffect: (fn) => { if (!mounted) effects.push(fn); }, useMemo: (fn) => fn(), useRef(initial) { const index = cursor++; if (!(index in states)) states[index] = { current: initial === null ? { blur: () => blurred++ } : initial }; return states[index]; }, useState(initial) { const index = cursor++; if (!(index in states)) states[index] = initial; return [states[index], (value) => { states[index] = typeof value === "function" ? value(states[index]) : value; }]; } },
     "next/link": { default: "Link" }, "../ui/Card": { Card: "Card" }, "../../lib/assistantQuestions": questions, "../../lib/assistantJobLink": jobLink, "../../lib/assistantIdentity": assistantIdentity,
   }, true, { window: { location: { search }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame(id) { frames[id - 1] = null; } } });
   let recordsNow = data;
@@ -778,4 +778,104 @@ test("corrected purchase and line identities restore counts on refresh without r
   h.replaceRecords({ ...data, purchases: [data.purchases[0], { ...data.purchases[1], id: "p2" }] }); assert.match(text(h.render()), /2 line\(s\) marked Needed/);
   h.replaceRecords({ ...data, purchases: [purchaseList({ items: [purchaseLine(), purchaseLine({ description: "Conflicting line" })] })] }); assert.match(text(h.render()), /0 line\(s\) marked Needed.*1 source identity review/);
   h.replaceRecords({ ...data, purchases: [purchaseList({ items: [purchaseLine(), purchaseLine({ id: "fixed", description: "Conflicting line" })] })] }); assert.match(text(h.render()), /2 line\(s\) marked Needed/); assert.equal(nodes(h.render()).find((node) => node.type === "select").props.value, "j1");
+});
+
+test("explicit conversational follow-ups recognize supported job topics without widening the normal parser", () => {
+  for (const [query, intent] of [["What about tasks?", "tasks"], ["And the open snags!", "snags"], ["Please what about materials?", "materials"], ["And deliveries for the same job", "deliveries"], ["What about the next visit?", "visits"], ["And job briefing", "job"], ["Show tasks for this job", "tasks"], ["Can you show awaiting deliveries for that job?", "deliveries"], ["Which materials need ordering for this job?", "materials"], ["Show next visit checks for the same job", "visits"]]) {
+    assert.equal(questions.assistantJobFollowUpIntent(query), intent, query); assert.equal(questions.assistantQuestionIntent(query), null, query);
+  }
+});
+
+test("follow-up parsing does not accept commands, mixed topics, unsupported money scope or partial words", () => {
+  for (const query of ["Order materials for this job", "Delete tasks for this job", "Don't show tasks for this job", "What about materials and deliveries?", "What about materials for everyone?", "What about money?", "How much is overdue for this job?", "What about materialstuff", "What about tasks tomorrow?", "What about tasks" + "x".repeat(180)]) {
+    assert.equal(questions.assistantJobFollowUpIntent(query), null, query); assert.equal(answer(query).recognized, false, query); assert.equal(answer(query).items.length, 0);
+  }
+});
+
+test("unscoped follow-ups require a unique job choice even when only one job is available", () => {
+  const data = records({ jobs: [job(), job({ id: "duplicate", title: "A" }), job({ id: "duplicate", title: "B" }), job({ id: "" })], tasks: [siteTask()] });
+  const result = answer("What about tasks?", data); assert.equal(result.title, "Choose a job"); assert.match(result.summary, /Choose one loaded job/); assert.equal(result.items.length, 0); assert.deepEqual(Array.from(result.jobChoices, j => j.id), ["j1"]); assert.match(result.scope, /not guessed.*all jobs/);
+  const empty = answer("What about tasks?"); assert.equal(empty.items.length, 0); assert.equal(empty.jobChoices.length, 0); assert.match(empty.summary, /No uniquely identified job/);
+});
+
+test("all follow-up topics remain on the exact selected job and reject removed or duplicate identities", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Other job" })], tasks: [siteTask(), siteTask({ id: "other-task", jobId: "other" })], purchases: [purchaseList(), purchaseList({ id: "other-purchase", jobId: "other" })] }); const before = JSON.stringify(data);
+  for (const query of ["What about tasks?", "And snags", "And materials", "And deliveries", "And next visit", "And job briefing"]) {
+    const result = answerFor(query, data, "j1"); assert.equal(result.resolvedJobId, "j1", query); assert.doesNotMatch(JSON.stringify(result.items), /other-task|other-purchase/);
+    const missing = answerFor(query, data, "removed"); assert.equal(missing.items.length, 0); assert.equal(missing.resolvedJobId, undefined); assert.equal(missing.jobChoices.length, 0);
+    const duplicate = answerFor(query, { ...data, jobs: [...data.jobs, job({ title: "Conflicting copy" })] }, "j1"); assert.equal(duplicate.title, "Job identity needs review"); assert.equal(duplicate.items.length, 0);
+  }
+  assert.equal(JSON.stringify(data), before);
+});
+
+test("quoted literal job names remain literal while this-job phrases need explicit saved scope", () => {
+  const data = { jobs: [job({ title: "This job" }), job({ id: "other", title: "Elsewhere" })], tasks: [siteTask()] };
+  assert.equal(answer('Show tasks for "This job"', data).resolvedJobId, "j1");
+  assert.equal(answer("Show tasks for this job", data).resolvedJobId, undefined);
+  assert.equal(answerFor("Show tasks for this job", data, "other").resolvedJobId, "other");
+});
+
+test("a named answer updates phone job scope so the next shortcut and typed follow-up stay on that identity", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Kitchen" })], tasks: [siteTask()], purchases: [purchaseList(), purchaseList({ id: "other-purchase", jobId: "other", title: "Other materials" })] }); const h = ui(data);
+  h.scope("other"); h.fill("Show tasks for Workshop"); h.submit(); assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, "j1");
+  h.click("Materials to order"); assert.match(text(h.render()), /Only purchase lists explicitly linked to Workshop/); assert.doesNotMatch(text(h.render()), /Other materials/);
+  h.fill("What about deliveries?"); h.submit(); assert.match(text(h.render()), /Awaiting deliveries · Workshop/); assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, "j1");
+});
+
+test("related-answer buttons keep exact job scope, use 48px targets and reset progressive reveal", () => {
+  const data = records({ jobs: [job()], tasks: Array.from({ length: 7 }, (_, i) => siteTask({ id: `follow-task-${i}` })), purchases: [purchaseList()] }); const h = ui(data);
+  h.fill("Job briefing for Workshop"); h.submit(); const group = nodes(h.render()).find(n => n.props["aria-label"] === "Follow up on this job"); assert.match(text(group), /Continue with Workshop/);
+  const buttons = nodes(group).filter(n => n.type === "button"); assert.equal(buttons.length, 6); for (const button of buttons) assert.match(button.props.className, /min-h-12/);
+  h.click("Job tasks"); assert.match(text(h.render()), /7 open items/); assert.equal(nodes(h.render()).filter(n => n.type === "Link").length, 4); h.click("Show more records"); assert.equal(nodes(h.render()).filter(n => n.type === "Link").length, 7);
+  h.click("Job materials"); assert.match(text(h.render()), /Materials to order · Workshop/); h.click("Job tasks"); assert.equal(nodes(h.render()).filter(n => n.type === "Link").length, 4);
+  h.click("Job snags"); assert.match(text(h.render()), /Open snags · Workshop/); h.click("Next work visit"); assert.match(text(h.render()), /Next work visit checks · Workshop/); h.click("Job summary"); assert.match(text(h.render()), /Job briefing · Workshop/);
+});
+
+test("follow-up without a chosen job offers progressive choices and answers only after explicit selection", () => {
+  const jobs = Array.from({ length: 7 }, (_, i) => job({ id: `follow-job-${i}`, title: `Job ${i}` })); const data = records({ jobs, tasks: jobs.map(j => siteTask({ id: `task-${j.id}`, jobId: j.id })) }); const h = ui(data);
+  h.fill("What about tasks?"); h.submit(); assert.match(text(h.render()), /Choose one loaded job before/); assert.equal(nodes(h.render()).filter(n => n.type === "button" && text(n) === "Use this job").length, 4);
+  assert.ok(!nodes(h.render()).some(n => n.props["aria-label"] === "Follow up on this job")); h.click("Show more jobs"); h.choose(5); assert.match(text(h.render()), /Only Job 5/); assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, "follow-job-5");
+  assert.equal(nodes(h.render()).filter(n => n.type === "Link").length, 1);
+});
+
+test("follow-up state stays unavailable when a job disappears, even if another job reuses its name", () => {
+  const data = records({ jobs: [job()], tasks: [siteTask()] }); const h = ui(data); h.fill("Show tasks for Workshop"); h.submit(); h.fill("And tasks"); h.submit();
+  h.replaceRecords({ ...data, jobs: [job({ id: "replacement" })], tasks: [siteTask({ jobId: "replacement" })] }); assert.match(text(h.render()), /selected job is no longer available/); assert.equal(nodes(h.render()).filter(n => n.type === "Link").length, 0); assert.ok(!nodes(h.render()).some(n => n.props["aria-label"] === "Follow up on this job"));
+  h.replaceRecords(data); assert.match(text(h.render()), /Only Workshop/); assert.equal(nodes(h.render()).filter(n => n.type === "Link").length, 1);
+});
+
+test("retained follow-up buttons cannot restore an answer after clear, input or scope changes", () => {
+  for (const action of [h => h.click("Clear answer"), h => h.fill("Something new"), h => h.scope("other"), h => h.click("Tomorrow")]) {
+    const h = ui(records({ jobs: [job(), job({ id: "other", title: "Other" })], tasks: [siteTask()] })); h.scope("j1"); h.click("Open tasks"); const stale = nodes(h.render()).find(n => n.type === "button" && text(n) === "Job materials").props.onClick;
+    action(h); const before = text(h.render()); stale(); assert.equal(text(h.render()), before);
+  }
+});
+
+test("a follow-up callback captured before a source refresh cannot substitute an unavailable job", () => {
+  const data = records({ jobs: [job()], tasks: [siteTask()], purchases: [purchaseList()] }); const h = ui(data); h.scope("j1"); h.click("Open tasks"); const stale = nodes(h.render()).find(n => n.type === "button" && text(n) === "Job materials").props.onClick;
+  h.replaceRecords({ ...data, jobs: [job({ id: "replacement" })], purchases: [purchaseList({ jobId: "replacement" })] }); stale(); assert.match(text(h.render()), /selected job is no longer available/); assert.ok(!nodes(h.render()).some(n => n.type === "Link" && n.props.href.startsWith("/purchases")));
+});
+
+test("unresolved named questions clear the previous job context instead of reusing it for a follow-up", () => {
+  const data = records({ jobs: [job(), job({ id: "a", title: "Shared" }), job({ id: "b", title: "Shared" })], tasks: [siteTask()] });
+  for (const name of ["Shared", "No matching job"]) {
+    const h = ui(data); h.scope("j1"); h.click("Open tasks"); h.fill(`Show tasks for ${name}`); h.submit(); assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, ""); h.fill("What about materials?"); h.submit(); assert.match(text(h.render()), /Choose one loaded job before/); assert.ok(!nodes(h.render()).some(n => n.type === "Link" && n.props.href.startsWith("/purchases")));
+  }
+});
+
+test("clear or All loaded jobs removes follow-up context, while normal shortcuts retain their documented scope", () => {
+  const data = records({ jobs: [job()], tasks: [siteTask()], invoices: [invoice()] }); const h = ui(data); h.fill("Show tasks for Workshop"); h.submit(); h.click("Overdue money"); assert.match(text(h.render()), /£240\.00/); assert.ok(!nodes(h.render()).some(n => n.props["aria-label"] === "Follow up on this job"));
+  h.fill("And tasks"); h.submit(); assert.match(text(h.render()), /Only Workshop/); h.scope(""); h.fill("And tasks"); h.submit(); assert.match(text(h.render()), /Choose one loaded job before/); h.choose(); h.click("Clear answer"); h.fill("And tasks"); h.submit(); assert.match(text(h.render()), /Choose one loaded job before/);
+  const fresh = ui(data); fresh.fill("And tasks"); fresh.submit(); assert.match(text(fresh.render()), /Choose one loaded job before/);
+});
+
+test("follow-ups retain office task destinations and do not mutate sources or restore stale choices", () => {
+  const data = records({ jobs: [job()], tasks: [siteTask()] }); const before = JSON.stringify(data), h = ui(data, false); h.fill("And tasks"); h.submit(); const oldChoice = nodes(h.render()).find(n => n.type === "button" && text(n) === "Use this job").props.onClick; h.choose();
+  assert.equal(nodes(h.render()).find(n => n.type === "Link").props.href, "/jobs/j1"); h.click("Job tasks"); assert.match(text(h.render()), /owner or admin/); h.click("Clear answer"); oldChoice(); assert.ok(!nodes(h.render()).some(n => n.props["aria-label"] === "JR AI answer")); assert.equal(JSON.stringify(data), before);
+});
+
+test("user input before a deferred job-link frame wins over the initial linked briefing", () => {
+  for (const action of [h => h.fill("What about materials?"), h => h.scope("other"), h => h.click("Tomorrow")]) {
+    const h = ui(records({ jobs: [job(), job({ id: "other", title: "Other" })] }), true, "?job=j1"); h.render(); action(h); const before = text(h.render()); h.flush(); assert.equal(text(h.render()), before); assert.doesNotMatch(text(h.render()), /Job briefing · Workshop/);
+  }
 });

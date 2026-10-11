@@ -77,6 +77,16 @@ Answers group matching lines by purchase list, showing four lists initially. Nee
 
 Review purchase list carries one encoded saved list id into `/purchases?list=…`. The source page shows that list's current lines and totals, including any status or quantity changes since the answer. Invalid, duplicate, oversized, missing or ambiguous ids cannot substitute another list; Show all purchase lists explicitly clears the scope. Oversized historical ids use the general purchase-list workspace instead. Navigation and query parameters cannot create or update records. No source or route permissions change.
 
+## Job-aware follow-ups
+
+A successfully matched named-job question now updates the visible Job scope selector. Tasks, snags, materials, deliveries, next-work-visit checks and job briefings keep that exact saved identity for the next question. Each resolved job answer offers six 48px related-answer buttons, resetting progressive results to four and dismissing the keyboard without navigating away or writing records.
+
+Explicit follow-ups such as “What about materials?”, “And deliveries”, “What about the next visit?” and “Show tasks for this job” use the chosen job. Without a selected identity, the assistant asks for one unique loaded job even if only one is available; it never guesses or runs the question across all jobs. Duplicate/missing job identities, unavailable records and reused titles retain their existing fail-closed behavior. Quoted literal names such as “This job” remain available through exact named-job questions.
+
+An unresolved new named-job question clears the previous job context before another follow-up. Choosing All loaded jobs or Clear answer also removes it. Diary, money, quote and site-preparation shortcuts keep their existing global scope and do not claim to answer for the selected job. Unsupported, mixed-topic and mutation requests remain unsupported. No conversation history is persisted or sent externally; the context lives only in the existing account-scoped question panel.
+
+Older related-answer and job-choice callbacks cannot restore cleared answers or replace subsequent input, scope choices or shortcuts. A deferred initial job-link frame cannot override an interaction already made by the user. Refreshed records still determine whether the retained identity is available. Behavioral tests exercise the actual handlers, progressive choice lists, unavailable/duplicate records, office destinations and source immutability.
+
 ## Account and data boundaries
 
 Scoped questions require a unique saved job identity across the complete loaded job collection, even if only one duplicate copy matches the typed name/address. Missing or duplicate job identities cannot appear as selectable phone choices. A retained or linked selection becomes unavailable/ambiguous until that exact identity is unique again; a reused title cannot substitute another job.
