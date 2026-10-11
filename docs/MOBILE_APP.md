@@ -35,6 +35,12 @@ can expose Workspace, Daily assistant and Quick quote. These are ordinary
 guarded routes: a shortcut never grants access to another role's workspace.
 Availability depends on the device and browser.
 
+## Quote inbox
+
+Quotes & Estimates now opens with its four overview figures behind a native, 48px Quote overview disclosure. The figures still describe all loaded quotes and explicitly remain independent of inbox filters. Saved documents have labelled search across number, title, customer/builder name and site address, document-type and saved-status filters, plus Clear filters. Needs status review surfaces unsupported historical statuses without changing them or presenting them as Draft. Saved Expired is a recorded status, not a recalculation from the validity date.
+
+Eight cards appear first, with eight more per tap; search and filter changes reset that reveal. Searching, filtering, clearing and expanding the overview preserve an open quote draft. Enter dismisses the search keyboard. Document cards show the site address, stack actions on narrow screens, provide 48px view/edit/delete/status/job-link targets, and encode saved identities in navigation links. Quick fixed-price quote opens the existing mobile builder when no full-builder form is open. These inbox controls are presentation and navigation only; quote calculations, saved status changes, deletion, job conversion and persistence policies retain their existing behavior. Physical-phone and populated signed-in acceptance remain pending.
+
 ## Task inbox
 
 The office Tasks & Snagging workspace starts with outstanding work. Open, Due, Snags, Completed and All filters, job selection and a combined task/job/address search narrow the list. Due means today or earlier using the device’s local calendar date; missing or invalid dates are not treated as overdue. Counts apply to the selected job before text search. Eight cards appear first, with Show more for the rest.
