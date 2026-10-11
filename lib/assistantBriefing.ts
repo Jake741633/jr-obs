@@ -3,8 +3,9 @@ import { assistantTaskActions } from "./assistantTasks";
 import { detectScheduleClashes, entryEndDate, type ScheduledPlannerEntry } from "./scheduling";
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
 import { outstandingCertificateJobs, type CertificateSignal } from "./dashboardIntelligence";
-import { assistantDateKey, assistantDay, assistantInvoiceBalance, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "./assistantSignals-core.mjs";
-import { effectiveInvoicePaid, type PaymentRecord } from "./payments";
+import { assistantDateKey, assistantDay, assistantQuoteFollowUpDue } from "./assistantSignals-core.mjs";
+import type { PaymentRecord } from "./payments";
+import { assistantMoneyActions } from "./assistantMoney";
 
 export type AssistantFocus = "All" | "Money" | "Quotes" | "Site" | "Diary" | "Tasks" | "Reminders";
 export interface AssistantAction {
@@ -32,7 +33,6 @@ export interface AssistantRecords {
   certificates: CertificateSignal[];
   tasks?: JobTask[];
 }
-const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const jobPath = (id: string) => `/jobs/${encodeURIComponent(id)}`;
 const quotePath = (id: string) => `/quotes/${encodeURIComponent(id)}`;
 const rank = { Now: 0, Today: 1, Next: 2 };
@@ -45,17 +45,8 @@ export function buildAssistantBriefing(records: AssistantRecords, now = new Date
   const todayDay = assistantDay(today)!;
   const actions: AssistantAction[] = [];
   const add = (action: AssistantAction) => actions.push(action);
-  const { jobs, documents, invoices, payments = [], planner, purchases, reminders, certificates } = records;
-
-  for (const invoice of invoices.filter((item) => isAssistantInvoiceOverdue(item, now, effectiveInvoicePaid(item, payments)))) {
-    const paid = effectiveInvoicePaid(invoice, payments);
-    const overdueDays = todayDay - assistantDay(invoice.dueDate)!;
-    add({ id: `invoice:${invoice.id}`, category: "Money", priority: "Now", title: `Chase ${invoice.number}`,
-      reason: `${money.format(assistantInvoiceBalance(invoice, paid))} remains unpaid, ${plural(overdueDays, "day")} after the due date.`,
-      nextStep: "Check for a recent payment, then review the invoice before contacting the customer.",
-      href: `/invoices?invoice=${encodeURIComponent(invoice.id)}`, actionLabel: "Review invoice", dueDate: invoice.dueDate, jobIds: invoice.jobId ? [invoice.jobId] : [],
-      evidence: [invoice.title, `Status: ${invoice.status}`, `Due: ${invoice.dueDate}`, `Effective recorded paid: ${money.format(paid)}`, "Uses the higher of the invoice paid amount and linked ledger payments, including credits/refunds; these amounts are not added together."] });
-  }
+  const { jobs, documents, invoices, planner, purchases, reminders, certificates } = records;
+  actions.push(...assistantMoneyActions(records, now));
 
   const linkedQuoteIds = new Set(jobs.flatMap((job) => [job.sourceQuoteId, job.quoteSnapshot?.quoteId].filter(Boolean)));
   for (const quote of documents.filter((item) => item.type === "Quote")) {

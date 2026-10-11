@@ -1,7 +1,7 @@
 import { buildAssistantBriefing, type AssistantAction, type AssistantRecords } from "./assistantBriefing";
-import { assistantDateKey, assistantDay, assistantInvoiceBalance, assistantQuoteFollowUpDue } from "./assistantSignals-core.mjs";
+import { assistantDateKey, assistantDay, assistantQuoteFollowUpDue } from "./assistantSignals-core.mjs";
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
-import { effectiveInvoicePaid, invoiceGross } from "./payments";
+import { assistantMoneyAnswer } from "./assistantMoney";
 import { entryEndDate } from "./scheduling";
 import { assistantTaskActions } from "./assistantTasks";
 import { assistantVisitActions } from "./assistantVisits";
@@ -46,7 +46,6 @@ export function assistantJobFollowUpIntent(question: string): JobQuestionIntent 
   return intent && ["tasks", "snags", "job", "visits", "materials", "deliveries"].includes(intent) ? intent as JobQuestionIntent : null;
 }
 
-const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const plural = (count: number, word: string, pluralWord = `${word}s`) => `${count} ${count === 1 ? word : pluralWord}`;
 const actionItem = (action: AssistantAction): AssistantAnswerItem => ({ id: action.id, title: action.title, detail: `${action.reason} ${action.nextStep}`, evidence: [...action.evidence], href: action.href, actionLabel: action.actionLabel });
 const dateAt = (day: number) => new Date(day * 86400000).toISOString().slice(0, 10);
@@ -99,10 +98,10 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
     if (intent === "job" && selectedJob) {
       const jobId = selectedJob.id;
       const priorityRank = { Now: 0, Today: 1, Next: 2 };
-      const actions = [...(briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => action.jobIds?.includes(jobId)),
+      const actions = [...(briefing ?? buildAssistantBriefing(records, now, canOpenTaskWorkspace)).actions.filter((action) => action.jobIds?.includes(jobId) && !action.id.startsWith("invoice-source:") && !action.id.startsWith("invoice-payment-review:")),
         ...assistantVisitActions([selectedJob], records.planner, today)].toSorted((a, b) => priorityRank[a.priority] - priorityRank[b.priority] || (a.dueDate || "9999").localeCompare(b.dueDate || "9999") || a.id.localeCompare(b.id));
-      const scopedInvoices = records.invoices.filter((invoice) => invoice.jobId === jobId);
-      const unpaid = answerAssistantQuestion({ ...records, invoices: scopedInvoices }, "Show unpaid invoices", now)!;
+      // Keep global identities for validation, but never include another job's copies as evidence.
+      const unpaid = assistantMoneyAnswer(records, "unpaid", now, jobId);
       const openTasks = assistantTaskActions((records.tasks || []).filter((task) => task.jobId === jobId), records.jobs, now, false, canOpenTaskWorkspace);
       const activeVisits = records.planner.filter((visit) => visit.jobId === jobId && ["Planned", "Confirmed"].includes(visit.status));
       const validVisits = activeVisits.filter((visit) => assistantDay(visit.date) !== null && assistantDay(entryEndDate(visit)) !== null && visit.date <= entryEndDate(visit));
@@ -159,24 +158,7 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
   }
 
   if (intent === "overdue" || intent === "unpaid") {
-    let invalidAmounts = 0, missingDates = 0;
-    const entries = records.invoices.filter((invoice) => ["Sent", "Part paid", "Overdue"].includes(invoice.status)).flatMap((invoice) => {
-      const paid = effectiveInvoicePaid(invoice, records.payments || []);
-      const balance = assistantInvoiceBalance(invoice, paid);
-      const pence = Math.round(balance * 100);
-      if (!Number.isFinite(invoiceGross(invoice)) || invoiceGross(invoice) < 0 || !Number.isFinite(invoice.amountPaid) || invoice.amountPaid < 0 || !Number.isFinite(paid) || !Number.isSafeInteger(pence)) { invalidAmounts++; return []; }
-      if (pence <= 0) return [];
-      const due = assistantDay(invoice.dueDate);
-      if (due === null) missingDates++;
-      if (intent === "overdue" && (due === null || due >= day)) return [];
-      return [{ invoice, paid, pence, due }];
-    }).toSorted((a, b) => (a.due ?? Infinity) - (b.due ?? Infinity) || a.invoice.id.localeCompare(b.invoice.id));
-    const totalPence = entries.reduce((sum, entry) => sum + entry.pence, 0);
-    const warnings = [...(invalidAmounts ? [`${plural(invalidAmounts, "invoice")} with invalid or unsupported amounts excluded from the total.`] : []), ...(missingDates && intent === "overdue" ? [`${plural(missingDates, "unpaid invoice")} with missing or invalid due dates cannot be classified as overdue.`] : [])];
-    return { recognized: true, title: intent === "overdue" ? "Overdue invoices" : "Unpaid invoices",
-      summary: Number.isSafeInteger(totalPence) ? `${money.format(totalPence / 100)} across ${plural(entries.length, "invoice")} in the loaded records.` : "The combined amount is outside the supported total range. Review the individual invoices.",
-      scope: intent === "overdue" ? `Due before ${today}, with a positive remaining balance after recorded payments. Invoices due today are not overdue.` : "Sent, part-paid or overdue invoices with a positive remaining balance after recorded payments, including invoices not yet due. Draft, paid and cancelled invoices are excluded.", warnings,
-      items: entries.map(({ invoice, paid, pence, due }) => ({ id: `invoice:${invoice.id}`, title: `${invoice.number} · ${invoice.title}`, detail: `${money.format(pence / 100)} outstanding · ${due === null ? "Due date needs review" : `Due ${invoice.dueDate}`}`, evidence: [`Status: ${invoice.status}`, `Effective recorded paid: ${money.format(paid)}`, "Invoice and ledger paid amounts are not added together. Check recent payments before contacting the customer."], href: `/invoices?invoice=${encodeURIComponent(invoice.id)}`, actionLabel: "Review invoice" })) };
+    return assistantMoneyAnswer(records, intent, now);
   }
 
   const dueQuotes = new Set(records.documents.filter((quote) => assistantQuoteFollowUpDue(quote, now)).map((quote) => `follow-up:${quote.id}`));
