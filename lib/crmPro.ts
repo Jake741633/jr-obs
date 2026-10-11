@@ -17,6 +17,8 @@ import type {
   SiteDiaryEntry,
 } from "./models";
 import type { ComplianceCertificate } from "./complianceCertificates";
+import { contactEmailHref, contactPhoneHref } from "./contactLinks";
+import { assistantDay } from "./assistantSignals-core.mjs";
 import { variationFinancials } from "./jobManagement-core.mjs";
 import { paymentEffect, type PaymentRecord } from "./payments";
 import {
@@ -506,7 +508,7 @@ export function buildFollowUpCentre({
       reason,
       title: contact.name,
       detail: `${quote.number} has been awaiting a decision for ${ageDays} day${ageDays === 1 ? "" : "s"}.`,
-      priorityScore: followUpPriority({ ageDays, estimatedValue: value, highValueThreshold: settings.highValueThreshold, overdue: ageDays >= settings.quoteAgeDays, contactable: Boolean(contact.phone || contact.email) }),
+      priorityScore: followUpPriority({ ageDays, estimatedValue: value, highValueThreshold: settings.highValueThreshold, overdue: ageDays >= settings.quoteAgeDays, contactable: Boolean(contactPhoneHref(contact.phone) || contactEmailHref(contact.email)) }),
       ageDays,
       estimatedValue: value,
       dueDate: today,
@@ -514,11 +516,12 @@ export function buildFollowUpCentre({
       quoteId: quote.id,
       phone: contact.phone,
       email: contact.email,
-      href: `/quotes/${quote.id}`,
+      href: `/quotes/${encodeURIComponent(quote.id)}`,
     });
   });
 
   leads.forEach((lead) => {
+    if (lead.followUpDate && assistantDay(lead.followUpDate) !== null && lead.followUpDate > today) return;
     const stage = normaliseLeadStage(lead.stage);
     const contact = leadContact(lead, customerMap);
     const lastContact = lead.lastContactAt
@@ -541,7 +544,7 @@ export function buildFollowUpCentre({
       detail: reason === "Lost opportunity"
         ? `${lead.workRequired || "Opportunity"} was lost${lead.lostReason ? `: ${lead.lostReason}` : " without a recorded reason"}.`
         : `${lead.workRequired || "Electrical enquiry"} · next action: ${lead.nextAction || "Make contact"}.`,
-      priorityScore: followUpPriority({ ageDays, estimatedValue: lead.estimatedValue, highValueThreshold: settings.highValueThreshold, priority: lead.priority as LeadPriority, overdue, contactable: Boolean(contact.phone || contact.email) }),
+      priorityScore: followUpPriority({ ageDays, estimatedValue: lead.estimatedValue, highValueThreshold: settings.highValueThreshold, priority: lead.priority as LeadPriority, overdue, contactable: Boolean(contactPhoneHref(contact.phone) || contactEmailHref(contact.email)) }),
       ageDays,
       estimatedValue: lead.estimatedValue,
       dueDate: lead.followUpDate || today,
@@ -563,14 +566,14 @@ export function buildFollowUpCentre({
       reason: "Customer reminder",
       title: customer.name,
       detail: profile.followUpReason || "Customer follow-up is due.",
-      priorityScore: followUpPriority({ ageDays, overdue: true, contactable: Boolean(customer.phone || customer.email) }),
+      priorityScore: followUpPriority({ ageDays, overdue: true, contactable: Boolean(contactPhoneHref(customer.phone) || contactEmailHref(customer.email)) }),
       ageDays,
       estimatedValue: 0,
       dueDate: profile.nextFollowUpDate,
       customerId: customer.id,
       phone: customer.phone,
       email: customer.email,
-      href: `/customers/${customer.id}`,
+      href: `/customers/${encodeURIComponent(customer.id)}`,
     });
   });
 

@@ -26,9 +26,9 @@ test("follow-up actions are mobile friendly and write back to CRM history", () =
   assert.match(followUps, /leadActivities\.setItems/);
   assert.match(followUps, /nextFollowUpDate/);
   assert.match(followUps, /min-h-12/);
-  assert.match(followUps, /tel:/);
+  assert.match(followUps, /contactPhoneHref/);
   assert.match(followUps, /sms:/);
-  assert.match(followUps, /mailto:/);
+  assert.match(followUps, /contactEmailHref/);
 });
 
 test("future snoozes and completed lost-opportunity contact suppress premature resurfacing", () => {

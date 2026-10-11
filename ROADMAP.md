@@ -47,6 +47,10 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Phone customer profiles with section shortcuts, progressive linked records, searchable activity and exact job-to-JR-AI links
 - [x] Explicit customer-profile job completion with durable saves and separate history-note retries
 - [x] Editable review-request preparation with user-confirmed sent records and durable partial-save retries
+- [x] Phone follow-up queue with multiword/contact search, progressive cards, filtered recommendations and validated contact links
+- [x] Durable follow-up rules with retained edits, numeric validation, changed-record review and account/conflict guards
+- [x] Future lead follow-up dates suppress premature resurfacing in the contact queue
+- [ ] Durable follow-up contact logging and postponement with explicit contact channel and partial-history retries
 - [x] Job-aware JR AI follow-up questions and one-tap related answers retaining the exact saved job
 - [x] Compact phone question panel with question-first layout and expandable shortcuts/scope help
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection
