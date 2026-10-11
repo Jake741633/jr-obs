@@ -9,6 +9,7 @@ import { assistantMaterialsAnswer } from "./assistantMaterials";
 import { assistantJobIdentityIndex } from "./assistantIdentity";
 
 export type AssistantQuestionIntent = "today" | "tomorrow" | "week" | "overdue" | "unpaid" | "quotes" | "site" | "priorities" | "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries";
+type JobQuestionIntent = Extract<AssistantQuestionIntent, "tasks" | "snags" | "job" | "visits" | "materials" | "deliveries">;
 export interface AssistantAnswerItem { id: string; title: string; detail: string; evidence: string[]; href: string; actionLabel: string }
 export interface AssistantJobChoice { id: string; title: string; address: string; status: string }
 export interface AssistantAnswer { recognized: boolean; title: string; summary: string; scope: string; warnings: string[]; items: AssistantAnswerItem[]; jobChoices?: AssistantJobChoice[]; resolvedJobId?: string }
@@ -31,6 +32,18 @@ export function assistantQuestionIntent(question: string): AssistantQuestionInte
   if (/^(?:(?:which|what) materials (?:need ordering|do i need to order)|show(?: me)? materials to order|list materials to order)$/.test(query)) return "materials";
   if (/^(?:(?:which|what) deliveries am i waiting for|show(?: me)? (?:awaiting deliveries|outstanding deliveries)|list outstanding deliveries|(?:which|what) materials are ordered)$/.test(query)) return "deliveries";
   return null;
+}
+
+/** Explicit conversational follow-ups require a chosen job; never infer a global scope. */
+export function assistantJobFollowUpIntent(question: string): JobQuestionIntent | null {
+  if (question.length > 180) return null;
+  const query = question.toLowerCase().trim().replace(/[?.!]+$/g, "").replace(/\s+/g, " ").replace(/^please /, "").replace(/^can you /, "").replace(/^tell me /, "").replace(/ please$/, "").trim();
+  const subjects: Record<string, JobQuestionIntent> = { tasks: "tasks", "open tasks": "tasks", snags: "snags", "open snags": "snags", materials: "materials", "materials to order": "materials", deliveries: "deliveries", "awaiting deliveries": "deliveries", "next visit": "visits", "next visit checks": "visits", "job briefing": "job" };
+  const followUp = query.match(/^(?:what about|and) (?:the )?(.+?)(?: for (?:this|that|the same) job)?$/);
+  if (followUp && Object.hasOwn(subjects, followUp[1])) return subjects[followUp[1]];
+  const explicitJob = query.match(/^(.+?) for (?:this|that|the same) job$/);
+  const intent = explicitJob ? assistantQuestionIntent(explicitJob[1]) : null;
+  return intent && ["tasks", "snags", "job", "visits", "materials", "deliveries"].includes(intent) ? intent as JobQuestionIntent : null;
 }
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -59,8 +72,9 @@ function namedJobQuestion(question: string) {
 
 export function answerAssistantQuestion(records: AssistantRecords, question: string, now = new Date(), briefing?: { today: string; actions: AssistantAction[] }, selectedJobId = "", canOpenTaskWorkspace = true): AssistantAnswer | null {
   if (!question.trim()) return null;
-  const namedJob = namedJobQuestion(question);
-  const intent = namedJob?.intent ?? assistantQuestionIntent(question);
+  const followUpIntent = assistantJobFollowUpIntent(question);
+  const namedJob = followUpIntent ? null : namedJobQuestion(question);
+  const intent = followUpIntent ?? namedJob?.intent ?? assistantQuestionIntent(question);
   const today = assistantDateKey(now);
   const day = assistantDay(today);
   if (!intent || day === null) return { recognized: false, title: "Try a supported question", summary: "I could not reliably match that question. Try “What is booked tomorrow?”, “How much is overdue?” or “Which quotes need chasing?”.", scope: "Quick answers use local rules and your loaded records. Use the record search below for a particular job, quote or invoice.", warnings: [], items: [] };
@@ -72,13 +86,13 @@ export function answerAssistantQuestion(records: AssistantRecords, question: str
     const selectedJob = selectedJobId ? selectableJobs.find((job) => job.id === selectedJobId) : namedJob && matchingJobs.length === 1 && selectableJobs.length === 1 ? selectableJobs[0] : undefined;
     const ambiguousSelection = Boolean(selectedJobId && (identities.counts.get(selectedJobId) || 0) > 1);
     const unusableMatches = matchingJobs.length - selectableJobs.length;
-    const needsChoice = Boolean((namedJob || intent === "job") && !selectedJob);
+    const needsChoice = Boolean((namedJob || intent === "job" || followUpIntent) && !selectedJob);
     if (needsChoice || (selectedJobId && !selectedJob)) {
       const choices = selectableJobs.toSorted((a, b) => a.title.localeCompare(b.title) || a.siteAddress.localeCompare(b.siteAddress) || a.id.localeCompare(b.id)).map((job) => ({ id: job.id, title: job.title, address: job.siteAddress, status: job.status }));
-      const showChoices = Boolean(namedJob || (intent === "job" && !selectedJobId));
+      const showChoices = Boolean(namedJob || ((intent === "job" || followUpIntent) && !selectedJobId));
       return { recognized: true, title: ambiguousSelection || (!choices.length && unusableMatches) ? "Job identity needs review" : showChoices && choices.length ? "Choose a job" : "Job unavailable",
-        summary: ambiguousSelection ? "Multiple loaded jobs share the selected identity. Review the saved job records before using this scope." : namedJob ? choices.length ? `${plural(choices.length, "loaded job")} ${choices.length === 1 ? "matches" : "match"} “${namedJob.label}”. Choose a job before I show its records.` : unusableMatches ? `Matching job records for “${namedJob.label}” have missing or duplicate identities and cannot be selected.` : `No exact saved job name or site address matches “${namedJob.label}”.` : selectedJobId ? "The selected job is no longer available in the loaded records." : records.jobs.length ? "Choose one loaded job for its briefing." : "No job records are available for a briefing.",
-        scope: "Job names and site addresses must match in full, ignoring case and repeated spaces. I have not broadened this answer to other jobs.",
+        summary: ambiguousSelection ? "Multiple loaded jobs share the selected identity. Review the saved job records before using this scope." : namedJob ? choices.length ? `${plural(choices.length, "loaded job")} ${choices.length === 1 ? "matches" : "match"} “${namedJob.label}”. Choose a job before I show its records.` : unusableMatches ? `Matching job records for “${namedJob.label}” have missing or duplicate identities and cannot be selected.` : `No exact saved job name or site address matches “${namedJob.label}”.` : selectedJobId ? "The selected job is no longer available in the loaded records." : followUpIntent ? choices.length ? "Choose one loaded job before I answer this follow-up." : "No uniquely identified job is available for this follow-up." : records.jobs.length ? "Choose one loaded job for its briefing." : "No job records are available for a briefing.",
+        scope: followUpIntent ? "This follow-up needs a chosen saved job. I have not guessed a job or broadened the answer to all jobs." : "Job names and site addresses must match in full, ignoring case and repeated spaces. I have not broadened this answer to other jobs.",
         warnings: [...(selectedJobId ? ["The previous selection is unavailable, ambiguous or no longer matches this question. Choose a current record or clear the job scope."] : []), ...(unusableMatches ? [`${plural(unusableMatches, "matching job record")} with missing or duplicate identities cannot be chosen. Review Jobs before using those records.`] : [])], items: [], jobChoices: showChoices ? choices : [] };
     }
     if (intent === "materials" || intent === "deliveries") return assistantMaterialsAnswer(records, intent, selectedJob);
