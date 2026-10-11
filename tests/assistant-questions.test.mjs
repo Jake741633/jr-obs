@@ -85,7 +85,7 @@ test("job task source reviews preserve role destinations and refresh after confl
 
 test("question matching accepts normal phrasing and punctuation, and rejects ambiguous scopes or commands", () => {
   for (const [query, intent] of [["What's booked tomorrow?", "tomorrow"], ["Please show my diary next seven days!", "week"], ["Can you tell me how much is overdue?", "overdue"], ["Who owes me money?", "unpaid"], ["Show quote follow-ups", "quotes"], ["Am I ready for site?", "site"], ["What should I do next?", "priorities"]]) assert.equal(questions.assistantQuestionIntent(query), intent, query);
-  for (const query of ["Show tomorrow's weather", "How much is overdue for Smith?", "Don't show unpaid invoices", "Delete overdue invoices", "Show my diary next month", "How much is overdue and what is booked tomorrow?", "x".repeat(181)]) {
+  for (const query of ["Show tomorrow's weather", "Don't show unpaid invoices", "Delete overdue invoices", "Show my diary next month", "How much is overdue and what is booked tomorrow?", "x".repeat(181)]) {
     assert.equal(questions.assistantQuestionIntent(query), null, query);
     assert.equal(answer(query).recognized, false);
     assert.equal(answer(query).items.length, 0);
@@ -977,8 +977,8 @@ test("explicit conversational follow-ups recognize supported job topics without 
   }
 });
 
-test("follow-up parsing does not accept commands, mixed topics, unsupported money scope or partial words", () => {
-  for (const query of ["Order materials for this job", "Delete tasks for this job", "Don't show tasks for this job", "What about materials and deliveries?", "What about materials for everyone?", "What about money?", "How much is overdue for this job?", "What about materialstuff", "What about tasks tomorrow?", "What about tasks" + "x".repeat(180)]) {
+test("follow-up parsing does not accept commands, mixed topics, vague money questions or partial words", () => {
+  for (const query of ["Order materials for this job", "Delete tasks for this job", "Don't show tasks for this job", "What about materials and deliveries?", "What about materials for everyone?", "What about money?", "What about materialstuff", "What about tasks tomorrow?", "What about tasks" + "x".repeat(180)]) {
     assert.equal(questions.assistantJobFollowUpIntent(query), null, query); assert.equal(answer(query).recognized, false, query); assert.equal(answer(query).items.length, 0);
   }
 });
@@ -1095,4 +1095,95 @@ test("secondary question handlers preserve job scope and global answers after th
   const clickMore = label => { const group = nodes(h.render()).find(n => n.props["aria-label"] === "More quick questions"), button = nodes(group).find(n => n.type === "button" && text(n) === label); assert.ok(button); button.props.onClick(); };
   clickMore("Open tasks"); assert.match(text(h.render()), /Only Workshop/); clickMore("Overdue money"); assert.match(text(h.render()), /£240\.00 across 1 invoice/); assert.ok(!nodes(h.render()).some(n => n.props["aria-label"] === "Follow up on this job"));
   clickMore("Awaiting deliveries"); assert.match(text(h.render()), /Awaiting deliveries · Workshop/); assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, "j1");
+});
+
+test("explicit finance follow-ups require a chosen job and keep vague or compound requests unsupported", () => {
+  for (const [query, intent] of [["What about unpaid invoices?", "unpaid"], ["And overdue invoices", "overdue"], ["How much is overdue for this job?", "overdue"], ["How much am I owed for the same job?", "unpaid"], ["What about quotes?", "quotes"], ["And quote follow-ups for that job", "quotes"]]) {
+    assert.equal(questions.assistantJobFollowUpIntent(query), intent, query);
+    const result = answer(query, { jobs: [job()], invoices: [invoice({ jobId: "j1" })] });
+    assert.equal(result.title, "Choose a job"); assert.equal(result.items.length, 0); assert.equal(result.resolvedJobId, undefined);
+  }
+  for (const query of ["Send unpaid invoices for this job", "Mark invoices paid for this job", "What about unpaid invoices and quotes?", "Show paid invoices for this job", "Show unpaid invoices next month for this job"]) {
+    assert.equal(answerFor(query, { jobs: [job()] }, "j1").recognized, false, query);
+  }
+  assert.equal(answer("How much is overdue for Smith?", { jobs: [job()], invoices: [invoice()] }).title, "Job unavailable");
+});
+
+test("named job money answers use explicit links and recorded payments without including same-customer invoices", () => {
+  const data = records({ jobs: [job({ status: "Complete", customerId: "c1" }), job({ id: "other", title: "Other site", customerId: "c1" })],
+    invoices: [invoice({ jobId: "j1", customerId: "c1" }), invoice({ id: "today", jobId: "j1", dueDate: "2026-10-10" }), invoice({ id: "other", jobId: "other", title: "Other invoice", customerId: "c1" }), invoice({ id: "unlinked", title: "Unlinked invoice", customerId: "c1" })],
+    payments: [{ id: "p1", invoiceId: "i1", type: "Payment", amount: 100 }] });
+  const before = JSON.stringify(data);
+  const unpaid = answer("Show unpaid invoices for workshop", data);
+  assert.equal(unpaid.resolvedJobId, "j1"); assert.match(unpaid.summary, /£380\.00 across 2 invoices/);
+  assert.match(unpaid.scope, /Only invoices explicitly linked to Workshop.*Job status: Complete.*Unlinked invoices and customer-name matches are not included/);
+  assert.doesNotMatch(JSON.stringify(unpaid), /Other invoice|Unlinked invoice"/);
+  const overdue = answer('How much is overdue at "1 High Street"?', { ...data, jobs: [data.jobs[0]] });
+  assert.match(overdue.summary, /£140\.00 across 1 invoice/); assert.equal(overdue.items[0].href, "/invoices?invoice=i1");
+  assert.match(answerFor("What about unpaid invoices?", data, "j1").summary, /£380\.00/);
+  assert.match(answerFor("How much am I owed?", data, "j1").summary, /£860\.00 across 4 invoices/, "ordinary money queries retain the global scope");
+  assert.equal(JSON.stringify(data), before);
+});
+
+test("job finance validates all invoice and payment identities before filtering evidence to one job", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Other site" })], invoices: [invoice({ jobId: "j1" }), invoice({ jobId: "other", title: "Private other copy", status: "Paid" }), invoice({ id: "valid", jobId: "j1" })] });
+  const conflict = answerFor("Show unpaid invoices for this job", data, "j1");
+  assert.match(conflict.summary, /Verified subtotal: £240\.00.*incomplete/); assert.match(conflict.warnings.join(" "), /invoice identity review/);
+  assert.doesNotMatch(JSON.stringify(conflict), /Private other copy|Other site/);
+  const paymentsConflict = answerFor("Show overdue invoices for this job", { ...data, invoices: [data.invoices[0]], payments: [{ id: "p1", invoiceId: "i1", type: "Payment", amount: 100 }, { id: "p1", invoiceId: "outside", type: "Payment", amount: 900 }] }, "j1");
+  assert.match(paymentsConflict.summary, /Verified subtotal: £0\.00.*incomplete/); assert.match(paymentsConflict.warnings.join(" "), /uncertain linked payment evidence/);
+  assert.equal(paymentsConflict.items[0].href, "/payments"); assert.doesNotMatch(JSON.stringify(paymentsConflict), /£900|outside/);
+});
+
+test("job quote follow-ups use saved quote and job-side links while retaining agreements and identity reviews", () => {
+  const quote = { id: "q1", type: "Quote", number: "Q-1", title: "Workshop quote", status: "Sent", updatedAt: "2026-10-01T12:00:00Z", validUntil: "2026-11-01" };
+  const data = records({ jobs: [job({ sourceQuoteId: "q1" }), job({ id: "other", title: "Elsewhere", siteAddress: "2 High Street" })], documents: [quote,
+    { ...quote, id: "direct", jobId: "j1", number: "Q-2" }, { ...quote, id: "agreed", jobId: "j1", number: "Q-3", validUntil: "2026-10-08", nextFollowUpDate: "2026-10-12" },
+    { ...quote, id: "other", jobId: "other", title: "Other quote" }, { ...quote, id: "unlinked", title: "Same customer without job link", customerId: "c1" }] });
+  const result = answer("Which quotes need chasing for Workshop?", data);
+  assert.equal(result.resolvedJobId, "j1"); assert.match(result.summary, /2 confirmed follow-ups/);
+  assert.deepEqual(Array.from(result.items, i => i.id).sort(), ["follow-up:direct", "follow-up:q1"]);
+  assert.doesNotMatch(JSON.stringify(result), /Other quote|Same customer without job link|Q-3/);
+  assert.match(result.scope, /Only quotes linked by a saved quote or job reference to Workshop/);
+  const conflict = answerFor("And quote follow-ups", { ...data, documents: [...data.documents, { ...quote, type: "Estimate", jobId: "other", title: "Other conflicting copy" }] }, "j1");
+  assert.match(conflict.summary, /1 confirmed follow-up.*1 quote source review.*incomplete/);
+  assert.doesNotMatch(JSON.stringify(conflict), /Other conflicting copy|Other quote/);
+});
+
+test("job finance cannot choose duplicate identities or substitute partial names and reused titles", () => {
+  for (const query of ["Show unpaid invoices", "Show overdue invoices", "Which quotes need chasing"]) {
+    const ambiguous = answer(`${query} for Workshop`, { jobs: [job(), job({ id: "other", siteAddress: "2 High Street" })] });
+    assert.equal(ambiguous.title, "Choose a job"); assert.equal(ambiguous.items.length, 0); assert.equal(ambiguous.jobChoices.length, 2);
+    const duplicate = answer(`${query} for Workshop`, { jobs: [job(), job({ title: "Different name" })] });
+    assert.equal(duplicate.title, "Job identity needs review"); assert.equal(duplicate.items.length, 0);
+    assert.equal(answer(`${query} for Work`, { jobs: [job()] }).title, "Job unavailable");
+    assert.equal(answerFor(`${query} for this job`, { jobs: [job({ id: "replacement" })], invoices: [invoice({ jobId: "replacement" })] }, "j1").title, "Job unavailable");
+  }
+});
+
+test("phone job finance controls stay compact and preserve exact scope through refreshes and global shortcuts", () => {
+  const data = records({ jobs: [job(), job({ id: "other", title: "Kitchen" })], invoices: Array.from({ length: 7 }, (_, i) => invoice({ id: `i${i}`, jobId: "j1" })).concat([invoice({ id: "elsewhere", jobId: "other", title: "Elsewhere invoice" })]) });
+  const h = ui(data); h.scope("other"); h.fill("Show unpaid invoices for Workshop"); h.submit();
+  assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, "j1"); assert.match(text(h.render()), /£1,680\.00 across 7 invoices/);
+  const disclosure = nodes(h.render()).find(n => n.type === "details" && text(n).startsWith("Invoice & quote questions for this job"));
+  assert.ok(disclosure); assert.equal(disclosure.props.open, undefined); assert.match(nodes(disclosure).find(n => n.type === "summary").props.className, /min-h-12/);
+  assert.equal(nodes(disclosure).filter(n => n.type === "button").length, 3); for (const b of nodes(disclosure).filter(n => n.type === "button")) assert.match(b.props.className, /min-h-12/);
+  h.click("Show more records"); assert.equal(nodes(h.render()).filter(n => n.type === "Link").length, 7);
+  h.click("Job overdue invoices"); assert.equal(nodes(h.render()).filter(n => n.type === "Link").length, 4); assert.match(text(h.render()), /Overdue invoices · Workshop/);
+  h.replaceRecords({ ...data, payments: [{ id: "payment", invoiceId: "i0", type: "Payment", amount: 240 }] }); assert.match(text(h.render()), /£1,440\.00 across 6 invoices/);
+  h.click("Overdue money"); assert.match(text(h.render()), /£1,680\.00 across 7 invoices/); assert.ok(!nodes(h.render()).some(n => n.props["aria-label"] === "Finance follow-ups for this job"));
+  h.fill("What about unpaid invoices?"); h.submit(); assert.match(text(h.render()), /Unpaid invoices · Workshop/);
+  h.click("Job quote follow-ups"); assert.match(text(h.render()), /Quote follow-ups due · Workshop/); assert.match(text(h.render()), /0 confirmed follow-ups/);
+  h.replaceRecords({ ...data, jobs: [job({ id: "replacement" }), data.jobs[1]] }); assert.match(text(h.render()), /selected job is no longer available/);
+  assert.ok(!nodes(h.render()).some(n => n.type === "Link"));
+});
+
+test("finance follow-up choices, opaque job IDs, clearing and stale callbacks keep the record boundary", () => {
+  const id = " j /?# +&action=create "; const data = records({ jobs: [job({ id })], invoices: [invoice({ jobId: id })] }), before = JSON.stringify(data), h = ui(data);
+  h.fill("How much am I owed for this job?"); h.submit(); assert.match(text(h.render()), /Choose one loaded job before/); h.choose(); assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, id);
+  h.click("Job unpaid invoices"); assert.match(text(h.render()), /£240\.00/);
+  const stale = nodes(h.render()).find(n => n.type === "button" && text(n) === "Job overdue invoices").props.onClick;
+  h.click("Clear answer"); stale(); assert.ok(!nodes(h.render()).some(n => n.props["aria-label"] === "JR AI answer"));
+  h.fill("What about quotes?"); h.submit(); assert.match(text(h.render()), /Choose one loaded job before/);
+  assert.equal(JSON.stringify(data), before);
 });

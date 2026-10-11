@@ -35,6 +35,24 @@ can expose Workspace, Daily assistant and Quick quote. These are ordinary
 guarded routes: a shortcut never grants access to another role's workspace.
 Availability depends on the device and browser.
 
+## Jobs inbox
+
+Jobs opens with labelled search and a stage filter, with eight cards shown first
+and eight more per tap. Search combines words across the saved job title, site,
+customer or builder and stage, while keeping notes and prices out of search.
+Active work excludes Complete, Invoiced, Paid, Cancelled and On hold; Closed jobs
+includes the first four recorded stages and does not mean every invoice is paid.
+Known legacy stages retain their existing mapping. Missing or unsupported stages
+appear under Needs status review, with an unselected quick-status control rather
+than an invented Enquiry stage. Field status transitions keep their existing rules.
+
+Search, stage changes and Clear job filters reset the eight-card reveal and retain
+an open job draft. Enter dismisses the search keyboard. Controls have 48px targets
+and phone-sized text. Office job cards offer Ask JR AI about this job, preserving
+the exact saved identity; field roles retain their existing job routes and do not
+receive office assistant links. These changes do not alter job persistence or sync.
+Physical-device and populated signed-in acceptance remain pending.
+
 ## Quote inbox
 
 Quotes & Estimates now opens with its four overview figures behind a native, 48px Quote overview disclosure. The figures still describe all loaded quotes and explicitly remain independent of inbox filters. Saved documents have labelled search across number, title, customer/builder name and site address, document-type and saved-status filters, plus Clear filters. Needs status review surfaces unsupported historical statuses without changing them or presenting them as Draft. Saved Expired is a recorded status, not a recalculation from the validity date.
@@ -67,7 +85,7 @@ Next visit checks is a JR AI shortcut for accepted or on-site work needing anoth
 
 ## Materials and deliveries
 
-Resolved JR AI job answers now offer one-tap Job summary, Job tasks, Job snags, Job materials, Job deliveries and Next work visit follow-ups. A full-name/address question updates the visible Job scope, so the next related question stays on that exact job. “What about materials?” and “And deliveries” work for the selected job; with no selected job, JR AI asks you to choose instead of answering across all jobs. Clear answer or All loaded jobs clears the context. An unresolved new named-job question also drops the previous context. These 48px controls and typed follow-ups are read-only, reset the four-record reveal and retain existing account and unavailable-record boundaries. Diary, money, quote and site-preparation shortcuts keep their normal global scope.
+Resolved JR AI job answers now offer one-tap Job summary, Job tasks, Job snags, Job materials, Job deliveries and Next work visit follow-ups. A full-name/address question updates the visible Job scope, so the next related question stays on that exact job. “What about materials?” and “And deliveries” work for the selected job; with no selected job, JR AI asks you to choose instead of answering across all jobs. Clear answer or All loaded jobs clears the context. An unresolved new named-job question also drops the previous context. These 48px controls and typed follow-ups are read-only, reset the four-record reveal and retain existing account and unavailable-record boundaries. Diary, money, quote and site-preparation shortcuts keep their normal global scope. A separate Invoice & quote questions for this job disclosure adds unpaid invoices, overdue invoices and quote follow-ups for the selected job. Named questions such as “Show unpaid invoices for Workshop” and follow-ups such as “What about unpaid invoices?” retain that exact identity. Opening the disclosure does not submit or change scope. The finance answers use saved job links and do not pull in other work merely because it shares the customer; global money and quote shortcuts remain explicitly global.
 
 JR AI offers Materials to order and Awaiting deliveries, with the existing job selector and exact-name/address questions. Four purchase-list answers appear first with progressive reveal. Each answer keeps the saved line quantities, supplier and stock code available under Source details. Unknown statuses and invalid quantities are explicitly reviewable; the assistant does not assume an order was placed or a delivery is late.
 

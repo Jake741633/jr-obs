@@ -91,6 +91,33 @@ Answers group matching lines by purchase list, showing four lists initially. Nee
 
 Review purchase list carries one encoded saved list id into `/purchases?list=…`. The source page shows that list's current lines and totals, including any status or quantity changes since the answer. Invalid, duplicate, oversized, missing or ambiguous ids cannot substitute another list; Show all purchase lists explicitly clears the scope. Oversized historical ids use the general purchase-list workspace instead. Navigation and query parameters cannot create or update records. No source or route permissions change.
 
+## Job-specific invoice and quote answers
+
+Explicit questions such as “Show unpaid invoices for Workshop”, “How much is
+overdue at 1 High Street” and “Which quotes need chasing for Workshop” use the
+same unique saved-job selection rules as tasks and materials. “What about unpaid
+invoices?”, “And overdue invoices”, “What about quotes?” and “Show quote follow-ups
+for this job” require a chosen job, even if only one loaded job exists. Vague
+money questions, unsupported time ranges, mixed requests and commands remain
+unsupported. Full names and addresses can be quoted to retain literal punctuation.
+
+The Invoice & quote questions for this job disclosure provides three 48px
+shortcuts after a resolved job answer, without adding to the primary question
+grid. Answers and subsequent questions retain the saved job ID through refreshes;
+missing or duplicate jobs cannot become global answers or a reused job name.
+Choosing another named job updates the phone selector. Clear answer and All
+loaded jobs discard this context. Ordinary money and quote shortcuts remain
+global, with that scope stated in the answer.
+
+Invoice answers use explicit invoice job links, including on closed jobs, with
+recorded payments and credits/refunds handled by the existing balance rules.
+Unlinked or same-customer invoices cannot be assigned to the selected job by
+inference. Quote answers use saved quote/job references and keep agreed follow-up
+dates. Identity validation uses every loaded invoice, payment and pricing
+document before narrowing evidence to the selected job. Ambiguous balances and
+follow-up counts remain withheld; source reviews do not describe another job's
+saved copies. These questions remain read-only and do not send messages.
+
 ## Job-aware follow-ups
 
 The phone question form appears first, followed by its visible job selector. Four primary questions remain exposed; a native More questions disclosure retains all eight other shortcuts without changing their handlers or scope. Longer scope help is separately expandable. Identity warnings and answers remain outside collapsed content. The 48px disclosures do not autofocus, submit, clear state or write records.
