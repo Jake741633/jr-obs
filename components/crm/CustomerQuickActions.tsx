@@ -39,11 +39,15 @@ export function CustomerQuickActions({
   activeJob,
   onMarkComplete,
   onRequestReview,
+  canComplete = Boolean(activeJob),
+  canRequestReview = true,
 }: {
   customer: Customer;
   activeJob?: Job;
   onMarkComplete: () => void;
   onRequestReview: () => void;
+  canComplete?: boolean;
+  canRequestReview?: boolean;
 }) {
   const query = `customerId=${encodeURIComponent(customer.id)}&action=create`;
   const mapAddress = encodeURIComponent(customer.address);
@@ -60,8 +64,8 @@ export function CustomerQuickActions({
       <QuickAction label="Quote" icon={<FilePlus2 className="size-5 text-violet-300" />} href={`/quotes?${query}`} />
       <QuickAction label="Book survey" icon={<ClipboardCheck className="size-5 text-amber-300" />} href={`/planner?${query}&type=Survey`} />
       <QuickAction label="Book work" icon={<CalendarPlus className="size-5 text-amber-300" />} href={`/planner?${query}&type=Job${activeJob ? `&jobId=${encodeURIComponent(activeJob.id)}` : ""}`} />
-      <QuickAction label="Complete" icon={<CheckCircle2 className="size-5 text-emerald-300" />} onClick={onMarkComplete} disabled={!activeJob} />
-      <QuickAction label="Review" icon={<Star className="size-5 text-yellow-300" />} onClick={onRequestReview} disabled={!phoneHref && !emailHref} />
+      <QuickAction label="Complete" icon={<CheckCircle2 className="size-5 text-emerald-300" />} onClick={onMarkComplete} disabled={!canComplete} />
+      <QuickAction label="Review" icon={<Star className="size-5 text-yellow-300" />} onClick={onRequestReview} disabled={!canRequestReview || (!phoneHref && !emailHref)} />
     </div>
   </section>;
 }

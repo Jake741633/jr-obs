@@ -88,9 +88,35 @@ The profile requires one exact nonblank customer identity before showing contact
 actions or CRM records; missing and duplicate identities need review. Call, Text
 and Email use the same validated contact targets as the inbox. Unsupported saved
 formats stay visible with review prompts, and the review-request composer cannot
-use an unsupported recipient. Profile completion/review logging and financial
-calculations otherwise retain their existing workflows. Deterministic fixtures
-cover populated browsing; signed-in physical-phone acceptance remains pending.
+use an unsupported recipient. Financial calculations retain their existing behavior.
+
+Complete opens an unselected job picker, with the exact job, site and current stage
+shown before confirmation. It excludes completed, invoiced, paid, cancelled,
+on-hold, unsupported and ambiguous jobs. Book work only prefills a job when there
+is one eligible linked identity. Completion uses the durable job update, checks
+the current record again after confirmation and preserves unrelated newer details.
+Failed saves retain the selection; changed job details or stage require choosing
+the current record again. If the job saves but its completion note fails, a separate
+retry retains the original note and does not repeat or regress the job change.
+
+Review opens an editable message with a validated text/email recipient. Preparing
+or opening the message writes no customer records. The user sends it in their own
+app, then explicitly chooses Record request as sent. This records the user's
+confirmation and original recipient, with delivery explicitly unverified. A
+changed contact requires a fresh draft before opening the composer. Once confirmed,
+failed saves retain one interaction identity and confirmation time; a partial save
+retries only the remaining customer care status, without sending again. Existing
+received reviews, newer request dates and unrelated profile details are retained.
+Conflicting/failed sync and replaced or ambiguous evidence require review.
+
+These actions require loaded sources, a unique current customer and office
+permissions in cloud mode; local mode retains local access. Account or route
+changes invalidate old callbacks. Temporary source loading retains open drafts and
+pending retries. Leaving the page or changing account loses unsaved work, as the
+panels explain. Success confirms a device save and asks the user to check sync;
+the separate job/note and interaction/profile writes are not atomic transactions.
+Deterministic fixtures cover browsing, persistence failures and stale callbacks;
+signed-in physical-phone acceptance remains pending.
 
 ## Jobs inbox
 
