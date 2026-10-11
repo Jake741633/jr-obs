@@ -451,7 +451,7 @@ test("field controls expose only current and server-approved next stages while o
   assertOnlyMappedOptions(
     listSelects[0],
     jobsSource,
-    "jobStatusOptions(job).map((item)=><optionkey={item}>{item}</option>)",
+    "jobStatusOptions(job).filter((item)=>canonicalJobStatuses.includes(item)).map((item)=><optionkey={item}>{item}</option>)",
     true,
   );
   assert.match(jobsPage, /jobStatusNotice\(job\)/);

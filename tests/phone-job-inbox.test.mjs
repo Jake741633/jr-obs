@@ -92,5 +92,10 @@ test("job review and JR AI links encode the saved identity while readiness and f
   assert.equal(nodes(cards(field.render())[0]).filter(n => n.type === "Link").length, 1); assert.doesNotMatch(text(field.render()), /Ask JR AI/);
   assert.equal(nodes(field.render()).find(n => n.type === "PageHeader").props.action, undefined);
   assert.deepEqual(nodes(cards(field.render())[0]).filter(n => n.type === "option").map(text), ["Scheduled", "First fix"]);
-  field.replace([job({ status: "Unknown" })]); field.filter("Review"); assert.equal(nodes(cards(field.render())[0]).find(n => n.type === "select").props.disabled, true);
+  for (const status of ["Unknown", "__proto__", "constructor", "toString"]) {
+    field.replace([job({ status })]); field.filter("Review");
+    const select = nodes(cards(field.render())[0]).find(n => n.type === "select");
+    assert.equal(select.props.disabled, true);
+    assert.ok(nodes(select).filter(n => n.type === "option").every(n => n.props.disabled || jobCore.canonicalJobStatuses.includes(text(n))));
+  }
 });
