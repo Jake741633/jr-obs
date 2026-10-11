@@ -33,6 +33,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Phone diary search, status/job filters and progressive visit cards with exact job-scoped JR AI scheduling links
 - [x] JR AI material-ordering and delivery-follow-up answers with exact job scope and purchase-list review links
 - [x] JR AI source-identity review for ambiguous jobs, purchase lists and lines without inflated status counts
+- [x] JR AI invoice/payment evidence checks with withheld ambiguous balances and explicit incomplete totals
 - [x] Job-aware JR AI follow-up questions and one-tap related answers retaining the exact saved job
 - [x] Compact phone question panel with question-first layout and expandable shortcuts/scope help
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection

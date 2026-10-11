@@ -171,6 +171,8 @@ payment links and authentication responses are not cached by this feature.
 
 ## Verification
 
+JR AI money answers show source reviews before verified balances when invoice or linked-payment identities are missing or ambiguous. An incomplete subtotal cannot read as a zero-debt clearance. Existing four-card progressive reveal, source-detail disclosures and 48px question controls are retained. Refreshed collections replace stale balances with review feedback without persisting questions or editing invoices/payments.
+
 Run `npm test`, `npm run lint`, `npm run build`, `npx tsc --noEmit`, and
 `npm audit --audit-level=moderate`. The installation tests check actual icon
 dimensions, manifest requirements, role-aware launch, signed-out behavior and

@@ -19,12 +19,13 @@ const scheduling = compile("../lib/scheduling.ts");
 const assistantVisits = compile("../lib/assistantVisits.ts", { "./jobManagement-core.mjs": jobsCore, "./scheduling": scheduling });
 const purchaseLink = compile("../lib/purchaseListLink.ts", {}, false, { URLSearchParams });
 const assistantIdentity = compile("../lib/assistantIdentity.ts");
+const assistantMoney = compile("../lib/assistantMoney.ts", { "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });
 const assistantMaterials = compile("../lib/assistantMaterials.ts", { "./purchaseListLink": purchaseLink, "./assistantIdentity": assistantIdentity });
 const taskInbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
 const assistantTasks = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": taskInbox });
 const dashboard = compile("../lib/dashboardIntelligence.ts", { "./jobManagement-core.mjs": jobsCore });
-const briefing = compile("../lib/assistantBriefing.ts", { "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
-const questions = compile("../lib/assistantQuestions.ts", { "./assistantIdentity": assistantIdentity, "./assistantMaterials": assistantMaterials, "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
+const briefing = compile("../lib/assistantBriefing.ts", { "./assistantMoney": assistantMoney, "./assistantTasks": assistantTasks, "./scheduling": scheduling, "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard, "./assistantSignals-core.mjs": signals, "./payments": payments });
+const questions = compile("../lib/assistantQuestions.ts", { "./assistantMoney": assistantMoney, "./assistantIdentity": assistantIdentity, "./assistantMaterials": assistantMaterials, "./assistantVisits": assistantVisits, "./assistantTasks": assistantTasks, "./assistantBriefing": briefing, "./assistantSignals-core.mjs": signals, "./jobManagement-core.mjs": jobsCore, "./payments": payments, "./scheduling": scheduling });
 const now = new Date(2026, 9, 10, 10);
 const records = (patch = {}) => ({ jobs: [], documents: [], invoices: [], payments: [], planner: [], purchases: [], reminders: [], certificates: [], ...patch });
 const visit = (patch = {}) => ({ id: "v1", title: "First fix", type: "Job", status: "Confirmed", date: "2026-10-11", startTime: "09:00", endTime: "12:00", location: "1 High Street", teamMemberIds: ["worker"], ...patch });
@@ -73,13 +74,13 @@ test("answers follow the local calendar over a year boundary and planner dates r
 });
 
 test("money answers distinguish overdue from future/current debts and use recorded ledger payments", () => {
-  const data = { invoices: [invoice({ id: "i/1?#" }), invoice({ id: "today", dueDate: "2026-10-10" }), invoice({ id: "future", dueDate: "2026-10-12" }), invoice({ id: "paid", status: "Paid" }), invoice({ id: "draft", status: "Draft" })], payments: [{ invoiceId: "i/1?#", type: "Payment", amount: 100 }] };
+  const data = { invoices: [invoice({ id: "i/1?#" }), invoice({ id: "today", dueDate: "2026-10-10" }), invoice({ id: "future", dueDate: "2026-10-12" }), invoice({ id: "paid", status: "Paid" }), invoice({ id: "draft", status: "Draft" })], payments: [{ id: "pay-special", invoiceId: "i/1?#", type: "Payment", amount: 100 }] };
   const overdue = answer("How much is overdue?", data);
   assert.match(overdue.summary, /£140\.00 across 1 invoice/);
   assert.equal(overdue.items[0].href, "/invoices?invoice=i%2F1%3F%23");
   assert.match(overdue.items[0].evidence.join(" "), /£100\.00/);
   assert.match(answer("Who owes me money?", data).summary, /£620\.00 across 3 invoices/);
-  assert.match(answer("How much am I owed?", { invoices: [invoice()], payments: [{ invoiceId: "i1", type: "Payment", amount: 240 }] }).summary, /£0\.00 across 0 invoices/);
+  assert.match(answer("How much am I owed?", { invoices: [invoice()], payments: [{ id: "pay-i1", invoiceId: "i1", type: "Payment", amount: 240 }] }).summary, /£0\.00 across 0 invoices/);
 });
 
 test("money totals keep penny precision and visibly exclude invalid amounts or unknown overdue dates", () => {
@@ -100,6 +101,142 @@ test("malformed recorded-paid amounts are reported instead of becoming zero-paid
     assert.match(result.warnings[0], /invalid or unsupported amounts/);
     assert.equal(briefing.buildAssistantBriefing(data, now).actions.length, 0);
   }
+});
+
+test("money answers withhold duplicate invoice identities, including closed copies, and keep valid subtotals", () => {
+  for (const status of ["Sent", "Paid", "Draft", "Cancelled"]) {
+    const data = records({ invoices: [invoice(), invoice({ status, title: "Conflicting saved copy" }), invoice({ id: "valid" })] });
+    for (const question of ["How much is overdue?", "Who owes me money?"]) {
+      const result = answer(question, data);
+      assert.match(result.summary, /Verified subtotal: £240\.00 across 1 invoice.*Total incomplete/);
+      assert.equal(result.items.filter((item) => item.id.startsWith("invoice:")).length, 1);
+      const review = result.items.find((item) => item.id.startsWith("invoice-source:"));
+      assert.equal(review.href, "/invoices"); assert.match(review.evidence.join(" "), /Conflicting saved copy/);
+      assert.match(result.warnings.join(" "), /1 invoice identity review/);
+    }
+    const actions = briefing.buildAssistantBriefing(data, now).actions;
+    assert.equal(actions.filter((action) => action.title.startsWith("Chase")).length, 1);
+    assert.equal(actions.filter((action) => action.title === "Invoice identity needs review").length, 1);
+  }
+});
+
+test("missing invoice identities cannot supply balances or an exact source link", () => {
+  for (const id of [undefined, null, "", "   ", 12]) {
+    const data = records({ invoices: [invoice({ id })] });
+    const result = answer("Who owes me money?", data);
+    assert.match(result.summary, /Total incomplete/); assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].href, "/invoices"); assert.match(result.items[0].detail, /identities are missing/);
+    assert.ok(!briefing.buildAssistantBriefing(data, now).actions.some((action) => action.title.startsWith("Chase")));
+  }
+});
+
+test("a duplicate payment cannot overstate settlement or become unpaid by being discarded", () => {
+  const payment = { id: "pay", invoiceId: "i1", type: "Payment", amount: 120 };
+  const data = records({ invoices: [invoice()], payments: [payment, { ...payment }] });
+  const result = answer("How much is overdue?", data);
+  assert.match(result.summary, /Verified subtotal: £0\.00.*Total incomplete/);
+  assert.equal(result.items.length, 1); assert.equal(result.items[0].href, "/payments");
+  assert.match(result.items[0].detail, /not treated as unpaid or settled/);
+  assert.match(result.items[0].evidence.join(" "), /identity shared/);
+  assert.doesNotMatch(result.items[0].detail, /£/);
+  const action = briefing.buildAssistantBriefing(data, now).actions[0];
+  assert.equal(action.title, "Payment evidence needs review · INV-1"); assert.equal(action.priority, "Today");
+});
+
+test("payment identity checks include copies on another invoice or without allocation", () => {
+  for (const invoiceId of ["other", undefined]) {
+    const data = { invoices: [invoice()], payments: [{ id: "pay", invoiceId: "i1", type: "Payment", amount: 100 }, { id: "pay", invoiceId, type: "Refund", amount: 30, reference: "Other invoice secret" }] };
+    const result = answer("Who owes me money?", data);
+    assert.match(result.summary, /Total incomplete/);
+    assert.match(result.items[0].evidence.join(" "), /identity shared/);
+    assert.doesNotMatch(result.items[0].evidence.join(" "), /Other invoice secret|30/);
+  }
+});
+
+test("missing payment identities and unsupported payment amounts or types request review", () => {
+  for (const patch of [{ id: undefined }, { id: " " }, { id: null }, { type: "Unknown" }, { amount: -1 }, { amount: NaN }, { amount: Infinity }, { amount: "100" }, { amount: 1e16 }]) {
+    const data = { invoices: [invoice({ amountPaid: 240 })], payments: [{ id: "pay", invoiceId: "i1", type: "Payment", amount: 100, ...patch }] };
+    const result = answer("How much is overdue?", data);
+    assert.match(result.summary, /Total incomplete/); assert.equal(result.items.length, 1);
+    assert.match(result.items[0].title, /Payment evidence needs review/);
+    assert.ok(!briefing.buildAssistantBriefing(records(data), now).actions.some((action) => action.title.startsWith("Chase")));
+  }
+});
+
+test("valid credits refunds deposits and invoice-paid maxima retain the existing payment policy", () => {
+  const data = { invoices: [invoice()], payments: [
+    { id: "deposit", invoiceId: "i1", type: "Deposit", amount: 50 },
+    { id: "stage", invoiceId: "i1", type: "Stage payment", amount: 50 },
+    { id: "credit", invoiceId: "i1", type: "Credit note", amount: 20 },
+    { id: "refund", invoiceId: "i1", type: "Refund", amount: 10 },
+  ] };
+  assert.match(answer("Who owes me money?", data).summary, /^£130\.00 across 1 invoice/);
+  assert.match(answer("Who owes me money?", { ...data, invoices: [invoice({ amountPaid: 150 })] }).summary, /^£90\.00 across 1 invoice/);
+  assert.equal(answer("Who owes me money?", data).warnings.length, 0);
+});
+
+test("unrelated malformed payments and only closed invoices do not create money reviews", () => {
+  const result = answer("Who owes me money?", { invoices: [invoice()], payments: [{ invoiceId: "other", type: "Unknown", amount: NaN }] });
+  assert.match(result.summary, /^£240\.00 across 1 invoice/); assert.equal(result.warnings.length, 0);
+  const closed = answer("Who owes me money?", { invoices: [invoice({ status: "Paid" }), invoice({ status: "Cancelled" }), invoice({ id: "", status: "Draft" })] });
+  assert.equal(closed.items.length, 0); assert.equal(closed.warnings.length, 0);
+});
+
+test("unsafe aggregate ledger amounts cannot silently imply an invoice is settled", () => {
+  const result = answer("Who owes me money?", { invoices: [invoice()], payments: [
+    { id: "a", invoiceId: "i1", type: "Payment", amount: 5e13 }, { id: "b", invoiceId: "i1", type: "Payment", amount: 5e13 },
+  ] });
+  assert.match(result.summary, /Total incomplete/); assert.match(result.warnings.join(" "), /invalid or unsupported amounts/);
+  assert.equal(result.items.length, 0);
+});
+
+test("job briefings retain global identity conflicts but never another job's invoice copy evidence", () => {
+  const data = { jobs: [job(), job({ id: "other", title: "Other job" })], invoices: [invoice({ jobId: "j1" }), invoice({ jobId: "other", title: "Other job confidential detail", status: "Paid" })] };
+  const result = answer("Job briefing for Workshop", data);
+  assert.ok(!result.items.some((item) => item.id.startsWith("invoice:")));
+  assert.match(result.warnings.join(" "), /invoice identity review/);
+  const reviews = result.items.filter((item) => item.id.startsWith("invoice-source:"));
+  assert.equal(reviews.length, 1); assert.match(reviews[0].evidence.join(" "), /Lighting/);
+  assert.doesNotMatch(JSON.stringify(result), /Other job confidential detail/);
+});
+
+test("job briefings detect cross-invoice payment conflicts without widening the job scope", () => {
+  const result = answer("Job briefing for Workshop", { jobs: [job()], invoices: [invoice({ jobId: "j1" })], payments: [
+    { id: "shared", invoiceId: "i1", type: "Payment", amount: 100 }, { id: "shared", invoiceId: "other", type: "Payment", amount: 50 },
+  ] });
+  assert.ok(!result.items.some((item) => item.id.startsWith("invoice:")));
+  assert.equal(result.items.filter((item) => item.id.startsWith("invoice-payment-review:")).length, 1);
+  assert.match(result.warnings.join(" "), /uncertain linked payment evidence/);
+});
+
+test("money source reviews are order-independent read-only and office-accessible", () => {
+  const data = records({ invoices: [invoice(), invoice({ status: "Paid" }), invoice({ id: "valid" }), invoice({ id: "bad-payment" })], payments: [{ id: "", invoiceId: "bad-payment", type: "Payment", amount: 100 }] });
+  const before = JSON.stringify(data);
+  const result = answer("How much is overdue?", data);
+  assert.equal(JSON.stringify(result), JSON.stringify(answer("How much is overdue?", { ...data, invoices: [...data.invoices].reverse(), payments: [...data.payments].reverse() })));
+  assert.equal(JSON.stringify(data), before);
+  for (const item of result.items) assert.equal(permissions.canAccessPath("office", permissions.internalPathForAccess(item.href)), true);
+  assert.equal(new Set(result.items.map((item) => item.id)).size, result.items.length);
+});
+
+test("phone money answers refresh from a balance to review and back without stale claims", () => {
+  const data = records({ invoices: [invoice()] }); const h = ui(data);
+  h.click("Overdue money"); assert.match(text(h.render()), /£240\.00 across 1 invoice/);
+  h.replaceRecords({ ...data, invoices: [invoice(), invoice({ status: "Paid" })] });
+  assert.match(text(h.render()), /Total incomplete/); assert.doesNotMatch(text(h.render()), /£240\.00 outstanding/);
+  assert.equal(nodes(h.render()).find((node) => node.type === "Link").props.href, "/invoices");
+  h.replaceRecords({ ...data, payments: [{ id: "pay", invoiceId: "i1", type: "Payment", amount: 100 }] });
+  assert.match(text(h.render()), /£140\.00 across 1 invoice/); assert.doesNotMatch(text(h.render()), /Total incomplete/);
+  h.click("Clear answer"); assert.ok(!nodes(h.render()).some((node) => node.props["aria-label"] === "JR AI answer"));
+});
+
+test("phone money reviews keep progressive reveal and supported source links", () => {
+  const invoices = Array.from({ length: 6 }, (_, index) => invoice({ id: `copy-${index}`, number: `INV-${index}` })).flatMap((entry) => [entry, { ...entry, status: "Paid" }]);
+  const h = ui(records({ invoices })); h.click("Overdue money");
+  assert.match(text(h.render()), /6 invoice identity reviews/);
+  assert.equal(nodes(h.render()).filter((node) => node.type === "Link").length, 4);
+  h.click("Show more records"); assert.equal(nodes(h.render()).filter((node) => node.type === "Link").length, 6);
+  h.fill("Who owes me money?"); assert.ok(!nodes(h.render()).some((node) => node.props["aria-label"] === "JR AI answer"));
 });
 
 test("quote answers respect contact agreements even when an expired quote still needs a pricing review", () => {
@@ -149,7 +286,7 @@ test("quick question buttons, typed submission, progressive reveal, edit invalid
 test("submitted answers refresh when loaded records change without retaining a stale balance", () => {
   const data = records({ invoices: [invoice()] }); const h = ui(data);
   h.click("Overdue money"); assert.match(text(h.render()), /£240\.00 across 1 invoice/);
-  h.replaceRecords({ ...data, payments: [{ invoiceId: "i1", type: "Payment", amount: 240 }] });
+  h.replaceRecords({ ...data, payments: [{ id: "pay-i1", invoiceId: "i1", type: "Payment", amount: 240 }] });
   assert.match(text(h.render()), /£0\.00 across 0 invoices/);
   assert.equal(nodes(h.render()).filter((node) => node.type === "Link").length, 0);
 });
@@ -365,12 +502,12 @@ test("job briefings retain clashes with another job without leaking that job's u
 });
 
 test("job briefing money checks use the ledger without double counting and include not-yet-due debt", () => {
-  const data = { jobs: [job()], tasks: [], invoices: [invoice({ jobId: "j1", amountPaid: 100 }), invoice({ id: "future", jobId: "j1", dueDate: "2026-11-01" }), invoice({ id: "draft", jobId: "j1", status: "Draft" }), invoice({ id: "cancelled", jobId: "j1", status: "Cancelled" })], payments: [{ invoiceId: "i1", type: "Payment", amount: 150 }, { invoiceId: "future", type: "Payment", amount: 20 }] };
+  const data = { jobs: [job()], tasks: [], invoices: [invoice({ jobId: "j1", amountPaid: 100 }), invoice({ id: "future", jobId: "j1", dueDate: "2026-11-01" }), invoice({ id: "draft", jobId: "j1", status: "Draft" }), invoice({ id: "cancelled", jobId: "j1", status: "Cancelled" })], payments: [{ id: "pay-i1", invoiceId: "i1", type: "Payment", amount: 150 }, { id: "pay-future", invoiceId: "future", type: "Payment", amount: 20 }] };
   const result = answer("Job briefing for Workshop", data);
   assert.match(result.items.find((i) => i.id === "invoice:i1").detail, /£90\.00/);
   assert.match(result.items.find((i) => i.id === "invoice:future").detail, /£220\.00/);
   assert.equal(result.items.filter((i) => i.id.startsWith("invoice:")).length, 2);
-  const settled = answer("Job briefing for Workshop", { ...data, payments: [{ invoiceId: "i1", type: "Payment", amount: 240 }, { invoiceId: "future", type: "Payment", amount: 240 }] });
+  const settled = answer("Job briefing for Workshop", { ...data, payments: [{ id: "pay-i1", invoiceId: "i1", type: "Payment", amount: 240 }, { id: "pay-future", invoiceId: "future", type: "Payment", amount: 240 }] });
   assert.equal(settled.items.filter((i) => i.id.startsWith("invoice:")).length, 0);
   const invalid = answer("Job briefing for Workshop", { jobs: [job()], invoices: [invoice({ jobId: "j1", amountPaid: NaN }), invoice({ id: "date", jobId: "j1", dueDate: "invalid" })] });
   assert.match(invalid.warnings.join(" "), /invalid or unsupported amounts/);
@@ -451,7 +588,7 @@ test("job briefing source links encode identities and remain usable by the accou
 test("a phone job briefing refreshes saved task, payment and visit status without retaining stale actions", () => {
   const data = records({ jobs: [job()], tasks: [siteTask({ priority: "High" })], invoices: [invoice({ jobId: "j1" })], planner: [visit({ jobId: "j1" })] }); const h = ui(data);
   h.scope("j1"); h.click("Job briefing"); assert.match(text(h.render()), /Chase INV-1/); assert.match(text(h.render()), /Task: Fit labels/);
-  h.replaceRecords({ ...data, tasks: [siteTask({ priority: "High", status: "Completed" })], payments: [{ invoiceId: "i1", type: "Payment", amount: 240 }], planner: [visit({ jobId: "j1", status: "Complete" })] });
+  h.replaceRecords({ ...data, tasks: [siteTask({ priority: "High", status: "Completed" })], payments: [{ id: "pay-i1", invoiceId: "i1", type: "Payment", amount: 240 }], planner: [visit({ jobId: "j1", status: "Complete" })] });
   assert.doesNotMatch(text(h.render()), /Chase INV-1|Task: Fit labels|Review visit day/);
   assert.match(text(h.render()), /0 open tasks and snags.*0 upcoming or ongoing visits/);
   assert.match(text(h.render()), /Job briefing · Workshop/);
