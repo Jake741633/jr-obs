@@ -45,6 +45,8 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Phone customer inbox with multiword/contact search, progressive cards and direct call/email actions
 - [x] Durable customer forms with retained drafts, changed-record review, stable retries and guarded linked-job deletion
 - [x] Phone customer profiles with section shortcuts, progressive linked records, searchable activity and exact job-to-JR-AI links
+- [x] Explicit customer-profile job completion with durable saves and separate history-note retries
+- [x] Editable review-request preparation with user-confirmed sent records and durable partial-save retries
 - [x] Job-aware JR AI follow-up questions and one-tap related answers retaining the exact saved job
 - [x] Compact phone question panel with question-first layout and expandable shortcuts/scope help
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection

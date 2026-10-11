@@ -25,7 +25,7 @@ function harness() {
   const deps = {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState(value) { const i = cursor++; if (!(i in slots)) slots[i] = typeof value === "function" ? value() : value; return [slots[i], next => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }]; } },
     "next/link": { default: "Link" }, "next/navigation": { useParams: () => ({ id: customerId }) }, "lucide-react": {},
-    "../../../components/crm/CustomerQuickActions": { CustomerQuickActions: "QuickActions" }, "../../../components/ui/Card": { Card: "Card" }, "../../../components/ui/StatusBadge": { StatusBadge: "StatusBadge" },
+    "../../../components/crm/CustomerWorkflowActions": { CustomerWorkflowActions: "WorkflowActions" }, "../../../components/ui/Card": { Card: "Card" }, "../../../components/ui/StatusBadge": { StatusBadge: "StatusBadge" },
     "../../../lib/cloud/coreBusinessCollections": Object.fromEntries(Object.entries(hooks).map(([key, hook]) => [hook, () => ({ items: data[key], isReady: ready[key], setItems: failWrite, createItem: failWrite, updateItem: failWrite, removeItem: failWrite })])),
     "../../../lib/crmPro": { buildCustomerIntelligence() { helperCalls++; return { totalSpend: 0, outstandingBalance: 0, lifetimeValue: 0, averagePaymentDays: null, repeatCustomerScore: 0, completedJobs: 0, acceptedQuotes: 0, builderRelationship: "None", referralSource: "None", reviewStatus: "Not requested" }; }, buildCustomerTimeline({ customer: selected }) { return data.history.filter(item => item.customerId === selected.id); } },
     "../../../lib/storage": { makeId: failWrite }, "../../../lib/workflow": { invoiceTotal: () => 100, pricingDocumentTotal: () => 100 },
@@ -79,7 +79,10 @@ test("customer profile changes reset browsing and never show another customer's 
 test("customer detail requires ready sources and one exact nonblank saved identity", () => {
   for (const state of ["loading", "missing", "duplicate", "blank"]) {
     const h = harness(); if (state === "loading") h.ready.jobs = false; if (state === "missing") h.data.customers = []; if (state === "duplicate") h.data.customers.push(customer({ name: "Other person" })); if (state === "blank") { h.route(" "); h.data.customers = [customer({ id: " " })]; }
-    const view = h.render(); assert.equal(nodes(view).find(n => n.type === "QuickActions"), undefined); assert.equal(h.helperCalls(), 0); assert.match(text(view), state === "loading" ? /Loading customer CRM/ : /Customer unavailable/);
+    const view = h.render(); assert.equal(h.helperCalls(), 0); assert.match(text(view), state === "loading" ? /Loading customer CRM/ : /Customer unavailable/);
+    // Keep the guarded workflow mounted across source loading so pending saves survive.
+    assert.equal(view.type, "div"); assert.equal(view.props.children[0].type, "WorkflowActions");
+    assert.equal(view.props.children[0].props.customers.items, h.data.customers);
   }
 });
 
@@ -100,5 +103,4 @@ test("customer dock contacts share validated call text and email links without m
   const invalid = actions(customer({ phone: "07700 900123?body=Injected", email: "customer@example.test?bcc=other@example.test" }));
   for (const label of ["Call", "Text", "Email", "Review"]) { assert.equal(get(invalid, label).type, "button"); assert.equal(get(invalid, label).props.disabled, true); }
   const page = harness(); page.data.customers = [customer({ phone: "07700 900123 ext 4", email: "unsupported" })]; const view = page.render(); assert.match(text(view), /Review phone format to call or text/); assert.match(text(view), /Review email format to compose/);
-  nodes(view).find(n => n.type === "QuickActions").props.onRequestReview(); // Invalid contacts cannot prepare or log a review request.
 });

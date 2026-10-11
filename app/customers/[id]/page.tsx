@@ -19,7 +19,7 @@ import {
   Star,
   UsersRound,
 } from "lucide-react";
-import { CustomerQuickActions } from "../../../components/crm/CustomerQuickActions";
+import { CustomerWorkflowActions } from "../../../components/crm/CustomerWorkflowActions";
 import { Card } from "../../../components/ui/Card";
 import { StatusBadge } from "../../../components/ui/StatusBadge";
 import {
@@ -44,12 +44,10 @@ import {
   buildCustomerTimeline,
   type CustomerTimelineKind,
 } from "../../../lib/crmPro";
-import { makeId } from "../../../lib/storage";
 import { invoiceTotal, pricingDocumentTotal } from "../../../lib/workflow";
 import { savedIdentityIndex } from "../../../lib/assistantIdentity";
 import { contactEmailHref, contactPhoneHref } from "../../../lib/contactLinks";
 import { assistantJobBriefingHref } from "../../../lib/assistantJobLink";
-import type { CustomerInteraction, CustomerProfile, JobTimelineEntry } from "../../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 
@@ -100,15 +98,15 @@ export default function CustomerDetailPage() {
   const reminders = useAiRemindersCollection();
   const jobTimeline = useJobTimelineCollection();
   const diaries = useSiteDiariesCollection();
-  const [message, setMessage] = useState("");
   const stores = [customers, builders, jobs, documents, invoices, payments, profiles, interactions, leads, variations, certificates, jobDocuments, reminders, jobTimeline, diaries];
   const isReady = stores.every((store) => store.isReady);
 
-  if (!isReady) return <Card>Loading customer CRM…</Card>;
+  const workflowActions = <CustomerWorkflowActions key={params.id} customerId={params.id} customers={customers} jobs={jobs} timeline={jobTimeline} profiles={profiles} interactions={interactions} />;
+  if (!isReady) return <div className="space-y-6">{workflowActions}<Card>Loading customer CRM…</Card></div>;
 
   const customer = savedIdentityIndex(customers.items).unique.get(params.id);
   if (!customer) {
-    return <div className="space-y-6"><Link href="/customers" className="inline-flex min-h-12 items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200">← Back to customers</Link><Card><h1 className="text-xl font-bold">Customer unavailable</h1><p className="mt-2 text-sm text-slate-400">This customer is missing or its saved identity is ambiguous. Review the customer records before using this workspace.</p></Card></div>;
+    return <div className="space-y-6">{workflowActions}<Link href="/customers" className="inline-flex min-h-12 items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200">← Back to customers</Link><Card><h1 className="text-xl font-bold">Customer unavailable</h1><p className="mt-2 text-sm text-slate-400">This customer is missing or its saved identity is ambiguous. Review the customer records before using this workspace.</p></Card></div>;
   }
   const phoneHref = contactPhoneHref(customer.phone);
   const emailHref = contactEmailHref(customer.email);
@@ -120,7 +118,6 @@ export default function CustomerDetailPage() {
   const linkedInvoices = invoices.items.filter((invoice) => invoice.customerId === customer.id || Boolean(invoice.jobId && jobIds.has(invoice.jobId))).toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   const quotes = linkedDocuments.filter((document) => document.type === "Quote");
   const estimates = linkedDocuments.filter((document) => document.type === "Estimate");
-  const activeJob = linkedJobs.find((job) => !["Complete", "On hold"].includes(job.status));
   const intelligence = buildCustomerIntelligence({
     customer,
     profile,
@@ -152,45 +149,9 @@ export default function CustomerDetailPage() {
     return (view.historyKind === "All" || item.kind === view.historyKind) && historyWords.every((word) => searchable.includes(word));
   });
 
-  function ensureProfile(now: string, changes: Partial<CustomerProfile>) {
-    profiles.setItems((current) => {
-      const existing = current.find((item) => item.customerId === customer!.id);
-      if (existing) return current.map((item) => item.id === existing.id ? { ...item, ...changes, updatedAt: now } : item);
-      return [{
-        id: makeId("profile"), customerId: customer!.id, tags: [], preferredContact: "Phone", nextFollowUpDate: "", followUpReason: "",
-        reviewStatus: "Not requested", portalEnabled: false, portalNote: "", createdAt: now, updatedAt: now, ...changes,
-      }, ...current];
-    });
-  }
-
-  function markCurrentJobComplete() {
-    if (!activeJob || !window.confirm(`Mark ${activeJob.title} complete?`)) return;
-    const now = new Date().toISOString();
-    jobs.setItems((current) => current.map((job) => job.id === activeJob.id ? { ...job, status: "Complete", updatedAt: now } : job));
-    const entry: JobTimelineEntry = { id: makeId("timeline"), jobId: activeJob.id, milestone: "Job completed", note: "Marked complete from the customer CRM quick actions.", completedBy: "JR OS CRM", completedAt: now, createdAt: now };
-    jobTimeline.setItems((current) => [entry, ...current]);
-    setMessage(`${activeJob.title} marked complete.`);
-  }
-
-  function requestReview() {
-    if (!customer || (!phoneHref && !emailHref)) return;
-    const now = new Date().toISOString();
-    ensureProfile(now, { reviewStatus: "Requested", reviewRequestedAt: now });
-    const interaction: CustomerInteraction = {
-      id: makeId("interaction"), customerId: customer.id, type: "Review request", summary: "Google review request prepared from Customer Quick Actions.", outcome: "Native message composer opened", completedBy: "JR OS CRM", interactionAt: now, createdAt: now,
-    };
-    interactions.setItems((current) => [interaction, ...current]);
-    setMessage("Review request logged in the customer timeline.");
-    const firstName = customer.name.split(/\s+/)[0] || customer.name;
-    const body = `Hi ${firstName}, thank you for choosing JR Electrical Services. If you were happy with the work, would you mind leaving us a Google review? It really helps the business. Kind regards, Jake`;
-    window.location.assign(phoneHref
-      ? `${phoneHref.replace("tel:", "sms:")}?body=${encodeURIComponent(body)}`
-      : `${emailHref}?subject=${encodeURIComponent("JR Electrical Services review request")}&body=${encodeURIComponent(body)}`);
-  }
-
   return <div className="space-y-6 pb-[calc(12rem+env(safe-area-inset-bottom))] lg:pb-0">
+    {workflowActions}
     <Link href="/customers" className="inline-flex min-h-12 items-center gap-2 text-sm text-cyan-300 hover:text-cyan-200">← Back to customers</Link>
-    {message ? <div role="status" className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-300">{message}</div> : null}
 
     <Card className="border-cyan-400/30">
       <p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">CRM Pro customer</p>
@@ -202,8 +163,6 @@ export default function CustomerDetailPage() {
         <p className="break-words sm:col-span-2"><span className="font-semibold text-slate-200">Notes:</span> {customer.notes || "No notes"}</p>
       </div>
     </Card>
-
-    <CustomerQuickActions customer={customer} activeJob={activeJob} onMarkComplete={markCurrentJobComplete} onRequestReview={requestReview} />
 
     <nav aria-label="Customer sections" className="grid grid-cols-2 gap-2 sm:grid-cols-4">{[["Jobs", "customer-jobs"], ["Quotes & estimates", "customer-pricing"], ["Invoices", "customer-invoices"], ["History", "customer-history"]].map(([label, id]) => <a key={id} href={`#${id}`} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 px-3 text-center text-sm font-semibold text-cyan-200">{label}</a>)}</nav>
 
