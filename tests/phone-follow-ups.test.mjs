@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { crm, rules, contacts, load, hookRuntime, jsx, nodes, text, FixedDate } from "./helpers/follow-up-harness.mjs";
+import { crm, pipeline, rules, contacts, load, hookRuntime, jsx, nodes, text, FixedDate } from "./helpers/follow-up-harness.mjs";
 
 const customer = (patch = {}) => ({ id: "customer-1", name: "Example customer", phone: "07700 900123", email: "customer@example.test", ...patch });
 const lead = (patch = {}) => ({ id: "lead-1", name: "Workshop enquiry", phone: "07700 900123", email: "customer@example.test", stage: "New Lead", workRequired: "Rear entrance lighting", nextAction: "Book a visit", priority: "Normal", estimatedValue: 100, createdAt: "2026-10-10T12:00:00Z", updatedAt: "2026-10-10T12:00:00Z", ...patch });
@@ -20,13 +20,13 @@ function harness() {
     "../../../components/crm/FollowUpActions": { useFollowUpActions: () => ({ panel: null, canStart: true, openContact: failWrite, openPostpone: failWrite }) },
     "../../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity, mode: "cloud", isReady: true }) },
     "../../../lib/cloud/coreBusinessCollections": Object.fromEntries(Object.entries(hooks).map(([key, hook]) => [hook, () => ({ items: data[key], isReady: ready[key], createItem: failWrite, updateItem: failWrite, setItems: failWrite })])),
-    "../../../lib/crmPro": { ...crm, buildFollowUpCentre(input) { calculations++; return crm.buildFollowUpCentre(input); } }, "../../../lib/crmFollowUpSettings": rules, "../../../lib/contactLinks": contacts, "../../../lib/storage": { makeId: failWrite },
+    "../../../lib/crmPro": { ...crm, buildFollowUpCentre(input) { calculations++; return crm.buildFollowUpCentre(input); } }, "../../../lib/leadPipeline": pipeline, "../../../lib/crmFollowUpSettings": rules, "../../../lib/contactLinks": contacts, "../../../lib/storage": { makeId: failWrite },
   }).default;
   const render = () => runtime.render(page);
   const queue = () => nodes(render()).find(n => n.props["aria-label"] === "Follow-up queue");
   const button = label => nodes(render()).find(n => n.type === "Button" && text(n) === label);
   const search = () => nodes(render()).find(n => n.type === "input" && n.props.type === "search");
-  return { data, ready, render, queue, button, cards: () => nodes(queue()).filter(n => n.type === "Card"), blurred: () => blurred, calculations: () => calculations,
+  return { data, ready, render, queue, button, cards: () => nodes(queue()).filter(n => n.type === "Card" && nodes(n).some(child => child.type === "h3")), blurred: () => blurred, calculations: () => calculations,
     click(label) { const control = button(label); assert.ok(control, label); control.props.onClick(); }, search(value) { search().props.onChange({ target: { value } }); },
     reason(value) { nodes(render()).find(n => n.props["aria-label"] === "Filter follow-ups by reason").props.onChange({ target: { value } }); },
     enter() { search().props.onKeyDown({ key: "Enter", preventDefault() {}, currentTarget: { blur() { blurred++; } } }); },
@@ -90,7 +90,7 @@ test("future lead snoozes suppress every surfaced stage until their saved day wi
     assert.equal(build({ leads: [{ ...original, followUpDate: "2026-10-10" }] }).length, 1, stage);
   }
   assert.equal(build({ leads: [lead({ stage: "Lost", lostFollowUpCompletedAt: "2026-10-10T12:00:00Z" })] }).length, 0);
-  for (const followUpDate of ["invalid", "2026-13-01", "2026-11-31"]) assert.equal(build({ leads: [lead({ followUpDate })] }).length, 1, "A malformed date is not evidence of a future snooze");
+  for (const followUpDate of ["invalid", "2026-13-01", "2026-11-31"]) assert.equal(build({ leads: [lead({ followUpDate })] }).length, 0, "A malformed date requires source review before recommending contact");
   assert.equal(build({ documents: [quote({ nextFollowUpDate: "2026-10-12" })], profiles: [profile({ nextFollowUpDate: "2026-10-12" })], customers: [customer()] }).length, 0);
 });
 
@@ -181,4 +181,45 @@ test("surfaced leads without valid age evidence say unavailable instead of claim
     const h = harness(); h.data.leads = [lead({ createdAt, updatedAt: "2026-10-11T11:00:00Z", lastContactAt: "invalid" })];
     assert.match(text(h.cards()[0]), /Age unavailable/); assert.doesNotMatch(text(h.cards()[0]), /0 days/); assert.match(text(h.recommendations()), /Age unavailable/); assert.doesNotMatch(text(h.recommendations()), /0 days/);
   }
+});
+
+test("ambiguous identities unknown stages and invalid follow-up days never become contact recommendations", () => {
+  const h = harness(); h.data.leads = [lead({ id: "duplicate" }), lead({ id: "duplicate", stage: "Lost" }), lead({ id: " " }), lead({ id: "unknown", stage: "constructor" }), lead({ id: "bad-day", followUpDate: "2026-02-30" }), lead({ id: "known" })];
+  assert.equal(h.cards().length, 1); assert.match(text(h.render()), /queue is incomplete/); assert.match(text(h.render()), /3 lead records have missing or duplicate identities/); assert.match(text(h.render()), /Lead records to review · 2/);
+  assert.equal(nodes(h.recommendations()).filter(n => n.type === "Link").length, 1); assert.equal(nodes(h.recommendations()).find(n => n.type === "Link").props.href, "/leads?lead=known");
+  assert.equal(build({ leads: h.data.leads }).length, 1);
+});
+
+test("lead reviews preserve exact saved links and reveal four more at a time with account-scoped paging", () => {
+  const h = harness(), id = "saved /?#+ &"; h.data.leads = Array.from({ length: 9 }, (_, i) => lead({ id: i ? `review-${i}` : id, stage: "Imported" }));
+  const review = () => nodes(h.render()).find(n => n.type === "details" && text(n.props.children[0]).startsWith("Lead records to review"));
+  const links = () => nodes(review()).filter(n => n.type === "Link");
+  assert.equal(review().props.open, undefined); assert.equal(links().length, 4); assert.equal(links()[0].props.href, `/leads?lead=${encodeURIComponent(id)}`); assert.match(links()[0].props.className, /min-h-12/);
+  h.click("Show more lead reviews"); assert.equal(links().length, 8); h.click("Show more lead reviews"); assert.equal(links().length, 9); assert.equal(h.button("Show more lead reviews"), undefined);
+  h.account({ organisationId: "other" }); assert.equal(links().length, 4); assert.equal(h.cards().length, 0);
+});
+
+test("invalid lead values and priorities cannot inflate priority or become zero-value claims", () => {
+  for (const estimatedValue of [NaN, Infinity, -1, "1000", {}, null, undefined, 1.234]) {
+    const source = lead({ estimatedValue, priority: "constructor" });
+    const item = build({ leads: [source] })[0], low = build({ leads: [lead({ estimatedValue: 0, priority: "Low" })] })[0];
+    assert.equal(item.estimatedValue, null); assert.equal(item.priorityScore, low.priorityScore); assert.equal(Number.isFinite(item.priorityScore), true); assert.match(item.reviewNote, /Estimated value needs review.*Priority needs review/);
+    const h = harness(); h.data.leads = [source]; assert.match(text(h.cards()[0]), /Value unavailable/); assert.match(text(h.overview()), /UnavailableKnown opportunity value · incomplete/); assert.match(text(h.recommendations()), /Estimated value needs review/); assert.doesNotMatch(text(h.render()), /NaN|Infinity|£0/);
+  }
+});
+
+test("follow-up value summaries use exact known pence and explain partial or unsupported totals", () => {
+  const h = harness(); h.data.leads = [lead({ id: "one", estimatedValue: 0.1 }), lead({ id: "two", estimatedValue: 0.2 }), lead({ id: "unknown-value", estimatedValue: NaN })]; assert.match(text(h.overview()), /£0.30Known opportunity value · incomplete/);
+  h.data.leads = [lead({ estimatedValue: 0 })]; assert.match(text(h.overview()), /£0.00Opportunity value/); assert.doesNotMatch(text(h.overview()), /incomplete/);
+  h.data.leads = [lead({ id: "one", estimatedValue: 50_000_000_000_000 }), lead({ id: "two", estimatedValue: 50_000_000_000_000 })]; assert.match(text(h.overview()), /UnavailableOpportunity valueCombined value exceeds/);
+});
+
+test("a withheld lead makes the opportunity subtotal explicitly incomplete even with an otherwise empty queue", () => {
+  const h = harness(); h.data.leads = [lead({ stage: "Imported" })]; assert.equal(h.cards().length, 0); assert.match(text(h.overview()), /UnavailableKnown opportunity value · incomplete/); assert.match(text(h.render()), /queue is incomplete/);
+  h.data.leads = [...h.data.leads, lead({ id: "known", estimatedValue: 150 })]; assert.match(text(h.overview()), /£150.00Known opportunity value · incomplete/);
+});
+
+test("refreshed valid lead evidence restores recommendations and clears its review without changing records", () => {
+  const h = harness(); h.data.leads = [lead({ stage: "Imported", followUpDate: "invalid" })]; assert.equal(h.cards().length, 0);
+  h.data.leads = [lead({ stage: "New enquiry", followUpDate: "2026-10-11" })]; const snapshot = JSON.stringify(h.data); assert.equal(h.cards().length, 1); assert.doesNotMatch(text(h.render()), /queue is incomplete|Lead records to review/); assert.equal(JSON.stringify(h.data), snapshot);
 });

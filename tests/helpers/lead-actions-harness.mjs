@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as permissions from "../../lib/cloud/permissions.ts";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
-import { crm, contacts, identities, load, hookRuntime, jsx, nodes, text } from "./follow-up-harness.mjs";
+import { crm, contacts, identities, pipeline, load, hookRuntime, jsx, nodes, text } from "./follow-up-harness.mjs";
 export { nodes, text };
 export const customer = (patch = {}) => ({ id: "customer-1", name: "Workshop customer", phone: "07700 900123", email: "customer@example.test", address: "Epsom", notes: "", createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", ...patch });
 export const builder = (patch = {}) => ({ id: "builder-1", companyName: "Workshop contractor", contactName: "Site manager", phone: "07700 900124", email: "builder@example.test", address: "Guildford", notes: "", createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", ...patch });
@@ -37,7 +37,7 @@ export function harness(query = "") {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: runtime.hooks, "lucide-react": {}, "next/link": { default: "Link" },
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/crm/LeadPipelineActions": actions,
     "../../lib/cloud/useCloudIdentity": identityModule, "../../lib/cloud/coreBusinessCollections": Object.fromEntries(Object.entries(hooks).map(([key, hook]) => [hook, () => store(key)])),
-    "../../lib/crmPro": crm, "../../lib/contactLinks": contacts, "../../lib/assistantIdentity": identities, "../../lib/scheduling": scheduling, "../../lib/storage": { makeId() { assert.fail("Legacy write path"); } },
+    "../../lib/crmPro": crm, "../../lib/leadPipeline": pipeline, "../../lib/contactLinks": contacts, "../../lib/assistantIdentity": identities, "../../lib/scheduling": scheduling, "../../lib/storage": { makeId() { assert.fail("Legacy write path"); } },
   }, { Date: TestDate, URLSearchParams, window: { location: { search: query }, requestAnimationFrame(fn) { frames.set(++frameId, fn); return frameId; }, cancelAnimationFrame(id) { frames.delete(id); }, confirm() { assert.fail("Unrelated confirmation"); } } });
   const paint = () => runtime.render(page.default);
   const render = () => { let view = paint(); if (frames.size) { const pending = [...frames.values()]; frames.clear(); pending.forEach(fn => fn()); view = paint(); } return view; };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import * as permissions from "../../lib/cloud/permissions.ts";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
-import { crm, rules, identities, contacts, load, hookRuntime, jsx, nodes, text } from "./follow-up-harness.mjs";
+import { crm, pipeline, rules, identities, contacts, load, hookRuntime, jsx, nodes, text } from "./follow-up-harness.mjs";
 export { nodes, text };
 export const customer = (patch = {}) => ({ id: "customer-1", name: "Workshop customer", phone: "07700 900123", email: "customer@example.test", createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", ...patch });
 export const lead = (patch = {}) => ({ id: "lead-1", customerId: "customer-1", name: "Workshop enquiry", phone: "07700 900123", email: "customer@example.test", stage: "New Lead", workRequired: "Entrance lighting", nextAction: "Book a visit", priority: "Normal", estimatedValue: 100, followUpDate: "2026-10-10", notes: "Keep notes", createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", ...patch });
@@ -38,7 +38,7 @@ export function harness() {
     "../../../components/ui/Button": { Button: "Button" }, "../../../components/ui/Card": { Card: "Card" }, "../../../components/ui/PageHeader": { PageHeader: "PageHeader" },
     "../../../components/crm/FollowUpRules": { FollowUpRules: "Rules" }, "../../../components/crm/FollowUpActions": actions,
     "../../../lib/cloud/useCloudIdentity": identityModule, "../../../lib/cloud/coreBusinessCollections": Object.fromEntries(Object.entries(hooks).map(([key, hook]) => [hook, () => store(key)])),
-    "../../../lib/crmPro": engine, "../../../lib/crmFollowUpSettings": rules, "../../../lib/contactLinks": contacts,
+    "../../../lib/crmPro": engine, "../../../lib/leadPipeline": pipeline, "../../../lib/crmFollowUpSettings": rules, "../../../lib/contactLinks": contacts,
   }, { Date: TestDate });
   const render = () => runtime.render(page.default);
   const button = label => nodes(render()).find(n => ["button", "Button"].includes(n.type) && text(n) === label);

@@ -9,15 +9,15 @@ test("sales pipeline uses cloud collections and preserves all requested stages",
   assert.match(pipeline, /useSalesLeadsCollection\(\)/);
   assert.match(pipeline, /useLeadActivitiesCollection\(\)/);
   assert.match(pipeline, /const stages: readonly LeadStage\[\] = crmLeadStages/);
-  assert.match(pipeline, /normaliseLeadStage\(lead\.stage\)/);
+  assert.match(pipeline, /resolveLeadStage\(lead\.stage\)/);
 });
 
 test("desktop pipeline supports drag and drop between stages", () => {
   assert.match(pipeline, /aria-label="Desktop sales pipeline"/);
-  assert.match(pipeline, /draggable=\{actions.canStart\} onDragStart=/);
+  assert.match(pipeline, /draggable=\{Boolean\(stage\) && actions.canStart\} onDragStart=/);
   assert.match(pipeline, /onDragOver=/);
-  assert.match(pipeline, /onDrop=\{\(\) => dropInto\(stage\)\}/);
-  assert.match(pipeline, /data-pipeline-stage=\{stage\}/);
+  assert.match(pipeline, /onDrop=\{stage \? \(\) => dropInto\(stage\) : undefined\}/);
+  assert.match(pipeline, /data-pipeline-stage=\{stage \|\| "Stage needs review"\}/);
 });
 
 test("mobile pipeline supports deliberate horizontal swipe and accessible stage controls", () => {

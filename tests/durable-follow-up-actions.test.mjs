@@ -98,12 +98,12 @@ test("missing, duplicate and blank source/customer identities block both follow-
     h => { h.data.leads = []; h.data.profiles = [profile(), profile({ customerId: "other" })]; },
   ];
   for (const configure of variants) for (const label of ["Log contact", "Postpone"]) {
-    const h = harness(); configure(h); h.click(label); assert.match(alert(h), /missing|ambiguous|identity/); assert.equal(h.writes.length, 0); assert.equal(h.field("Contact method"), undefined);
+    const h = harness(), retained = h.button(label).props.onClick; configure(h); const current = h.button(label); if (current) h.click(label); else retained(); assert.match(alert(h), /missing|ambiguous|identity|unavailable/); assert.equal(h.writes.length, 0); assert.equal(h.field("Contact method"), undefined);
   }
 });
 
 test("unsupported raw stages cannot be normalized into a legitimate contact update", () => {
-  const h = harness(); h.data.leads = [lead({ stage: "Unexpected" })]; h.open(""); assert.match(alert(h), /unsupported saved stage/); assert.equal(h.writes.length, 0);
+  const h = harness(), retained = h.button("Log contact").props.onClick; h.data.leads = [lead({ stage: "Unexpected" })]; assert.equal(h.button("Log contact"), undefined); retained(); assert.match(alert(h), /unsupported saved stage|no longer due|unavailable/); assert.equal(h.writes.length, 0); assert.equal(h.field("Contact method"), undefined);
 });
 
 test("changed and closed source records, replaced customers, contact edits and changed rules block stale drafts", () => {

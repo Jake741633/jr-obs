@@ -143,6 +143,33 @@ dates are ignored. Without dated contact, the queue uses the enquiry creation
 date and labels it "since enquiry"; surfaced records with neither valid date
 show "Age unavailable". Cards and recommendations show the same age basis.
 
+Lead recommendations require one unique saved identity, a recognised current or
+legacy stage and a valid follow-up day when a day is recorded. Unrecognised stages
+are never inferred to be new enquiries. Withheld leads make the queue and value
+subtotal explicitly incomplete. A separate disclosure shows four source reviews
+at a time, with exact saved-lead links; missing/duplicate identities link to the
+pipeline instead. Account changes reset review paging. Invalid lead estimates and
+priorities earn no value/priority boost; eligible contact cards retain explicit
+value/priority review notes. Money summaries add known pence, flag incomplete
+subtotals and withhold amounts outside the supported range.
+
+Pipeline reporting also requires unique identities and recognised stages. Unknown
+stages remain visible in a review column and on phone cards, with a Needs review
+filter. Unsupported estimates, priorities, sources and calendar days are labelled;
+invalid values cannot turn into £0 or corrupt totals. Counts/rates based on an
+incomplete set say known; no decisions and no usable value evidence have explicit
+empty states. Source reporting retains an unrecognised-source group, and quote win
+rates withhold ambiguous document identities and unsupported types/statuses.
+
+Choose the correct stage on an unrecognised lead to open the existing confirmation
+panel. No swipe, drag, browse or filter automatically repairs a stage. Confirmation
+retains the original saved stage in history and uses the same durable source-first
+save, retained failure draft, stale/account/sync checks and history-only retries.
+Corrections preserve contact/completion times and the saved next action; routine
+stage changes retain their disclosed effects. Other missing
+evidence remains visible for source review; this change does not rewrite records
+or infer missing values, dates, priorities or sources.
+
 Follow-up rules use durable create/update methods. Editing does not recalculate
 the queue until the rules save. Failed saves retain the draft; first-save retries
 use the same settings identity. Whole-day windows accept 1–3650; the value threshold

@@ -105,7 +105,7 @@ test("all supported stage side effects preserve unrelated fields including newer
 
 test("legacy stages are deliberately normalized but unsupported stages cannot be silently moved", () => {
   const h = harness(); h.data.leads = [lead({ stage: "Won" })]; h.stage("Completed"); h.click("Confirm stage change"); assert.match(h.data.activities[0].summary, /Accepted → Completed/);
-  const unknown = harness(); unknown.data.leads = [lead({ stage: "Imported unknown" })]; unknown.stage(); assert.equal(unknown.writes.length, 0); assert.equal(unknown.button("Confirm stage change"), undefined); assert.match(text(unknown.render()), /unsupported saved stage/);
+  const unknown = harness(); const stale = unknown.field("Stage for Workshop").props.onChange; unknown.data.leads = [lead({ stage: "Imported unknown" })]; unknown.render(); stale({ target: { value: "Contacted" } }); assert.equal(unknown.writes.length, 0); assert.equal(unknown.button("Confirm stage change"), undefined); assert.match(text(unknown.render()), /unsupported saved stage/);
 });
 
 test("stage review rejects stale cards, changed source fields, removed or ambiguous identities", () => {

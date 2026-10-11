@@ -1,6 +1,9 @@
 import type { LeadPriority, LeadStage, LegacyLeadStage } from "./models";
 
 export const crmLeadStages: readonly LeadStage[];
+export function resolveLeadStage(stage: unknown): LeadStage | null;
+export function leadStageLabel(stage: unknown): string;
+export function leadValuePence(value: unknown): number | null;
 export function normaliseLeadStage(stage: LeadStage | LegacyLeadStage | string): LeadStage;
 export function moveLeadStage(stage: LeadStage | LegacyLeadStage | string, direction: -1 | 1): LeadStage;
 export function ageInDays(value: string, now?: Date): number;

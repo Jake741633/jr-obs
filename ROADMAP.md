@@ -55,6 +55,8 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Durable lead capture and reviewed stage changes with retained failure drafts and independent history retries
 - [x] Durable lead activity/outcome saves and guarded deletion with retained failure drafts and reviewed history cleanup
 - [x] Lead follow-up age uses genuine contact evidence and labels enquiry-date fallbacks without treating notes as contact
+- [x] Pipeline source review with explicit saved-stage corrections, exact known value subtotals and incomplete count/rate labels
+- [x] Follow-up lead review for ambiguous identities, unrecognised stages and invalid dates, with unknown value/priority evidence kept out of ranking boosts
 - [x] Job-aware JR AI follow-up questions and one-tap related answers retaining the exact saved job
 - [x] Compact phone question panel with question-first layout and expandable shortcuts/scope help
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection
