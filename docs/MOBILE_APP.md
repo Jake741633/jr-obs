@@ -35,6 +35,23 @@ can expose Workspace, Daily assistant and Quick quote. These are ordinary
 guarded routes: a shortcut never grants access to another role's workspace.
 Availability depends on the device and browser.
 
+## Customer inbox
+
+Customers shows eight cards first, with eight more per tap. Labelled search
+matches words across the saved name, phone, email and address, including phone
+numbers without spaces or brackets. Search and Clear customer search reset the
+reveal without discarding an open form; Enter dismisses the search keyboard.
+Notes remain outside search. Customer review links encode the exact saved ID,
+and linked job record counts wait until the job collection finishes loading.
+
+View, edit, delete and contact controls have 48px targets. Phone entry uses the
+phone keyboard, long contact details wrap, and the page leaves room for bottom
+navigation. Call and Email open the user's phone/mail app with the saved contact;
+they do not log an interaction, send a message or add a subject/body. Unsupported
+formats remain visible for review instead of creating an uncertain dialing or
+recipient link. These browsing changes retain the existing CRM write/access
+behavior. Signed-in physical-phone acceptance remains pending.
+
 ## Jobs inbox
 
 Jobs opens with labelled search and a stage filter, with eight cards shown first
@@ -68,8 +85,22 @@ current job into the form. Missing or ambiguous job identities cannot be edited 
 deleted. Creation, edits, note retries and deletion recheck current readiness and
 account permissions, including old callbacks after account changes or unmount.
 Office editing and owner/admin deletion retain their existing access boundaries.
-The separate quick-status field workflow keeps its existing transition and sync
-rules.
+Quick-status controls also confirm the durable save before displaying the new
+stage or reporting a queued field change. A failed write retains the saved stage;
+repeated taps do not write again or duplicate history. Changes operate on the
+latest record, preserve unrelated details and reject a changed stage, replacement
+job, unavailable/duplicate identity or open edit form. Controls explain why a
+change is unavailable. Current account, readiness and team-identity checks also
+apply to old callbacks after refresh, account changes or page unmount.
+
+Quick status reads the current account's queue before writing, so a failed or
+conflicted attempt blocks another change even before a sync event reaches the
+screen. That failure replaces any older pending feedback. Field accounts retain
+the existing permitted transition graph, ordered offline changes and secure RPC;
+their timeline history remains server-authored. Field stage saves do not depend
+on office customer, builder or timeline collections. Office quick changes use the
+same separate timeline-note retry as the edit form. A device save or an empty
+queue never independently claims cloud confirmation.
 
 If the job saves but its creation or edited-stage timeline note fails, a separate
 panel identifies the saved job and retries only that original note. Multiple notes

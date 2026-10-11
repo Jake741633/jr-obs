@@ -139,6 +139,41 @@ function assertHandlerGuardsBeforeOptimism(source, path, transitionCondition, ex
   return handler;
 }
 
+function assertListDurableStatusGuards() {
+  const handler = functionNode(jobsSource, jobsPath, "updateStatus");
+  const guards = [
+    ["!access.ready||access.scopeKey!==jobMutationScopeKey||access.denied||access.fieldRestricted!==fieldJobStatusRestricted", "live account/readiness"],
+    ["jobStatusMutationDenied", "unavailable identity"],
+    ["fieldJobStatusRestricted&&!fieldJobOperatorMemberId", "field identity"],
+    ["fieldJobStatusRestricted&&access.operatorMemberId!==fieldJobOperatorMemberId", "changed field operator"],
+    ["fieldJobStatusRestricted&&!fieldJobStatusTransitionAllowed(job.status,nextStatus)", "field transition"],
+  ].map(([condition, label]) => exactTopLevelGuard(handler, jobsSource, condition, label));
+  const effects = ["jobs.updateItem", "transitionJobStatus", "saveJobNote"].map(callee => {
+    const calls = collectNodes(handler.body, node => ts.isCallExpression(node) && node.expression.getText(jobsSource) === callee);
+    assert.equal(calls.length, 1, `Expected one ${callee} in the quick-stage handler`);
+    for (const guard of guards) assert.ok(guard.end < calls[0].getStart(jobsSource), `${callee} must follow every authorization/transition guard`);
+    return calls[0];
+  });
+  assert.equal(effects[0].arguments.length, 2);
+  assert.equal(effects[0].arguments[0].getText(jobsSource), "id");
+  const updater = effects[0].arguments[1];
+  assert.ok(ts.isArrowFunction(updater) && ts.isBlock(updater.body));
+  assert.equal(compact(updater.body.statements.at(-1).getText(jobsSource)), "returnresult.job;");
+  assert.match(updater.getText(jobsSource), /if \(current\.status !== expected\.status\) throw new Error/);
+  assert.match(updater.getText(jobsSource), /if \(fieldJobStatusRestricted && !fieldJobStatusTransitionAllowed\(current\.status, nextStatus\)\) throw new Error/);
+  assertTransitionTarget(effects[1], jobsSource, "nextStatus");
+  const noteGuard = nearestIfStatement(effects[2], handler.body);
+  assert.equal(compact(noteGuard.expression.getText(jobsSource)), "!fieldJobStatusRestricted&&note", "Field timeline evidence must remain server-authored");
+  assert.equal(collectNodes(handler.body, node => ts.isCallExpression(node) && ["jobs.setItems", "timeline.setItems", "timeline.createItem"].includes(node.expression.getText(jobsSource))).length, 0);
+  const syncCalls = collectNodes(handler.body, node => ts.isCallExpression(node) && node.expression.getText(jobsSource) === "setJobStatusSyncProjection");
+  assert.equal(syncCalls.length, 2, "Queue failure and a successful queued save each update their displayed sync state");
+  assert.match(syncCalls[0].getText(jobsSource), /\[id\]: syncState/);
+  assert.ok(effects[0].end < syncCalls[1].getStart(jobsSource), "Pending/offline feedback must follow durable persistence");
+  assert.equal(compact(nearestIfStatement(syncCalls[1], handler.body).expression.getText(jobsSource)), "jobStatusCloudTracking");
+  assert.match(syncCalls[1].getText(jobsSource), /\[id\]: navigator.onLine \? "Pending" : "Offline"/);
+  return handler;
+}
+
 function jsxAttributeExpression(element, source, attributeName) {
   const attributes = element.openingElement.attributes.properties.filter((attribute) => ts.isJsxAttribute(attribute)
     && attribute.name.getText(source) === attributeName);
@@ -190,11 +225,11 @@ function assertListStatusHelpers() {
   assert.ok(ts.isReturnStatement(locked.body.statements[0]) && locked.body.statements[0].expression);
   assert.equal(
     compact(locked.body.statements[0].expression.getText(jobsSource)),
-    "jobStatusMutationDenied||(fieldJobStatusRestricted&&!fieldJobOperatorMemberId)||(fieldJobStatusRestricted&&fieldJobStatusTransitions(job.status).length===0)||jobStatusSyncBlocked(job)",
+    "jobStatusMutationDenied||!jobStatusSaveReady||!jobIndex.unique.has(job.id)||(showForm&&editingId===job.id)||(fieldJobStatusRestricted&&!fieldJobOperatorMemberId)||(fieldJobStatusRestricted&&fieldJobStatusTransitions(job.status).length===0)||jobStatusSyncBlocked(job)",
   );
 
   const notice = functionNode(jobsSource, jobsPath, "jobStatusNotice");
-  assert.equal(notice.body.statements.length, 6, "jobStatusNotice must handle target sync truth, deny, field identity, terminal field, then unlocked cases");
+  assert.equal(notice.body.statements.length, 9, "jobStatusNotice must handle sync truth, identity/readiness/edit review, deny, field identity, terminal field, then unlocked cases");
   const syncDeclaration = notice.body.statements[0];
   assert.ok(ts.isVariableStatement(syncDeclaration));
   assert.equal(compact(syncDeclaration.getText(jobsSource)), "constsyncState=jobStatusSyncState(job);");
@@ -202,15 +237,20 @@ function assertListStatusHelpers() {
   assert.ok(ts.isIfStatement(syncNotice));
   assert.equal(compact(syncNotice.expression.getText(jobsSource)), "syncState");
   assert.equal(returnedExpression(syncNotice.thenStatement, jobsSource, "sync notice").getText(jobsSource), "jobStatusSyncMessages[syncState]");
-  const unavailable = notice.body.statements[2];
+  for (const [index, condition] of [[2, "!jobIndex.unique.has(job.id)"], [3, "!jobStatusSaveReady"], [4, "showForm&&editingId===job.id"]]) {
+    const guard = notice.body.statements[index]; assert.ok(ts.isIfStatement(guard));
+    assert.equal(compact(guard.expression.getText(jobsSource)), condition);
+    assert.ok(ts.isStringLiteral(returnedExpression(guard.thenStatement, jobsSource, "record review notice")));
+  }
+  const unavailable = notice.body.statements[5];
   assert.ok(ts.isIfStatement(unavailable));
   assert.equal(compact(unavailable.expression.getText(jobsSource)), "jobStatusMutationDenied");
   assert.equal(returnedExpression(unavailable.thenStatement, jobsSource, "unavailable notice").getText(jobsSource), "unavailableStatusMessage");
-  const unresolvedIdentity = notice.body.statements[3];
+  const unresolvedIdentity = notice.body.statements[6];
   assert.ok(ts.isIfStatement(unresolvedIdentity));
   assert.equal(compact(unresolvedIdentity.expression.getText(jobsSource)), "fieldJobStatusRestricted&&!fieldJobOperatorMemberId");
   assert.equal(returnedExpression(unresolvedIdentity.thenStatement, jobsSource, "field identity notice").getText(jobsSource), "unresolvedFieldIdentityMessage");
-  const terminal = notice.body.statements[4];
+  const terminal = notice.body.statements[7];
   assert.ok(ts.isIfStatement(terminal));
   assert.equal(
     compact(terminal.expression.getText(jobsSource)),
@@ -219,7 +259,7 @@ function assertListStatusHelpers() {
   const terminalMessage = returnedExpression(terminal.thenStatement, jobsSource, "terminal field notice");
   assert.ok(ts.isStringLiteral(terminalMessage));
   assert.equal(terminalMessage.text, "Further lifecycle changes for this job require office review.");
-  const unlocked = notice.body.statements[5];
+  const unlocked = notice.body.statements[8];
   assert.ok(ts.isReturnStatement(unlocked) && unlocked.expression && ts.isStringLiteral(unlocked.expression));
   assert.equal(unlocked.expression.text, "");
 }
@@ -248,7 +288,7 @@ function assertListStatusMessage(handler) {
   assert.equal(message.whenTrue.templateSpans[1].expression.getText(jobsSource), "nextStatus");
   assert.equal(message.whenTrue.templateSpans[1].literal.text, " queued for secure sync.");
   assert.ok(ts.isStringLiteral(message.whenFalse));
-  assert.equal(message.whenFalse.text, "");
+  assert.equal(message.whenFalse.text, "Job stage saved on this device. Check sync status before switching devices.");
   assert.match(jobsPage, /role="status"[^>]*>\{displayedStatusMessage\}<\/p>/);
 }
 
@@ -411,7 +451,7 @@ test("client field transitions exactly match the final server RPC graph", () => 
   assert.equal(fieldJobStatusTransitionAllowed("First fix", " Paid "), false);
 });
 
-test("both electrician-accessible job status surfaces fail closed before optimistic writes", () => {
+test("both electrician-accessible job status surfaces fail closed before their collection writes", () => {
   assertStatusBoundaryInitializers(jobsSource, jobsPath);
   assertStatusBoundaryInitializers(workspaceSource, workspacePath);
   assertFieldIdentityInitializer(jobsSource, jobsPath);
@@ -421,13 +461,7 @@ test("both electrician-accessible job status surfaces fail closed before optimis
   assert.equal(initializer(jobsSource, jobsPath, "jobStatusBoundaryReady"), "identityState.isReady&&(!fieldJobStatusRestricted||team.isReady)");
   assert.match(jobsPage, /if \(!jobStatusBoundaryReady\) return <Card>Loading jobs…<\/Card>;/);
 
-  const listHandler = assertHandlerGuardsBeforeOptimism(
-    jobsSource,
-    jobsPath,
-    "fieldJobStatusRestricted&&!fieldJobStatusTransitionAllowed(job.status,nextStatus)",
-    "(current)=>current.map((item)=>item.id===id?result.job:item)",
-    "setJobStatusSyncProjection",
-  );
+  const listHandler = assertListDurableStatusGuards();
   assertListStatusMessage(listHandler);
   const workspaceHandler = assertHandlerGuardsBeforeOptimism(
     workspaceSource,

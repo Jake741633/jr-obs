@@ -9,6 +9,8 @@ import * as permissions from "../lib/cloud/permissions.ts";
 import * as links from "../lib/assistantJobLink.ts";
 import * as identities from "../lib/assistantIdentity.ts";
 import * as signals from "../lib/assistantSignals-core.mjs";
+import * as repositoryCore from "../lib/cloud/repository-core.mjs";
+import * as fieldIdentity from "../lib/siteDiaryIdentity-core.mjs";
 
 const jsx = (type, props) => ({ type, props });
 const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
@@ -19,8 +21,9 @@ const source = ts.transpileModule(readFileSync(new URL("../app/jobs/page.tsx", i
 function harness(initial = []) {
   const slots = [], layouts = [], attempts = [], writes = [], confirmations = [];
   let cursor = 0, sequence = 0, confirmEffect, confirmResult = true;
-  let mode = "cloud", identity = { organisationId: "org-1", userId: "user-1", role: "owner" }, identityReady = true;
-  const data = { jobs: initial, timeline: [], customers: [{ id: "customer-1", name: "Customer one" }], builders: [{ id: "builder-1", companyName: "Builder one" }], team: [] };
+  let mode = "cloud", identity = { organisationId: "org-1", userId: "user-1", role: "owner", email: "operator@example.test" }, identityReady = true;
+  const data = { jobs: initial, timeline: [], customers: [{ id: "customer-1", name: "Customer one" }], builders: [{ id: "builder-1", companyName: "Builder one" }], team: [{ id: "member-1", email: "operator@example.test", status: "Active" }] };
+  const connection = { onLine: true, queue: [] };
   const ready = { jobs: true, timeline: true, customers: true, builders: true, team: true };
   const failures = new Set();
   const useState = (value) => { const i = cursor++; if (!(i in slots)) slots[i] = typeof value === "function" ? value() : value; return [slots[i], (next) => { slots[i] = typeof next === "function" ? next(slots[i]) : next; }]; };
@@ -40,7 +43,7 @@ function harness(initial = []) {
     return { items: data[name], isReady: ready[name],
       setItems() { throw new Error("Job forms must not use deferred collection writes"); }, remove() { throw new Error("Job deletion must be durable"); },
       createItem(item) { assert.ok(!data[name].some(record => record.id === item.id), "Creation must not reuse a saved identity"); return commit("create", item, [item, ...data[name]]); },
-      updateItem(id, update) { const index = data[name].findIndex(item => item.id === id); assert.ok(index >= 0); const item = update(data[name][index]); return commit("update", item, data[name].map((record, i) => i === index ? item : record)); },
+      updateItem(id, update) { const index = data[name].findIndex(item => item.id === id); assert.ok(index >= 0); const item = update(data[name][index]); if (item === data[name][index]) return item; return commit("update", item, data[name].map((record, i) => i === index ? item : record)); },
       removeItem(id, validate) { const item = data[name].find(record => record.id === id); assert.ok(item); validate(item); return commit("delete", item, data[name].filter(record => record.id !== id)); },
     };
   }
@@ -51,19 +54,21 @@ function harness(initial = []) {
     "../../lib/cloud/adapter": { accountStorageKey: (...parts) => parts.join(":") },
     "../../lib/cloud/coreBusinessCollections": { useJobsCollection: () => collection("jobs"), useCustomersCollection: () => collection("customers"), useBuildersCollection: () => collection("builders"), useJobTimelineCollection: () => collection("timeline"), useTeamCollection: () => collection("team") },
     "../../lib/cloud/fieldMutationPolicy-core.mjs": policy, "../../lib/cloud/permissions": permissions,
-    "../../lib/cloud/repository-core.mjs": {}, "../../lib/cloud/repository": {},
+    "../../lib/cloud/repository-core.mjs": repositoryCore, "../../lib/cloud/repository": { getSyncQueue: () => connection.queue },
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ mode, identity, isReady: identityReady }) },
-    "../../lib/jobManagement-core.mjs": jobCore, "../../lib/siteDiaryIdentity-core.mjs": { fieldOperatorMemberId: () => "member-1" },
+    "../../lib/jobManagement-core.mjs": jobCore, "../../lib/siteDiaryIdentity-core.mjs": fieldIdentity,
     "../../lib/assistantJobLink": links, "../../lib/assistantIdentity": identities, "../../lib/assistantSignals-core.mjs": signals,
     "../../lib/storage": { makeId: prefix => `${prefix}_${++sequence}` },
   };
   const mod = { exports: {} };
-  vm.runInNewContext(source, { module: mod, exports: mod.exports, Error, Date, Intl, window: { confirm(message) { confirmations.push(message); confirmEffect?.(); return confirmResult; } }, require(name) { assert.ok(name in dependencies, name); return dependencies[name]; } });
+  vm.runInNewContext(source, { module: mod, exports: mod.exports, Error, Date, Intl, navigator: connection, window: { confirm(message) { confirmations.push(message); confirmEffect?.(); return confirmResult; } }, require(name) { assert.ok(name in dependencies, name); return dependencies[name]; } });
   const render = () => { cursor = 0; const view = mod.exports.default(); layouts.splice(0).forEach(fn => fn()); return view; };
   const form = () => nodes(render()).find(n => n.type === "form");
   const button = label => nodes(render()).find(n => (n.type === "button" || n.type === "Button") && (text(n) === label || n.props["aria-label"] === label));
   const field = label => nodes(form()).find(n => n.props.label === label) || nodes(form()).find(n => n.type === "label" && text(n.props.children[0]) === label)?.props.children[1];
-  return { data, ready, failures, attempts, writes, confirmations, render, form, button, field,
+  return { data, ready, failures, attempts, writes, confirmations, connection, render, form, button, field,
+    stageControl() { return nodes(render()).find(n => n.type === "select" && n.props["aria-label"] === "Update Workshop status"); },
+    stage(value) { this.stageControl().props.onChange({ target: { value } }); },
     open() { nodes(render()).find(n => n.type === "PageHeader").props.action.props.onClick(); },
     enter(label, value) { const control = field(label); assert.ok(control, label); control.props.onChange({ target: { value } }); },
     fill(title = "New job") { this.enter("Job title", title); this.enter("Site address", "2 New Street"); this.enter("Estimated value (£)", "120.50"); },
@@ -251,4 +256,115 @@ test("an open edit draft blocks deletion and office accounts retain editing with
   h.open(); const staleDelete = h.button("Delete Workshop").props.onClick; h.account({ role: "office" }); staleDelete();
   assert.equal(h.confirmations.length, 0); assert.equal(h.button("Delete Workshop"), undefined);
   h.click("Edit Workshop"); h.enter("Job title", "Office change"); h.submit(); assert.equal(h.data.jobs[0].title, "Office change");
+});
+
+test("quick job stages remain saved values on failure and retry once with current unrelated metadata", () => {
+  const original = savedJob(), h = harness([original]); h.failures.add("jobs:update"); h.stage("First fix");
+  assert.equal(h.data.jobs[0], original); assert.equal(h.stageControl().props.value, "Scheduled"); assert.equal(h.data.timeline.length, 0);
+  assert.match(text(h.render()), /Job stage save could not be confirmed/);
+  const change = h.stageControl().props.onChange;
+  h.data.jobs = [{ ...original, notes: "New site information", value: 999, assignedTo: ["member-2"], targetCompletionDate: "2026-11-01" }];
+  h.failures.clear(); change({ target: { value: "First fix" } }); change({ target: { value: "First fix" } });
+  assert.equal(jobWrites(h).length, 1); assert.equal(h.data.timeline.length, 1); assert.equal(h.data.jobs[0].status, "First fix");
+  assert.equal(h.data.jobs[0].notes, "New site information"); assert.equal(h.data.jobs[0].value, 999); assert.deepEqual(h.data.jobs[0].assignedTo, ["member-2"]);
+  assert.equal(h.data.timeline[0].fromStatus, "Scheduled"); assert.equal(h.data.timeline[0].toStatus, "First fix");
+  h.stage("First fix"); assert.equal(jobWrites(h).length, 1); assert.equal(h.data.timeline.length, 1);
+});
+
+test("quick stages refuse stale stages and replacement identities before or after the next render", () => {
+  for (const patch of [{ status: "Testing" }, { createdAt: "2026-10-11T12:00:00Z" }]) {
+    for (const rerender of [false, true]) {
+      const h = harness([savedJob()]), change = h.stageControl().props.onChange;
+      h.data.jobs = [{ ...h.data.jobs[0], ...patch }]; if (rerender) h.render(); change({ target: { value: "First fix" } });
+      assert.equal(h.writes.length, 0); assert.match(text(h.render()), /stage has changed|has been replaced/);
+    }
+  }
+});
+
+test("quick stages reject missing ambiguous and blank identities and retain an open edit draft", () => {
+  for (const records of [[], [savedJob(), savedJob({ title: "Duplicate job" })]]) {
+    const h = harness([savedJob()]), change = h.stageControl().props.onChange; h.data.jobs = records; h.render(); change({ target: { value: "First fix" } });
+    assert.equal(h.writes.length, 0); assert.match(text(h.render()), /unavailable or its saved identity is ambiguous/);
+    if (records.length) assert.equal(h.stageControl().props.disabled, true);
+  }
+  const blank = harness([savedJob({ id: " " })]); assert.equal(blank.stageControl().props.disabled, true); blank.stage("First fix"); assert.equal(blank.writes.length, 0);
+  const h = harness([savedJob()]), change = h.stageControl().props.onChange; h.click("Edit Workshop"); h.enter("Job notes", "Unsaved draft"); change({ target: { value: "First fix" } });
+  assert.equal(h.stageControl().props.disabled, true); assert.equal(h.writes.length, 0); assert.equal(h.field("Job notes").props.value, "Unsaved draft");
+});
+
+test("quick stage note failure retains the original event and never replays an already saved transition", () => {
+  const h = harness([savedJob()]); h.failures.add("timeline:create"); h.stage("First fix");
+  assert.equal(h.data.jobs[0].status, "First fix"); assert.equal(h.data.timeline.length, 0); assert.ok(h.button("Retry timeline note"));
+  h.stage("Second fix"); assert.equal(jobWrites(h).length, 2); h.failures.clear(); h.click("Retry timeline note");
+  assert.equal(h.data.jobs[0].status, "Second fix"); assert.equal(h.data.timeline[0].fromStatus, "Scheduled"); assert.equal(h.data.timeline[0].toStatus, "First fix");
+  h.click("Retry timeline note"); assert.equal(h.data.timeline.length, 2); assert.equal(jobWrites(h).length, 2);
+});
+
+test("quick stage validation preserves office unknown-stage review and field transition restrictions", () => {
+  for (const stage of ["Unknown", "__proto__", undefined]) {
+    const h = harness([savedJob({ status: stage })]); h.stage("Enquiry"); assert.equal(h.data.jobs[0].status, "Enquiry");
+    assert.equal(h.data.timeline[0].fromStatus, undefined); assert.match(h.data.timeline[0].note, /after review/);
+    const field = harness([savedJob({ status: stage })]); field.account({ role: "electrician" }); field.stage("First fix"); assert.equal(field.writes.length, 0);
+  }
+  for (const role of ["owner", "electrician"]) {
+    for (const stage of ["Unknown", "__proto__", " In progress ", "", undefined]) {
+      const h = harness([savedJob()]); h.account({ role }); h.stage(stage); assert.equal(h.writes.length, 0);
+    }
+  }
+  for (const current of jobCore.canonicalJobStatuses) {
+    for (const requested of jobCore.canonicalJobStatuses) {
+      const h = harness([savedJob({ status: current })]); h.account({ role: "electrician" }); h.stage(requested);
+      assert.equal(jobWrites(h).length, jobCore.fieldJobStatusTransitionAllowed(current, requested) ? 1 : 0, `${current} → ${requested}`);
+      assert.equal(h.data.timeline.length, 0, "Field status history stays server-authored");
+    }
+  }
+});
+
+test("field quick stages distinguish queued online and offline saves and do not depend on office collections", () => {
+  for (const online of [true, false]) {
+    const h = harness([savedJob({ status: " Scheduled " })]); h.account({ role: "electrician" }); h.connection.onLine = online;
+    h.ready.timeline = false; h.ready.customers = false; h.ready.builders = false;
+    h.stage("First fix"); assert.equal(h.data.jobs[0].status, "First fix"); assert.equal(h.data.timeline.length, 0);
+    assert.match(text(h.render()), online ? /queued attempt until cloud confirmation/ : /saved on this device and is not cloud-confirmed yet/);
+    h.connection.queue = [{ table: "jobs", sourceId: "job-1", state: online ? "Pending" : "Offline" }];
+    h.stage("Second fix"); assert.equal(h.data.jobs[0].status, "Second fix"); assert.equal(jobWrites(h).length, 2);
+  }
+});
+
+test("a failed field quick stage cannot claim a queued or cloud-confirmed save", () => {
+  const h = harness([savedJob()]); h.account({ role: "electrician" }); h.failures.add("jobs:update"); h.stage("First fix");
+  assert.equal(h.data.jobs[0].status, "Scheduled"); assert.equal(h.data.timeline.length, 0); assert.equal(h.stageControl().props.value, "Scheduled");
+  assert.match(text(h.render()), /Job stage save could not be confirmed/); assert.doesNotMatch(text(h.render()), /queued for secure sync|queued attempt until cloud confirmation|stage confirmed by cloud/);
+  h.failures.clear(); h.stage("First fix"); assert.equal(h.data.jobs[0].status, "First fix"); assert.equal(jobWrites(h).length, 1);
+});
+
+test("fresh failed or conflicted queue entries block a quick stage even before a sync event renders", () => {
+  for (const role of ["owner", "electrician"]) {
+    for (const state of ["Failed", "Conflict"]) {
+      const h = harness([savedJob()]); h.account({ role }); const change = h.stageControl().props.onChange;
+      h.connection.queue = [{ table: "jobs", sourceId: "job-1", state }]; change({ target: { value: "First fix" } });
+      assert.equal(h.writes.length, 0); assert.match(text(h.render()), /not cloud-confirmed/);
+      h.connection.queue = [{ table: "jobs", sourceId: "another-job", state }, { table: "customers", sourceId: "job-1", state }];
+      h.stage("First fix"); assert.equal(jobWrites(h).length, 1);
+    }
+  }
+  for (const state of ["Failed", "Conflict"]) {
+    const h = harness([savedJob()]); h.account({ role: "electrician" }); h.stage("First fix");
+    const change = h.stageControl().props.onChange; h.connection.queue = [{ table: "jobs", sourceId: "job-1", state }]; change({ target: { value: "Second fix" } });
+    assert.equal(jobWrites(h).length, 1); assert.equal(h.stageControl().props.disabled, true);
+    assert.match(text(h.render()), state === "Failed" ? /Job stage sync failed/ : /Job stage sync conflicted/);
+    assert.doesNotMatch(text(h.render()), /queued attempt until cloud confirmation/);
+  }
+});
+
+test("quick stages reject old callbacks after authorization readiness account or operator changes", () => {
+  for (const change of [h => h.account({ role: "customer" }), h => h.account({ role: "unknown" }), h => h.account({ organisationId: "org-2" }), h => h.account({ userId: "user-2" }), h => h.mode("local"), h => h.signedOut(), h => h.identityLoading(), h => { h.ready.jobs = false; h.render(); }, h => h.unmount()]) {
+    for (const role of ["owner", "electrician"]) {
+      const h = harness([savedJob()]); h.account({ role }); const stale = h.stageControl().props.onChange; change(h); stale({ target: { value: "First fix" } }); assert.equal(h.writes.length, 0);
+    }
+  }
+  for (const change of [h => { h.ready.team = false; }, h => { h.data.team = []; }, h => { h.data.team = [h.data.team[0], { ...h.data.team[0], id: "another-member" }]; }, h => { h.data.team = [{ ...h.data.team[0], id: "another-member" }]; }]) {
+    const h = harness([savedJob()]); h.account({ role: "electrician" }); const stale = h.stageControl().props.onChange; change(h); h.render(); stale({ target: { value: "First fix" } }); assert.equal(h.writes.length, 0);
+  }
+  const office = harness([savedJob()]), stale = office.stageControl().props.onChange; office.ready.timeline = false; office.render(); stale({ target: { value: "First fix" } }); assert.equal(office.writes.length, 0);
 });
