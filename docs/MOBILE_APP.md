@@ -230,11 +230,48 @@ Pending/offline durable saves remain usable, with device-save and sync wording.
 
 Keep the page open until saving finishes: drafts and pending history receipts are
 in-memory and are lost on navigation or account change. Other lead mutations are
-disabled while an action is open. Activity logging, outcome saves and deletion
-remain separate roadmap work. Behavioural fixtures exercise storage failures,
+disabled while an action is open. Behavioural fixtures exercise storage failures,
 partial retries, refreshed records, stale callbacks, source loading, account/role
 changes, linked contacts and stage gestures. Signed-in physical-phone acceptance
 remains pending.
+
+## Lead activity, outcomes and deletion
+
+Contact-log and outcome buttons open a page-level action with multiline notes and
+48px controls. The action stays visible outside filters and loading states. Choose
+the actual activity type and enter what happened before saving. Internal notes
+preserve the contact time and next action. Contact activity records contact now and
+sets Follow up only for open leads; closed leads keep their agreed next action.
+Stages and follow-up dates are preserved. Lost/Cancelled outcome edits change only
+the corresponding reason. Blank reasons are rejected and unchanged reasons add no
+duplicate history.
+
+The lead update is saved durably before its activity entry. Failures retain editable
+drafts; unchanged retries reuse the prepared identity and time. Once the lead is
+saved, the draft locks and retry writes only the missing history. Later contact,
+stage, reason and note changes are preserved. Exact source/contact identities,
+reviewed fields, loaded records, office access, account scope and fresh sync checks
+gate these actions, including inside the storage updater. Only one lead action can
+be open at a time, including capture and stage changes.
+
+Deletion requires an owner/admin or local mode, and a separate review of the exact
+lead and all its history. Leads linked to a job, quote, survey or planner entry are
+blocked; Cancelled retains the opportunity and its history. A full frozen snapshot
+guards the lead and every reviewed history entry. Missing or duplicated history
+identities, changed evidence and new history stop deletion. The lead is removed
+durably first, followed by each reviewed history entry; a failed lead deletion
+leaves history intact. A failed cleanup retains per-entry progress independently
+of the now-missing card and does not repeat completed deletions.
+
+If new, changed or restored history arrives after partial deletion, Refresh history
+for review prepares a fresh list and requires another explicit confirmation. It
+never adopts ambiguous entries or deletes history relinked to another lead. A
+restored lead blocks further cleanup. Failed/conflicting sync blocks writes;
+pending/offline writes use the normal device queue. Keep the page open until
+cleanup finishes: deletion receipts, like other drafts, are in-memory. The UI
+reports device saves/deletions and asks the user to check sync before changing
+devices. Behavioural fixtures cover failure/retry, concurrent evidence, role/account
+changes and restored records; signed-in physical-phone acceptance remains pending.
 
 ## Jobs inbox
 

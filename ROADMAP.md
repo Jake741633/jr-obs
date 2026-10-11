@@ -53,7 +53,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Durable follow-up contact logging and postponement with explicit contact channel and partial-history retries
 - [x] Phone lead browsing with progressive cards, multiword/contact search, exact-record deep links and withheld ambiguous identities
 - [x] Durable lead capture and reviewed stage changes with retained failure drafts and independent history retries
-- [ ] Durable lead activity/outcome saves and guarded deletion with retained failure drafts
+- [x] Durable lead activity/outcome saves and guarded deletion with retained failure drafts and reviewed history cleanup
 - [x] Job-aware JR AI follow-up questions and one-tap related answers retaining the exact saved job
 - [x] Compact phone question panel with question-first layout and expandable shortcuts/scope help
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection
