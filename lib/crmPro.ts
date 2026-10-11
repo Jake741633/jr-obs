@@ -456,6 +456,7 @@ export interface CrmFollowUpItem {
   detail: string;
   priorityScore: number;
   ageDays: number;
+  ageBasis?: "contact" | "enquiry" | "unknown";
   estimatedValue: number;
   dueDate: string;
   customerId?: string;
@@ -475,6 +476,16 @@ function leadContact(lead: SalesLead, customers: Map<string, Customer>) {
 function quoteContact(document: PricingDocument, customers: Map<string, Customer>) {
   const customer = document.customerId ? customers.get(document.customerId) : undefined;
   return { phone: customer?.phone || "", email: customer?.email || "", name: customer?.name || document.title };
+}
+
+const leadContactTypes = new Set<LeadActivity["type"]>(["Call", "Text", "Email", "WhatsApp", "Site visit"]);
+
+/** Reject missing, malformed and future dates as evidence of completed contact. */
+function followUpTimestamp(value: string | undefined, now: Date) {
+  if (typeof value !== "string" || assistantDay(value.slice(0, 10)) === null) return null;
+  if (value.length !== 10 && !/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.test(value)) return null;
+  const timestamp = new Date(value.length === 10 ? `${value}T00:00:00` : value).getTime();
+  return Number.isFinite(timestamp) && timestamp <= now.getTime() ? timestamp : null;
 }
 
 export function buildFollowUpCentre({
@@ -497,6 +508,12 @@ export function buildFollowUpCentre({
   const items: CrmFollowUpItem[] = [];
   const customerMap = new Map(customers.map((customer) => [customer.id, customer]));
   const today = assistantDateKey(now);
+  const activityContactTimes = new Map<string, number>();
+  for (const activity of leadActivities) {
+    if (!leadContactTypes.has(activity.type)) continue;
+    const timestamp = followUpTimestamp(activity.completedAt, now);
+    if (timestamp !== null && timestamp > (activityContactTimes.get(activity.leadId) ?? -Infinity)) activityContactTimes.set(activity.leadId, timestamp);
+  }
   documents.filter((document) => document.type === "Quote" && document.status === "Sent").forEach((quote) => {
     const scheduled = Boolean(quote.nextFollowUpDate && assistantDay(quote.nextFollowUpDate) !== null);
     if (scheduled && quote.nextFollowUpDate! > today) return;
@@ -526,12 +543,10 @@ export function buildFollowUpCentre({
     if (lead.followUpDate && assistantDay(lead.followUpDate) !== null && lead.followUpDate > today) return;
     const stage = normaliseLeadStage(lead.stage);
     const contact = leadContact(lead, customerMap);
-    const lastContact = lead.lastContactAt
-      || leadActivities.filter((activity) => activity.leadId === lead.id && activity.type !== "Stage change")
-        .toSorted((left, right) => right.completedAt.localeCompare(left.completedAt))[0]?.completedAt
-      || lead.updatedAt
-      || lead.createdAt;
-    const ageDays = ageInDays(lastContact, now);
+    const contactTime = Math.max(followUpTimestamp(lead.lastContactAt, now) ?? -Infinity, activityContactTimes.get(lead.id) ?? -Infinity);
+    const hasContact = Number.isFinite(contactTime);
+    const ageTime = hasContact ? contactTime : followUpTimestamp(lead.createdAt, now);
+    const ageDays = ageTime === null ? 0 : Math.floor((now.getTime() - ageTime) / 86_400_000);
     let reason: CrmFollowUpReason | null = null;
     if (stage === "Lost" && !lead.lostFollowUpCompletedAt && (!lead.followUpDate || lead.followUpDate <= today) && ageInDays(lead.updatedAt, now) <= settings.lostOpportunityDays) reason = "Lost opportunity";
     else if (stage === "Quote Sent" && !lead.quoteId && ageDays >= settings.noResponseDays) reason = "Awaiting acceptance";
@@ -548,6 +563,7 @@ export function buildFollowUpCentre({
         : `${lead.workRequired || "Electrical enquiry"} · next action: ${lead.nextAction || "Make contact"}.`,
       priorityScore: followUpPriority({ ageDays, estimatedValue: lead.estimatedValue, highValueThreshold: settings.highValueThreshold, priority: lead.priority as LeadPriority, overdue, contactable: Boolean(contactPhoneHref(contact.phone) || contactEmailHref(contact.email)) }),
       ageDays,
+      ageBasis: ageTime === null ? "unknown" : hasContact ? "contact" : "enquiry",
       estimatedValue: lead.estimatedValue,
       dueDate: lead.followUpDate || today,
       customerId: lead.customerId,

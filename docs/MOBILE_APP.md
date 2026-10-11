@@ -136,6 +136,13 @@ review prompts and disabled contact controls. These strings no longer earn the
 contactability score boost or count as ready-to-contact recommendations. Valid
 future lead follow-up dates suppress all surfaced lead stages until the saved day.
 
+Lead wait times use the newest valid completed Call, Text, Email, WhatsApp or
+Site visit, including the lead's saved last-contact time. Notes, stage changes
+and general edits do not restart the no-response timer. Invalid/future contact
+dates are ignored. Without dated contact, the queue uses the enquiry creation
+date and labels it "since enquiry"; surfaced records with neither valid date
+show "Age unavailable". Cards and recommendations show the same age basis.
+
 Follow-up rules use durable create/update methods. Editing does not recalculate
 the queue until the rules save. Failed saves retain the draft; first-save retries
 use the same settings identity. Whole-day windows accept 1–3650; the value threshold

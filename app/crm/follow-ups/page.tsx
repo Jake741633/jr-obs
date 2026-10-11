@@ -48,8 +48,13 @@ const reasonTone: Record<CrmFollowUpReason, string> = {
   "Lost opportunity": "border-fuchsia-400/30 bg-fuchsia-500/5 text-fuchsia-200",
   "Customer reminder": "border-emerald-400/30 bg-emerald-500/5 text-emerald-200",
 };
+function waitDescription(item: CrmFollowUpItem) {
+  if (item.ageBasis === "unknown") return "Age unavailable";
+  const basis = item.ageBasis === "contact" ? "since contact" : item.ageBasis === "enquiry" ? "since enquiry" : "waiting";
+  return `${item.ageDays} day${item.ageDays === 1 ? "" : "s"} ${basis}`;
+}
 function recommendationReason(item: CrmFollowUpItem) {
-  const signals = [`${item.priorityScore}/100 priority`, `${item.ageDays} day${item.ageDays === 1 ? "" : "s"} waiting`];
+  const signals = [`${item.priorityScore}/100 priority`, waitDescription(item)];
   if (item.estimatedValue > 0) signals.push(`${money.format(item.estimatedValue)} opportunity`);
   if (!canContact(item)) signals.push("contact details missing or need review");
   return signals.join(" · ");
@@ -129,7 +134,7 @@ function FollowUpCentreSession() {
         const contactClass = "flex min-h-12 items-center justify-center gap-2 rounded-xl border border-slate-700 text-sm font-semibold text-cyan-300 disabled:opacity-30";
         return <Card key={item.id} className="scroll-mt-4">
         <div className="flex items-start justify-between gap-3"><div className="min-w-0"><span className={`inline-flex rounded-full border px-2 py-1 text-[10px] font-bold uppercase tracking-wide ${reasonTone[item.reason]}`}>{item.reason}</span><h3 className="mt-3 break-words text-xl font-bold">{item.title}</h3><p className="mt-2 text-sm leading-6 text-slate-400">{item.detail}</p></div><span className={`grid size-14 shrink-0 place-items-center rounded-2xl text-lg font-black ${item.priorityScore >= 70 ? "bg-rose-500/10 text-rose-300" : item.priorityScore >= 45 ? "bg-amber-500/10 text-amber-300" : "bg-cyan-500/10 text-cyan-300"}`}>{item.priorityScore}</span></div>
-        <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><div className="rounded-xl bg-slate-950 p-3"><Clock3 className="mx-auto size-4 text-amber-300" /><p className="mt-2 font-semibold">{item.ageDays} days</p></div><div className="rounded-xl bg-slate-950 p-3"><PoundSterling className="mx-auto size-4 text-emerald-300" /><p className="mt-2 font-semibold">{money.format(item.estimatedValue)}</p></div><Link href={item.href} className="rounded-xl bg-slate-950 p-3"><UserRoundSearch className="mx-auto size-4 text-cyan-300" /><p className="mt-2 font-semibold">Open record</p></Link></div>
+        <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs"><div className="rounded-xl bg-slate-950 p-3"><Clock3 className="mx-auto size-4 text-amber-300" /><p className="mt-2 font-semibold">{waitDescription(item)}</p></div><div className="rounded-xl bg-slate-950 p-3"><PoundSterling className="mx-auto size-4 text-emerald-300" /><p className="mt-2 font-semibold">{money.format(item.estimatedValue)}</p></div><Link href={item.href} className="rounded-xl bg-slate-950 p-3"><UserRoundSearch className="mx-auto size-4 text-cyan-300" /><p className="mt-2 font-semibold">Open record</p></Link></div>
         <div className="mt-4 grid grid-cols-3 gap-2">
           {phoneHref ? <a href={phoneHref} className={contactClass}><Phone className="size-4" />Call</a> : <button type="button" disabled className={contactClass}><Phone className="size-4" />Call</button>}
           {phoneHref ? <a href={phoneHref.replace("tel:", "sms:")} className={contactClass}><MessageSquareText className="size-4" />Text</a> : <button type="button" disabled className={contactClass}><MessageSquareText className="size-4" />Text</button>}
