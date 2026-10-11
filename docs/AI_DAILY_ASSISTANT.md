@@ -79,6 +79,8 @@ Review purchase list carries one encoded saved list id into `/purchases?list=…
 
 ## Job-aware follow-ups
 
+The phone question form appears first, followed by its visible job selector. Four primary questions remain exposed; a native More questions disclosure retains all eight other shortcuts without changing their handlers or scope. Longer scope help is separately expandable. Identity warnings and answers remain outside collapsed content. The 48px disclosures do not autofocus, submit, clear state or write records.
+
 A successfully matched named-job question now updates the visible Job scope selector. Tasks, snags, materials, deliveries, next-work-visit checks and job briefings keep that exact saved identity for the next question. Each resolved job answer offers six 48px related-answer buttons, resetting progressive results to four and dismissing the keyboard without navigating away or writing records.
 
 Explicit follow-ups such as “What about materials?”, “And deliveries”, “What about the next visit?” and “Show tasks for this job” use the chosen job. Without a selected identity, the assistant asks for one unique loaded job even if only one is available; it never guesses or runs the question across all jobs. Duplicate/missing job identities, unavailable records and reused titles retain their existing fail-closed behavior. Quoted literal names such as “This job” remain available through exact named-job questions.

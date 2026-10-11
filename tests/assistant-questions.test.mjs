@@ -879,3 +879,29 @@ test("user input before a deferred job-link frame wins over the initial linked b
     const h = ui(records({ jobs: [job(), job({ id: "other", title: "Other" })] }), true, "?job=j1"); h.render(); action(h); const before = text(h.render()); h.flush(); assert.equal(text(h.render()), before); assert.doesNotMatch(text(h.render()), /Job briefing · Workshop/);
   }
 });
+
+test("the compact question form comes before job scope and shortcut groups without keyboard autofocus", () => {
+  const tree = ui().render(), all = nodes(tree), form = all.find(n => n.type === "form"), select = all.find(n => n.type === "select"), input = all.find(n => n.type === "input"), quick = all.find(n => n.props["aria-label"] === "Quick questions");
+  assert.ok(all.indexOf(form) < all.indexOf(select)); assert.ok(all.indexOf(form) < all.indexOf(quick)); assert.equal(input.props.autoFocus, undefined); assert.match(input.props.className, /min-h-12/); assert.match(input.props.className, /text-base/);
+});
+
+test("four primary questions and eight secondary questions retain every shortcut exactly once", () => {
+  const all = nodes(ui().render()), primary = all.find(n => n.props["aria-label"] === "Quick questions"), more = all.find(n => n.props["aria-label"] === "More quick questions");
+  assert.deepEqual(nodes(primary).filter(n => n.type === "button").map(text), ["Today", "Tomorrow", "Job briefing", "Materials to order"]);
+  const secondary = nodes(more).filter(n => n.type === "button"); assert.equal(secondary.length, 8); const labels = [...nodes(primary).filter(n => n.type === "button"), ...secondary].map(text); assert.equal(new Set(labels).size, 12);
+  for (const n of [...nodes(primary).filter(n => n.type === "button"), ...secondary]) assert.match(n.props.className, /min-h-12/);
+  const disclosure = all.find(n => n.type === "details" && text(n).startsWith("More questions")); assert.ok(disclosure); assert.equal(disclosure.props.open, undefined); assert.equal(disclosure.props.onToggle, undefined); assert.match(text(disclosure), /^More questions \(8\)/);
+});
+
+test("scope help is a 48px native disclosure while identity warnings stay outside collapsed content", () => {
+  const tree = ui(records({ jobs: [job(), job()] })).render(), all = nodes(tree), help = all.find(n => n.type === "details" && text(n).startsWith("How job scope works"));
+  assert.ok(help); assert.equal(help.props.open, undefined); assert.match(nodes(help).find(n => n.type === "summary").props.className, /min-h-12/); assert.match(text(help), /Other|normal scope/);
+  const warning = all.find(n => n.props.role === "status" && text(n).includes("duplicate identities")); assert.ok(warning); assert.ok(!all.filter(n => n.type === "details").some(n => nodes(n).includes(warning)));
+});
+
+test("secondary question handlers preserve job scope and global answers after the layout change", () => {
+  const h = ui(records({ jobs: [job()], tasks: [siteTask()], invoices: [invoice()] })); h.scope("j1");
+  const clickMore = label => { const group = nodes(h.render()).find(n => n.props["aria-label"] === "More quick questions"), button = nodes(group).find(n => n.type === "button" && text(n) === label); assert.ok(button); button.props.onClick(); };
+  clickMore("Open tasks"); assert.match(text(h.render()), /Only Workshop/); clickMore("Overdue money"); assert.match(text(h.render()), /£240\.00 across 1 invoice/); assert.ok(!nodes(h.render()).some(n => n.props["aria-label"] === "Follow up on this job"));
+  clickMore("Awaiting deliveries"); assert.match(text(h.render()), /Awaiting deliveries · Workshop/); assert.equal(nodes(h.render()).find(n => n.type === "select").props.value, "j1");
+});
