@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { crm, contacts, identities, load, hookRuntime, jsx, nodes, text } from "./helpers/follow-up-harness.mjs";
+import { crm, contacts, identities, pipeline, load, hookRuntime, jsx, nodes, text } from "./helpers/follow-up-harness.mjs";
 const scheduling = load("lib/scheduling.ts", {});
 
 const lead = (patch = {}) => ({ id: "lead-1", name: "Workshop", company: "Contractor", phone: "07700 900123", email: "work@example.test", stage: "New Lead", source: "Referral", priority: "Normal", estimatedValue: 100, siteAddress: "Epsom High Street", workRequired: "Entrance lighting", nextAction: "Book a visit", followUpDate: "2026-10-10", createdAt: "2026-10-01T12:00:00Z", updatedAt: "2026-10-01T12:00:00Z", ...patch });
@@ -12,9 +12,9 @@ function harness(query = "") {
   const page = load("app/leads/page.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: runtime.hooks, "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
-    "../../components/crm/LeadPipelineActions": { leadSources: ["Website", "Google", "Referral", "Builder", "Repeat customer", "Social media", "MyJobsQuote", "MyBuilder", "Checkatrade", "Other"], useLeadPipelineActions: () => ({ openCapture: failWrite, reviewStage: failWrite, openRecordAction: failWrite, panel: null, canStart: true, canDelete: true, ready: true }) },
+    "../../components/crm/LeadPipelineActions": { leadSources: ["Website", "Google", "Referral", "Builder", "Repeat customer", "Social media", "MyJobsQuote", "MyBuilder", "Checkatrade", "Other"], useLeadPipelineActions: () => ({ openCapture: failWrite, reviewStage: failWrite, reviewUnsupportedStage: failWrite, openRecordAction: failWrite, panel: null, canStart: true, canDelete: true, ready: true }) },
     "../../lib/cloud/coreBusinessCollections": Object.fromEntries(Object.entries(hooks).map(([key, hook]) => [hook, () => ({ items: data[key], isReady: ready[key], setItems: failWrite, remove: failWrite })])),
-    "../../lib/crmPro": crm, "../../lib/assistantIdentity": identities, "../../lib/contactLinks": contacts,
+    "../../lib/crmPro": crm, "../../lib/leadPipeline": pipeline, "../../lib/assistantIdentity": identities, "../../lib/contactLinks": contacts,
     "../../lib/scheduling": scheduling,
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ mode: "cloud", identity, isReady: true }) }, "../../lib/storage": { makeId: failWrite },
   }, { URLSearchParams, window: { location: { search: query }, requestAnimationFrame(fn) { frames.set(++frameId, fn); return frameId; }, cancelAnimationFrame(id) { frames.delete(id); }, confirm: failWrite } }).default;
@@ -71,7 +71,7 @@ test("a selected lead becoming missing or ambiguous remains scoped rather than o
 
 test("missing and duplicate identities are withheld from cards and lead reporting", () => {
   const h = harness(); h.data.leads = [lead(), lead(), lead({ id: " " }), lead({ id: "other", stage: "Accepted" })];
-  assert.equal(h.cards("Mobile").length, 1); assert.match(text(h.render()), /3 opportunities have missing or duplicate identities/); assert.match(text(h.render()), /0Open opportunities/); assert.match(text(h.render()), /1 won · 0 lost · 1 total/);
+  assert.equal(h.cards("Mobile").length, 1); assert.match(text(h.render()), /3 opportunities have missing or duplicate identities/); assert.match(text(h.render()), /0 knownOpen opportunities/); assert.match(text(h.render()), /1 won · 0 lost · 1 total/);
 });
 
 test("lead composer links validate and encode contact details without recording activity", () => {
@@ -101,7 +101,7 @@ test("desktop stage counts describe both visible and filtered cards instead of i
 
 test("pipeline due counts honour valid future postponements and ignore malformed dates as due evidence", () => {
   const h = harness(); h.data.leads = [lead({ id: "future", stage: "Follow-up Due", followUpDate: "2026-12-01" }), lead({ id: "due", stage: "Follow-up Due", followUpDate: "2026-10-10" }), lead({ id: "bad", followUpDate: "2026-02-31" }), lead({ id: "closed", stage: "Lost", followUpDate: "2026-10-10" })];
-  assert.match(text(h.render()), /1Follow-ups due/); assert.match(text(h.render()), /3Open opportunities/);
+  assert.match(text(h.render()), /1 knownFollow-ups due/); assert.match(text(h.render()), /3Open opportunities/);
 });
 
 test("pipeline due day uses the device-local calendar rather than the UTC date", () => {

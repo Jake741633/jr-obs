@@ -9,7 +9,7 @@ import { canDeleteRecords, canEditFinance } from "../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { getSyncQueue } from "../../lib/cloud/repository";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
-import { crmLeadStages, normaliseLeadStage } from "../../lib/crmPro";
+import { crmLeadStages, normaliseLeadStage, resolveLeadStage, leadStageLabel } from "../../lib/crmPro";
 import { plannerViewDate } from "../../lib/scheduling";
 import { makeId } from "../../lib/storage";
 import type { Builder, Customer, LeadActivity, LeadPriority, LeadSource, LeadStage, SalesLead } from "../../lib/models";
@@ -35,7 +35,7 @@ type Deletion = Common & { kind: "delete"; original: SalesLead; expected: string
 type SaveDraft = Capture | Stage | Activity | Outcome;
 type Draft = SaveDraft | Deletion;
 const fieldClass = "min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base disabled:opacity-50";
-function knownStage(stage: SalesLead["stage"]) { return [...crmLeadStages, "New enquiry", "Survey booked", "Quote required", "Quote sent", "Won"].includes(stage); }
+function knownStage(stage: SalesLead["stage"]) { return resolveLeadStage(stage) !== null; }
 function stageSnapshot(lead: SalesLead) {
   return JSON.stringify([lead.id, lead.createdAt, lead.name, lead.company, lead.phone, lead.email, lead.workRequired, lead.stage, lead.customerId, lead.builderId, lead.jobId, lead.quoteId, lead.surveyId, lead.plannerEntryId, lead.nextAction, lead.followUpDate, lead.lastContactAt, lead.completedAt]);
 }
@@ -140,20 +140,23 @@ export function useLeadPipelineActions(stores: Stores) {
     checkSync("cloud_collections", id, "jr-os-leads");
     return current;
   }
-  function reviewStage(lead: SalesLead, target: LeadStage, method = "Pipeline") {
+  function openStageReview(lead: SalesLead, target: LeadStage, method: string, correcting: boolean) {
     try {
       requireAccess();
       if (draftRef.current) throw new Error("Finish or close the open lead action first.");
       const current = liveLead(lead.id);
-      if (!knownStage(current.stage) || !crmLeadStages.includes(target)) throw new Error("Review the unsupported saved stage before changing this lead.");
+      if (!crmLeadStages.includes(target) || (!knownStage(current.stage) && !correcting)) throw new Error("Review the unsupported saved stage before changing this lead.");
+      if (correcting && knownStage(current.stage)) throw new Error("The saved stage is now recognised. Review its current record before changing it.");
       if (stageSnapshot(current) !== stageSnapshot(lead)) throw new Error("This lead changed. Review its current record before changing stage.");
-      if (normaliseLeadStage(current.stage) === target) return;
+      if (resolveLeadStage(current.stage) === target) return;
       const parties: Party[] = [];
       if (current.customerId) parties.push(party("customer", current.customerId));
       if (current.builderId) parties.push(party("builder", current.builderId));
       showDraft({ scope, kind: "stage", original: current, expected: stageSnapshot(current), target, method, parties, saved: false }); setError(""); setMessage("");
     } catch (error) { setError(error instanceof Error ? error.message : "Stage change is unavailable."); }
   }
+  function reviewStage(lead: SalesLead, target: LeadStage, method = "Pipeline") { openStageReview(lead, target, method, false); }
+  function reviewUnsupportedStage(lead: SalesLead, target: LeadStage) { openStageReview(lead, target, "Saved stage correction", true); }
   function openRecordAction(lead: SalesLead, kind: "activity" | "outcome" | "delete") {
     try {
       const stores = requireAccess(kind === "delete");
@@ -240,7 +243,7 @@ export function useLeadPipelineActions(stores: Stores) {
         if (active.kind === "capture") active.prepared = prepareCapture(active);
         else {
           const at = new Date().toISOString();
-          const summary = active.kind === "stage" ? `${active.method}: ${normaliseLeadStage(active.original.stage)} → ${active.target}` : active.kind === "outcome" ? `${normaliseLeadStage(active.original.stage)} reason: ${active.reason.trim()}` : active.summary.trim();
+          const summary = active.kind === "stage" ? `${active.method}: ${leadStageLabel(active.original.stage)} → ${active.target}` : active.kind === "outcome" ? `${normaliseLeadStage(active.original.stage)} reason: ${active.reason.trim()}` : active.summary.trim();
           active.prepared = { record: active.original, activity: { id: makeId("activity"), leadId: active.original.id, type: active.kind === "stage" ? "Stage change" : active.kind === "activity" ? active.channel as ActivityType : "Note", summary, completedBy: "JR OS CRM", completedAt: at, createdAt: at } };
         }
       }
@@ -358,8 +361,8 @@ export function useLeadPipelineActions(stores: Stores) {
           <TextareaField label="Notes" aria-label="Notes" value={capture.form.notes} onChange={event => editCapture(capture, { notes: event.target.value })} />
           <Button type="submit" className="min-h-12" disabled={disabled || Boolean(capture.linkIssue)}>Save lead</Button>
         </fieldset>
-      </form> : active.kind === "stage" ? <><p className="mt-4 break-words font-semibold">{active.original.name}: {normaliseLeadStage(active.original.stage)} → {active.target}</p><p className="mt-2 break-words text-sm text-slate-400">{active.original.workRequired}</p>{!active.saved ? <p className="mt-2 text-sm text-slate-400">Confirm that this stage reflects the work. Contacted records contact now; Completed records completion now.</p> : null}</> : active.kind === "capture" ? <p className="mt-4 font-semibold">{capture?.prepared?.record.name}</p> : <>
-        <p className="mt-4 break-words font-semibold">{active.original.name} · {active.original.stage}</p><p className="mt-2 break-words text-sm text-slate-400">{active.original.workRequired}</p>
+      </form> : active.kind === "stage" ? <><p className="mt-4 break-words font-semibold">{active.original.name}: {leadStageLabel(active.original.stage)} → {active.target}</p><p className="mt-2 break-words text-sm text-slate-400">{active.original.workRequired}</p>{!active.saved ? <p className="mt-2 text-sm text-slate-400">{!knownStage(active.original.stage) ? "This saved stage is unrecognised. Your chosen stage will replace it after confirmation. " : ""}Confirm that this stage reflects the work. Contacted records contact now; Completed records completion now.</p> : null}</> : active.kind === "capture" ? <p className="mt-4 font-semibold">{capture?.prepared?.record.name}</p> : <>
+        <p className="mt-4 break-words font-semibold">{active.original.name} · {leadStageLabel(active.original.stage)}</p><p className="mt-2 break-words text-sm text-slate-400">{active.original.workRequired}</p>
         {active.kind === "activity" ? <>
           <p className="mt-3 text-sm text-slate-400">Record contact you have already made, or an internal note. A note keeps the contact time and next action. Contact logs record contact now and set the next action to Follow up for open leads.</p>
           <label className="mt-4 grid gap-2 text-sm font-semibold">Activity type<select aria-label="Lead activity type" value={active.channel} disabled={disabled || active.saved} onChange={event => editRecordAction(active, event.target.value, true)} className={fieldClass}><option value="">Choose activity type</option>{activityTypes.map(type => <option key={type}>{type}</option>)}</select></label>
@@ -377,5 +380,5 @@ export function useLeadPipelineActions(stores: Stores) {
       </div>
     </Card> : null}
   </div>;
-  return { openCapture, reviewStage, openRecordAction, panel, ready, canStart: ready && allowed && !active, canDelete: ready && deleteAllowed && !active, busy: Boolean(active) };
+  return { openCapture, reviewStage, reviewUnsupportedStage, openRecordAction, panel, ready, canStart: ready && allowed && !active, canDelete: ready && deleteAllowed && !active, busy: Boolean(active) };
 }

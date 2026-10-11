@@ -18,6 +18,7 @@ import type {
 } from "./models";
 import type { ComplianceCertificate } from "./complianceCertificates";
 import { contactEmailHref, contactPhoneHref } from "./contactLinks";
+import { reviewLeadFollowUps, leadPriorityRank } from "./leadPipeline";
 import { assistantDateKey, assistantDay } from "./assistantSignals-core.mjs";
 import { variationFinancials } from "./jobManagement-core.mjs";
 import { paymentEffect, type PaymentRecord } from "./payments";
@@ -25,10 +26,12 @@ import {
   ageInDays,
   followUpPriority,
   normaliseLeadStage,
+  resolveLeadStage,
+  leadValuePence,
   repeatCustomerScore,
 } from "./crmPro-core.mjs";
 
-export { crmLeadStages, moveLeadStage, normaliseLeadStage } from "./crmPro-core.mjs";
+export { crmLeadStages, moveLeadStage, normaliseLeadStage, resolveLeadStage, leadStageLabel, leadValuePence } from "./crmPro-core.mjs";
 
 export const crmStorageKeys = {
   customerProfiles: "jr-os-customer-profiles",
@@ -457,7 +460,8 @@ export interface CrmFollowUpItem {
   priorityScore: number;
   ageDays: number;
   ageBasis?: "contact" | "enquiry" | "unknown";
-  estimatedValue: number;
+  estimatedValue: number | null;
+  reviewNote?: string;
   dueDate: string;
   customerId?: string;
   leadId?: string;
@@ -539,9 +543,9 @@ export function buildFollowUpCentre({
     });
   });
 
-  leads.forEach((lead) => {
+  reviewLeadFollowUps(leads).leads.forEach((lead) => {
     if (lead.followUpDate && assistantDay(lead.followUpDate) !== null && lead.followUpDate > today) return;
-    const stage = normaliseLeadStage(lead.stage);
+    const stage = resolveLeadStage(lead.stage);
     const contact = leadContact(lead, customerMap);
     const contactTime = Math.max(followUpTimestamp(lead.lastContactAt, now) ?? -Infinity, activityContactTimes.get(lead.id) ?? -Infinity);
     const hasContact = Number.isFinite(contactTime);
@@ -554,6 +558,8 @@ export function buildFollowUpCentre({
     else if (stage === "New Lead" || (stage === "Contacted" && lead.followUpDate && lead.followUpDate <= today)) reason = "Survey not booked";
     if (!reason) return;
     const overdue = Boolean(lead.followUpDate && lead.followUpDate <= today) || ageDays >= settings.noResponseDays;
+    const valuePence = leadValuePence(lead.estimatedValue);
+    const priorityKnown = leadPriorityRank(lead.priority) > 0;
     items.push({
       id: `lead-follow-up-${lead.id}`,
       reason,
@@ -561,10 +567,11 @@ export function buildFollowUpCentre({
       detail: reason === "Lost opportunity"
         ? `${lead.workRequired || "Opportunity"} was lost${lead.lostReason ? `: ${lead.lostReason}` : " without a recorded reason"}.`
         : `${lead.workRequired || "Electrical enquiry"} · next action: ${lead.nextAction || "Make contact"}.`,
-      priorityScore: followUpPriority({ ageDays, estimatedValue: lead.estimatedValue, highValueThreshold: settings.highValueThreshold, priority: lead.priority as LeadPriority, overdue, contactable: Boolean(contactPhoneHref(contact.phone) || contactEmailHref(contact.email)) }),
+      priorityScore: followUpPriority({ ageDays, estimatedValue: valuePence === null ? 0 : valuePence / 100, highValueThreshold: settings.highValueThreshold, priority: priorityKnown ? lead.priority as LeadPriority : "Low", overdue, contactable: Boolean(contactPhoneHref(contact.phone) || contactEmailHref(contact.email)) }),
       ageDays,
       ageBasis: ageTime === null ? "unknown" : hasContact ? "contact" : "enquiry",
-      estimatedValue: lead.estimatedValue,
+      estimatedValue: valuePence === null ? null : valuePence / 100,
+      reviewNote: [valuePence === null ? "Estimated value needs review" : "", !priorityKnown ? "Priority needs review" : ""].filter(Boolean).join(" · "),
       dueDate: lead.followUpDate || today,
       customerId: lead.customerId,
       leadId: lead.id,
@@ -596,7 +603,7 @@ export function buildFollowUpCentre({
     });
   });
 
-  return items.toSorted((left, right) => right.priorityScore - left.priorityScore || right.estimatedValue - left.estimatedValue || right.ageDays - left.ageDays);
+  return items.toSorted((left, right) => right.priorityScore - left.priorityScore || (right.estimatedValue ?? -1) - (left.estimatedValue ?? -1) || right.ageDays - left.ageDays);
 }
 
 export function customerForPlannerEntry(entry: PlannerEntry, jobs: Job[], customers: Customer[]) {

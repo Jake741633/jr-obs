@@ -31,17 +31,16 @@ import {
   usePricingDocumentsCollection,
   useSalesLeadsCollection,
 } from "../../lib/cloud/coreBusinessCollections";
-import { crmLeadStages, moveLeadStage, normaliseLeadStage } from "../../lib/crmPro";
-import { savedIdentityIndex } from "../../lib/assistantIdentity";
+import { crmLeadStages, moveLeadStage, resolveLeadStage, leadStageLabel, leadValuePence } from "../../lib/crmPro";
+import { buildLeadPipeline, leadDate, leadPriorityRank, recordedText, type pipelineMoney } from "../../lib/leadPipeline";
 import { contactEmailHref, contactPhoneHref } from "../../lib/contactLinks";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
-import { plannerDateKey, plannerViewDate } from "../../lib/scheduling";
-import type { LeadPriority, LeadStage, SalesLead } from "../../lib/models";
+import { plannerDateKey } from "../../lib/scheduling";
+import type { LeadStage, SalesLead } from "../../lib/models";
 
-const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 });
+const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const stages: readonly LeadStage[] = crmLeadStages;
 const sources = leadSources;
-const closedStages: LeadStage[] = ["Accepted", "Lost", "Completed", "Cancelled"];
 const stageColours: Record<LeadStage, string> = {
   "New Lead": "border-sky-400/35 bg-sky-500/5",
   Contacted: "border-blue-400/35 bg-blue-500/5",
@@ -54,11 +53,14 @@ const stageColours: Record<LeadStage, string> = {
   Completed: "border-green-400/35 bg-green-500/5",
   Cancelled: "border-slate-600 bg-slate-900/70",
 };
-const priorityOrder: Record<LeadPriority, number> = { Urgent: 4, High: 3, Normal: 2, Low: 1 };
-
-function displayDate(value: string) {
-  return value ? new Date(`${value.slice(0, 10)}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "Not set";
+function displayDate(value: unknown) {
+  const day = leadDate(value);
+  return day ? new Date(`${day}T12:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : value === "" || value === undefined || value === null ? "Not set" : "Date needs review";
 }
+function valueLabel(value: ReturnType<typeof pipelineMoney>) { return value.pence === null ? "Unavailable" : money.format(value.pence / 100); }
+function valueNote(value: ReturnType<typeof pipelineMoney>) { return value.overflow ? "Combined value exceeds the supported range" : value.incomplete ? "Known subtotal · incomplete" : ""; }
+function countLabel(count: number, incomplete: boolean) { return `${count}${incomplete ? " known" : ""}`; }
+function rateLabel(rate: number | null, incomplete: boolean) { return rate === null ? incomplete ? "Unavailable" : "No decisions" : `${rate.toFixed(1)}%${incomplete ? " known" : ""}`; }
 
 function contactHref(lead: SalesLead) {
   if (lead.customerId) return `/crm?customer=${encodeURIComponent(lead.customerId)}`;
@@ -109,63 +111,34 @@ function LeadsSession() {
     return () => window.cancelAnimationFrame(frame);
   }, [openCapture, ready]);
 
-  const leadIndex = useMemo(() => savedIdentityIndex(leads.items), [leads.items]);
-  const normalisedLeads = useMemo(() => leadIndex.selectable.map((lead) => ({ lead, stage: normaliseLeadStage(lead.stage) })), [leadIndex]);
-  const openLeads = normalisedLeads.filter(({ stage }) => !closedStages.includes(stage));
-  const wonLeads = normalisedLeads.filter(({ stage }) => stage === "Accepted" || stage === "Completed");
-  const lostLeads = normalisedLeads.filter(({ stage }) => stage === "Lost");
-  const decidedLeads = wonLeads.length + lostLeads.length;
-  const pipelineValue = openLeads.reduce((sum, { lead }) => sum + lead.estimatedValue, 0);
-  const quotePipelineValue = normalisedLeads.filter(({ stage }) => stage === "Quote Sent" || stage === "Follow-up Due").reduce((sum, { lead }) => sum + lead.estimatedValue, 0);
-  const conversionRate = decidedLeads ? wonLeads.length / decidedLeads * 100 : 0;
-  const dueFollowUps = openLeads.filter(({ lead, stage }) => {
-    const date = plannerViewDate(lead.followUpDate);
-    if (date && date > today) return false;
-    return stage === "Follow-up Due" || Boolean(date && date <= today);
-  }).length;
-  const builderOpportunities = openLeads.filter(({ lead }) => lead.source === "Builder" || Boolean(lead.builderId)).length;
-  const recordedQuotes = documents.items.filter((document) => document.type === "Quote");
-  const quoteDecisions = recordedQuotes.filter((document) => document.status === "Accepted" || document.status === "Declined");
-  const quoteConversion = quoteDecisions.length ? quoteDecisions.filter((document) => document.status === "Accepted").length / quoteDecisions.length * 100 : 0;
+  const facts = useMemo(() => buildLeadPipeline(leads.items, documents.items, sources, today), [leads.items, documents.items, today]);
+  const leadIndex = facts.index;
 
   const filtered = useMemo(() => {
     const words = search.trim().toLocaleLowerCase("en-GB").split(/\s+/).filter(Boolean);
     return leadIndex.selectable
       .filter((lead) => selectedLeadId === null || lead.id === selectedLeadId)
-      .filter((lead) => (!stageFilter || normaliseLeadStage(lead.stage) === stageFilter) && (!sourceFilter || lead.source === sourceFilter))
+      .filter((lead) => (!stageFilter || (stageFilter === "needs-review" ? Boolean(facts.byId.get(lead.id)?.issues.length) : resolveLeadStage(lead.stage) === stageFilter)) && (!sourceFilter || (sourceFilter === "needs-review" ? !sources.includes(lead.source) : lead.source === sourceFilter)))
       .filter((lead) => {
         const searchable = [lead.name, lead.company, lead.workRequired, lead.siteAddress, lead.phone, lead.email, typeof lead.phone === "string" ? lead.phone.replace(/[\s().-]/g, "") : ""].filter(value => typeof value === "string").join(" ").toLocaleLowerCase("en-GB");
         return words.every(word => searchable.includes(word));
       })
-      .toSorted((left, right) => priorityOrder[right.priority] - priorityOrder[left.priority] || left.followUpDate.localeCompare(right.followUpDate) || right.updatedAt.localeCompare(left.updatedAt));
-  }, [leadIndex, search, sourceFilter, stageFilter, selectedLeadId]);
+      .toSorted((left, right) => leadPriorityRank(right.priority) - leadPriorityRank(left.priority) || (leadDate(left.followUpDate) || "9999").localeCompare(leadDate(right.followUpDate) || "9999") || recordedText(right.updatedAt).localeCompare(recordedText(left.updatedAt)));
+  }, [facts, leadIndex, search, sourceFilter, stageFilter, selectedLeadId]);
   const visible = filtered.slice(0, limit);
   const selectedLead = selectedLeadId === null ? undefined : leadIndex.unique.get(selectedLeadId);
 
   function clearFilters() { setSearch(""); setStageFilter(""); setSourceFilter(""); setLimit(8); }
 
-  const sourcePerformance = useMemo(() => sources.map((source) => {
-    const sourceLeads = normalisedLeads.filter(({ lead }) => lead.source === source);
-    const won = sourceLeads.filter(({ stage }) => stage === "Accepted" || stage === "Completed");
-    const lost = sourceLeads.filter(({ stage }) => stage === "Lost");
-    return { source, total: sourceLeads.length, won: won.length, lost: lost.length, value: won.reduce((sum, { lead }) => sum + lead.estimatedValue, 0), conversion: won.length + lost.length ? won.length / (won.length + lost.length) * 100 : 0 };
-  }).filter((item) => item.total > 0).toSorted((left, right) => right.value - left.value || right.total - left.total), [normalisedLeads]);
-
-  const lossReasons = useMemo(() => {
-    const counts = new Map<string, number>();
-    lostLeads.forEach(({ lead }) => {
-      const reason = lead.lostReason?.trim() || "Reason not recorded";
-      counts.set(reason, (counts.get(reason) ?? 0) + 1);
-    });
-    return [...counts.entries()].toSorted((left, right) => right[1] - left[1]);
-  }, [lostLeads]);
+  const { sourcePerformance, lossReasons } = facts;
 
   function changeStage(lead: SalesLead, stage: LeadStage, method = "Pipeline") {
     actions.reviewStage(lead, stage, method);
   }
 
   function moveBy(lead: SalesLead, direction: -1 | 1, method: string) {
-    changeStage(lead, moveLeadStage(normaliseLeadStage(lead.stage), direction), method);
+    const stage = resolveLeadStage(lead.stage);
+    if (stage) changeStage(lead, moveLeadStage(stage, direction), method);
   }
 
   function dropInto(stage: LeadStage) {
@@ -175,7 +148,7 @@ function LeadsSession() {
   }
 
   function startSwipe(lead: SalesLead, event: ReactTouchEvent) {
-    if (!actions.canStart || (event.target as HTMLElement | undefined)?.closest?.("button,a,input,select,textarea,summary,details")) return;
+    if (!actions.canStart || !resolveLeadStage(lead.stage) || (event.target as HTMLElement | undefined)?.closest?.("button,a,input,select,textarea,summary,details")) return;
     const touch = event.touches[0];
     if (!touch) return;
     touchOrigin.current[lead.id] = { x: touch.clientX, y: touch.clientY };
@@ -198,21 +171,24 @@ function LeadsSession() {
 
   function leadCard(lead: SalesLead, mobile: boolean) {
     const phoneHref = contactPhoneHref(lead.phone), emailHref = contactEmailHref(lead.email);
-    const stage = normaliseLeadStage(lead.stage);
-    const stageIndex = stages.indexOf(stage);
-    const leadActivities = activities.items.filter((activity) => activity.leadId === lead.id).toSorted((left, right) => right.completedAt.localeCompare(left.completedAt)).slice(0, 3);
+    const stage = resolveLeadStage(lead.stage);
+    const stageIndex = stage ? stages.indexOf(stage) : -1;
+    const pence = leadValuePence(lead.estimatedValue), followUpDate = leadDate(lead.followUpDate);
+    const issues = facts.byId.get(lead.id)?.issues || [];
+    const leadActivities = activities.items.filter((activity) => activity.leadId === lead.id).toSorted((left, right) => recordedText(right.completedAt).localeCompare(recordedText(left.completedAt))).slice(0, 3);
     const relationshipLink = contactHref(lead);
-    const reason = stage === "Lost" ? lead.lostReason : stage === "Cancelled" ? lead.cancelledReason : "";
-    return <Card className={`touch-pan-y ${stageColours[stage]} ${mobile ? "p-4" : "cursor-grab p-4 active:cursor-grabbing"}`}>
+    const reason = recordedText(stage === "Lost" ? lead.lostReason : stage === "Cancelled" ? lead.cancelledReason : "");
+    return <Card className={`touch-pan-y ${stage ? stageColours[stage] : "border-amber-400/35 bg-amber-500/5"} ${mobile || !stage ? "p-4" : "cursor-grab p-4 active:cursor-grabbing"}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2"><h3 className="truncate font-bold">{lead.name}</h3><span className="rounded-full bg-slate-950/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300">{lead.priority}</span></div>
-          <p className="mt-1 truncate text-xs text-slate-400">{lead.company || lead.source}</p>
+          <div className="flex items-center gap-2"><h3 className="truncate font-bold">{lead.name}</h3><span className="rounded-full bg-slate-950/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-300">{leadPriorityRank(lead.priority) ? lead.priority : "Priority needs review"}</span></div>
+          <p className="mt-1 truncate text-xs text-slate-400">{recordedText(lead.company) || recordedText(lead.source, "Source needs review")}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-1 text-sm font-bold text-emerald-300">{!mobile ? <GripVertical className="size-4 text-slate-500" /> : null}{money.format(lead.estimatedValue)}</div>
+        <div className="flex shrink-0 items-center gap-1 text-sm font-bold text-emerald-300">{!mobile && stage ? <GripVertical className="size-4 text-slate-500" /> : null}{pence === null ? "Value unavailable" : money.format(pence / 100)}</div>
       </div>
+      {issues.length ? <p className="mt-3 break-words text-sm text-amber-200">{issues.join(" · ")}{!stage ? `. ${leadStageLabel(lead.stage)}.` : ""}</p> : null}
       <p className="mt-3 line-clamp-3 text-sm leading-5 text-slate-200">{lead.workRequired}</p>
-      <div className="mt-3 rounded-xl bg-slate-950/60 p-3 text-xs text-slate-400"><p className="font-semibold text-slate-200">Next: {lead.nextAction || "Not set"}</p><p className={lead.followUpDate && lead.followUpDate <= today ? "mt-1 text-amber-300" : "mt-1"}>Follow up {displayDate(lead.followUpDate)}</p></div>
+      <div className="mt-3 rounded-xl bg-slate-950/60 p-3 text-xs text-slate-400"><p className="font-semibold text-slate-200">Next: {lead.nextAction || "Not set"}</p><p className={followUpDate && followUpDate <= today ? "mt-1 text-amber-300" : "mt-1"}>Follow up {displayDate(lead.followUpDate)}</p></div>
       <div className="mt-3 grid grid-cols-5 gap-1">
         {phoneHref ? <a aria-label={`Call ${lead.name}`} href={phoneHref} className="flex min-h-12 items-center justify-center rounded-xl bg-slate-950/70 text-cyan-300"><Phone className="size-4" /></a> : <button type="button" disabled aria-label={`Call ${lead.name}`} className="min-h-12 rounded-xl bg-slate-950/70 text-slate-700"><Phone className="mx-auto size-4" /></button>}
         {phoneHref ? <a aria-label={`Text ${lead.name}`} href={phoneHref.replace("tel:", "sms:")} className="flex min-h-12 items-center justify-center rounded-xl bg-slate-950/70 text-cyan-300"><MessageSquareText className="size-4" /></a> : <button type="button" disabled aria-label={`Text ${lead.name}`} className="min-h-12 rounded-xl bg-slate-950/70 text-slate-700"><MessageSquareText className="mx-auto size-4" /></button>}
@@ -222,7 +198,7 @@ function LeadsSession() {
       </div>
       {lead.phone && !phoneHref ? <p className="mt-2 break-words text-xs text-amber-200">Review phone format: {lead.phone}</p> : null}
       {lead.email && !emailHref ? <p className="mt-2 break-words text-xs text-amber-200">Review email format: {lead.email}</p> : null}
-      {mobile ? <div className="mt-3 grid grid-cols-[3rem_1fr_3rem] items-center gap-2">
+      {!stage ? <label className="mt-3 grid gap-2 text-sm font-semibold">Review saved stage<select aria-label={`Reviewed stage for ${lead.name}`} value="" disabled={!actions.canStart} onChange={event => actions.reviewUnsupportedStage(lead, event.target.value as LeadStage)} className="min-h-12 min-w-0 rounded-xl border border-amber-400/30 bg-slate-950 px-3 text-base"><option value="">Choose the correct stage</option>{stages.map(item => <option key={item}>{item}</option>)}</select></label> : mobile ? <div className="mt-3 grid grid-cols-[3rem_1fr_3rem] items-center gap-2">
         <button type="button" aria-label="Previous lead stage" disabled={!actions.canStart || stageIndex === 0} onClick={() => moveBy(lead, -1, "Mobile action")} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 disabled:opacity-30"><ArrowLeft className="size-4" /></button>
         <select aria-label={`Stage for ${lead.name}`} value={stage} disabled={!actions.canStart} onChange={(event) => changeStage(lead, event.target.value as LeadStage, "Stage selector")} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-semibold"><option>{stage}</option>{stages.filter((item) => item !== stage).map((item) => <option key={item}>{item}</option>)}</select>
         <button type="button" aria-label="Next lead stage" disabled={!actions.canStart || stageIndex === stages.length - 1} onClick={() => moveBy(lead, 1, "Mobile action")} className="flex min-h-12 items-center justify-center rounded-xl border border-slate-700 disabled:opacity-30"><ArrowRight className="size-4" /></button>
@@ -232,7 +208,7 @@ function LeadsSession() {
       <details className="mt-3 rounded-xl border border-slate-700/70 bg-slate-950/40 p-3">
         <summary className="flex min-h-12 cursor-pointer items-center text-sm font-semibold text-slate-300">Contact log · {leadActivities.length} recent</summary>
         <div className="mt-3 grid gap-2">
-          <Button type="button" className="min-h-12 w-full" disabled={!actions.canStart} onClick={() => actions.openRecordAction(lead, "activity")}>Log activity</Button>
+          <Button type="button" className="min-h-12 w-full" disabled={!actions.canStart || !stage} onClick={() => actions.openRecordAction(lead, "activity")}>Log activity</Button>
           {leadActivities.map((activity) => <p key={activity.id} className="text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-200">{activity.type}:</span> {activity.summary}</p>)}
         </div>
       </details>
@@ -247,19 +223,20 @@ function LeadsSession() {
     {actions.panel}
 
     {leadIndex.unusableCount ? <p role="alert" className="rounded-xl border border-amber-400/30 p-4 text-sm text-amber-200">{leadIndex.unusableCount} opportunities have missing or duplicate identities and are withheld from this pipeline and its totals. Review their source records.</p> : null}
-    <details className="rounded-2xl border border-slate-800 p-4"><summary className="min-h-12 cursor-pointer font-semibold">Pipeline overview</summary><p className="my-3 text-sm text-slate-400">Figures describe all uniquely identified opportunities, independently of filters and the selected lead.</p><section className="grid grid-cols-2 gap-3 xl:grid-cols-6 xl:gap-4">
-      <Card><UserRoundSearch className="size-5 text-sky-300" /><p className="mt-3 text-2xl font-bold">{openLeads.length}</p><p className="text-xs text-slate-400">Open opportunities</p></Card>
-      <Card><CirclePoundSterling className="size-5 text-emerald-300" /><p className="mt-3 text-2xl font-bold">{money.format(pipelineValue)}</p><p className="text-xs text-slate-400">Open pipeline</p></Card>
-      <Card><FilePlus2 className="size-5 text-violet-300" /><p className="mt-3 text-2xl font-bold">{money.format(quotePipelineValue)}</p><p className="text-xs text-slate-400">Quote pipeline</p></Card>
-      <Card><TrendingUp className="size-5 text-cyan-300" /><p className="mt-3 text-2xl font-bold">{conversionRate.toFixed(1)}%</p><p className="text-xs text-slate-400">Lead win rate · quotes {quoteConversion.toFixed(1)}%</p></Card>
-      <Card><CalendarClock className="size-5 text-amber-300" /><p className="mt-3 text-2xl font-bold">{dueFollowUps}</p><p className="text-xs text-slate-400">Follow-ups due</p></Card>
-      <Card><Building2 className="size-5 text-fuchsia-300" /><p className="mt-3 text-2xl font-bold">{builderOpportunities}</p><p className="text-xs text-slate-400">Builder opportunities</p></Card>
+    {facts.reviewCount ? <div role="alert" className="rounded-xl border border-amber-400/30 p-4 text-sm text-amber-200"><p>{facts.reviewCount} opportunities need review. Unrecognised stages are excluded from stage counts; unsupported values and dates are excluded from the affected figures. Figures marked known or incomplete are partial.</p><Button type="button" variant="secondary" className="mt-3 min-h-12" onClick={() => { setStageFilter("needs-review"); setSourceFilter(""); setSearch(""); setLimit(8); }}>Show records needing review</Button></div> : null}
+    <details className="rounded-2xl border border-slate-800 p-4"><summary className="min-h-12 cursor-pointer font-semibold">Pipeline overview</summary><p className="my-3 text-sm text-slate-400">Figures use uniquely identified opportunities with recognised stages, independently of filters and the selected lead. Missing evidence is shown as incomplete.</p>{facts.quoteReviews ? <p role="alert" className="mb-3 text-sm text-amber-200">{facts.quoteReviews} pricing records need identity, type or status review. The quote win rate is incomplete. <Link href="/quotes" className="underline">Review quotes</Link></p> : null}<section className="grid grid-cols-2 gap-3 xl:grid-cols-6 xl:gap-4">
+      <Card><UserRoundSearch className="size-5 text-sky-300" /><p className="mt-3 text-2xl font-bold">{countLabel(facts.openCount, Boolean(facts.unclassified))}</p><p className="text-xs text-slate-400">Open opportunities</p></Card>
+      <Card><CirclePoundSterling className="size-5 text-emerald-300" /><p className="mt-3 text-2xl font-bold">{valueLabel(facts.pipelineValue)}</p><p className="text-xs text-slate-400">Open pipeline</p><p className="mt-1 text-xs text-amber-200">{valueNote(facts.pipelineValue)}</p></Card>
+      <Card><FilePlus2 className="size-5 text-violet-300" /><p className="mt-3 text-2xl font-bold">{valueLabel(facts.quotePipelineValue)}</p><p className="text-xs text-slate-400">Quote pipeline</p><p className="mt-1 text-xs text-amber-200">{valueNote(facts.quotePipelineValue)}</p></Card>
+      <Card><TrendingUp className="size-5 text-cyan-300" /><p className="mt-3 text-2xl font-bold">{rateLabel(facts.conversionRate, Boolean(facts.unclassified))}</p><p className="text-xs text-slate-400">Lead win rate · quotes {rateLabel(facts.quoteRate, Boolean(facts.quoteReviews))}</p></Card>
+      <Card><CalendarClock className="size-5 text-amber-300" /><p className="mt-3 text-2xl font-bold">{countLabel(facts.due, Boolean(facts.unclassified || facts.dateReviews))}</p><p className="text-xs text-slate-400">Follow-ups due</p></Card>
+      <Card><Building2 className="size-5 text-fuchsia-300" /><p className="mt-3 text-2xl font-bold">{countLabel(facts.builderCount, Boolean(facts.unclassified || facts.builderReviews))}</p><p className="text-xs text-slate-400">Builder opportunities</p></Card>
     </section></details>
 
     <Card><div className="grid gap-3 md:grid-cols-3">
       <label className="relative"><span className="sr-only">Search pipeline</span><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input type="search" value={search} onChange={(event) => { setSearch(event.target.value); setLimit(8); }} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} placeholder="Name, work, address, phone or email" className="min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 pl-10 pr-3 text-base" /></label>
-      <select aria-label="Filter by stage" className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" value={stageFilter} onChange={(event) => { setStageFilter(event.target.value); setLimit(8); }}><option value="">All stages</option>{stages.map((stage) => <option key={stage}>{stage}</option>)}</select>
-      <select aria-label="Filter by source" className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" value={sourceFilter} onChange={(event) => { setSourceFilter(event.target.value); setLimit(8); }}><option value="">All sources</option>{sources.map((source) => <option key={source}>{source}</option>)}</select>
+      <select aria-label="Filter by stage" className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" value={stageFilter} onChange={(event) => { setStageFilter(event.target.value); setLimit(8); }}><option value="">All stages</option><option value="needs-review">Needs review</option>{stages.map((stage) => <option key={stage}>{stage}</option>)}</select>
+      <select aria-label="Filter by source" className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" value={sourceFilter} onChange={(event) => { setSourceFilter(event.target.value); setLimit(8); }}><option value="">All sources</option><option value="needs-review">Source needs review</option>{sources.map((source) => <option key={source}>{source}</option>)}</select>
     </div></Card>
 
     {selectedLeadId !== null ? <Card><p role={selectedLead ? "status" : "alert"} className="text-sm">{selectedLead ? `Selected opportunity: ${selectedLead.name}. Only this exact saved lead is shown.` : "The linked opportunity is unavailable or has a missing or duplicate identity. No other lead has been selected."}</p><Button type="button" variant="secondary" className="mt-3 min-h-12" onClick={() => { setSelectedLeadId(null); clearFilters(); }}>Show all opportunities</Button></Card> : null}
@@ -273,12 +250,12 @@ function LeadsSession() {
     <section className="hidden lg:block" aria-label="Desktop sales pipeline">
       <div className="mb-3 flex items-center gap-2 text-sm text-slate-400"><GripVertical className="size-4" />Drag cards to review a stage change. The board scrolls horizontally without compressing the cards.</div>
       <div className="flex snap-x gap-4 overflow-x-auto pb-4">
-        {stages.map((stage) => {
-          const stageItems = filtered.filter((lead) => normaliseLeadStage(lead.stage) === stage);
-          const visibleStageItems = visible.filter((lead) => normaliseLeadStage(lead.stage) === stage);
-          return <section key={stage} data-pipeline-stage={stage} onDragOver={(event: ReactDragEvent) => event.preventDefault()} onDrop={() => dropInto(stage)} className={`min-h-64 w-[19rem] shrink-0 snap-start rounded-2xl border p-3 ${stageColours[stage]}`}>
-            <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-sm font-bold">{stage}</h2><span className="rounded-full bg-slate-950/80 px-2 py-1 text-xs">{visibleStageItems.length} of {stageItems.length}</span></div>
-            <div className="space-y-3">{visibleStageItems.map((lead) => <article key={lead.id} draggable={actions.canStart} onDragStart={() => setDraggedLeadId(lead.id)} onDragEnd={() => setDraggedLeadId("")} className={draggedLeadId === lead.id ? "opacity-40" : "opacity-100"}>{leadCard(lead, false)}</article>)}{stageItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700/70 p-4 text-center text-xs text-slate-500">Drop an opportunity here</div> : visibleStageItems.length < stageItems.length ? <p className="mt-3 text-xs text-slate-400">Use Show more opportunities below or filter to this stage.</p> : null}</div>
+        {[...stages, ...(facts.stageReviews ? [null] : [])].map((stage) => {
+          const stageItems = filtered.filter((lead) => resolveLeadStage(lead.stage) === stage);
+          const visibleStageItems = visible.filter((lead) => resolveLeadStage(lead.stage) === stage);
+          return <section key={stage || "stage-review"} data-pipeline-stage={stage || "Stage needs review"} onDragOver={stage ? (event: ReactDragEvent) => event.preventDefault() : undefined} onDrop={stage ? () => dropInto(stage) : undefined} className={`min-h-64 w-[19rem] shrink-0 snap-start rounded-2xl border p-3 ${stage ? stageColours[stage] : "border-amber-400/35 bg-amber-500/5"}`}>
+            <div className="mb-3 flex items-center justify-between gap-2"><h2 className="text-sm font-bold">{stage || "Stage needs review"}</h2><span className="rounded-full bg-slate-950/80 px-2 py-1 text-xs">{visibleStageItems.length} of {stageItems.length}</span></div>
+            <div className="space-y-3">{visibleStageItems.map((lead) => <article key={lead.id} draggable={Boolean(stage) && actions.canStart} onDragStart={() => { if (stage) setDraggedLeadId(lead.id); }} onDragEnd={() => setDraggedLeadId("")} className={draggedLeadId === lead.id ? "opacity-40" : "opacity-100"}>{leadCard(lead, false)}</article>)}{stageItems.length === 0 ? <div className="rounded-xl border border-dashed border-slate-700/70 p-4 text-center text-xs text-slate-500">{stage ? "Drop an opportunity here" : "No matching records need stage review"}</div> : visibleStageItems.length < stageItems.length ? <p className="mt-3 text-xs text-slate-400">Use Show more opportunities below or filter to this stage.</p> : null}</div>
           </section>;
         })}
       </div>
@@ -286,9 +263,9 @@ function LeadsSession() {
     {filtered.length > limit ? <Button type="button" variant="secondary" className="min-h-12 w-full" onClick={() => setLimit(current => current + 8)}>Show more opportunities</Button> : null}
 
     <details className="rounded-2xl border border-slate-800 p-4"><summary className="min-h-12 cursor-pointer font-semibold">Win / loss reporting</summary><section className="mt-4 space-y-4">
-      <div><p className="text-xs font-semibold uppercase tracking-wider text-fuchsia-300">Win / loss reporting</p><h2 className="mt-1 text-2xl font-bold">What is converting</h2><p className="mt-1 text-sm text-slate-400">Decided opportunities are grouped by source so the strongest routes are visible.</p></div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{sourcePerformance.map((result) => <Card key={result.source}><div className="flex items-center justify-between gap-2"><h3 className="font-bold">{result.source}</h3><Target className="size-4 text-cyan-300" /></div><p className="mt-3 text-2xl font-bold">{result.conversion.toFixed(1)}%</p><p className="mt-1 text-xs text-slate-400">{result.won} won · {result.lost} lost · {result.total} total</p><p className="mt-3 text-sm font-semibold text-emerald-300">{money.format(result.value)} won value</p></Card>)}</div>
-      {sourcePerformance.length === 0 ? <Card><p className="text-sm text-slate-400">Win/loss reporting will appear once opportunities have been recorded.</p></Card> : null}
+      <div><p className="text-xs font-semibold uppercase tracking-wider text-fuchsia-300">Win / loss reporting</p><h2 className="mt-1 text-2xl font-bold">What is converting</h2><p className="mt-1 text-sm text-slate-400">Recognised opportunities are grouped by source. Win rates use only won and lost decisions; unrecognised sources remain in their own review group.</p></div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{sourcePerformance.map((result) => <Card key={result.source}><div className="flex items-center justify-between gap-2"><h3 className="font-bold">{result.source}</h3><Target className="size-4 text-cyan-300" /></div><p className="mt-3 text-2xl font-bold">{rateLabel(result.conversion, Boolean(facts.unclassified))}</p><p className="mt-1 text-xs text-slate-400">{result.won} won · {result.lost} lost · {result.total} total</p><p className="mt-3 text-sm font-semibold text-emerald-300">{valueLabel(result.value)} won value</p><p className="mt-1 text-xs text-amber-200">{valueNote(result.value)}</p></Card>)}</div>
+      {facts.unclassified ? <p className="text-sm text-amber-200">Win/loss figures and loss reasons cover known records only while identities or stages need review.</p> : null}{sourcePerformance.length === 0 ? <Card><p className="text-sm text-slate-400">{facts.unclassified ? "Win/loss reporting is unavailable until the saved records are reviewed." : "Win/loss reporting will appear once opportunities have been recorded."}</p></Card> : null}
       {lossReasons.length > 0 ? <Card><h3 className="font-bold">Recorded loss reasons</h3><div className="mt-3 grid gap-2 sm:grid-cols-2">{lossReasons.map(([reason, count]) => <div key={reason} className="flex items-center justify-between gap-3 rounded-xl bg-slate-950 p-3 text-sm"><span>{reason}</span><span className="rounded-full bg-rose-500/10 px-2 py-1 text-xs font-bold text-rose-300">{count}</span></div>)}</div></Card> : null}
     </section></details>
   </main>;

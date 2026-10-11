@@ -18,7 +18,8 @@ export function load(path, dependencies, globals = {}) {
   vm.runInNewContext(source, { module: mod, exports: mod.exports, Date: FixedDate, Intl, Error, ...globals, require(name) { assert.ok(name in dependencies, `${path}: ${name}`); return dependencies[name]; } });
   return mod.exports;
 }
-export const crm = load("lib/crmPro.ts", { "./contactLinks": contacts, "./assistantSignals-core.mjs": signals, "./crmPro-core.mjs": crmCore, "./jobManagement-core.mjs": jobCore, "./payments": { paymentEffect() { assert.fail("Follow-up queue must not access payment calculations"); } } });
+export const pipeline = load("lib/leadPipeline.ts", { "./assistantIdentity": identities, "./crmPro-core.mjs": crmCore, "./scheduling": load("lib/scheduling.ts", {}) });
+export const crm = load("lib/crmPro.ts", { "./leadPipeline": pipeline, "./contactLinks": contacts, "./assistantSignals-core.mjs": signals, "./crmPro-core.mjs": crmCore, "./jobManagement-core.mjs": jobCore, "./payments": { paymentEffect() { assert.fail("Follow-up queue must not access payment calculations"); } } });
 export const rules = load("lib/crmFollowUpSettings.ts", { "./crmPro": crm, "./assistantIdentity": identities });
 
 export function hookRuntime() {
