@@ -12,6 +12,7 @@ function harness(query = "") {
   const page = load("app/leads/page.tsx", {
     "react/jsx-runtime": { jsx, jsxs: jsx }, react: runtime.hooks, "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" },
+    "../../components/crm/LeadPipelineActions": { leadSources: ["Website", "Google", "Referral", "Builder", "Repeat customer", "Social media", "MyJobsQuote", "MyBuilder", "Checkatrade", "Other"], useLeadPipelineActions: () => ({ openCapture: failWrite, reviewStage: failWrite, panel: null, canStart: true, ready: true }) },
     "../../lib/cloud/coreBusinessCollections": Object.fromEntries(Object.entries(hooks).map(([key, hook]) => [hook, () => ({ items: data[key], isReady: ready[key], setItems: failWrite, remove: failWrite })])),
     "../../lib/crmPro": crm, "../../lib/assistantIdentity": identities, "../../lib/contactLinks": contacts,
     "../../lib/scheduling": scheduling,
