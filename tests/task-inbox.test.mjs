@@ -14,11 +14,53 @@ function compile(path, deps, globals = {}) {
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { exports: mod.exports, module: mod, Date, Error, URLSearchParams, ...globals, require(name) { assert.ok(name in deps, name); return deps[name]; } });
   return mod.exports;
 }
-const inbox = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
-const assistant = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": inbox });
+const identity = compile("../lib/assistantIdentity.ts", {});
+const inbox = compile("../lib/taskInbox.ts", { "./assistantIdentity": identity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals });
+const assistant = compile("../lib/assistantTasks.ts", { "./assistantIdentity": identity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": signals, "./taskInbox": inbox });
 const now = new Date(2026, 9, 10, 10);
 const job = (patch = {}) => ({ id: "j1", title: "Workshop", siteAddress: "1 High Street", status: "Scheduled", updatedAt: "2026-10-10T10:00:00Z", ...patch });
 const task = (patch = {}) => ({ id: "t1", jobId: "j1", type: "Task", title: "Check labels", description: "Confirm circuit labels", category: "General", priority: "Normal", dueDate: "2026-10-10", status: "Open", photos: [], notes: "", createdAt: "2026-10-01T10:00:00Z", updatedAt: "2026-10-01T10:00:00Z", ...patch });
+
+test("task snapshots validate full identities before job, snag and completed-work filtering", () => {
+  const tasks = [task({ type: "Snag", priority: "Urgent" }), task({ jobId: "other", type: "Task", status: "Completed", title: "Other job secret" }), task({ id: "valid" })];
+  const before = structuredClone(tasks);
+  const snapshot = assistant.assistantTaskSnapshot(tasks, [job(), job({ id: "other", title: "Elsewhere" })], now, { onlyAttention: false, snagsOnly: true, jobId: "j1" });
+  assert.equal(snapshot.openCount, 0); assert.equal(snapshot.reviewCount, 1); assert.equal(snapshot.actions.length, 1);
+  assert.equal(snapshot.actions[0].priority, "Now"); assert.equal(snapshot.actions[0].href, "/job-tasks");
+  assert.match(snapshot.actions[0].reason, /2 loaded tasks/); assert.match(snapshot.warnings.join(" "), /count is incomplete/);
+  assert.match(snapshot.actions[0].evidence.join(" "), /Check labels/); assert.doesNotMatch(JSON.stringify(snapshot), /Other job secret|Elsewhere/);
+  const all = assistant.assistantTaskSnapshot(tasks, [job()], now, { onlyAttention: false });
+  assert.equal(all.openCount, 1); assert.equal(all.reviewCount, 1); assert.match(JSON.stringify(all.actions), /Completed/);
+  assert.deepEqual(tasks, before);
+});
+
+test("missing task identities need review without invented open counts or duplicate action keys", () => {
+  const data = [task({ id: "" }), task({ id: " " }), task({ id: undefined }), task({ id: "closed", status: "Completed" }), task({ id: "closed", status: "Customer confirmed" })];
+  const result = assistant.assistantTaskSnapshot(data, [job()], now, { onlyAttention: false });
+  assert.equal(result.openCount, 0); assert.equal(result.reviewCount, 1); assert.equal(result.actions.length, 1);
+  assert.match(result.actions[0].reason, /identities are missing/);
+  assert.equal(new Set(result.actions.map(a => a.id)).size, result.actions.length);
+  assert.equal(assistant.assistantTaskSnapshot([task({ id: "future", dueDate: "2027-01-01" }), task({ id: "future", status: "Completed" })], [job()], now).reviewCount, 1);
+});
+
+test("task answers and search never infer a linked job from ambiguous job identities", () => {
+  const jobs = [job({ title: "Wrong A", siteAddress: "Ambiguous address" }), job({ title: "Wrong B", siteAddress: "Other address" })];
+  const result = assistant.assistantTaskSnapshot([task()], jobs, now, { canOpenTaskWorkspace: false });
+  assert.equal(result.actions[0].href, "/jobs"); assert.match(result.actions[0].evidence.join(" "), /job identity is ambiguous/);
+  assert.doesNotMatch(JSON.stringify(result), /Wrong A|Wrong B/);
+  assert.equal(inbox.filterTaskInbox([task()], jobs, { jobId: "", filter: "All", query: "Ambiguous address", today: "2026-10-10" }).length, 0);
+  const review = assistant.assistantTaskSnapshot([task(), task({ status: "Completed" })], [job()], now, { jobId: "j1", canOpenTaskWorkspace: false });
+  assert.equal(review.actions[0].href, "/jobs/j1"); assert.match(review.actions[0].nextStep, /owner or admin/);
+});
+
+test("task review links keep literal bounded identities and fall back for unsupported targets", () => {
+  assert.equal(inbox.taskReviewHref(task({ id: " padded ", jobId: "" })), "/job-tasks?task=%20padded%20");
+  assert.equal(inbox.taskReviewHref(task({ id: "x".repeat(301) })), "/job-tasks");
+  assert.equal(inbox.taskReviewHref(task({ jobId: "x".repeat(301) })), "/job-tasks?task=t1");
+  for (const query of ["?task=", "?job=%20", "?task=t1&task=t1", "?job=j1&job=j1", `?task=${"x".repeat(301)}`, "?task=t1&job="]) assert.equal(inbox.resolveTaskInboxLink([task()], [job()], query).missing, true, query);
+  assert.equal(inbox.resolveTaskInboxLink([task(), task({ status: "Completed" })], [job()], "?task=t1").missing, true);
+  assert.equal(inbox.resolveTaskInboxLink([task()], [job(), job()], "?job=j1").missing, true);
+});
 
 test("task priorities distinguish urgent, safety, past, today, near and distant work", () => {
   const data = [task({ id: "future", dueDate: "2026-12-01" }), task({ id: "today" }), task({ id: "late", dueDate: "2026-10-09" }), task({ id: "safety", category: "Safety", dueDate: "" }), task({ id: "urgent", priority: "Urgent", dueDate: "2026-12-01" }), task({ id: "high", priority: "High", dueDate: "" }), task({ id: "near", dueDate: "2026-10-16" }), task({ id: "outside", dueDate: "2026-10-17" }), task({ id: "closed", status: "Completed", priority: "Urgent" }), task({ id: "confirmed", status: "Customer confirmed", category: "Safety" }), task({ id: "invalid", dueDate: "2026-02-30" })];
@@ -65,8 +107,8 @@ test("deep links resolve exact authorized records and reject mismatched or missi
   assert.equal(inbox.resolveTaskInboxLink([task()], [], "?task=t1&job=j1").taskId, "t1");
 });
 
-function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", ready: initialReady = true, writable = false, failTasks = 0, failTimeline = 0, failUpdates = 0, failDeletes = 0, confirmDelete = true } = {}) {
-  const state = [], effects = [], frames = [], listeners = {};
+function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", ready: initialReady = true, writable = false, failTasks = 0, failTimeline = 0, failUpdates = 0, failDeletes = 0, confirmDelete = true, onConfirm } = {}) {
+  const state = [], effects = [], layouts = [], cleanups = [], frames = [], listeners = {};
   let cursor = 0, tasks = initialTasks, timeline = [], ready = initialReady, writes = 0, ids = 0;
   const attempts = [];
   function create(kind, item) {
@@ -102,22 +144,104 @@ function pageHarness({ tasks: initialTasks = [], jobs = [job()], search = "", re
   const noWrite = () => { writes++; throw new Error("Inbox navigation must not write records"); };
   const store = (items) => ({ items, isReady: ready, setItems: noWrite, remove: noWrite });
   const page = compile("../app/job-tasks/page.tsx", {
-    "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState, useRef: (value) => useState({ current: value })[0], useMemo: (fn) => fn(), useEffect: (fn) => effects.push(fn) }, "lucide-react": {},
+    "react/jsx-runtime": { jsx, jsxs: jsx }, react: { useState, useRef: (value) => useState({ current: value })[0], useMemo: (fn) => fn(), useEffect: (fn) => effects.push(fn), useLayoutEffect: (fn) => layouts.push(fn) }, "lucide-react": {},
     "../../components/ui/Card": { Card: "Card" }, "../../components/ui/Button": { Button: "Button" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" },
     "../../lib/cloud/coreBusinessCollections": { useJobsCollection: () => store(jobs), useJobTasksCollection: () => ({ ...store(tasks), createItem: (item) => create("task", item), updateItem, removeItem }), useJobTimelineCollection: () => ({ ...store(timeline), createItem: (item) => create("timeline", item) }), useTeamCollection: () => store([]) },
-    "../../lib/storage": { makeId: () => writable ? `new-${++ids}` : noWrite() }, "../../lib/jobTasks-core.mjs": taskCore, "../../lib/assistantSignals-core.mjs": signals, "../../lib/taskInbox": inbox,
-  }, { window: { confirm: () => confirmDelete, location: { search }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, setInterval() { return 1; }, clearInterval() {}, addEventListener(type, fn) { listeners[type] = fn; }, removeEventListener() {} } });
-  const render = () => { cursor = 0; effects.length = 0; return page.default(); };
+    "../../lib/storage": { makeId: () => writable ? `new-${++ids}` : noWrite() }, "../../lib/assistantIdentity": identity, "../../lib/jobTasks-core.mjs": taskCore, "../../lib/assistantSignals-core.mjs": signals, "../../lib/taskInbox": inbox,
+  }, { window: { confirm: () => { onConfirm?.(); return confirmDelete; }, location: { search }, requestAnimationFrame(fn) { frames.push(fn); return frames.length; }, cancelAnimationFrame() {}, setInterval() { return 1; }, clearInterval() {}, addEventListener(type, fn) { listeners[type] = fn; }, removeEventListener() {} } });
+  const render = () => { cursor = 0; effects.length = 0; const view = page.default(); cleanups.splice(0).forEach((fn) => fn?.()); layouts.splice(0).forEach((fn) => cleanups.push(fn())); return view; };
   const flush = () => { render(); effects.splice(0).forEach((fn) => fn()); frames.splice(0).forEach((fn) => fn()); };
   return { render, flush, writes: () => writes, attempts, tasks: () => tasks, timeline: () => timeline,
-    replaceTimeline(value) { timeline = value; },
+    replaceTimeline(value) { timeline = value; render(); }, replaceJobs(value) { jobs = value; render(); }, unmount() { cleanups.splice(0).forEach((fn) => fn?.()); },
     field(label, value) { const form = nodes(render()).find((n) => n.type === "form"); const all = nodes(form); let input = all.find((n) => n.props.label === label); if (!input) input = nodes(all.find((n) => n.type === "label" && text(n).startsWith(label))).find((n) => n.type === "select"); assert.ok(input, label); input.props.onChange({ target: { value } }); },
     submitHandler() { const form = nodes(render()).find((n) => n.type === "form"); assert.ok(form); return () => form.props.onSubmit({ preventDefault() {} }); },
     retryHandler() { const button = nodes(render()).find((n) => n.type === "button" && text(n) === "Retry timeline note"); assert.ok(button); return button.props.onClick; },
     taskHandler(label) { const card = cards(render()).find((n) => /^(Task|Snag):/.test(n.props["aria-label"])); const button = nodes(card).find((n) => n.type === "button" && text(n) === label); assert.ok(button, label); return button.props.onClick; },
-    replaceTasks(value) { tasks = value; }, setReady(value) { ready = value; }, fill(value) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
+    replaceTasks(value) { tasks = value; render(); }, setReady(value) { ready = value; render(); }, fill(value) { nodes(render()).find((n) => n.type === "input").props.onChange({ target: { value } }); }, click(label) { const button = nodes(render()).find((n) => n.type === "button" && text(n).startsWith(label)); assert.ok(button, label); button.props.onClick(); } };
 }
 const cards = (view) => nodes(view).filter((n) => n.type === "Card" && n.props["aria-label"]);
+
+test("task links hide the unscoped inbox before resolution and recover only the original identity", () => {
+  const h = pageHarness({ tasks: [task(), task({ id: "other", title: "Other task" })], search: "?task=t1&job=j1" });
+  assert.equal(cards(h.render()).length, 0); assert.match(text(h.render()), /Loading job tasks/);
+  h.flush(); assert.equal(cards(h.render()).length, 1);
+  h.replaceTasks([task(), task({ jobId: "other", status: "Completed" })]); assert.equal(cards(h.render()).length, 0); assert.match(text(h.render()), /ambiguous.*No other record/);
+  h.replaceTasks([task({ id: "replacement" })]); assert.equal(cards(h.render()).length, 0);
+  h.replaceTasks([task({ status: "Completed" })]); assert.equal(cards(h.render()).length, 1); assert.match(text(cards(h.render())), /Completed/);
+  h.replaceTasks([task({ jobId: "other" })]); assert.equal(cards(h.render()).length, 0);
+  h.click("Show all open tasks"); assert.equal(cards(h.render()).length, 1); assert.equal(h.writes(), 0);
+});
+
+test("malformed task and job links remain empty until an explicit inbox reset", () => {
+  for (const search of ["?task=", "?task=t1&task=t1", "?job=j1&job=other", `?task=${"x".repeat(301)}`]) {
+    const h = pageHarness({ tasks: [task()], search }); h.flush();
+    assert.equal(cards(h.render()).length, 0); assert.match(text(h.render()), /task link is unavailable/);
+    h.click("Show all open tasks"); assert.equal(cards(h.render()).length, 1); assert.equal(h.writes(), 0);
+  }
+});
+
+test("phone task counts and write controls check copies outside the visible status and job filters", () => {
+  const h = pageHarness({ tasks: [task(), task({ jobId: "elsewhere", status: "Completed" }), task({ id: "", title: "No identity" }), task({ id: "valid" })], search: "?job=j1", writable: true }); h.flush();
+  assert.equal(cards(h.render()).length, 3); assert.match(text(h.render()), /2 task record\(s\).*Counts exclude/);
+  const open = nodes(h.render()).find(n => n.type === "button" && /^Open /.test(text(n))); assert.equal(text(open), "Open 1");
+  for (const card of cards(h.render()).filter(n => /Task identity needs review/.test(text(n)))) {
+    const buttons = nodes(card).filter(n => n.type === "button"); assert.ok(buttons.every(n => n.props.disabled));
+    for (const button of buttons) button.props.onClick();
+  }
+  assert.equal(h.writes(), 0); assert.equal(h.tasks().length, 4);
+});
+
+test("selected job scope survives missing and conflicting records without broadening the inbox", () => {
+  const h = pageHarness({ tasks: [task(), task({ id: "other", jobId: "other" })], search: "?job=j1" }); h.flush();
+  h.replaceJobs([job(), job({ title: "Conflicting job" })]); assert.equal(cards(h.render()).length, 0);
+  assert.match(text(h.render()), /Selected job unavailable or ambiguous/); assert.equal(nodes(h.render()).filter(n => n.type === "option" && n.props.value === "j1").length, 1);
+  h.replaceJobs([job({ id: "replacement" })]); assert.equal(cards(h.render()).length, 0);
+  h.replaceJobs([job()]); assert.equal(cards(h.render()).length, 1); assert.equal(h.writes(), 0);
+});
+
+test("old task status and delete handlers refuse a newly duplicated identity or an unmounted page", () => {
+  for (const label of ["Completed", "Delete task"]) for (const change of ["duplicate", "not-ready", "unmount"]) {
+    const h = pageHarness({ tasks: [task()], writable: true }); h.flush(); const handler = h.taskHandler(label);
+    if (change === "duplicate") h.replaceTasks([task(), task({ jobId: "other", status: "Completed" })]);
+    else if (change === "not-ready") h.setReady(false); else h.unmount();
+    handler(); assert.equal(h.writes(), 0, `${label}: ${change}`);
+  }
+});
+
+test("task deletion rechecks identity and readiness after the confirmation dialog", () => {
+  for (const change of ["duplicate", "not-ready", "unmount"]) {
+    let h;
+    h = pageHarness({ tasks: [task()], writable: true, onConfirm: () => { if (change === "duplicate") h.replaceTasks([task(), task({ status: "Completed" })]); else if (change === "not-ready") h.setReady(false); else h.unmount(); } });
+    h.flush(); h.taskHandler("Delete task")(); assert.equal(h.writes(), 0, change);
+  }
+});
+
+test("creation rejects a newly ambiguous job while retaining the task draft", () => {
+  const h = pageHarness({ writable: true }); draftTask(h);
+  const submit = h.submitHandler(); h.replaceJobs([job(), job({ title: "Other copy" })]); submit();
+  assert.equal(h.writes(), 0); assert.match(text(h.render()), /Choose an available job with one unique/);
+  assert.equal(nodes(h.render()).find(n => n.props.label === "Title").props.value, "Fit labels");
+});
+
+test("timeline retry refuses duplicated task or note identities, including an old callback", () => {
+  for (const change of ["task", "note", "unmount"]) {
+    const h = pageHarness({ writable: true, failTimeline: 1 }); draftTask(h); h.submitHandler()(); const retry = h.retryHandler();
+    if (change === "task") h.replaceTasks([h.tasks()[0], { ...h.tasks()[0], jobId: "other" }]);
+    else if (change === "note") { const note = h.attempts.find(a => a.kind === "timeline").item; h.replaceTimeline([note, { ...note, sourceId: "other" }]); }
+    else h.unmount();
+    const before = h.writes(); retry(); assert.equal(h.writes(), before, change);
+  }
+});
+
+test("phone task search dismisses the keyboard and resets progressive results without losing a draft", () => {
+  const h = pageHarness({ tasks: Array.from({ length: 14 }, (_, i) => task({ id: String(i) })), writable: true }); draftTask(h);
+  h.click("Show more tasks"); assert.equal(cards(h.render()).length, 14);
+  h.fill("labels"); assert.equal(cards(h.render()).length, 8);
+  assert.equal(nodes(h.render()).find(n => n.props.label === "Title").props.value, "Fit labels");
+  let blurred = 0, prevented = 0;
+  nodes(h.render()).find(n => n.type === "input" && n.props.type === "search").props.onKeyDown({ key: "Enter", preventDefault() { prevented++; }, currentTarget: { blur() { blurred++; } } });
+  assert.equal(blurred, 1); assert.equal(prevented, 1); assert.equal(h.writes(), 0);
+});
 
 test("phone inbox uses real filter, search, progressive reveal and reset handlers", () => {
   const h = pageHarness({ tasks: [...Array.from({ length: 11 }, (_, i) => task({ id: String(i), title: `Site task ${i}` })), task({ id: "done", status: "Completed" }), task({ id: "snag", type: "Snag", title: "Damaged switch" })] });

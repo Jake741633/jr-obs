@@ -34,6 +34,8 @@ control. Each card explains its reason, next step and saved evidence.
 - **Tasks:** outstanding tasks and snags use their saved priority, category and due date. Urgent work, Safety-category records and past due dates appear first. High priority, due-today and work due through today plus six days follow. Completed/customer-confirmed records are excluded; closed-job and orphaned tasks remain reviewable with their actual source evidence. The Safety label comes from the saved record and is not a new assessment of the installation.
 - **Reminders:** incomplete reminders due today or earlier remain visible.
 
+Task priorities, open-task/snag answers and job briefings validate identities across all loaded tasks before filtering by job, type or status. Missing identities and duplicate copies become source-review cards with their open-work counts withheld; completed copies and copies on another job still establish a conflict. Scoped answers describe only the requested job's copies, including when a prebuilt global briefing is available. A warning marks the open-work count as incomplete, and saved urgency or Safety evidence keeps an uncertain source prominent without choosing an authoritative copy. All-closed sources do not create open-work claims. Ambiguous linked jobs never supply a guessed name or address. Review destinations retain role restrictions; oversized task identities use the inbox instead of an unusable exact link. These checks use loaded records only and never update tasks.
+
 The shared invoice/follow-up predicates also correct the existing Today’s
 Assistant, Smart Recommendations, daily invoice briefing, home dashboard and
 Business Coach outstanding-money totals. Draft invoices are excluded from

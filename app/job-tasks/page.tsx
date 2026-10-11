@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Plus, Wrench } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -11,6 +11,7 @@ import { isOutstandingJobTask, isJobTaskStatus, jobTaskStatuses, jobTaskStatusTr
 import { assistantDateKey, assistantDay } from "../../lib/assistantSignals-core.mjs";
 import { filterTaskInbox, resolveTaskInboxLink, taskInboxFilters, taskMatchesInboxFilter, type TaskInboxFilter } from "../../lib/taskInbox";
 import { makeId } from "../../lib/storage";
+import { savedIdentityIndex } from "../../lib/assistantIdentity";
 import type { JobPriority, JobTask, JobTaskCategory, JobTaskStatus, JobTaskType, JobTimelineEntry } from "../../lib/models";
 
 const categories: JobTaskCategory[] = ["General", "Survey", "First fix", "Second fix", "Testing", "Certificate", "Materials", "Handover", "Safety", "Other"];
@@ -32,24 +33,35 @@ export default function JobTasksPage() {
   const tasks = useJobTasksCollection();
   const timeline = useJobTimelineCollection();
   const team = useTeamCollection();
-  const [selectedJobId, setSelectedJobId] = useState("");
+  const [chosenJobId, setSelectedJobId] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(blankForm);
   const [message, setMessage] = useState("");
   const [filter, setFilter] = useState<TaskInboxFilter>("Open");
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(8);
-  const [targetTaskId, setTargetTaskId] = useState("");
-  const [missingLink, setMissingLink] = useState(false);
+  const [linkSearch, setLinkSearch] = useState<string | null>(null);
   const [today, setToday] = useState(() => assistantDateKey(new Date()));
   const deepLinkHandled = useRef(false);
   const draft = useRef({ id: "", saved: false });
   const [pendingNotes, setPendingNotes] = useState<JobTimelineEntry[]>([]);
   const completedNoteIds = useRef(new Set<string>());
 
+  const taskIndex = useMemo(() => savedIdentityIndex(tasks.items), [tasks.items]);
+  const jobIndex = useMemo(() => savedIdentityIndex(jobs.items), [jobs.items]);
+  const link = useMemo(() => resolveTaskInboxLink(tasks.items, jobs.items, linkSearch || ""), [tasks.items, jobs.items, linkSearch]);
+  const selectedJobId = linkSearch ? link.jobId : chosenJobId;
+  const targetTaskId = linkSearch ? link.taskId : "";
+  const missingLink = Boolean(linkSearch && link.missing) || Boolean(!targetTaskId && selectedJobId && !jobIndex.unique.has(selectedJobId));
   const visibleTasks = useMemo(() => missingLink ? [] : targetTaskId ? tasks.items.filter((task) => task.id === targetTaskId && (!selectedJobId || task.jobId === selectedJobId)) : filterTaskInbox(tasks.items, jobs.items, { jobId: selectedJobId, filter, query, today }), [missingLink, targetTaskId, selectedJobId, tasks.items, jobs.items, filter, query, today]);
-  const jobTasks = tasks.items.filter((task) => !selectedJobId || task.jobId === selectedJobId);
+  const jobTasks = missingLink ? [] : taskIndex.selectable.filter((task) => !selectedJobId || task.jobId === selectedJobId);
+  const uncertainTaskCount = tasks.items.filter((task) => (!selectedJobId || task.jobId === selectedJobId) && !taskIndex.unique.has(task.id)).length;
   const ready = jobs.isReady && tasks.isReady && timeline.isReady && team.isReady;
+  const latestSources = useRef({ ready: false, tasks: tasks.items, jobs: jobs.items, timeline: timeline.items });
+  useLayoutEffect(() => {
+    latestSources.current = { ready, tasks: tasks.items, jobs: jobs.items, timeline: timeline.items };
+    return () => { latestSources.current = { ready: false, tasks: [], jobs: [], timeline: [] }; };
+  }, [ready, tasks.items, jobs.items, timeline.items]);
 
   useEffect(() => {
     const update = () => setToday(assistantDateKey(new Date()));
@@ -61,14 +73,15 @@ export default function JobTasksPage() {
   useEffect(() => {
     if (!ready || deepLinkHandled.current) return;
     const frame = window.requestAnimationFrame(() => {
-      const link = resolveTaskInboxLink(tasks.items, jobs.items, window.location.search);
-      setTargetTaskId(link.taskId); setSelectedJobId(link.jobId); setMissingLink(link.missing);
+      const search = window.location.search;
+      const params = new URLSearchParams(search);
+      setLinkSearch(params.has("task") || params.has("job") ? search : "");
       deepLinkHandled.current = true;
     });
     return () => window.cancelAnimationFrame(frame);
   }, [ready, tasks.items, jobs.items]);
 
-  function clearTarget() { setTargetTaskId(""); setMissingLink(false); setLimit(8); }
+  function clearTarget() { setLinkSearch(""); setSelectedJobId(selectedJobId); setLimit(8); }
   function resetInbox() { clearTarget(); setSelectedJobId(""); setFilter("Open"); setQuery(""); }
 
   function openForm(type: JobTaskType) {
@@ -81,8 +94,8 @@ export default function JobTasksPage() {
   function createTask(event: FormEvent) {
     event.preventDefault();
     if (draft.current.saved || !showForm) return;
-    if (!ready) { setMessage("Wait for task records to finish loading. Your draft is still here."); return; }
-    if (!jobs.items.some((job) => job.id === form.jobId)) { setMessage("Choose an available job this task belongs to."); return; }
+    if (!latestSources.current.ready) { setMessage("Wait for task records to finish loading. Your draft is still here."); return; }
+    if (!savedIdentityIndex(latestSources.current.jobs).unique.has(form.jobId)) { setMessage("Choose an available job with one unique saved identity this task belongs to."); return; }
     if (!form.title.trim()) { setMessage("Enter a task or snag title."); return; }
     if (form.dueDate && assistantDay(form.dueDate) === null) { setMessage("Choose a valid due date, or leave it blank. Your draft is still here."); return; }
     const now = new Date().toISOString();
@@ -111,8 +124,8 @@ export default function JobTasksPage() {
       return;
     }
     draft.current.saved = true;
-    setSelectedJobId(task.jobId);
     clearTarget(); setFilter("Open"); setQuery("");
+    setSelectedJobId(task.jobId);
     setForm(blankForm);
     setShowForm(false);
     const note: JobTimelineEntry = {
@@ -138,14 +151,17 @@ export default function JobTasksPage() {
   }
 
   function retryTaskNote(note: JobTimelineEntry) {
-    if (!ready) { setMessage("Wait for task records to finish loading before retrying the note."); return; }
-    const existing = timeline.items.find((item) => item.id === note.id);
+    if (!latestSources.current.ready) { setMessage("Wait for task records to finish loading before retrying the note."); return; }
+    const notes = latestSources.current.timeline.filter((item) => item.id === note.id);
+    if (notes.length > 1) { setMessage("The timeline note ID is shared by multiple records. Review the job timeline before retrying."); return; }
+    const existing = notes[0];
     if (existing && (existing.jobId !== note.jobId || existing.sourceId !== note.sourceId || existing.sourceType !== note.sourceType)) {
       setMessage("The timeline note ID is already used by a different record. Review the job timeline before retrying."); return;
     }
     if (!existing && !completedNoteIds.current.has(note.id)) {
-      if (!tasks.items.some((task) => task.id === note.sourceId && task.jobId === note.jobId)) {
-        setMessage("The saved task is no longer available on this job. Review its current record before retrying the note."); return;
+      const source = savedIdentityIndex(latestSources.current.tasks).unique.get(note.sourceId || "");
+      if (!source || source.jobId !== note.jobId) {
+        setMessage("The saved task is no longer available on this job with one unique identity. Review its current record before retrying the note."); return;
       }
       try { timeline.createItem(note); }
       catch (error) { setMessage(`The task remains saved, but its timeline note could not be saved. ${error instanceof Error ? error.message : "Please try again."}`); return; }
@@ -156,11 +172,12 @@ export default function JobTasksPage() {
   }
 
   function changeStatus(task: JobTask, nextStatus: JobTaskStatus) {
-    if (!ready) { setMessage("Wait for task records to finish loading before changing status."); return; }
+    if (!latestSources.current.ready) { setMessage("Wait for task records to finish loading before changing status."); return; }
     const now = new Date().toISOString();
     let previousStatus: JobTaskStatus | undefined;
     let updated: JobTask;
     try {
+      requireUniqueTask(task);
       updated = tasks.updateItem(task.id, (current) => {
         if (current.jobId !== task.jobId) throw new Error("This task has moved to another job. Review its current record before changing status.");
         if (current.status === nextStatus) return current;
@@ -186,9 +203,11 @@ export default function JobTasksPage() {
   }
 
   function removeTask(task: JobTask) {
-    if (!ready) { setMessage("Wait for task records to finish loading before deleting."); return; }
-    if (!window.confirm(`Delete ${task.type.toLowerCase()} “${task.title}”?`)) return;
+    if (!latestSources.current.ready) { setMessage("Wait for task records to finish loading before deleting."); return; }
     try {
+      requireUniqueTask(task);
+      if (!window.confirm(`Delete ${task.type.toLowerCase()} “${task.title}”?`)) return;
+      requireUniqueTask(task);
       tasks.removeItem(task.id, (current) => {
         if (JSON.stringify(current) !== JSON.stringify(task)) throw new Error("This task has changed. Review its current record before deleting.");
       });
@@ -198,7 +217,11 @@ export default function JobTasksPage() {
     }
   }
 
-  if (!ready) return <Card>Loading job tasks…</Card>;
+  function requireUniqueTask(task: JobTask) {
+    if (!latestSources.current.ready || !savedIdentityIndex(latestSources.current.tasks).unique.has(task.id)) throw new Error("This task is unavailable or its saved identity is ambiguous. Review the current records before making changes.");
+  }
+
+  if (!ready || linkSearch === null) return <Card>Loading job tasks…</Card>;
 
   return <main className="space-y-6 pb-24">
     <PageHeader eyebrow="Job Management Pro" title="Tasks & Snagging" description="Track site actions, defects and customer-confirmed completion from one mobile workspace." action={<Button onClick={() => openForm("Task")}><Plus className="mr-2 size-4" />Add task</Button>} />
@@ -207,7 +230,9 @@ export default function JobTasksPage() {
     {pendingNotes.length ? <Card className="border-amber-400/30" aria-label="Unsaved task timeline notes"><h2 className="font-bold">Task saved — timeline note needs retrying</h2><p className="mt-2 text-sm text-slate-400">Your task change has been saved on this device. Keep this page open to retry its timeline note; leaving keeps the task change but loses this unsaved note.</p><div className="mt-3 space-y-3">{pendingNotes.map((note) => <div key={note.id} className="rounded-xl border border-slate-700 p-3"><p className="break-words text-sm">{note.note}</p><button type="button" onClick={() => retryTaskNote(note)} className="mt-3 min-h-12 rounded-xl border border-amber-400/30 px-3 text-sm font-semibold text-amber-200">Retry timeline note</button></div>)}</div></Card> : null}
 
     <Card>
-      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select value={selectedJobId} onChange={(event) => { setSelectedJobId(event.target.value); clearTarget(); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">All jobs</option>{jobs.items.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"}</option>)}</select></label>
+      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select value={selectedJobId} onChange={(event) => { clearTarget(); setSelectedJobId(event.target.value); }} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base"><option value="">All jobs</option>{selectedJobId && !jobIndex.unique.has(selectedJobId) ? <option value={selectedJobId}>Selected job unavailable or ambiguous</option> : null}{jobIndex.selectable.toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((job) => <option key={job.id} value={job.id}>{job.title} · {job.siteAddress || "No address"}</option>)}</select></label>
+      {jobIndex.unusableCount ? <p className="mt-2 text-sm text-amber-200">{jobIndex.unusableCount} job record(s) have missing or duplicate identities and cannot be chosen. Review Jobs before using those records.</p> : null}
+      {uncertainTaskCount ? <p role="status" className="mt-2 text-sm text-amber-200">{uncertainTaskCount} task record(s) have missing or duplicate identities. Counts exclude these records and are incomplete. Status changes and deletion are blocked for them.</p> : null}
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <button type="button" onClick={() => openForm("Task")} className="min-h-12 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 text-sm font-semibold text-cyan-200"><Plus className="mx-auto mb-1 size-4" />Task</button>
         <button type="button" onClick={() => openForm("Snag")} className="min-h-12 rounded-xl border border-amber-500/20 bg-amber-500/5 px-3 text-sm font-semibold text-amber-200"><Wrench className="mx-auto mb-1 size-4" />Snag</button>
@@ -217,16 +242,16 @@ export default function JobTasksPage() {
     </Card>
 
     <section aria-label="Find tasks" className="space-y-3">
-      {targetTaskId || missingLink ? <Card role="status"><p className="font-semibold">{missingLink || !visibleTasks.length ? "This task link is unavailable in the loaded records." : "Showing the task you opened"}</p><p className="mt-1 text-sm text-slate-400">{missingLink || !visibleTasks.length ? "The record may have changed or may not be available to this account." : "Its current status is shown below, including any changes since the assistant answer."}</p><button type="button" onClick={resetInbox} className="mt-3 min-h-12 rounded-xl border border-slate-700 px-3 text-sm font-semibold text-cyan-200">Show all open tasks</button></Card> : null}
+      {targetTaskId || missingLink ? <Card role="status"><p className="font-semibold">{missingLink || !visibleTasks.length ? "This task link is unavailable in the loaded records." : "Showing the task you opened"}</p><p className="mt-1 text-sm text-slate-400">{missingLink || !visibleTasks.length ? "The requested task or job may be missing, ambiguous or have an invalid link. No other record has been substituted." : "Its current status is shown below, including any changes since the assistant answer."}</p><button type="button" onClick={resetInbox} className="mt-3 min-h-12 rounded-xl border border-slate-700 px-3 text-sm font-semibold text-cyan-200">Show all open tasks</button></Card> : null}
       <div role="group" aria-label="Task filters" className="grid grid-cols-3 gap-2 sm:grid-cols-5">{taskInboxFilters.map((item) => <button key={item} type="button" aria-pressed={!targetTaskId && !missingLink && filter === item} onClick={() => { clearTarget(); setFilter(item); }} className={`min-h-12 rounded-xl border px-2 text-sm font-semibold ${!targetTaskId && !missingLink && filter === item ? "border-cyan-400/50 bg-cyan-400/10 text-cyan-200" : "border-slate-700 bg-slate-900 text-slate-300"}`}>{item} <span className="text-xs opacity-70">{jobTasks.filter((task) => taskMatchesInboxFilter(task, item, today)).length}</span></button>)}</div>
-      <label className="block text-sm font-semibold">Search tasks or site address<input type="search" maxLength={160} autoComplete="off" value={query} onChange={(event) => { clearTarget(); setQuery(event.target.value); }} placeholder="Task, job, snag or address…" className="mt-2 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" /></label>
-      <p role="status" className="text-sm text-slate-400">{visibleTasks.length} matching {visibleTasks.length === 1 ? "item" : "items"} · Due includes today and earlier ({today}). Counts are for the selected job, before search.</p>
+      <label className="block text-sm font-semibold">Search tasks or site address<input type="search" maxLength={160} autoComplete="off" autoCapitalize="none" spellCheck={false} enterKeyHint="search" value={query} onChange={(event) => { clearTarget(); setQuery(event.target.value); }} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.currentTarget.blur(); } }} placeholder="Task, job, snag or address…" className="mt-2 min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base" /></label>
+      <p role="status" className="text-sm text-slate-400">{visibleTasks.length} matching saved {visibleTasks.length === 1 ? "record" : "records"} · Due includes today and earlier ({today}). Status counts use unique task identities for the selected job, before search.</p>
       {query || selectedJobId || filter !== "Open" ? <button type="button" onClick={resetInbox} className="min-h-12 text-sm font-semibold text-cyan-200">Reset filters</button> : null}
     </section>
 
     {showForm ? <Card><form onSubmit={createTask} className="space-y-4">
       <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">New {form.type}</p><h2 className="mt-1 text-lg font-bold">Record site action</h2></div><Button type="button" variant="secondary" onClick={() => setShowForm(false)}>Close</Button></div>
-      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose job</option>{jobs.items.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
+      <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Job</span><select required value={form.jobId} onChange={(event) => setForm({ ...form, jobId: event.target.value })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Choose job</option>{form.jobId && !jobIndex.unique.has(form.jobId) ? <option value={form.jobId}>Selected job unavailable or ambiguous</option> : null}{jobIndex.selectable.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}</select></label>
       <div className="grid gap-4 sm:grid-cols-2"><InputField required label="Title" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Type</span><select value={form.type} onChange={(event) => setForm({ ...form, type: event.target.value as JobTaskType })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3"><option>Task</option><option>Snag</option></select></label></div>
       <TextareaField label="Description" value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} />
       <div className="grid gap-4 sm:grid-cols-2"><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value as JobTaskCategory })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3">{categories.map((category) => <option key={category}>{category}</option>)}</select></label><label className="grid gap-2 text-sm font-medium text-slate-300"><span>Priority</span><select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as JobPriority })} className="min-h-12 rounded-xl border border-slate-700 bg-slate-950 px-3">{priorities.map((priority) => <option key={priority}>{priority}</option>)}</select></label></div>
@@ -236,17 +261,20 @@ export default function JobTasksPage() {
     </form></Card> : null}
 
     <section className="space-y-3">
-      {visibleTasks.length ? visibleTasks.slice(0, limit).map((task) => {
-        const job = jobs.items.find((item) => item.id === task.jobId);
+      {visibleTasks.length ? visibleTasks.slice(0, limit).map((task, index) => {
+        const job = jobIndex.unique.get(task.jobId);
+        const uniqueTask = taskIndex.unique.has(task.id);
         const assignee = team.items.find((member) => member.id === task.assignedTo);
         const complete = !isOutstandingJobTask(task);
-        return <Card key={task.id} aria-label={`${task.type}: ${task.title}`} className={`break-words ${targetTaskId === task.id ? "border-cyan-400/50" : complete ? "border-emerald-500/20" : task.type === "Snag" ? "border-amber-500/20" : ""}`}>
+        return <Card key={uniqueTask ? task.id : `source-review:${index}`} aria-label={`${task.type}: ${task.title}`} className={`break-words ${targetTaskId === task.id ? "border-cyan-400/50" : complete ? "border-emerald-500/20" : task.type === "Snag" ? "border-amber-500/20" : ""}`}>
+          {!uniqueTask ? <p className="mb-3 text-sm text-amber-200">Task identity needs review. This saved copy is excluded from counts and cannot be changed or deleted here.</p> : null}
+          {!job ? <p className="mb-3 text-sm text-amber-200">The linked job is unavailable or ambiguous. No job copy was chosen.</p> : null}
           <div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${task.type === "Snag" ? "bg-amber-500/10 text-amber-300" : "bg-cyan-500/10 text-cyan-300"}`}>{task.type}</span><span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">{task.priority}</span><span className="rounded-full bg-slate-800 px-2 py-1 text-xs text-slate-300">{task.status}</span></div><h2 className="mt-3 text-lg font-bold">{task.title}</h2><p className="mt-1 text-sm text-slate-400">{job?.title ?? "Unknown job"} · {task.category}</p></div>{complete ? <CheckCircle2 className="size-6 shrink-0 text-emerald-300" /> : task.priority === "Urgent" ? <AlertTriangle className="size-6 shrink-0 text-red-300" /> : null}</div>
           {task.description ? <p className="mt-4 whitespace-pre-wrap text-sm text-slate-300">{task.description}</p> : null}
           <div className="mt-4 grid gap-2 text-xs text-slate-500 sm:grid-cols-3"><span>Assigned: {assignee?.name ?? "Unassigned"}</span><span>Due: {assistantDay(task.dueDate) !== null ? new Date(`${task.dueDate}T12:00:00`).toLocaleDateString("en-GB") : task.dueDate ? "Date needs review" : "No date"}</span><span>Photos: {task.photos.length}</span></div>
           {!isJobTaskStatus(task.status) ? <p className="mt-3 text-sm text-amber-200">Saved status needs review. Choose a supported next stage after checking the task.</p> : ["Open", "In progress"].includes(task.status) ? <p className="mt-3 text-sm text-slate-400">Complete the task before recording customer confirmation.</p> : task.status === "Customer confirmed" ? <p className="mt-3 text-sm text-slate-400">Reopen the task before moving it to another stage.</p> : null}
-          <div role="group" aria-label="Task status actions" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{jobTaskStatuses.map((status) => <button key={status} type="button" aria-pressed={task.status === status} disabled={!jobTaskStatusTransitionAllowed(task.status, status)} onClick={() => changeStatus(task, status)} className={`min-h-12 rounded-xl border px-2 text-xs font-semibold ${task.status === status ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200" : "border-slate-700 text-slate-300 disabled:opacity-40"}`}>{status}</button>)}</div>
-          <button type="button" onClick={() => removeTask(task)} className="mt-4 min-h-12 text-sm font-semibold text-red-300">Delete {task.type.toLowerCase()}</button>
+          <div role="group" aria-label="Task status actions" className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">{jobTaskStatuses.map((status) => <button key={status} type="button" aria-pressed={task.status === status} disabled={!uniqueTask || !jobTaskStatusTransitionAllowed(task.status, status)} onClick={() => changeStatus(task, status)} className={`min-h-12 rounded-xl border px-2 text-xs font-semibold ${task.status === status ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200" : "border-slate-700 text-slate-300 disabled:opacity-40"}`}>{status}</button>)}</div>
+          <button type="button" disabled={!uniqueTask} onClick={() => removeTask(task)} className="mt-4 min-h-12 text-sm font-semibold text-red-300 disabled:opacity-40">Delete {task.type.toLowerCase()}</button>
         </Card>;
       }) : <Card><h2 className="font-bold">No matching tasks or snags</h2><p className="mt-2 text-sm text-slate-400">Try another filter or search, or choose a job to add an action. Only loaded records are included.</p></Card>}
       {visibleTasks.length > limit ? <button type="button" onClick={() => setLimit((value) => value + 8)} className="min-h-12 w-full rounded-xl border border-slate-700 px-3 text-sm font-semibold">Show more tasks ({visibleTasks.length - limit} remaining)</button> : null}

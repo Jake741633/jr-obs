@@ -28,8 +28,9 @@ function compile(path, dependencies, window) {
   });
   return mod.exports;
 }
-const taskInboxRules = compile("../lib/taskInbox.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": assistantSignals });
-const taskRules = compile("../lib/assistantTasks.ts", { "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": assistantSignals, "./taskInbox": taskInboxRules });
+const taskIdentity = compile("../lib/assistantIdentity.ts", {});
+const taskInboxRules = compile("../lib/taskInbox.ts", { "./assistantIdentity": taskIdentity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": assistantSignals });
+const taskRules = compile("../lib/assistantTasks.ts", { "./assistantIdentity": taskIdentity, "./jobTasks-core.mjs": taskCore, "./assistantSignals-core.mjs": assistantSignals, "./taskInbox": taskInboxRules });
 function harness({ taskActions = false } = {}) {
   let snapshot = { identity: owner, mode: "cloud", isReady: true }, ready = true, paymentsReady = true, tasksReady = true;
   let active, cursor;
