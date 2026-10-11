@@ -72,7 +72,7 @@ test("failed or conflicted job stage attempts stay visibly local and block anoth
   }
 
   const listHandler = functionBody(jobsPage, "updateStatus", "deleteJob");
-  assert.ok(listHandler.indexOf('syncState === "Failed" || syncState === "Conflict"') < listHandler.indexOf("jobs.setItems"));
+  assert.ok(listHandler.indexOf('syncState === "Failed" || syncState === "Conflict"') < listHandler.indexOf("jobs.updateItem"));
   assert.match(jobsPage, /jobStatusSyncBlocked\(job\)/);
 
   const workspaceHandler = functionBody(workspace, "updateStatus", "updateProgressMetric");
@@ -101,7 +101,7 @@ test("field start cards keep failed stages visibly local and block another start
 test("field mutations report pending or offline immediately while office evidence stays unchanged", () => {
   assert.match(jobsPage, /\[id\]: navigator\.onLine \? "Pending" : "Offline"/);
   assert.match(workspace, /setJobStatusSync\(\{ targetKey: jobStatusSyncTargetKey, state: navigator\.onLine \? "Pending" : "Offline" \}\)/);
-  assert.match(jobsPage, /if \(!fieldJobStatusRestricted && result\.timelineEntry\) timeline\.setItems/);
+  assert.match(jobsPage, /if \(!fieldJobStatusRestricted && note\) saveJobNote/);
   assert.match(workspace, /if \(!fieldJobStatusRestricted && result\.timelineEntry\)/);
   assert.match(workspace, /fieldJobStatusRestricted\s*\? "Cloud-confirmed stage changes add a job timeline entry automatically\."\s*: "Every change is written to the job timeline automatically\."/);
 });

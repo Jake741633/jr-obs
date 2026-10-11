@@ -140,6 +140,12 @@ export default function JobsPage() {
   ]);
   const jobMutationScopeKey = JSON.stringify([identityState.mode, jobStatusSyncScopeKey]);
   const jobFormReady = identityState.isReady && jobs.isReady && customers.isReady && builders.isReady && timeline.isReady;
+  const jobStatusSaveReady = jobStatusBoundaryReady && jobs.isReady && (fieldJobStatusRestricted || timeline.isReady);
+  const latestStatusSources = useRef({ ready: false, scopeKey: "", denied: true, fieldRestricted: false, operatorMemberId: "", jobs: jobs.items });
+  useLayoutEffect(() => {
+    latestStatusSources.current = { ready: jobStatusSaveReady, scopeKey: jobMutationScopeKey, denied: jobStatusMutationDenied, fieldRestricted: fieldJobStatusRestricted, operatorMemberId: fieldJobOperatorMemberId, jobs: jobs.items };
+    return () => { latestStatusSources.current = { ...latestStatusSources.current, ready: false, denied: true }; };
+  }, [jobStatusSaveReady, jobMutationScopeKey, jobStatusMutationDenied, fieldJobStatusRestricted, fieldJobOperatorMemberId, jobs.items]);
   const latestSources = useRef({ ready: false, scopeKey: "", editRestricted: true, deleteRestricted: true, jobs: jobs.items, customers: customers.items, builders: builders.items, timeline: timeline.items });
   useLayoutEffect(() => {
     latestSources.current = { ready: jobFormReady, scopeKey: jobMutationScopeKey, editRestricted: jobEditRestricted, deleteRestricted: jobDeleteRestricted, jobs: jobs.items, customers: customers.items, builders: builders.items, timeline: timeline.items };
@@ -242,6 +248,9 @@ export default function JobsPage() {
   }
   function jobStatusLocked(job: Job) {
     return jobStatusMutationDenied
+      || !jobStatusSaveReady
+      || !jobIndex.unique.has(job.id)
+      || (showForm && editingId === job.id)
       || (fieldJobStatusRestricted && !fieldJobOperatorMemberId)
       || (fieldJobStatusRestricted && fieldJobStatusTransitions(job.status).length === 0)
       || jobStatusSyncBlocked(job);
@@ -256,6 +265,9 @@ export default function JobsPage() {
   function jobStatusNotice(job: Job) {
     const syncState = jobStatusSyncState(job);
     if (syncState) return jobStatusSyncMessages[syncState];
+    if (!jobIndex.unique.has(job.id)) return "This job's saved identity is missing or ambiguous. Review its records before changing stage.";
+    if (!jobStatusSaveReady) return "Wait for job records to finish loading before changing stage.";
+    if (showForm && editingId === job.id) return "Save or close this job's edit form before changing its stage.";
     if (jobStatusMutationDenied) return unavailableStatusMessage;
     if (fieldJobStatusRestricted && !fieldJobOperatorMemberId) return unresolvedFieldIdentityMessage;
     if (fieldJobStatusRestricted && fieldJobStatusTransitions(job.status).length === 0) {
@@ -355,25 +367,62 @@ export default function JobsPage() {
       setError(""); setStatusMessage("Timeline note saved on this device. Check sync status before switching devices.");
     } catch (error) { setError(`The job remains saved, but its timeline note could not be saved. ${error instanceof Error ? error.message : "Please try again."}`); }
   }
-  function updateStatus(id: string, nextStatus: CanonicalJobStatus) {
-    const job = jobs.items.find((item) => item.id === id);
-    if (!job) return;
-    const syncState = jobStatusSyncState(job);
-    if (syncState === "Failed" || syncState === "Conflict") {
-      setStatusMessage(jobStatusSyncMessages[syncState]);
-      return;
+  function updateStatus(id: string, nextStatus: CanonicalJobStatus, expected: Job) {
+    const access = latestStatusSources.current;
+    if (!access.ready || access.scopeKey !== jobMutationScopeKey || access.denied || access.fieldRestricted !== fieldJobStatusRestricted) {
+      setStatusMessage(""); setError("Wait for this account's authorized job records to finish loading before changing stage."); return;
     }
     if (jobStatusMutationDenied) { setStatusMessage(""); setError(unavailableStatusMessage); return; }
     if (fieldJobStatusRestricted && !fieldJobOperatorMemberId) { setStatusMessage(""); setError(unresolvedFieldIdentityMessage); return; }
+    if (fieldJobStatusRestricted && access.operatorMemberId !== fieldJobOperatorMemberId) { setStatusMessage(""); setError(unresolvedFieldIdentityMessage); return; }
+    const job = savedIdentityIndex(access.jobs).unique.get(id);
+    if (!job || expected.id !== id) { setStatusMessage(""); setError("This job is unavailable or its saved identity is ambiguous. Review its current record before changing stage."); return; }
+    if (draft.current?.editingId === id) { setError("Save or close this job's edit form before changing its stage."); return; }
+    const syncState = identityState.mode !== "local" && identityState.identity
+      ? queueTargetSyncState(getSyncQueue(), { table: "jobs", sourceId: id }, navigator.onLine) as SyncState
+      : jobStatusSyncState(job);
+    if (syncState === "Failed" || syncState === "Conflict") {
+      setError("");
+      if (jobStatusCloudTracking) {
+        setJobStatusSyncProjection((current) => ({ scopeKey: jobStatusSyncScopeKey, states: { ...(current.scopeKey === jobStatusSyncScopeKey ? current.states : {}), [id]: syncState } }));
+      }
+      setStatusMessage(jobStatusSyncMessages[syncState]);
+      return;
+    }
+    if (!canonicalJobStatuses.includes(nextStatus)) { setStatusMessage(""); setError("Choose an available job stage before saving."); return; }
+    if (job.createdAt !== expected.createdAt) { setStatusMessage(""); setError("This job has been replaced. Review its current record before changing stage."); return; }
+    if (jobBrowseStatus(job, fieldJobStatusRestricted) === nextStatus) { setError(""); setStatusMessage(`Job is already at ${nextStatus}.`); return; }
+    if (job.status !== expected.status) { setStatusMessage(""); setError("This job's stage has changed. Review its current record before choosing another stage."); return; }
     if (fieldJobStatusRestricted && !fieldJobStatusTransitionAllowed(job.status, nextStatus)) {
       setStatusMessage("");
       setError(fieldStatusHandoffMessage);
       return;
     }
+    let saved: Job;
+    let changed = false;
+    let note: JobTimelineEntry | null = null;
+    try {
+      saved = jobs.updateItem(id, (current) => {
+        if (current.createdAt !== expected.createdAt) throw new Error("This job has been replaced. Review its current record before changing stage.");
+        if (jobBrowseStatus(current, fieldJobStatusRestricted) === nextStatus) return current;
+        if (current.status !== expected.status) throw new Error("This job's stage has changed. Review its current record before choosing another stage.");
+        if (fieldJobStatusRestricted && !fieldJobStatusTransitionAllowed(current.status, nextStatus)) throw new Error(fieldStatusHandoffMessage);
+        const now = new Date().toISOString(), timelineId = makeId("timeline");
+        const result = transitionJobStatus({ job: current, nextStatus, now, timelineId, completedBy: "JR OS Jobs" });
+        if (!fieldJobStatusRestricted) {
+          note = result.timelineEntry;
+          if (jobBrowseStatus(current, false) === null) {
+            note = { ...initialJobTimelineEntry({ job: result.job, now, timelineId, completedBy: "JR OS Jobs" }), milestone: nextStatus === "Complete" ? "Job completed" : "Custom update", note: `Job status set to ${nextStatus} after review of the unrecognised saved stage.` };
+          }
+        }
+        changed = true;
+        return result.job;
+      });
+    } catch (error) {
+      setStatusMessage(""); setError(`Job stage save could not be confirmed. Review the saved stage and retry. ${error instanceof Error ? error.message : ""}`); return;
+    }
     setError("");
-    const result = transitionJobStatus({ job, nextStatus, now: new Date().toISOString(), timelineId: makeId("timeline"), completedBy: "JR OS Jobs" });
-    jobs.setItems((current) => current.map((item) => item.id === id ? result.job : item));
-    if (!fieldJobStatusRestricted && result.timelineEntry) timeline.setItems((current) => [result.timelineEntry!, ...current]);
+    if (!changed) { setStatusMessage(`Job is already at ${nextStatus}.`); return; }
     if (jobStatusCloudTracking) {
       setJobStatusSyncProjection((current) => ({
         scopeKey: jobStatusSyncScopeKey,
@@ -385,7 +434,8 @@ export default function JobsPage() {
     }
     setStatusMessage(fieldJobStatusRestricted
       ? `${job.title} stage change to ${nextStatus} queued for secure sync.`
-      : "");
+      : "Job stage saved on this device. Check sync status before switching devices.");
+    if (!fieldJobStatusRestricted && note) saveJobNote({ note, jobTitle: saved.title, jobCreatedAt: saved.createdAt, scopeKey: jobMutationScopeKey });
   }
   function deleteJob(job: Job) {
     if (blockJobDelete()) return;
@@ -441,7 +491,7 @@ export default function JobsPage() {
       </div>
       <p className="text-xs leading-5 text-slate-500">Closed jobs includes Complete, Invoiced, Paid and Cancelled; it does not mean all invoices are paid. Active work excludes closed and on-hold jobs. Needs status review shows records with a missing or unsupported saved stage. Filtering does not change a job.</p>
     </section>
-    {!jobs.isReady ? <Card>Loading jobs…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<BriefcaseBusiness className="size-6" />} title={jobs.items.length ? "No matching jobs" : "No jobs yet"} description={jobs.items.length ? "Change the search or status filter." : jobEditRestricted ? "No assigned jobs are currently available." : "Create the first job and connect it to a customer or builder."} /> : <section aria-label="Job records" className="grid gap-4 xl:grid-cols-2">{filtered.slice(0, limit).map((job) => <Card key={job.id}><div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-start"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{relatedName(job)}</p><h2 className="mt-1 break-words text-lg font-bold sm:text-xl">{job.title}</h2><div className="mt-2">{jobBrowseStatus(job, fieldJobStatusRestricted) !== null ? <StatusBadge status={jobBrowseStatus(job, fieldJobStatusRestricted)!} /> : <span className="inline-flex rounded-lg bg-amber-400/10 px-2 py-1 text-xs font-semibold text-amber-200">Needs status review</span>}{jobBrowseStatus(job, fieldJobStatusRestricted) === null ? <p className="mt-2 break-words text-sm text-amber-200">Saved stage: {typeof job.status === "string" && job.status.trim() ? job.status : "Not recorded"}. Review before choosing a stage.</p> : null}</div></div><div className={`grid ${jobEditRestricted ? "grid-cols-1" : jobDeleteRestricted ? "grid-cols-2" : "grid-cols-3"} gap-2`}><Link href={`/jobs/${encodeURIComponent(job.id)}`} aria-label={`View ${job.title}`} className="grid min-h-12 min-w-12 place-items-center rounded-xl border border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-cyan-300"><Eye className="size-4" /></Link>{!jobEditRestricted ? <button disabled={!jobFormReady || !jobIndex.unique.has(job.id)} onClick={() => startEdit(job)} aria-label={`Edit ${job.title}`} className="grid min-h-12 min-w-12 place-items-center rounded-xl border border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-cyan-300"><Pencil className="size-4" /></button> : null}{!jobDeleteRestricted ? <button disabled={!jobFormReady || !jobIndex.unique.has(job.id)} onClick={() => deleteJob(job)} aria-label={`Delete ${job.title}`} className="grid min-h-12 min-w-12 place-items-center rounded-xl border border-slate-800 text-slate-400 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div></div><div className="mt-4 grid gap-3 text-sm text-slate-400 sm:flex sm:flex-wrap sm:gap-4">{job.siteAddress ? <span className="flex min-w-0 items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" /><span className="break-words">{job.siteAddress}</span></span> : null}{job.startDate ? <span className="flex items-center gap-2"><CalendarDays className="size-4 text-cyan-400" />{new Date(`${job.startDate}T12:00:00`).toLocaleDateString("en-GB")}</span> : null}{job.value ? <span className="font-semibold text-slate-200">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.value)}</span> : null}</div>{!jobEditRestricted && assistantJobBriefingHref(job.id) ? <Link href={assistantJobBriefingHref(job.id)!} className="mt-4 flex min-h-12 items-center rounded-xl border border-cyan-400/30 px-3 text-sm font-semibold text-cyan-200">Ask JR AI about this job</Link> : null}<div className="mt-5 grid gap-2 border-t border-slate-800 pt-4 sm:grid-cols-[auto_1fr] sm:items-center"><span className="text-xs text-slate-500">Quick status</span><select aria-label={`Update ${job.title} status`} value={jobBrowseStatus(job, fieldJobStatusRestricted) ?? ""} disabled={jobStatusLocked(job)} onChange={(e) => updateStatus(job.id, e.target.value as CanonicalJobStatus)} className="min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm">{jobBrowseStatus(job, fieldJobStatusRestricted) === null ? <option value="" disabled>Review saved status</option> : null}{jobStatusOptions(job).filter((item) => canonicalJobStatuses.includes(item)).map((item) => <option key={item}>{item}</option>)}</select>{jobStatusNotice(job) ? <span role="status" className="text-xs text-amber-200 sm:col-span-2">{jobStatusNotice(job)}</span> : null}</div></Card>)}</section>}
+    {!jobs.isReady ? <Card>Loading jobs…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<BriefcaseBusiness className="size-6" />} title={jobs.items.length ? "No matching jobs" : "No jobs yet"} description={jobs.items.length ? "Change the search or status filter." : jobEditRestricted ? "No assigned jobs are currently available." : "Create the first job and connect it to a customer or builder."} /> : <section aria-label="Job records" className="grid gap-4 xl:grid-cols-2">{filtered.slice(0, limit).map((job) => <Card key={job.id}><div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-start"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{relatedName(job)}</p><h2 className="mt-1 break-words text-lg font-bold sm:text-xl">{job.title}</h2><div className="mt-2">{jobBrowseStatus(job, fieldJobStatusRestricted) !== null ? <StatusBadge status={jobBrowseStatus(job, fieldJobStatusRestricted)!} /> : <span className="inline-flex rounded-lg bg-amber-400/10 px-2 py-1 text-xs font-semibold text-amber-200">Needs status review</span>}{jobBrowseStatus(job, fieldJobStatusRestricted) === null ? <p className="mt-2 break-words text-sm text-amber-200">Saved stage: {typeof job.status === "string" && job.status.trim() ? job.status : "Not recorded"}. Review before choosing a stage.</p> : null}</div></div><div className={`grid ${jobEditRestricted ? "grid-cols-1" : jobDeleteRestricted ? "grid-cols-2" : "grid-cols-3"} gap-2`}><Link href={`/jobs/${encodeURIComponent(job.id)}`} aria-label={`View ${job.title}`} className="grid min-h-12 min-w-12 place-items-center rounded-xl border border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-cyan-300"><Eye className="size-4" /></Link>{!jobEditRestricted ? <button disabled={!jobFormReady || !jobIndex.unique.has(job.id)} onClick={() => startEdit(job)} aria-label={`Edit ${job.title}`} className="grid min-h-12 min-w-12 place-items-center rounded-xl border border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-cyan-300"><Pencil className="size-4" /></button> : null}{!jobDeleteRestricted ? <button disabled={!jobFormReady || !jobIndex.unique.has(job.id)} onClick={() => deleteJob(job)} aria-label={`Delete ${job.title}`} className="grid min-h-12 min-w-12 place-items-center rounded-xl border border-slate-800 text-slate-400 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div></div><div className="mt-4 grid gap-3 text-sm text-slate-400 sm:flex sm:flex-wrap sm:gap-4">{job.siteAddress ? <span className="flex min-w-0 items-start gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-cyan-400" /><span className="break-words">{job.siteAddress}</span></span> : null}{job.startDate ? <span className="flex items-center gap-2"><CalendarDays className="size-4 text-cyan-400" />{new Date(`${job.startDate}T12:00:00`).toLocaleDateString("en-GB")}</span> : null}{job.value ? <span className="font-semibold text-slate-200">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(job.value)}</span> : null}</div>{!jobEditRestricted && assistantJobBriefingHref(job.id) ? <Link href={assistantJobBriefingHref(job.id)!} className="mt-4 flex min-h-12 items-center rounded-xl border border-cyan-400/30 px-3 text-sm font-semibold text-cyan-200">Ask JR AI about this job</Link> : null}<div className="mt-5 grid gap-2 border-t border-slate-800 pt-4 sm:grid-cols-[auto_1fr] sm:items-center"><span className="text-xs text-slate-500">Quick status</span><select aria-label={`Update ${job.title} status`} value={jobBrowseStatus(job, fieldJobStatusRestricted) ?? ""} disabled={jobStatusLocked(job)} onChange={(e) => updateStatus(job.id, e.target.value as CanonicalJobStatus, job)} className="min-h-12 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base disabled:cursor-not-allowed disabled:opacity-60 sm:text-sm">{jobBrowseStatus(job, fieldJobStatusRestricted) === null ? <option value="" disabled>Review saved status</option> : null}{jobStatusOptions(job).filter((item) => canonicalJobStatuses.includes(item)).map((item) => <option key={item}>{item}</option>)}</select>{jobStatusNotice(job) ? <span role="status" className="text-xs text-amber-200 sm:col-span-2">{jobStatusNotice(job)}</span> : null}</div></Card>)}</section>}
     {jobs.isReady && filtered.length > limit ? <button type="button" onClick={() => setLimit((value) => value + 8)} className="min-h-12 w-full rounded-xl border border-slate-700 px-4 text-sm font-semibold">Show more jobs ({filtered.length - limit} remaining)</button> : null}
     {!jobEditRestricted ? <div className="fixed inset-x-4 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-30 sm:hidden"><Button className="w-full shadow-2xl" onClick={() => showForm ? resetForm() : openForm()}><Plus className="mr-2 size-4" />{showForm ? "Close job form" : "Create job"}</Button></div> : null}
   </div>;
