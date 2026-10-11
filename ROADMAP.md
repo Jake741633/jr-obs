@@ -34,6 +34,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] JR AI material-ordering and delivery-follow-up answers with exact job scope and purchase-list review links
 - [x] JR AI source-identity review for ambiguous jobs, purchase lists and lines without inflated status counts
 - [x] Job-aware JR AI follow-up questions and one-tap related answers retaining the exact saved job
+- [x] Compact phone question panel with question-first layout and expandable shortcuts/scope help
 - [x] Durable purchase-list creation with retained selections, stable retry identities and repeated-tap protection
 - [x] Phone purchase-line drafts with explicit durable saves, conflict review and confirmed list deletion
 - [x] Phone purchase search, exact job/status filters, uncertain-record review and progressive list cards

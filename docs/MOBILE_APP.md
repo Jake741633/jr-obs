@@ -17,6 +17,8 @@ migration tools remain available in a collapsed section below installation help.
 
 ## Faster everyday actions
 
+JR AI puts Your question before the job selector and shortcut grid, without automatically opening the keyboard. Today, Tomorrow, Job briefing and Materials to order stay immediately visible. More questions reveals the other eight shortcuts, including money, quotes, tasks, snags, next visits and deliveries. How job scope works keeps longer guidance available on demand. Both are native keyboard-accessible disclosures with 48px targets; the visible job selection and ambiguous-identity warnings never hide inside them. Opening help or extra questions does not submit, change scope or clear a typed question/answer. No new storage or account state is introduced.
+
 The phone header's **+ Quick actions** button opens a native modal sheet with
 large targets. Office accounts can open quick quotes, JR AI, customers, surveys
 and the planner; field accounts get assigned jobs, diary, materials, testing and
