@@ -49,7 +49,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [ ] Direct large video-file uploads with durable private binary storage and progress/retry controls
 - [x] Connected photo/notes quote-scope implementation with live account guards, explicit sharing, editable human review and clear billing errors; hosted activation and live generation acceptance remain below
 - [ ] Activate the server-side AI secret/business allowlist on the development preview and verify a funded live generation request (local key authenticates; API credit exhausted)
-- [ ] Connected video/speech analysis and reviewed quote drafts from job media, with explicit AI service setup
+- [x] Short site-video/voice preparation, reviewed speech transcription and sampled-frame quote scope; local preparation and server boundaries implemented with explicit sharing (hosted activation, funded live checks and physical-phone acceptance remain pending)
 - [x] Phone customer profiles with section shortcuts, progressive linked records, searchable activity and exact job-to-JR-AI links
 - [x] Explicit customer-profile job completion with durable saves and separate history-note retries
 - [x] Editable review-request preparation with user-confirmed sent records and durable partial-save retries
