@@ -46,11 +46,25 @@ save retains the prepared photo and retries its queue entry using the same recor
 it does not duplicate metadata. Account/job/permission and ambiguous-identity
 guards apply after asynchronous preparation. Local mode saves the photo directly.
 
+Select up to eight library photos with a combined source size of 100 MB or less.
+Camera shots add to the current selection; a new library selection replaces it.
+Review the filenames and remove unwanted photos before saving. The evidence name
+and user-entered notes apply to every photo, with numbered names for a batch.
+Preparation and saves run one photo at a time, with visible progress. If a save
+fails, completed photos remain saved and retry starts at the first unfinished
+photo, retaining its stable record ID and prepared bytes. Shared details lock
+after the first saved record. A photo without a saved record can still be removed
+to skip an unreadable image; an existing record awaiting its photo bytes must be
+retried. Keep the page open until all chosen photos are saved, then check sync
+status. Device storage limits can interrupt a batch even within these file limits;
+the interface reports partial success instead of claiming cloud upload finished.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
-These notes are labelled as user-entered. Direct video-file upload, automatic
-transcription, visual analysis and media-generated quote drafts are **not yet
-implemented or enabled**. Large video files need a separate durable binary-upload
+These notes are labelled as user-entered. The separate Quote Builder can prepare
+short recordings, review speech transcripts and submit sampled frames for AI quote
+scope; see [Connected AI](CONNECTED_AI.md). Hosted AI activation and funded live
+acceptance remain pending. Direct large video-file storage needs a durable binary-upload
 path; the existing private-file queue uses browser localStorage and the deployed
 bucket contract does not allow video MIME types. No bucket, schema, permission,
 credential or external AI service settings change in this batch.
