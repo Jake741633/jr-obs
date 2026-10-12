@@ -19,6 +19,8 @@ Existing `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` are also
 
 Set the private settings in the intended Netlify deploy context with Functions and Builds scopes, then redeploy. Development-preview setup must not activate production. Never commit `.env.local` or put the key in the browser, a URL, a screenshot, a PR, logs or a Library artifact. The connection check only confirms server configuration; an actual review tests billing and model access.
 
+Netlify can route a preview alias through its immutable deployment address. The build captures only the public `DEPLOY_URL` and `DEPLOY_PRIME_URL` into `JR_OS_DEPLOY_URL` and `JR_OS_DEPLOY_PRIME_URL`; the API permits that exact alias-to-build mapping in addition to a direct same-origin request. No wildcard, sibling preview, production origin or caller-supplied forwarding header grants access. These build values contain no credentials and need no manual setting. Rejected origins expose only a fixed diagnostic category, never the received or expected address.
+
 ## Site video and spoken notes
 
 Open **Use a short video or voice recording** inside Quote Builder's AI panel. Choose a saved recording or use the phone's camera control. Keep clips to 60 seconds and 100 MiB or less. MP4/MOV/WebM video and MP3/M4A/WAV/WebM audio depend on the phone's decoder; an unreadable codec gives an explicit error.

@@ -28,6 +28,11 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Public build addresses only. No credentials belong in Next's bundled env values.
+  env: {
+    JR_OS_DEPLOY_URL: process.env.NETLIFY === "true" ? process.env.DEPLOY_URL || "" : "",
+    JR_OS_DEPLOY_PRIME_URL: process.env.NETLIFY === "true" ? process.env.DEPLOY_PRIME_URL || "" : "",
+  },
   async headers() {
     return [
       {
