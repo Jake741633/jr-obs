@@ -47,6 +47,8 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Reviewed phone contacts: native picker where available, iPhone vCard-file import, editable choices, duplicate review and durable partial-save retries
 - [x] Job evidence capture from camera/photo library with optimised copies, video links and clearly attributed user-entered spoken notes
 - [ ] Direct large video-file uploads with durable private binary storage and progress/retry controls
+- [x] Connected photo/notes quote-scope implementation with live account guards, explicit sharing, editable human review and clear billing errors; hosted activation and live generation acceptance remain below
+- [ ] Activate the server-side AI secret/business allowlist on the development preview and verify a funded live generation request (local key authenticates; API credit exhausted)
 - [ ] Connected video/speech analysis and reviewed quote drafts from job media, with explicit AI service setup
 - [x] Phone customer profiles with section shortcuts, progressive linked records, searchable activity and exact job-to-JR-AI links
 - [x] Explicit customer-profile job completion with durable saves and separate history-note retries

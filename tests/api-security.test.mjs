@@ -22,7 +22,7 @@ function listRouteFiles(directory, prefix = "") {
 }
 
 test("server API route inventory stays explicit for security review", () => {
-  assert.deepEqual(listRouteFiles(apiRoot).sort(), ["materials/lookup/route.ts"]);
+  assert.deepEqual(listRouteFiles(apiRoot).sort(), ["ai/quote-scope/route.ts", "materials/lookup/route.ts"]);
 });
 
 test("supplier lookup accepts no request-controlled organisation selector", () => {
