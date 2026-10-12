@@ -1,1 +1,1 @@
-export function createQuoteScopeHandler(options?: { env?: Record<string, string | undefined>; fetchImpl?: typeof fetch; now?: () => number }): (request: Request) => Promise<Response>;
+export function createQuoteScopeHandler(options?: { env?: Record<string, string | undefined>; deployment?: { url?: string; alias?: string }; fetchImpl?: typeof fetch; now?: () => number }): (request: Request) => Promise<Response>;
