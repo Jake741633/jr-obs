@@ -8,6 +8,8 @@ import { captureSupabaseSessionOwnership, readSupabaseSession, readSupabaseSessi
 import { sameSupabaseSessionOwnership, supabaseSessionUserId } from "../../lib/supabase/sessionOwnership-core.mjs";
 import { photoFileError, prepareJobPhoto } from "../../lib/jobMediaCapture";
 import { parseQuoteScope, quoteScopeNotes } from "../../lib/connectedQuoteScope.mjs";
+import { clipNotes, type ReviewedClip } from "../../lib/quoteClip";
+import { QuoteClipInput, ClipFrames } from "./QuoteClipInput";
 
 type Ownership = ReturnType<typeof captureSupabaseSessionOwnership>;
 type Review = { scope: object; text: string; reviewed: boolean; ownership: Ownership };
@@ -20,9 +22,12 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, onApply }: P
   const enabled = ready && identity.isReady && identity.mode !== "local" && allowed;
   const accountKey = JSON.stringify([identity.mode, member?.organisationId, member?.userId, member?.role, member?.customerSourceId, contextKey]);
   const base = useMemo(() => ({ accountKey, enabled }), [accountKey, enabled]);
-  const [selection, setSelection] = useState<{ base: object; file: File } | null>(null);
-  const photo = selection?.base === base ? selection.file : null;
-  const scope = useMemo(() => ({ base, notes, photo }), [base, notes, photo]);
+  const [selection, setSelection] = useState<{ base: object; file?: File; clip?: ReviewedClip } | null>(null);
+  const selected = selection?.base === base ? selection : null;
+  const photo = selected?.file || null, clip = selected?.clip || null;
+  const scope = useMemo(() => ({ base, notes, selected }), [base, notes, selected]);
+  const [clipVersion, setClipVersion] = useState(0);
+  const clipVersionRef = useRef(0);
   const [review, setReview] = useState<Review | null>(null);
   const [notice, setNotice] = useState<{ scope: object; text: string; error: boolean } | null>(null);
   const [busyScope, setBusyScope] = useState<object | null>(null);
@@ -42,18 +47,26 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, onApply }: P
   const active = () => latest.current.active && latest.current.scope === scope && latest.current.enabled;
   const ownsSession = (ownership: Ownership) => sameSupabaseSessionOwnership(readSupabaseSession(), readSupabaseSessionOwnershipEpoch(), ownership.session, ownership.epoch);
 
+  const canUseClip = () => active() && !operation.current && clipVersionRef.current === clipVersion;
+  function invalidateClipInput() { clipVersionRef.current += 1; setClipVersion(clipVersionRef.current); }
+  function useClip(evidence: ReviewedClip) {
+    if (!canUseClip()) return;
+    try { clipNotes(notes, evidence.transcript); } catch (error) { setNotice({ scope, text: (error as Error).message, error: true }); return; }
+    invalidateClipInput(); setSelection({ base, clip: evidence }); setReview(null); setNotice(null);
+  }
+
   function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]; event.target.value = "";
     if (!file || !active() || operation.current) return;
     const error = photoFileError(file);
     if (error) { setNotice({ scope, text: error, error: true }); return; }
-    setSelection({ base, file });
+    invalidateClipInput(); setSelection({ base, file });
   }
 
   function clear() {
     if (!active()) return;
     operation.current?.controller.abort(); operation.current = null;
-    applied.current = review;
+    applied.current = review; invalidateClipInput();
     setBusyScope(null); setReview(null); setNotice(null); setSelection(null);
   }
 
@@ -63,10 +76,13 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, onApply }: P
     if (!ownership.session?.access_token || ownership.session.is_password_recovery || supabaseSessionUserId(ownership.session) !== member?.userId) {
       setNotice({ scope, text: "Sign in again before using connected AI.", error: true }); return;
     }
-    if (kind === "draft" && (notes.length > 12000 || (!notes.trim() && !photo))) {
-      setNotice({ scope, text: "Add job notes or one photo. Keep the notes under 12,000 characters.", error: true }); return;
+    let requestNotes = notes;
+    try { if (kind === "draft" && clip) requestNotes = clipNotes(notes, clip.transcript); }
+    catch (error) { setNotice({ scope, text: (error as Error).message, error: true }); return; }
+    if (kind === "draft" && (requestNotes.length > 12000 || (!requestNotes.trim() && !photo && !clip?.frames.length))) {
+      setNotice({ scope, text: "Add job notes, a photo or reviewed clip evidence. Keep the combined notes under 12,000 characters.", error: true }); return;
     }
-    const task = { controller: new AbortController() }; operation.current = task;
+    const task = { controller: new AbortController() }; operation.current = task; invalidateClipInput();
     const isCurrent = () => active() && operation.current === task && ownsSession(ownership);
     setBusyScope(scope); setNotice(null); setReview(null);
     try {
@@ -75,7 +91,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, onApply }: P
       const response = await fetch("/api/ai/quote-scope", {
         method: "POST", cache: "no-store", redirect: "error", signal: task.controller.signal,
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${ownership.session.access_token}`, "X-JR-Organisation": member!.organisationId },
-        body: JSON.stringify(kind === "status" ? { operation: "status" } : { operation: "draft", notes, consent: true, ...(prepared ? { photo: prepared.dataUrl } : {}) }),
+        body: JSON.stringify(kind === "status" ? { operation: "status" } : { operation: "draft", notes: requestNotes, consent: true, ...(prepared ? { photo: prepared.dataUrl } : {}), ...(clip?.frames.length ? { frames: clip.frames } : {}) }),
       });
       const payload = await response.json();
       if (!isCurrent()) return;
@@ -110,10 +126,10 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, onApply }: P
 
   if (member && !allowed) return null;
   return <details className="mt-5 rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4">
-    <summary className="min-h-12 cursor-pointer py-3 font-bold">Review notes and a photo with connected AI</summary>
+    <summary className="min-h-12 cursor-pointer py-3 font-bold">Review notes, photos or a site recording with AI</summary>
     <div className="mt-3 space-y-4">
       <p className="text-sm text-slate-300">Use the job notes above, including any spoken details you have typed or pasted. AI suggests an unpriced scope and questions for you to check.</p>
-      <p className="text-sm text-slate-400">Review with AI sends those notes and the chosen photo to OpenAI. Only include information you want to share. Video and audio transcription will be added separately.</p>
+      <p className="text-sm text-slate-400">Review with AI sends the job notes, any checked transcript and the selected photo or sampled frames to OpenAI. Only include information you want to share.</p>
       {!enabled ? <p className="text-sm text-amber-200">Sign in with an office account and wait for your job data to load before using connected AI.</p> : null}
       <fieldset disabled={!enabled || busy} className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -123,6 +139,12 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, onApply }: P
         {photo ? <p className="break-all text-sm text-cyan-200">Selected: {photo.name}</p> : null}
         <p className="text-xs text-slate-400">One photo up to 25 MB; a smaller copy is sent. Save it to the job separately if you need to keep it as evidence.</p>
       </fieldset>
+      <QuoteClipInput key={clipVersion} context={scope} enabled={enabled && !busy} notes={notes} organisationId={member?.organisationId || ""} userId={member?.userId || ""} canUse={canUseClip} onUse={useClip} />
+      {clip ? <div className="space-y-3 rounded-xl border border-cyan-500/20 p-3">
+        <p className="font-semibold">Reviewed recording evidence for this AI request</p>
+        {clip.transcript ? <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{clip.transcript}</p> : <p className="text-sm text-slate-400">Using sampled frames with the typed job notes.</p>}
+        <ClipFrames frames={clip.frames} />
+      </div> : null}
       <div className="flex flex-wrap gap-3">
         <Button type="button" disabled={!enabled || busy} onClick={() => run("draft")}>{busy ? "Checking AI…" : "Review with AI"}</Button>
         <Button type="button" disabled={!enabled || busy} onClick={() => run("status")}>Check connection</Button>

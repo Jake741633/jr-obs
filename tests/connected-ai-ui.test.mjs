@@ -8,6 +8,8 @@ import * as scopeHelpers from "../lib/connectedQuoteScope.mjs";
 import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
 
 const source = ts.transpileModule(readFileSync(new URL("../components/ai/ConnectedQuoteAssistant.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+const clipModule = { exports: {} };
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../lib/quoteClip.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { module: clipModule, exports: clipModule.exports, Error, Set, Number, Math });
 const draft = { title: "Kitchen", summary: "Two sockets requested.", scope: ["Confirm two socket positions."], questions: ["Confirm cable route."], exclusions: ["Heating-controls wiring excluded."] };
 function harness() {
   let cursor = 0, epoch = 1, session = { access_token: "token", user: { id: "user-1" } }, fetcher = async () => new Response(JSON.stringify({ draft })), prepare = async () => ({ dataUrl: "data:image/jpeg;base64,/9j/2Q==" });
@@ -25,6 +27,8 @@ function harness() {
     "../../lib/supabase/sessionOwnership-core.mjs": ownership,
     "../../lib/jobMediaCapture": { photoFileError: file => file.type === "image/jpeg" ? "" : "Choose a photo", prepareJobPhoto: file => prepare(file) },
     "../../lib/connectedQuoteScope.mjs": scopeHelpers,
+    "../../lib/quoteClip": clipModule.exports,
+    "./QuoteClipInput": { QuoteClipInput: "QuoteClipInput", ClipFrames: "ClipFrames" },
   };
   const mod = { exports: {} };
   vm.runInNewContext(source, { module: mod, exports: mod.exports, Error, JSON, AbortController, require: key => { assert.ok(key in dependencies, key); return dependencies[key]; }, fetch: async (url, init) => { calls.push({ url, init }); return fetcher(); } });
@@ -33,6 +37,7 @@ function harness() {
   return { props, identity, calls, applies, render, button,
     fetch(fn) { fetcher = fn; }, prepare(fn) { prepare = fn; },
     photo() { nodes(render()).find(node => node.type === "input" && node.props.type === "file").props.onChange({ target: { files: [{ name: "kitchen.jpg", type: "image/jpeg", size: 100 }], value: "" } }); render(); },
+    clipPanel() { const panel = nodes(render()).find(node => node.type === "QuoteClipInput"); assert.ok(panel, "clip panel exists"); return panel; },
     async run() { await button("Review with AI").props.onClick(); render(); },
     review() { nodes(render()).find(node => node.type === "input" && node.props.type === "checkbox").props.onChange({ target: { checked: true } }); render(); },
     account(patch) { Object.assign(identity.identity, patch); render(); },
@@ -73,4 +78,20 @@ test("billing failures preserve notes and connection checks do not submit source
   const h = harness(); h.fetch(async () => new Response(JSON.stringify({ code: "billing_required", error: "OpenAI API credit is exhausted." }), { status: 402 })); await h.run(); assert.match(text(h.render()), /credit is exhausted/); assert.equal(h.props.notes, "Two kitchen sockets"); assert.equal(h.applies.length, 0);
   h.fetch(async () => new Response(JSON.stringify({ configured: true, message: "Server configured; credit checked on review." })));
   await h.button("Check connection").props.onClick(); assert.deepEqual(JSON.parse(h.calls[1].init.body), { operation: "status" });
+});
+
+const clipEvidence = { transcript: "Add a pendant by the window.", frames: [{ dataUrl: "data:image/jpeg;base64,/9j/2Q==", seconds: 3 }], duration: 30 };
+test("reviewed clip evidence joins typed notes and sampled frames only on the explicit scope request", async () => {
+  const h = harness(); h.clipPanel().props.onUse(clipEvidence); h.render(); assert.equal(h.calls.length, 0); assert.equal(h.props.notes, "Two kitchen sockets");
+  await h.run(); const body = JSON.parse(h.calls[0].init.body); assert.match(body.notes, /Two kitchen sockets/); assert.match(body.notes, /Reviewed speech from site recording/); assert.match(body.notes, /pendant/); assert.deepEqual(body.frames, clipEvidence.frames); assert.equal(body.photo, undefined);
+});
+test("old clip handoffs cannot change a new parent input or a running scope request", async () => {
+  for (const change of [h => { h.props.notes = "Changed job notes"; h.render(); }, h => h.photo(), h => { h.props.contextKey = "job-2"; h.render(); }, h => { h.props.ready = false; h.render(); }]) {
+    const h = harness(), use = h.clipPanel().props.onUse; change(h); use(clipEvidence); assert.doesNotMatch(text(h.render()), /pendant/);
+  }
+  const h = harness(), use = h.clipPanel().props.onUse; let done; h.fetch(() => new Promise(resolve => { done = resolve; })); const pending = h.run(); use(clipEvidence); done(new Response(JSON.stringify({ draft }))); await pending; assert.doesNotMatch(JSON.stringify(h.calls), /pendant/);
+});
+test("choosing a photo replaces clip evidence and oversized combined notes cannot be submitted", async () => {
+  const h = harness(); h.clipPanel().props.onUse(clipEvidence); h.render(); h.photo(); await h.run(); assert.equal(JSON.parse(h.calls[0].init.body).frames, undefined);
+  const long = harness(); long.clipPanel().props.onUse({ ...clipEvidence, transcript: "x".repeat(12000) }); long.render(); assert.match(text(long.render()), /12,000/); assert.equal(long.calls.length, 0);
 });
