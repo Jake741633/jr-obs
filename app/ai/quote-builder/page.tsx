@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { AiConfidenceScore } from "../../../components/ai/AiConfidenceScore";
 import { AiToolNav } from "../../../components/ai/AiToolNav";
+import { ConnectedQuoteAssistant } from "../../../components/ai/ConnectedQuoteAssistant";
 import { WhyRecommendation } from "../../../components/ai/WhyRecommendation";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -265,8 +266,19 @@ export default function AiQuoteBuilderPage() {
                   ? "Paste the transcript from your voice note here. Include quantities, access, customer requests, testing and exclusions where known."
                   : "Example: Replace consumer unit with RCBO board and SPD. Existing board under stairs. Allow for testing, labels and certification. Customer wants work on a Friday."}
               />
-              {sourceMode === "Voice transcript" ? <p className="mt-2 text-xs text-slate-500">Use your phone&apos;s dictation or transcription, then paste the words here. JR OS never sends audio in this local-first version.</p> : null}
+              {sourceMode === "Voice transcript" ? <p className="mt-2 text-xs text-slate-500">Use your phone&apos;s dictation or transcription, then paste the words here. Connected AI can review the pasted text; audio files are not uploaded by this form.</p> : null}
             </div>
+            <ConnectedQuoteAssistant
+              notes={notes}
+              contextKey={JSON.stringify([jobId, customerId, builderId, siteAddress])}
+              ready={ready && (!jobId || jobs.items.filter(item => item.id === jobId).length === 1)}
+              onApply={(sourceNotes, reviewedNotes) => {
+                if (!ready || sourceNotes !== notes) return;
+                setNotes(current => current === sourceNotes ? reviewedNotes : current);
+                setDraft(null);
+                setMessage("Reviewed AI scope added to the notes. Create a priced draft and check each line before saving.");
+              }}
+            />
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-medium text-slate-300">
                 <span>Job type</span>
@@ -298,7 +310,7 @@ export default function AiQuoteBuilderPage() {
               <InputField label="Site address" value={siteAddress} onChange={(event) => setSiteAddress(event.target.value)} />
               <InputField label="Valid until" type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} />
             </div>
-            <Button className="mt-5 w-full" onClick={generateDraft}><Sparkles className="mr-2 size-4" />Create AI draft</Button>
+            <Button className="mt-5 w-full" onClick={generateDraft}><Sparkles className="mr-2 size-4" />Create priced draft from notes</Button>
           </Card>
 
           {draft ? (

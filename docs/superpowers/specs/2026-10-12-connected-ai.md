@@ -1,0 +1,13 @@
+# Connected quote scope assistance
+
+Jake wants less manual customer entry, job photo/video evidence and AI help drafting electrical quotes. Contact import and job photo evidence already exist. This increment connects the existing Quote Builder to OpenAI for a deliberately reviewed, unpriced scope from entered notes and one chosen photo. Video storage and transcription remain a subsequent increment.
+
+Only a signed-in, active owner/admin/office member of the server-configured business can use the paid connection. The server revalidates identity and membership before sending and before returning a result. The key stays server-side. No CRM collection, customer details or saved media is automatically sent. The user explicitly submits the displayed notes and chosen photo. No model tools, remote URL fetching, record writes, automatic quotes or message sending are introduced.
+
+The response contains a title, summary, proposed scope, questions and exclusions. It cannot provide price fields. The prompt requires stated quantities, visible evidence uncertainty, fixed-scope installation pricing and exclusion of heating-controls wiring. Photos cannot establish compliance, hidden cable routes or supply capacity. The user edits and confirms the result before replacing the quote notes; the existing priced-draft workflow stays separate.
+
+Requests accept 12,000 characters of notes and one optimised JPEG of at most 1,500,000 bytes. Bodies are bounded at 2,100,000 bytes while streaming. Responses are bounded at 100,000 bytes and validated against the application schema. A 40-second provider timeout, one in-flight request and four starts per minute per process reduce accidental repeated spending; these are not distributed spending caps. The configured API project must retain its own usage controls. Missing configuration, denied access, stale identity, quota exhaustion, rate limiting, refusal and malformed output fail without fallback fabricated analysis.
+
+State is transient. Account, role, target selection, source-note and readiness changes cancel requests and invalidate results. Old callbacks and double taps cannot submit or apply another result. Photos are not persisted by this feature.
+
+Release remains development-preview only. Full regression, lint, build, independent review and exact-deploy checks are required. A live request currently authenticates but returns `credit_balance_exhausted`; no successful generation can be claimed until billing is funded. The local key is saved outside git. Hosting activation additionally needs a secure server environment write, which the currently exposed Netlify connector cannot perform.
