@@ -1,7 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
-import { BriefcaseBusiness, Plus, Search, Star, Trash2 } from "lucide-react";
+import { FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { BriefcaseBusiness, Plus, Search, Star } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
@@ -9,25 +9,45 @@ import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
 import { useJobPacksCollection, useMaterialsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId } from "../../lib/storage";
-import type { JobPack, JobPackMaterial } from "../../lib/models";
+import { StarterCatalogue } from "../../components/catalogue/StarterCatalogue";
+import { JobPackBreakdown } from "../../components/jobs/JobPackBreakdown";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
+import { captureSupabaseSessionOwnership, readSupabaseSession, readSupabaseSessionOwnershipEpoch } from "../../lib/supabase/client";
+import { sameSupabaseSessionOwnership, supabaseSessionUserId } from "../../lib/supabase/sessionOwnership-core.mjs";
+import { savedIdentityIndex } from "../../lib/assistantIdentity";
+import { jobPackTotals } from "../../lib/jobPackCatalogue";
+import type { JobPack, JobPackMaterial, Material } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
-const categories = ["Consumer unit", "Rewire", "EICR", "Fault finding", "EV charger", "Commercial small works", "Lighting", "Emergency lighting", "Fire alarm", "Custom"];
-const blankForm = { name: "", category: "Custom", description: "", labourDescription: "Electrician labour", labourHours: "8", labourRate: "50", testingRequirements: "", certificatesRequired: "", notes: "" };
-const blankMaterial = { materialId: "", description: "", quantity: "1", unitPrice: "" };
+const categories = ["Consumer unit", "Rewire", "EICR", "Fault finding", "EV charger", "Domestic small works", "Commercial small works", "Dedicated supplies", "Ventilation", "Kitchen", "Earthing and bonding", "Containment", "Lighting", "Emergency lighting", "Fire alarm", "Custom"];
+const blankForm = { name: "", category: "Custom", description: "", labourDescription: "Electrician labour", labourHours: "8", labourRate: "50", testingRequirements: "", certificatesRequired: "", notes: "", internalNotes: "" };
+const blankMaterial = { materialId: "", description: "", quantity: "1", unitPrice: "", unitCost: "" };
 
 export default function JobPacksPage() {
   const packs = useJobPacksCollection();
   const materialsLibrary = useMaterialsCollection();
-  const [showForm, setShowForm] = useState(false);
+  const identityState = useCloudIdentity(), member = identityState.identity, local = identityState.mode === "local";
+  const ownership = captureSupabaseSessionOwnership();
+  const enabled = identityState.isReady && packs.isReady && materialsLibrary.isReady && (local || Boolean(member && ["owner", "admin", "office"].includes(member.role)));
+  const accountKey = String(JSON.stringify([identityState.mode, member?.organisationId, member?.userId, member?.role, member?.customerSourceId, ownership.epoch]));
+  const scope = useMemo(() => ({ accountKey, enabled }), [accountKey, enabled]);
+  const [draft, setDraft] = useState<{ ownerKey: string; original?: JobPack } | null>(null);
+  const showForm = enabled && draft?.ownerKey === accountKey;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [form, setForm] = useState(blankForm);
   const [materials, setMaterials] = useState<JobPackMaterial[]>([]);
   const [materialLine, setMaterialLine] = useState(blankMaterial);
-
-  const filtered = useMemo(() => packs.items.filter((pack) => `${pack.name} ${pack.category} ${pack.description}`.toLowerCase().includes(search.toLowerCase())), [packs.items, search]);
+  const latest = useRef({ active: false, scope, packs, materialsLibrary, draft });
+  const consumed = useRef<object | null>(null);
+  useLayoutEffect(() => { latest.current = { active: true, scope, packs, materialsLibrary, draft }; return () => { latest.current.active = false; }; });
+  const active = () => latest.current.active && latest.current.scope === scope && enabled
+    && (local || Boolean(ownership.session?.access_token && !ownership.session.is_password_recovery && supabaseSessionUserId(ownership.session) === member?.userId
+      && sameSupabaseSessionOwnership(readSupabaseSession(), readSupabaseSessionOwnershipEpoch(), ownership.session, ownership.epoch)));
+  const draftActive = () => active() && showForm && latest.current.draft === draft && consumed.current !== draft;
+  const packIndex = savedIdentityIndex(packs.items), materialIndex = savedIdentityIndex(materialsLibrary.items);
+  const filtered = enabled ? packIndex.selectable.filter(pack => `${pack.name} ${pack.category} ${pack.description} ${pack.materials.map(line => line.description).join(" ")}`.toLowerCase().includes(search.toLowerCase())) : [];
   const labourTotal = Number(form.labourHours || 0) * Number(form.labourRate || 0);
   const materialsTotal = materials.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
 
@@ -36,87 +56,125 @@ export default function JobPacksPage() {
     setMaterials([]);
     setMaterialLine(blankMaterial);
     setEditingId(null);
-    setShowForm(false);
+    setDraft(null);
     setError("");
   }
 
   function selectLibraryMaterial(materialId: string) {
-    const selected = materialsLibrary.items.find((item) => item.id === materialId);
-    setMaterialLine({ materialId, description: selected?.name ?? "", quantity: "1", unitPrice: selected ? String(selected.sellPrice) : "" });
+    if (!draftActive()) return;
+    const selected = materialIndex.unique.get(materialId);
+    setMaterialLine({ materialId: selected?.id || "", description: selected?.name ?? "", quantity: "1", unitPrice: selected ? String(selected.sellPrice) : "", unitCost: selected ? String(selected.tradeCost) : "" });
   }
 
   function addMaterial() {
+    if (!draftActive()) return;
     const quantity = Number(materialLine.quantity);
     const unitPrice = Number(materialLine.unitPrice);
-    if (!materialLine.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) {
+    const unitCost = materialLine.unitCost.trim() ? Number(materialLine.unitCost) : undefined;
+    if (!materialLine.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || (unitCost !== undefined && (!Number.isFinite(unitCost) || unitCost < 0))) {
       setError("Add a material description, positive quantity and valid selling price.");
       return;
     }
-    setMaterials((current) => [...current, { id: makeId("jpm"), materialId: materialLine.materialId || undefined, description: materialLine.description.trim(), quantity, unitPrice }]);
+    setMaterials((current) => [...current, { id: makeId("jpm"), materialId: materialLine.materialId || undefined, description: materialLine.description.trim(), quantity, unitPrice, unitCost }]);
     setMaterialLine(blankMaterial);
     setError("");
   }
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (!draftActive()) return;
     const labourHours = Number(form.labourHours);
     const labourRate = Number(form.labourRate);
     if (!form.name.trim()) { setError("Job pack name is required."); return; }
     if (!Number.isFinite(labourHours) || labourHours < 0 || !Number.isFinite(labourRate) || labourRate < 0) { setError("Labour hours and rate must be valid positive amounts."); return; }
     const now = new Date().toISOString();
-    const payload = { name: form.name.trim(), category: form.category, description: form.description, labourDescription: form.labourDescription.trim() || "Electrician labour", labourHours, labourRate, materials, testingRequirements: form.testingRequirements, certificatesRequired: form.certificatesRequired, notes: form.notes };
-    packs.setItems((current) => editingId
-      ? current.map((pack) => pack.id === editingId ? { ...pack, ...payload, updatedAt: now } : pack)
-      : [{ id: makeId("pack"), ...payload, createdAt: now, updatedAt: now }, ...current]);
-    reset();
+    const payload = { name: form.name.trim(), category: form.category, description: form.description, labourDescription: form.labourDescription.trim() || "Electrician labour", labourHours, labourRate, materials, testingRequirements: form.testingRequirements, certificatesRequired: form.certificatesRequired, notes: form.notes, internalNotes: form.internalNotes };
+    if (jobPackTotals(payload, materialsLibrary.items).total === null || savedIdentityIndex(materials).unusableCount || materials.some(line => !line.description.trim() || (line.unitCost !== undefined && (!Number.isFinite(line.unitCost) || line.unitCost < 0)))) { setError("Check each material description, positive quantity and non-negative buying/selling amounts."); return; }
+    try {
+      if (editingId) {
+        if (!savedIdentityIndex(latest.current.packs.items).unique.has(editingId)) throw new Error("The job pack changed or is ambiguous. Reload it before saving.");
+        packs.updateItem(editingId, current => {
+          if (!draftActive() || JSON.stringify(current) !== JSON.stringify(draft?.original)) throw new Error("The job pack changed while you were editing. Reopen it before saving.");
+          return { ...current, ...payload, updatedAt: now };
+        });
+      } else packs.createItem({ id: makeId("pack"), ...payload, createdAt: now, updatedAt: now });
+      consumed.current = draft; reset();
+    } catch (error) { setError(error instanceof Error ? error.message : "The pack could not be saved. Your draft is unchanged."); }
   }
 
   function edit(pack: JobPack) {
-    setForm({ name: pack.name, category: pack.category, description: pack.description, labourDescription: pack.labourDescription, labourHours: String(pack.labourHours), labourRate: String(pack.labourRate), testingRequirements: pack.testingRequirements, certificatesRequired: pack.certificatesRequired, notes: pack.notes });
-    setMaterials(pack.materials);
+    if (!active() || savedIdentityIndex(latest.current.packs.items).unique.get(pack.id) !== pack) return;
+    setForm({ name: pack.name, category: pack.category, description: pack.description, labourDescription: pack.labourDescription, labourHours: String(pack.labourHours), labourRate: String(pack.labourRate), testingRequirements: pack.testingRequirements, certificatesRequired: pack.certificatesRequired, notes: pack.notes, internalNotes: pack.internalNotes || "" });
+    setMaterials(structuredClone(pack.materials));
     setEditingId(pack.id);
-    setShowForm(true);
+    setDraft({ ownerKey: accountKey, original: structuredClone(pack) });
     setError("");
   }
 
   function remove(pack: JobPack) {
-    if (window.confirm(`Delete ${pack.name}? This cannot be undone.`)) packs.remove((item) => item.id === pack.id);
+    if (!active() || savedIdentityIndex(latest.current.packs.items).unique.get(pack.id) !== pack || !window.confirm(`Delete ${pack.name}? This cannot be undone.`) || !active()) return;
+    try { packs.removeItem(pack.id, current => { if (!active() || JSON.stringify(current) !== JSON.stringify(pack)) throw new Error("The job pack changed. Review it before deleting."); }); }
+    catch (error) { setError(error instanceof Error ? error.message : "The pack could not be deleted."); }
   }
 
+  function canUseMaterial(material: Material) {
+    if (!active() || !latest.current.materialsLibrary.isReady) return false;
+    const current = savedIdentityIndex(latest.current.materialsLibrary.items).unique.get(material.id);
+    return Boolean(current && ["name", "supplier", "stockCode", "supplierUrl"].every(key => current[key as keyof Material] === material[key as keyof Material]));
+  }
+
+  function updateLine(id: string, patch: Partial<JobPackMaterial>) { if (draftActive()) setMaterials(current => current.map(line => line.id === id ? { ...line, ...patch } : line)); }
+
   return <div className="space-y-6">
-    <PageHeader eyebrow="Templates" title="Job Packs" description="Create reusable labour, material, testing and certification templates for common electrical work." action={<Button onClick={() => showForm ? reset() : setShowForm(true)}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New job pack"}</Button>} />
+    <PageHeader eyebrow="Templates" title="Job Packs" description="Reusable electrical scopes with material quantities, buying allowances and fixed-price estimates. Review every pack for the actual job." action={<Button disabled={!enabled} onClick={() => { if (!active()) return; if (showForm) reset(); else { reset(); setDraft({ ownerKey: accountKey }); } }}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New job pack"}</Button>} />
+    <StarterCatalogue materials={materialsLibrary} packs={packs} identityState={identityState} />
+    {!showForm && error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}
 
     {showForm ? <Card><form onSubmit={submit} className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <InputField required label="Job pack name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
-        <InputField label="Labour hours" type="number" min="0" step="0.25" value={form.labourHours} onChange={(e) => setForm({ ...form, labourHours: e.target.value })} />
-        <InputField label="Charge rate (£/hour)" type="number" min="0" step="0.01" value={form.labourRate} onChange={(e) => setForm({ ...form, labourRate: e.target.value })} />
+        <InputField label="Labour hours" type="number" min="0" step="any" value={form.labourHours} onChange={(e) => setForm({ ...form, labourHours: e.target.value })} />
+        <InputField label="Charge rate (£/hour)" type="number" min="0" step="any" value={form.labourRate} onChange={(e) => setForm({ ...form, labourRate: e.target.value })} />
       </div>
       <div className="grid gap-4 md:grid-cols-2"><TextareaField label="Scope description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /><TextareaField label="Labour description" value={form.labourDescription} onChange={(e) => setForm({ ...form, labourDescription: e.target.value })} /></div>
 
       <div className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
         <h2 className="font-semibold">Pack materials</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_110px_150px_auto]">
-          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Library material</span><select value={materialLine.materialId} onChange={(e) => selectLibraryMaterial(e.target.value)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Custom item</option>{materialsLibrary.items.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Library material</span><select value={materialLine.materialId} onChange={(e) => selectLibraryMaterial(e.target.value)} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3"><option value="">Custom item</option>{materialIndex.selectable.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <InputField label="Description" value={materialLine.description} onChange={(e) => setMaterialLine({ ...materialLine, description: e.target.value })} />
-          <InputField label="Qty" type="number" min="0.01" step="0.01" value={materialLine.quantity} onChange={(e) => setMaterialLine({ ...materialLine, quantity: e.target.value })} />
-          <InputField label="Sell price (£)" type="number" min="0" step="0.01" value={materialLine.unitPrice} onChange={(e) => setMaterialLine({ ...materialLine, unitPrice: e.target.value })} />
+          <InputField label="Qty" type="number" min="0.01" step="any" value={materialLine.quantity} onChange={(e) => setMaterialLine({ ...materialLine, quantity: e.target.value })} />
+          <InputField label="Sell price (£)" type="number" min="0" step="any" value={materialLine.unitPrice} onChange={(e) => setMaterialLine({ ...materialLine, unitPrice: e.target.value })} />
+          <InputField label="Buying cost each (£)" type="number" min="0" step="any" value={materialLine.unitCost} onChange={(e) => setMaterialLine({ ...materialLine, unitCost: e.target.value })} />
           <Button type="button" className="self-end" onClick={addMaterial}>Add</Button>
         </div>
-        <div className="mt-4 space-y-2">{materials.map((item) => <div key={item.id} className="flex items-center justify-between gap-4 rounded-xl bg-slate-900 px-4 py-3 text-sm"><div><span className="font-medium">{item.description}</span><span className="ml-2 text-slate-500">{item.quantity} × {money.format(item.unitPrice)}</span></div><div className="flex items-center gap-3"><strong>{money.format(item.quantity * item.unitPrice)}</strong><button type="button" onClick={() => setMaterials((current) => current.filter((line) => line.id !== item.id))} className="text-slate-500 hover:text-red-300"><Trash2 className="size-4" /></button></div></div>)}</div>
+        <div className="mt-4 space-y-3">{materials.map(item => <div key={item.id} className="min-w-0 space-y-3 rounded-xl bg-slate-900 p-3 text-sm">
+          <p className="break-words font-semibold">{item.description}</p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <InputField label={`Quantity · ${item.description}`} type="number" min="0.01" step="any" value={item.quantity} onChange={event => updateLine(item.id, { quantity: Number(event.target.value) })} />
+            <InputField label={`Buying cost each (£) · ${item.description}`} type="number" min="0" step="any" value={item.unitCost ?? ""} onChange={event => updateLine(item.id, { unitCost: event.target.value.trim() ? Number(event.target.value) : undefined })} />
+            <InputField label={`Selling price each (£) · ${item.description}`} type="number" min="0" step="any" value={item.unitPrice} onChange={event => updateLine(item.id, { unitPrice: Number(event.target.value) })} />
+          </div><Button type="button" variant="secondary" onClick={() => { if (draftActive()) setMaterials(current => current.filter(line => line.id !== item.id)); }}>Remove material line</Button>
+        </div>)}</div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3"><TextareaField label="Testing requirements" value={form.testingRequirements} onChange={(e) => setForm({ ...form, testingRequirements: e.target.value })} /><TextareaField label="Certificates required" value={form.certificatesRequired} onChange={(e) => setForm({ ...form, certificatesRequired: e.target.value })} /><TextareaField label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
+      <p className="text-xs text-amber-200">Scope, testing, certification and Notes are copied into the quote. Keep internal prices and history in the separate field below.</p>
+      <TextareaField label="Internal pricing notes" value={form.internalNotes} onChange={event => setForm({ ...form, internalNotes: event.target.value })} />
       <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Labour {money.format(labourTotal)}</p><p className="text-sm text-slate-400">Materials {money.format(materialsTotal)}</p><p className="text-xl font-bold">Pack total {money.format(labourTotal + materialsTotal)}</p><Button type="submit" className="mt-3">{editingId ? "Update job pack" : "Save job pack"}</Button></div></div>
     </form></Card> : null}
 
     <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search job packs" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
 
-    {!packs.isReady ? <Card>Loading job packs…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<BriefcaseBusiness className="size-6" />} title={packs.items.length ? "No matching job packs" : "No job packs yet"} description={packs.items.length ? "Try a different search." : "Create reusable templates for rewires, consumer units, EICRs and other electrical work."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((pack) => {
-      const labour = pack.labourHours * pack.labourRate;
-      const materialCost = pack.materials.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-      return <Card key={pack.id}><div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{pack.category}</p><h2 className="mt-1 text-lg font-bold">{pack.name}</h2></div><Star className="size-4 text-amber-300" /></div><p className="mt-3 text-sm leading-6 text-slate-400">{pack.description || "Reusable electrical job template."}</p><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><div className="rounded-xl bg-slate-950 p-3"><p className="text-slate-500">Labour</p><p className="font-semibold">{pack.labourHours}h · {money.format(labour)}</p></div><div className="rounded-xl bg-slate-950 p-3"><p className="text-slate-500">Materials</p><p className="font-semibold">{pack.materials.length} lines · {money.format(materialCost)}</p></div></div><div className="mt-4 flex items-center justify-between border-t border-slate-800 pt-4"><strong>{money.format(labour + materialCost)}</strong><div className="flex gap-2"><Button variant="secondary" onClick={() => edit(pack)}>Edit</Button><Button variant="danger" onClick={() => remove(pack)}>Delete</Button></div></div></Card>;
-    })}</section>}
+    {!enabled ? <Card>Load your job packs and sign in with an office account to view or edit saved prices.</Card> : <>
+      {packIndex.unusableCount ? <p role="alert" className="text-sm text-amber-200">Some packs have missing or duplicate IDs and are withheld. Resolve them before editing.</p> : null}
+      {filtered.length === 0 ? <EntityEmptyState icon={<BriefcaseBusiness className="size-6" />} title={packs.items.length ? "No matching job packs" : "No job packs yet"} description="Browse the starter catalogue above or create your own job pack." /> : <section className="grid gap-4 lg:grid-cols-2">{filtered.map(pack => <Card key={pack.id}>
+        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{pack.category}</p><h2 className="mt-1 text-lg font-bold">{pack.name}</h2></div><Star className="size-4 text-amber-300" /></div>
+        <p className="mt-3 text-sm leading-6 text-slate-400">{pack.description}</p>
+        <JobPackBreakdown pack={pack} materials={materialsLibrary.items} contextKey={accountKey} canUseMaterial={canUseMaterial} />
+        <div className="mt-4 flex gap-2 border-t border-slate-800 pt-4"><Button variant="secondary" onClick={() => edit(pack)}>Edit</Button><Button variant="danger" onClick={() => remove(pack)}>Delete</Button></div>
+      </Card>)}</section>}
+    </>}
   </div>;
 }

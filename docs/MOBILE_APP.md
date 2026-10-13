@@ -15,6 +15,27 @@ accounts clears the submitted password and hides it again. A verified account
 can open its role-appropriate workspace directly. Cloud configuration and data
 migration tools remain available in a collapsed section below installation help.
 
+## Electrical catalogue and product sharing
+
+Job Packs and Starter Library expose the same reviewed catalogue: 40 job packs
+and 101 materials, from small jobs through rewire examples. Adding missing records
+preserves existing prices and supplier details; partial saves are retryable.
+Pack edits show quantities and separate buying/selling/labour allowances. Internal
+pricing notes are not copied into customer quote scope, and quotes keep reviewed
+pack prices even when the materials library changes. See [Job Catalogue](JOB_CATALOGUE.md)
+for estimate limitations, import behavior and acceptance checks.
+
+Material code/link inputs support normal phone paste. Copy and Share use only
+product identity and a validated URL, never private costs, margins or job details.
+Unsupported or denied clipboard/share APIs provide selectable text. Native share
+cancellation is respected. Account, session, readiness and changed product checks
+invalidate older actions. Same-owner account revalidation temporarily suspends a
+pack editor and then resumes its draft without reactivating older callbacks.
+
+Automated tests do not replace physical iPhone/Android testing: verify native
+share-sheet cancellation, pasted stock codes/links, installed-app storage/sync and
+one actual reviewed quote before using the catalogue for live customer pricing.
+
 ## Phone contacts and job evidence
 
 Customers includes **Import phone contacts** for owner/admin/office roles and local
