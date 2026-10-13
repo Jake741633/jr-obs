@@ -10,6 +10,7 @@ import { photoFileError, prepareJobPhoto } from "../../lib/jobMediaCapture";
 import { parseQuoteScope, quoteScopeNotes } from "../../lib/connectedQuoteScope.mjs";
 import { clipNotes, type ReviewedClip } from "../../lib/quoteClip";
 import { QuoteClipInput, ClipFrames } from "./QuoteClipInput";
+import { AiConnectionHelp, AiRecoveryNotice, aiRecoveryCode, type AiRecoveryCode } from "./AiConnectionHelp";
 import { JobDocumentBrowser, JobPhotoPreview } from "../jobs/JobDocumentBrowser";
 import { savedIdentityIndex } from "../../lib/assistantIdentity";
 import { photoPreviewSource, readSavedJobPhoto, sameSavedJobEvidence, savedJobEvidenceNotes, type SavedJobDocument } from "../../lib/jobPhotoEvidence";
@@ -23,6 +24,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
   const identity = useCloudIdentity();
   const member = identity.identity;
   const allowed = Boolean(member && ["owner", "admin", "office"].includes(member.role));
+  const canManageAi = identity.isReady && Boolean(member && ["owner", "admin"].includes(member.role));
   const enabled = ready && identity.isReady && identity.mode !== "local" && allowed;
   const accountKey = JSON.stringify([identity.mode, member?.organisationId, member?.userId, member?.role, member?.customerSourceId, contextKey]);
   const base = useMemo(() => ({ accountKey, enabled }), [accountKey, enabled]);
@@ -36,7 +38,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
   const [clipVersion, setClipVersion] = useState(0);
   const clipVersionRef = useRef(0);
   const [review, setReview] = useState<Review | null>(null);
-  const [notice, setNotice] = useState<{ scope: object; text: string; error: boolean } | null>(null);
+  const [notice, setNotice] = useState<{ scope: object; text: string; error: boolean; recovery?: AiRecoveryCode } | null>(null);
   const [busyScope, setBusyScope] = useState<object | null>(null);
   const operation = useRef<{ controller: AbortController } | null>(null);
   const applied = useRef<Review | null>(null);
@@ -119,9 +121,12 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
       });
       const payload = await response.json();
       if (!isCurrent()) return;
-      if (!response.ok) throw new Error(typeof payload?.error === "string" ? payload.error : "AI is unavailable. Your notes are unchanged.");
+      if (!response.ok) {
+        setNotice({ scope, text: typeof payload?.error === "string" ? payload.error : "AI is unavailable. Your notes are unchanged.", error: true, recovery: aiRecoveryCode(payload?.code) });
+        return;
+      }
       if (kind === "status") {
-        if (payload?.configured !== true) throw new Error("The AI connection has not been activated for this site.");
+        if (payload?.configured !== true) { setNotice({ scope, text: "The AI connection has not been activated for this site.", error: true, recovery: "not_configured" }); return; }
         setNotice({ scope, text: "The server is configured. API credit and model access are checked when you request a review.", error: false });
       } else {
         const draft = parseQuoteScope(payload?.draft);
@@ -155,6 +160,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
       <p className="text-sm text-slate-300">Use the job notes above, including any spoken details you have typed or pasted. AI suggests an unpriced scope and questions for you to check.</p>
       <p className="text-sm text-slate-400">Review with AI sends the job notes, any checked transcript and the selected photo or sampled frames to OpenAI. Only include information you want to share.</p>
       {!enabled ? <p className="text-sm text-amber-200">Sign in with an office account and wait for your job data to load before using connected AI.</p> : null}
+      <AiConnectionHelp canManage={canManageAi} />
       <fieldset disabled={!enabled || busy} className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="grid gap-2 text-sm font-semibold">Take a photo<input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" onChange={choosePhoto} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 p-3 text-base" /></label>
@@ -188,7 +194,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
           <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{saved.record.notes || "No saved notes."}</p>
         </>}
       </div> : null}
-      <QuoteClipInput key={clipVersion} context={scope} enabled={enabled && !busy} notes={notes} organisationId={member?.organisationId || ""} userId={member?.userId || ""} canUse={canUseClip} onUse={useClip} />
+      <QuoteClipInput key={clipVersion} context={scope} enabled={enabled && !busy} notes={notes} organisationId={member?.organisationId || ""} userId={member?.userId || ""} canManageAi={canManageAi} canUse={canUseClip} onUse={useClip} />
       {clip ? <div className="space-y-3 rounded-xl border border-cyan-500/20 p-3">
         <p className="font-semibold">Reviewed recording evidence for this AI request</p>
         {clip.transcript ? <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{clip.transcript}</p> : <p className="text-sm text-slate-400">Using sampled frames with the typed job notes.</p>}
@@ -200,6 +206,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
         <Button type="button" disabled={!enabled} onClick={clear}>Clear AI review</Button>
       </div>
       {currentNotice ? <p role={currentNotice.error ? "alert" : "status"} className={currentNotice.error ? "text-sm text-amber-200" : "text-sm text-cyan-200"}>{currentNotice.text}</p> : null}
+      {currentNotice?.recovery ? <AiRecoveryNotice code={currentNotice.recovery} canManage={canManageAi} /> : null}
       {currentReview ? <div className="space-y-4">
         <p className="text-sm text-amber-200">AI scope suggestion — check it against the site. A photo cannot confirm hidden wiring, supply capacity or compliance. Heating-controls wiring remains excluded.</p>
         <TextareaField label="Review and edit the AI scope" value={currentReview.text} maxLength={12000} className="min-h-80" onChange={event => editReview({ text: event.target.value, reviewed: false })} />

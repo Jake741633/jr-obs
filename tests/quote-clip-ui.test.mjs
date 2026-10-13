@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import vm from "node:vm";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import ts from "typescript";
 import { nodes, text } from "./helpers/customer-page-harness.mjs";
 import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
 const compile = path => ts.transpileModule(readFileSync(new URL(path, import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText;
 const source=compile('../components/ai/QuoteClipInput.tsx');
 const clipMod={exports:{}};vm.runInNewContext(compile('../lib/quoteClip.ts'),{module:clipMod,exports:clipMod.exports,Error,Set,Number,Math});
+const helpMod={exports:{}};
+if(existsSync(new URL('../components/ai/AiConnectionHelp.tsx',import.meta.url)))vm.runInNewContext(compile('../components/ai/AiConnectionHelp.tsx'),{module:helpMod,exports:helpMod.exports,require:name=>{assert.equal(name,'react/jsx-runtime');return{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})};}});
 const prepared={audio:'data:audio/webm;base64,GkXfowAAAAAAAAAA',frames:[{dataUrl:'data:image/jpeg;base64,/9j/2Q==',seconds:2}],duration:20};
 function harness(){
  let cursor=0,epoch=1,session={access_token:'token',user:{id:'user-1'}},preparer=async()=>prepared,fetcher=async()=>new Response(JSON.stringify({transcript:'Add two sockets.'}));
@@ -19,6 +21,7 @@ function harness(){
  'react/jsx-runtime':{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})},
  react:{useState,useRef:v=>useState({current:v})[0],useMemo(fn,deps){const i=cursor++;if(changed(slots[i],deps))slots[i]={value:fn(),deps};return slots[i].value;},useLayoutEffect(fn,deps){const i=cursor++,old=slots[i];if(changed(old,deps)){const next={deps,cleanup:old?.cleanup};slots[i]=next;effects.push(()=>{next.cleanup?.();next.cleanup=fn();});}}},
  'next/image':{default:'Image'},'../ui/Button':{Button:'Button'},'../ui/FormField':{TextareaField:'TextareaField'},
+ './AiConnectionHelp':{...helpMod.exports,AiRecoveryNotice:'AiRecoveryNotice'},
  '../../lib/quoteClip':{...clipMod.exports,prepareQuoteClip:(...args)=>{prepares.push(args);return preparer(...args);}},
  '../../lib/supabase/client':{captureSupabaseSessionOwnership:()=>({session,epoch}),readSupabaseSession:()=>session,readSupabaseSessionOwnershipEpoch:()=>epoch},
  '../../lib/supabase/sessionOwnership-core.mjs':ownership,
@@ -54,4 +57,16 @@ test('billing failures preserve notes and recovery or excessive text cannot appl
  const h=harness();await h.ready();h.fetch(async()=>new Response(JSON.stringify({error:'OpenAI API credit is exhausted.'}),{status:402}));await h.transcribe();assert.match(text(h.render()),/credit is exhausted/);assert.equal(h.props.notes,'Kitchen');assert.equal(h.uses.length,0);
  const recovery=harness();recovery.recover();recovery.choose();await recovery.button('Prepare sound and frames').props.onClick();assert.equal(recovery.prepares.length,0);
  const long=harness();await long.ready();await long.transcribe();long.edit('x'.repeat(12000));long.review();long.button('Use checked transcript').props.onClick();assert.equal(long.uses.length,0);assert.match(text(long.render()),/12,000/);
+});
+test('transcription recovery keeps prepared audio for an explicit retry and does not grant billing controls to office users',async()=>{
+ for(const canManageAi of [true,false])for(const code of ['billing_required','quota_required','spend_limit_reached','usage_limit_reached','not_configured','connection_failed']){
+  const h=harness();h.props.canManageAi=canManageAi;await h.ready();h.fetch(async()=>new Response(JSON.stringify({code,error:'Account needs attention'}),{status:402}));await h.transcribe();
+  const help=nodes(h.render()).find(n=>n.type==='AiRecoveryNotice');assert.ok(help,code);assert.equal(help.props.code,code);assert.equal(help.props.canManage,canManageAi);assert.equal(h.calls.length,1);assert.equal(h.props.notes,'Kitchen');assert.equal(h.uses.length,0);assert.equal(h.button('Transcribe speech').props.disabled,false);
+  h.fetch(async()=>new Response(JSON.stringify({transcript:'Two sockets.'})));await h.transcribe();assert.equal(h.calls.length,2);assert.equal(h.prepares.length,1);assert.ok(!nodes(h.render()).some(n=>n.type==='AiRecoveryNotice'));
+ }
+});
+test('cleared or superseded transcription errors cannot leave billing actions behind',async()=>{
+ for(const change of [h=>h.button('Clear recording').props.onClick(),h=>{h.props.notes='New notes';h.render();},h=>h.session(),h=>h.unmount()]){
+  const h=harness();await h.ready();let finish;h.fetch(()=>new Promise(resolve=>{finish=resolve;}));const pending=h.transcribe();change(h);finish(new Response(JSON.stringify({code:'billing_required',error:'Old error'}),{status:402}));await pending;assert.ok(!nodes(h.render()).some(n=>n.type==='AiRecoveryNotice'));assert.doesNotMatch(text(h.render()),/Old error/);
+ }
 });

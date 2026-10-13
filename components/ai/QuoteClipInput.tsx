@@ -7,11 +7,12 @@ import { TextareaField } from "../ui/FormField";
 import { clipFileError, clipNotes, prepareQuoteClip, type ClipFrame, type PreparedClip, type ReviewedClip } from "../../lib/quoteClip";
 import { captureSupabaseSessionOwnership, readSupabaseSession, readSupabaseSessionOwnershipEpoch } from "../../lib/supabase/client";
 import { sameSupabaseSessionOwnership, supabaseSessionUserId } from "../../lib/supabase/sessionOwnership-core.mjs";
+import { AiRecoveryNotice, aiRecoveryCode, type AiRecoveryCode } from "./AiConnectionHelp";
 
 type Ownership = ReturnType<typeof captureSupabaseSessionOwnership>;
 type Prepared = { scope: object; value: PreparedClip; ownership: Ownership };
 type Transcript = { scope: object; text: string; reviewed: boolean; ownership: Ownership };
-type Props = { context: object; enabled: boolean; notes: string; organisationId: string; userId: string; canUse?: () => boolean; onUse: (clip: ReviewedClip) => void };
+type Props = { context: object; enabled: boolean; notes: string; organisationId: string; userId: string; canManageAi?: boolean; canUse?: () => boolean; onUse: (clip: ReviewedClip) => void };
 
 export function ClipFrames({ frames }: { frames: ClipFrame[] }) {
   return <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{frames.map(frame => <figure key={frame.seconds} className="min-w-0 rounded-xl border border-slate-700 p-2">
@@ -20,14 +21,14 @@ export function ClipFrames({ frames }: { frames: ClipFrame[] }) {
   </figure>)}</div>;
 }
 
-export function QuoteClipInput({ context, enabled, notes, organisationId, userId, canUse, onUse }: Props) {
+export function QuoteClipInput({ context, enabled, notes, organisationId, userId, canManageAi = false, canUse, onUse }: Props) {
   const base = useMemo(() => ({ context, enabled, notes, organisationId, userId }), [context, enabled, notes, organisationId, userId]);
   const [selection, setSelection] = useState<{ base: object; file: File } | null>(null);
   const file = selection?.base === base ? selection.file : null;
   const scope = useMemo(() => ({ base, file }), [base, file]);
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
-  const [notice, setNotice] = useState<{ scope: object; text: string; error: boolean } | null>(null);
+  const [notice, setNotice] = useState<{ scope: object; text: string; error: boolean; recovery?: AiRecoveryCode } | null>(null);
   const [busyScope, setBusyScope] = useState<object | null>(null);
   const operation = useRef<{ controller: AbortController } | null>(null);
   const used = useRef<Prepared | null>(null);
@@ -84,7 +85,10 @@ export function QuoteClipInput({ context, enabled, notes, organisationId, userId
         body: JSON.stringify({ operation: "transcribe", consent: true, audio: currentPrepared.value.audio }),
       });
       const payload = await response.json(); if (!current()) return;
-      if (!response.ok) throw new Error(typeof payload?.error === "string" ? payload.error : "Speech transcription is unavailable. Your notes are unchanged.");
+      if (!response.ok) {
+        setNotice({ scope, text: typeof payload?.error === "string" ? payload.error : "Speech transcription is unavailable. Your notes are unchanged.", error: true, recovery: aiRecoveryCode(payload?.code) });
+        return;
+      }
       if (typeof payload?.transcript !== "string" || !payload.transcript.trim() || payload.transcript.length > 12000) throw new Error("AI returned no usable transcript. Check the sound or enter the spoken details yourself.");
       setTranscript({ scope, text: payload.transcript.trim(), reviewed: false, ownership: owner }); message("Check names, quantities and anything unclear before using the transcript.");
     } catch (error) { if (current()) message(error instanceof Error ? error.message : "Speech transcription is unavailable.", true); }
@@ -118,6 +122,7 @@ export function QuoteClipInput({ context, enabled, notes, organisationId, userId
         <Button type="button" disabled={!enabled} onClick={clear}>Clear recording / cancel</Button>
       </div>
       {currentNotice ? <p role={currentNotice.error ? "alert" : "status"} className={currentNotice.error ? "text-sm text-amber-200" : "text-sm text-cyan-200"}>{currentNotice.text}</p> : null}
+      {currentNotice?.recovery ? <AiRecoveryNotice code={currentNotice.recovery} canManage={canManageAi} /> : null}
       {currentPrepared ? <div className="space-y-4">
         <ClipFrames frames={currentPrepared.value.frames} />
         <p className="text-xs text-slate-400">These are sampled stills, not every moment of the video. The original recording stays on your phone and is not saved to the job by this step.</p>

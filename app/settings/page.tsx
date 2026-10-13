@@ -4,6 +4,7 @@ import { ChangeEvent, useEffect, useState } from "react";
 import { Brain, CheckCircle2, Cloud, Download, ShieldCheck, Upload } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
+import { AiConnectionHelp } from "../../components/ai/AiConnectionHelp";
 import { defaultAiProfile, downloadJrOsBackup, importJrOsBackup, type JrAiProfile } from "../../lib/appData";
 import { organisationStorageKey } from "../../lib/cloud/adapter";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
@@ -65,6 +66,8 @@ export default function SettingsPage() {
       <Card><ShieldCheck className="size-6 text-emerald-300" /><p className="mt-3 font-bold">Inspector remains in control</p><p className="mt-2 text-sm text-slate-400">AI suggestions remain drafts and technical decisions must be reviewed before issue.</p></Card>
       <Card><Cloud className={`size-6 ${cloud.configured ? "text-emerald-300" : "text-amber-300"}`} /><p className="mt-3 font-bold">{cloud.configured ? "Cloud keys detected" : "Cloud setup required"}</p><p className="mt-2 text-sm text-slate-400">{cloud.configured ? "JR OS has the environment settings needed for the next authentication and sync stage." : "Add the Supabase project URL and public anon key before account-based syncing is enabled."}</p></Card>
     </div>
+
+    <Card id="connected-ai"><h2 className="mb-3 text-xl font-bold">Connected AI</h2><AiConnectionHelp canManage={Boolean(identity && ["owner", "admin"].includes(identity.role))} /></Card>
 
     <Card className="border-cyan-400/30">
       <div className="flex items-center gap-3"><Brain className="size-6 text-cyan-300" /><div><h2 className="text-xl font-bold">JR AI working profile</h2><p className="text-sm text-slate-400">Editable memory that JR AI can use when producing drafts.</p></div></div>

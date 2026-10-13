@@ -62,12 +62,50 @@ test("empty, unconsented, oversized and remote-photo inputs are rejected without
   }
   const h = harness(); assert.equal((await h.handler(request({ operation: "draft", notes: "x".repeat(2100001), consent: true }, { headers: { "content-length": "1" } }))).status, 413); assert.equal(h.providerCalls().length, 0);
 });
-test("quota, temporary limits, invalid credentials and provider failures return safe distinct errors", async () => {
-  for (const [status, code, expectedStatus, expectedCode] of [[429, "credit_balance_exhausted", 402, "billing_required"], [429, "insufficient_quota", 402, "billing_required"], [429, "rate_limit_exceeded", 429, "rate_limited"], [401, "invalid_api_key", 503, "connection_failed"], [404, "model_not_found", 503, "connection_failed"], [500, "internal_error", 503, "provider_unavailable"]]) {
+test("temporary limits, invalid credentials and provider failures return safe distinct errors", async () => {
+  for (const [status, code, expectedStatus, expectedCode] of [[429, "rate_limit_exceeded", 429, "rate_limited"], [401, "invalid_api_key", 503, "connection_failed"], [404, "model_not_found", 503, "connection_failed"], [500, "internal_error", 503, "provider_unavailable"]]) {
     const h = harness({ provider: () => json({ error: { code, message: "secret-sentinel and personal source content" } }, status) });
     const response = await h.handler(request()), actual = await response.json();
     assert.equal(response.status, expectedStatus); assert.equal(actual.code, expectedCode); assert.ok(!JSON.stringify(actual).includes("secret-sentinel")); assert.equal(h.providerCalls().length, 1);
   }
+});
+test("specific billing and limit codes override generic quota type without leaking provider details", async () => {
+  const cases = [
+    ["credit_balance_exhausted", "billing_required", /API credit is exhausted/],
+    ["organization_spend_limit_exceeded", "spend_limit_reached", /spend limit/],
+    ["project_spend_limit_exceeded", "spend_limit_reached", /spend limit/],
+    ["organization_usage_limit_exceeded", "usage_limit_reached", /usage limit/],
+    ["insufficient_quota", "quota_required", /credit.*limits/i],
+    [undefined, "quota_required", /credit.*limits/i],
+    ["unrecognized_quota_detail", "quota_required", /credit.*limits/i],
+  ];
+  for (const [code, expectedCode, guidance] of cases) {
+    const h = harness({ provider: () => json({ error: { code, type: "insufficient_quota", message: "secret-sentinel private notes", details: { notes: "private provider payload" } } }, 429) });
+    const response = await h.handler(request()), actual = await response.json();
+    assert.equal(response.status, 402); assert.equal(actual.code, expectedCode); assert.match(actual.error, guidance);
+    assert.deepEqual(Object.keys(actual).sort(), ["code", "error"]);
+    assert.doesNotMatch(JSON.stringify(actual), /secret-sentinel|private notes|private provider payload/);
+    if (expectedCode !== "billing_required") assert.doesNotMatch(actual.error, /exhausted/);
+    assert.equal(h.providerCalls().length, 1);
+  }
+});
+test("billing failures never auto-retry and permit an immediate explicit review after recovery", async () => {
+  for (const code of ["credit_balance_exhausted", "organization_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_usage_limit_exceeded", "insufficient_quota"]) {
+    let recovered = false;
+    const h = harness({ provider: () => recovered ? json(result()) : json({ error: { code, type: "insufficient_quota" } }, 429) });
+    assert.equal((await h.handler(request())).status, 402); assert.equal(h.providerCalls().length, 1);
+    recovered = true;
+    const retry = await h.handler(request());
+    assert.equal(retry.status, 200); assert.deepEqual((await retry.json()).draft, scope); assert.equal(h.providerCalls().length, 2);
+  }
+});
+test("an explicit transient rate-limit code keeps its cooldown even with generic quota type", async () => {
+  let recovered = false;
+  const h = harness({ provider: () => recovered ? json(result()) : json({ error: { code: "rate_limit_exceeded", type: "insufficient_quota" } }, 429) });
+  const limited = await h.handler(request()); assert.equal(limited.status, 429); assert.equal((await limited.json()).code, "rate_limited");
+  recovered = true;
+  assert.equal((await h.handler(request())).status, 429); assert.equal(h.providerCalls().length, 1);
+  h.advance(60001); assert.equal((await h.handler(request())).status, 200); assert.equal(h.providerCalls().length, 2);
 });
 test("refusals, incomplete output, malformed structure and excessive provider responses fail closed", async () => {
   for (const payload of [{ ...result(), status: "incomplete" }, { status: "completed", output: [{ type: "message", content: [{ type: "refusal", refusal: "Cannot help" }] }] }, { status: "completed", output: [{ type: "message", content: [{ type: "output_text", text: "{}" }] }] }, { padding: "x".repeat(100001) }]) {

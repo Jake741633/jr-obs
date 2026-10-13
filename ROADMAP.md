@@ -60,6 +60,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Reuse a reviewed saved job photo and notes in Quote Builder, with explicit sharing, current-source checks and notes-only use of video-link records
 - [ ] Direct large video-file uploads with durable private binary storage and progress/retry controls
 - [x] Connected photo/notes quote-scope implementation with live account guards, explicit sharing, editable human review and clear billing errors; hosted activation and live generation acceptance remain below
+- [x] In-app AI funding/setup help with owner billing links and separate credit, spend-limit, usage-limit and connection recovery for scope and speech requests
 - [ ] Activate the server-side AI secret/business allowlist on the development preview and verify a funded live generation request (local key authenticates; API credit exhausted)
 - [x] Short site-video/voice preparation, reviewed speech transcription and sampled-frame quote scope; local preparation and server boundaries implemented with explicit sharing (hosted activation, funded live checks and physical-phone acceptance remain pending)
 - [x] Phone customer profiles with section shortcuts, progressive linked records, searchable activity and exact job-to-JR-AI links
