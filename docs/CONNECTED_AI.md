@@ -53,6 +53,38 @@ Set the private settings in the intended Netlify deploy context with Functions a
 
 Netlify can route a preview alias through its immutable deployment address. The build captures only the public `DEPLOY_URL` and `DEPLOY_PRIME_URL` into `JR_OS_DEPLOY_URL` and `JR_OS_DEPLOY_PRIME_URL`; the API permits that exact alias-to-build mapping in addition to a direct same-origin request. No wildcard, sibling preview, production origin or caller-supplied forwarding header grants access. These build values contain no credentials and need no manual setting. Rejected origins expose only a fixed diagnostic category, never the received or expected address.
 
+## Funding and recovery help
+
+Settings and the connected Quote Builder panel include **AI setup, credit and
+costs**. Owner/admin views link to the fixed official OpenAI billing, limits and
+usage pages in a new tab. Office users are directed to the business owner.
+The help does not read the balance, collect payment details, create keys or make
+an AI request. API usage is separate from a ChatGPT subscription. Select the
+OpenAI organisation used for the JR OS key when adding credit; funding does not
+activate the hosted JR OS connection by itself.
+
+Scope and speech errors preserve their safe response code and show the matching
+recovery guidance. The server distinguishes depleted credit (`billing_required`),
+organisation/project spend limits (`spend_limit_reached`), OpenAI-approved usage
+limits (`usage_limit_reached`) and an unspecified legacy quota failure
+(`quota_required`). A specific recognised provider code takes precedence over
+generic `insufficient_quota` type. Raw provider errors remain private. A generic
+quota error does not by itself prove that credit is exhausted.
+
+These account failures never retry automatically or impose the transient-provider
+60-second cooldown. An explicit retry remains possible after the account issue
+is resolved, within the unchanged four-start burst protection. Transient 429s
+retain the cooldown. Current typed notes remain unchanged, and stale responses
+cannot attach recovery actions to another account or input. Leaving/reloading
+the page still loses transient work.
+
+**Check connection** remains a free configuration check, not a balance check or
+a successful model-access test. No paid requests or hosted activation were made
+as part of this help update. Current official references:
+[billing errors](https://developers.openai.com/api/docs/guides/error-codes),
+[spend controls](https://developers.openai.com/api/docs/guides/spend-limits),
+[ChatGPT/API pricing distinction](https://learn.chatgpt.com/docs/pricing).
+
 ## Site video and spoken notes
 
 Open **Use a short video or voice recording** inside Quote Builder's AI panel. Choose a saved recording or use the phone's camera control. Keep clips to 60 seconds and 100 MiB or less. MP4/MOV/WebM video and MP3/M4A/WAV/WebM audio depend on the phone's decoder; an unreadable codec gives an explicit error.

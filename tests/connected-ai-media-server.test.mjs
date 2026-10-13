@@ -54,6 +54,33 @@ test("empty, oversized and malformed transcripts fail closed and provider detail
     const h=harness(()=>response({error:{code,message:"secret-sentinel private recording"}},status)),r=await h.handler(request());assert.equal(r.status,expected);assert.doesNotMatch(await r.text(),/secret-sentinel|private recording/);
   }
 });
+test("transcription distinguishes credit, spend, usage and legacy quota errors with safe guidance", async()=>{
+  for(const [code,expectedCode,guidance] of [["credit_balance_exhausted","billing_required",/API credit is exhausted/],["organization_spend_limit_exceeded","spend_limit_reached",/spend limit/],["project_spend_limit_exceeded","spend_limit_reached",/spend limit/],["organization_usage_limit_exceeded","usage_limit_reached",/usage limit/],["insufficient_quota","quota_required",/credit.*limits/i],[undefined,"quota_required",/credit.*limits/i]]){
+    const h=harness(()=>response({error:{code,type:"insufficient_quota",message:"secret-sentinel private recording",details:{audio:"private provider payload"}}},429));
+    const r=await h.handler(request()),actual=await r.json();
+    assert.equal(r.status,402);assert.equal(actual.code,expectedCode);assert.match(actual.error,guidance);
+    assert.deepEqual(Object.keys(actual).sort(),["code","error"]);assert.doesNotMatch(JSON.stringify(actual),/secret-sentinel|private recording|private provider payload/);
+    if(expectedCode!=="billing_required")assert.doesNotMatch(actual.error,/exhausted/);
+    assert.equal(h.paid().length,1);
+  }
+});
+test("transcription billing failures do not retry automatically or impose a recovery cooldown",async()=>{
+  for(const code of ["credit_balance_exhausted","organization_spend_limit_exceeded","project_spend_limit_exceeded","organization_usage_limit_exceeded","insufficient_quota"]){
+    let recovered=false;
+    const h=harness(()=>recovered?response({text:"Two sockets"}):response({error:{code,type:"insufficient_quota"}},429));
+    assert.equal((await h.handler(request())).status,402);assert.equal(h.paid().length,1);
+    recovered=true;
+    const retry=await h.handler(request());assert.equal(retry.status,200);assert.deepEqual(await retry.json(),{transcript:"Two sockets"});assert.equal(h.paid().length,2);
+  }
+});
+test("transcription transient rate limits retain the cooldown when quota type is generic",async()=>{
+  let recovered=false;
+  const h=harness(()=>recovered?response({text:"Two sockets"}):response({error:{code:"rate_limit_exceeded",type:"insufficient_quota"}},429));
+  const limited=await h.handler(request());assert.equal(limited.status,429);assert.equal((await limited.json()).code,"rate_limited");
+  recovered=true;
+  assert.equal((await h.handler(request())).status,429);assert.equal(h.paid().length,1);
+  h.advance();assert.equal((await h.handler(request())).status,200);assert.equal(h.paid().length,2);
+});
 test("speech and scope share concurrency and burst limits",async()=>{
   let release;const h=harness(()=>new Promise(resolve=>{release=()=>resolve(response({text:"Two sockets"}));}));
   const pending=h.handler(request());for(let i=0;i<100&&!release;i++)await new Promise(resolve=>setImmediate(resolve));assert.ok(release,"transcription provider started");

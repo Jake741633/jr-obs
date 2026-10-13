@@ -14,6 +14,11 @@ const savedPhoto = { id: "doc-1", jobId: "job-1", category: "Photo", name: "Kitc
 const source = ts.transpileModule(readFileSync(new URL("../components/ai/ConnectedQuoteAssistant.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 const clipModule = { exports: {} };
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../lib/quoteClip.ts", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { module: clipModule, exports: clipModule.exports, Error, Set, Number, Math });
+const aiHelp = existsSync(new URL("../components/ai/AiConnectionHelp.tsx", import.meta.url)) ? (() => {
+  const mod = { exports: {} };
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../components/ai/AiConnectionHelp.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, require: name => { assert.equal(name, "react/jsx-runtime"); return { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) }; } });
+  return mod.exports;
+})() : {};
 const draft = { title: "Kitchen", summary: "Two sockets requested.", scope: ["Confirm two socket positions."], questions: ["Confirm cable route."], exclusions: ["Heating-controls wiring excluded."] };
 function harness() {
   let cursor = 0, epoch = 1, session = { access_token: "token", user: { id: "user-1" } }, fetcher = async () => new Response(JSON.stringify({ draft })), prepare = async () => ({ dataUrl: "data:image/jpeg;base64,/9j/2Q==" });
@@ -34,6 +39,7 @@ function harness() {
     "../../lib/connectedQuoteScope.mjs": scopeHelpers,
     "../../lib/quoteClip": clipModule.exports,
     "./QuoteClipInput": { QuoteClipInput: "QuoteClipInput", ClipFrames: "ClipFrames" },
+    "./AiConnectionHelp": { ...aiHelp, AiConnectionHelp: "AiConnectionHelp", AiRecoveryNotice: "AiRecoveryNotice" },
     "../../lib/assistantIdentity": { savedIdentityIndex },
     "../../lib/jobPhotoEvidence": { ...evidenceHelpers, readSavedJobPhoto: (...args) => { savedReads.push(args); return readSaved(...args); } },
     "../jobs/JobDocumentBrowser": { JobDocumentBrowser: "JobDocumentBrowser", JobPhotoPreview: "JobPhotoPreview" },
@@ -93,6 +99,38 @@ test("billing failures preserve notes and connection checks do not submit source
   const h = harness(); h.fetch(async () => new Response(JSON.stringify({ code: "billing_required", error: "OpenAI API credit is exhausted." }), { status: 402 })); await h.run(); assert.match(text(h.render()), /credit is exhausted/); assert.equal(h.props.notes, "Two kitchen sockets"); assert.equal(h.applies.length, 0);
   h.fetch(async () => new Response(JSON.stringify({ configured: true, message: "Server configured; credit checked on review." })));
   await h.button("Check connection").props.onClick(); assert.deepEqual(JSON.parse(h.calls[1].init.body), { operation: "status" });
+});
+
+test("connected AI help is available without a request and management guidance follows the account role", () => {
+  for (const role of ["owner", "admin", "office"]) {
+    const h = harness(); h.account({ role }); const setup = nodes(h.render()).find(node => node.type === "AiConnectionHelp"); assert.ok(setup); assert.equal(setup.props.canManage, role !== "office");
+    assert.equal(h.clipPanel().props.canManageAi, role !== "office"); assert.equal(h.calls.length, 0);
+  }
+});
+
+test("AI failures offer recovery for the exact safe code without losing notes or retrying automatically", async () => {
+  for (const code of ["billing_required", "spend_limit_reached", "usage_limit_reached", "quota_required", "not_configured", "connection_failed"]) {
+    const h = harness(); h.fetch(async () => new Response(JSON.stringify({ code, error: "Please review your account." }), { status: 402 })); await h.run();
+    const help = nodes(h.render()).find(node => node.type === "AiRecoveryNotice"); assert.ok(help, code); assert.equal(help.props.code, code); assert.equal(help.props.canManage, true); assert.equal(h.calls.length, 1); assert.equal(h.props.notes, "Two kitchen sockets"); assert.equal(h.applies.length, 0);
+    h.props.notes = "New site notes"; h.render(); assert.ok(!nodes(h.render()).some(node => node.type === "AiRecoveryNotice"));
+  }
+  for (const code of ["rate_limited", "provider_unavailable", "https://evil.example/pay", { billing_required: true }]) {
+    const h = harness(); h.fetch(async () => new Response(JSON.stringify({ code, error: "Unavailable" }), { status: 429 })); await h.run(); assert.ok(!nodes(h.render()).some(node => node.type === "AiRecoveryNotice")); assert.equal(h.calls.length, 1);
+  }
+});
+
+test("office billing guidance asks the owner, and successful free status checks never claim funded AI", async () => {
+  const h = harness(); h.account({ role: "office" }); h.fetch(async () => new Response(JSON.stringify({ code: "billing_required", error: "Credit exhausted" }), { status: 402 })); await h.run();
+  assert.equal(nodes(h.render()).find(node => node.type === "AiRecoveryNotice").props.canManage, false);
+  h.fetch(async () => new Response(JSON.stringify({ configured: true }))); await h.button("Check connection").props.onClick();
+  assert.ok(!nodes(h.render()).some(node => node.type === "AiRecoveryNotice")); assert.match(text(h.render()), /API credit and model access are checked when you request a review/); assert.equal(h.calls.length, 2); assert.deepEqual(JSON.parse(h.calls[1].init.body), { operation: "status" });
+});
+
+test("stale billing failures cannot attach recovery actions to changed notes or accounts", async () => {
+  for (const change of [h => { h.props.notes = "Other notes"; h.render(); }, h => h.account({ organisationId: "other" }), h => h.changeSession(), h => h.unmount()]) {
+    const h = harness(); let finish; h.fetch(() => new Promise(resolve => { finish = resolve; })); const pending = h.run(); change(h); finish(new Response(JSON.stringify({ code: "billing_required", error: "Old failure" }), { status: 402 })); await pending;
+    assert.ok(!nodes(h.render()).some(node => node.type === "AiRecoveryNotice")); assert.doesNotMatch(text(h.render()), /Old failure/);
+  }
 });
 
 const clipEvidence = { transcript: "Add a pendant by the window.", frames: [{ dataUrl: "data:image/jpeg;base64,/9j/2Q==", seconds: 3 }], duration: 30 };
