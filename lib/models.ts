@@ -132,8 +132,8 @@ export interface StockLocation { id: EntityId; name: string; type: StockLocation
 export interface StockItem { id: EntityId; materialId?: EntityId; description: string; locationId: EntityId; quantity: number; minimumQuantity: number; unitCost: number; unit: MaterialUnit; stockCode: string; supplier: string; notes: string; createdAt: string; updatedAt: string; }
 export type StockMovementType = "Received" | "Used" | "Transferred" | "Adjusted" | "Returned";
 export interface StockMovement { id: EntityId; stockItemId: EntityId; type: StockMovementType; quantity: number; fromLocationId?: EntityId; toLocationId?: EntityId; jobId?: EntityId; note: string; movedAt: string; createdAt: string; }
-export interface JobPackMaterial { id: EntityId; materialId?: EntityId; description: string; quantity: number; unitPrice: number; }
-export interface JobPack { id: EntityId; name: string; category: string; description: string; labourDescription: string; labourHours: number; labourRate: number; materials: JobPackMaterial[]; testingRequirements: string; certificatesRequired: string; notes: string; createdAt: string; updatedAt: string; }
+export interface JobPackMaterial { id: EntityId; materialId?: EntityId; description: string; quantity: number; unitPrice: number; unitCost?: number; }
+export interface JobPack { id: EntityId; name: string; category: string; description: string; labourDescription: string; labourHours: number; labourRate: number; materials: JobPackMaterial[]; testingRequirements: string; certificatesRequired: string; notes: string; internalNotes?: string; createdAt: string; updatedAt: string; }
 
 export type PurchaseItemStatus = "Needed" | "Ordered" | "Delivered";
 export interface PurchaseListItem { id: EntityId; materialId?: EntityId; description: string; supplier: string; stockCode: string; supplierUrl?: string; quantity: number; unitCost: number; status: PurchaseItemStatus; }

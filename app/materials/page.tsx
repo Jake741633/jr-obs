@@ -1,15 +1,21 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { ExternalLink, History, Package, Pencil, Plus, RefreshCw, Search, Star, Trash2 } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { EntityEmptyState } from "../../components/crm/EntityEmptyState";
+import { MaterialShareActions } from "../../components/materials/MaterialShareActions";
 import { useMaterialsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { readSupabaseSession } from "../../lib/supabase/client";
+import { captureSupabaseSessionOwnership, readSupabaseSessionOwnershipEpoch } from "../../lib/supabase/client";
+import { sameSupabaseSessionOwnership, supabaseSessionUserId } from "../../lib/supabase/sessionOwnership-core.mjs";
+import { savedIdentityIndex } from "../../lib/assistantIdentity";
+import { safeMaterialProductUrl } from "../../lib/materialSharing";
 import { makeId } from "../../lib/storage";
 import type { Material, MaterialCategory, MaterialPriceHistory, MaterialPriceSource, MaterialUnit } from "../../lib/models";
 
@@ -40,7 +46,8 @@ function ageInDays(date?: string) {
 
 export default function MaterialsPage() {
   const materials = useMaterialsCollection();
-  const { identity } = useCloudIdentity();
+  const identityState = useCloudIdentity();
+  const { identity } = identityState;
   const priceRestricted = identity?.role === "electrician";
   const [form, setForm] = useState(blank);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -58,6 +65,32 @@ export default function MaterialsPage() {
   const [lookupMessage, setLookupMessage] = useState("");
   const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
 
+  const sharingAccountKey = JSON.stringify([identityState.mode, identity?.organisationId, identity?.userId, identity?.role, identity?.customerSourceId, readSupabaseSessionOwnershipEpoch()]);
+  const sharingAccount = useMemo(() => ({ key: sharingAccountKey, ownership: captureSupabaseSessionOwnership() }), [sharingAccountKey]);
+  const sharingOwnership = sharingAccount.ownership;
+  const sharingRoleAllowed = identityState.mode === "local" || Boolean(identity && ["owner", "admin", "office", "electrician"].includes(identity.role));
+  const sharingSessionReady = identityState.mode === "local" || Boolean(sharingOwnership.session?.access_token && !sharingOwnership.session.is_password_recovery && supabaseSessionUserId(sharingOwnership.session) === identity?.userId);
+  const sharingReady = identityState.isReady && materials.isReady && sharingRoleAllowed && sharingSessionReady;
+  const sharingScope = useMemo(() => ({ key: sharingAccountKey, ready: sharingReady, ownership: sharingOwnership, items: materials.items }), [sharingAccountKey, sharingReady, sharingOwnership, materials.items]);
+  const materialIndex = useMemo(() => savedIdentityIndex(materials.items), [materials.items]);
+  const latestSharing = useRef({ active: false, scope: sharingScope, ready: sharingReady, items: materials.items });
+  useLayoutEffect(() => {
+    latestSharing.current = { active: true, scope: sharingScope, ready: sharingReady, items: materials.items };
+    return () => { latestSharing.current.active = false; };
+  }, [sharingScope, sharingReady, materials.items]);
+
+  function canShareMaterial(expected: Pick<Material, "id" | "createdAt" | "name" | "supplier" | "stockCode" | "supplierUrl">) {
+    const latest = latestSharing.current;
+    if (!latest.active || latest.scope !== sharingScope || !latest.ready) return false;
+    if (identityState.mode !== "local") {
+      const session = readSupabaseSession();
+      if (!session?.access_token || session.is_password_recovery || supabaseSessionUserId(session) !== identity?.userId || !sameSupabaseSessionOwnership(session, readSupabaseSessionOwnershipEpoch(), sharingScope.ownership.session, sharingScope.ownership.epoch)) return false;
+    }
+    // Recheck the entire collection, not the filtered cards: hidden duplicates are ambiguous.
+    const current = savedIdentityIndex(latest.items).unique.get(expected.id);
+    return Boolean(current && current.createdAt === expected.createdAt && current.name === expected.name && current.supplier === expected.supplier && current.stockCode === expected.stockCode && current.supplierUrl === expected.supplierUrl);
+  }
+
   const filtered = useMemo(() => materials.items.filter((item) => {
     const matchesSearch = `${item.name} ${item.manufacturer} ${item.supplier} ${item.stockCode}`.toLowerCase().includes(search.toLowerCase());
     return matchesSearch && (category === "All" || item.category === category) && (!favouritesOnly || item.favourite);
@@ -65,7 +98,7 @@ export default function MaterialsPage() {
 
   const summary = useMemo(() => ({
     stale: materials.items.filter((item) => ageInDays(item.lastPriceCheckedAt) > 30).length,
-    linked: materials.items.filter((item) => item.supplierUrl).length,
+    linked: materials.items.filter((item) => safeMaterialProductUrl(item.supplierUrl)).length,
     favourites: materials.items.filter((item) => item.favourite).length,
   }), [materials.items]);
 
@@ -88,7 +121,8 @@ export default function MaterialsPage() {
     const sellPrice = priceRestricted ? 0 : Number(form.sellPrice || 0);
     if (!form.name.trim()) { setError("Material name is required."); return; }
     if (!priceRestricted && (!Number.isFinite(tradeCost) || tradeCost < 0 || !Number.isFinite(sellPrice) || sellPrice < 0)) { setError("Trade cost and selling price must be valid positive amounts."); return; }
-    if (form.supplierUrl && !/^https?:\/\//i.test(form.supplierUrl)) { setError("Supplier link must start with http:// or https://"); return; }
+    const supplierUrl = safeMaterialProductUrl(form.supplierUrl);
+    if (form.supplierUrl.trim() && !supplierUrl) { setError("Supplier link must be a valid http:// or https:// product URL without credentials or control characters."); return; }
 
     const now = new Date().toISOString();
     const priceEntry: MaterialPriceHistory = { id: makeId("price"), tradeCost, sellPrice, source: "Manual", recordedAt: now };
@@ -97,7 +131,7 @@ export default function MaterialsPage() {
       category: form.category,
       manufacturer: form.manufacturer.trim(),
       supplier: form.supplier.trim(),
-      supplierUrl: form.supplierUrl.trim(),
+      supplierUrl,
       stockCode: form.stockCode.trim(),
       unit: form.unit,
       tradeCost,
@@ -159,7 +193,7 @@ export default function MaterialsPage() {
       name: lookupResult.name || `${lookupResult.supplier} item ${lookupResult.stockCode}`,
       manufacturer: lookupResult.manufacturer || "",
       supplier: lookupResult.supplier,
-      supplierUrl: lookupResult.productUrl || lookupResult.searchUrl,
+      supplierUrl: safeMaterialProductUrl(lookupResult.productUrl) || safeMaterialProductUrl(lookupResult.searchUrl),
       stockCode: lookupResult.stockCode,
       tradeCost: suggestedPrice,
       sellPrice: suggestedPrice,
@@ -202,8 +236,12 @@ export default function MaterialsPage() {
     setQuickEditId(null);
   }
 
+  const lookupProductUrl = lookupResult ? safeMaterialProductUrl(lookupResult.productUrl) || safeMaterialProductUrl(lookupResult.searchUrl) : "";
+
   return <div className="space-y-6">
     <PageHeader eyebrow={priceRestricted ? "Materials" : "Pricing"} title="Materials Library" description={priceRestricted ? "Browse supplier-linked materials and maintain field catalogue details without office pricing." : "Track supplier links, trade costs, selling prices and price-check dates for faster, safer quoting."} action={<Button onClick={() => showForm ? reset() : setShowForm(true)}><Plus className="mr-2 size-4" />{showForm ? "Close form" : "Add material"}</Button>} />
+
+    <div className="rounded-xl border border-cyan-400/30 bg-cyan-400/5 p-4"><Link href="/starter-library" className="inline-flex min-h-12 items-center font-semibold text-cyan-200">Browse starter materials</Link><p className="text-sm text-slate-400">Review the starter catalogue and choose what to import. Browsing here does not add any records.</p></div>
 
     <section className={`grid gap-4 sm:grid-cols-2 ${priceRestricted ? "" : "xl:grid-cols-3"}`}>
       <Card><p className="text-sm text-slate-400">Supplier-linked items</p><p className="mt-2 text-3xl font-bold">{summary.linked}</p></Card>
@@ -215,11 +253,11 @@ export default function MaterialsPage() {
       <div className="flex items-start gap-3"><Search className="mt-0.5 size-5 text-cyan-300" /><div><h2 className="font-semibold">Find material by supplier stock code</h2><p className="mt-1 text-sm text-slate-400">Search CEF, Screwfix or TLC Direct. JR OS will import machine-readable product details when available and otherwise open the supplier result for confirmation.</p></div></div>
       <form onSubmit={lookupStockCode} className="mt-5 grid gap-3 md:grid-cols-[200px_1fr_auto]">
         <select value={lookupSupplier} onChange={(event) => setLookupSupplier(event.target.value as SupplierName)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{suppliers.map((supplier) => <option key={supplier}>{supplier}</option>)}</select>
-        <input value={lookupCode} onChange={(event) => setLookupCode(event.target.value)} placeholder="Enter stock code or product code" className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 outline-none focus:border-cyan-400" />
+        <input aria-label="Supplier stock code lookup" value={lookupCode} onChange={(event) => setLookupCode(event.target.value)} placeholder="Enter or paste stock code or product code" maxLength={128} autoCapitalize="none" spellCheck={false} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 outline-none focus:border-cyan-400" />
         <Button type="submit" disabled={lookupBusy}>{lookupBusy ? "Searching…" : "Find product"}</Button>
       </form>
       {lookupMessage ? <p className="mt-4 rounded-xl bg-slate-950 p-3 text-sm text-slate-300">{lookupMessage}</p> : null}
-      {lookupResult ? <div className="mt-4 flex flex-wrap gap-3"><Button onClick={useLookupResult}><Plus className="mr-2 size-4" />Add to materials</Button><a href={lookupResult.productUrl || lookupResult.searchUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold"><ExternalLink className="size-4" />Open supplier result</a></div> : null}
+      {lookupResult ? <div className="mt-4 flex flex-wrap gap-3"><Button onClick={useLookupResult}><Plus className="mr-2 size-4" />Add to materials</Button>{lookupProductUrl ? <a href={lookupProductUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold"><ExternalLink className="size-4" />Open supplier result</a> : null}</div> : null}
     </Card>
 
     {showForm ? <Card><form onSubmit={submit} className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -227,8 +265,8 @@ export default function MaterialsPage() {
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as MaterialCategory })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
       <InputField label="Manufacturer" value={form.manufacturer} onChange={(e) => setForm({ ...form, manufacturer: e.target.value })} />
       <InputField label="Supplier" value={form.supplier} onChange={(e) => setForm({ ...form, supplier: e.target.value })} />
-      <InputField label="Supplier link" type="url" value={form.supplierUrl} onChange={(e) => setForm({ ...form, supplierUrl: e.target.value })} />
-      <InputField label="Stock code" value={form.stockCode} onChange={(e) => setForm({ ...form, stockCode: e.target.value })} />
+      <InputField label="Supplier link" type="url" value={form.supplierUrl} onChange={(e) => setForm({ ...form, supplierUrl: e.target.value })} placeholder="Paste a supplier product link" maxLength={2048} autoCapitalize="none" spellCheck={false} />
+      <InputField label="Stock code" value={form.stockCode} onChange={(e) => setForm({ ...form, stockCode: e.target.value })} placeholder="Paste a supplier stock code" maxLength={128} autoCapitalize="none" spellCheck={false} />
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Unit</span><select value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value as MaterialUnit })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{units.map((item) => <option key={item}>{item}</option>)}</select></label>
       {!priceRestricted ? <InputField label="Trade cost (£)" type="number" min="0" step="0.01" value={form.tradeCost} onChange={(e) => setForm({ ...form, tradeCost: e.target.value })} /> : null}
       {!priceRestricted ? <InputField label="Selling price (£)" type="number" min="0" step="0.01" value={form.sellPrice} onChange={(e) => setForm({ ...form, sellPrice: e.target.value })} /> : null}
@@ -251,17 +289,21 @@ export default function MaterialsPage() {
       const daysOld = ageInDays(item.lastPriceCheckedAt);
       const stale = daysOld > 30;
       const lastHistory = priceRestricted ? [] : (item.priceHistory ?? []).slice(-3).reverse();
+      const supplierUrl = safeMaterialProductUrl(item.supplierUrl);
+      const shareMaterial = { name: item.name, supplier: item.supplier, stockCode: item.stockCode, supplierUrl: item.supplierUrl };
+      const expectedShareMaterial = { id: item.id, createdAt: item.createdAt, ...shareMaterial };
       return <Card key={item.id}>
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category} · {item.unit}</p><h2 className="mt-1 text-lg font-bold">{item.name}</h2><p className="text-sm text-slate-500">{item.manufacturer || item.supplier || "No manufacturer or supplier"}</p></div><div className="flex"><button onClick={() => toggleFavourite(item)} aria-label={`Favourite ${item.name}`} className={`rounded-lg p-2 ${item.favourite ? "text-amber-300" : "text-slate-500 hover:text-amber-300"}`}><Star className="size-4" fill={item.favourite ? "currentColor" : "none"} /></button><button onClick={() => startEdit(item)} aria-label={`Edit ${item.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Pencil className="size-4" /></button>{!priceRestricted ? <button onClick={() => remove(item)} aria-label={`Delete ${item.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div></div>
         {!priceRestricted ? <>
           <div className="mt-5 grid grid-cols-2 gap-3 border-t border-slate-800 pt-4 text-sm"><div><p className="text-slate-500">Trade cost</p><p className="font-semibold">{money.format(tradeCost)}</p></div><div><p className="text-slate-500">Selling price</p><p className="font-semibold">{money.format(sellPrice)}</p></div><div><p className="text-slate-500">Markup</p><p className="font-semibold">{markup.toFixed(1)}%</p></div><div><p className="text-slate-500">Stock code</p><p className="font-semibold">{item.stockCode || "—"}</p></div></div>
           <div className={`mt-4 rounded-xl border p-3 text-xs ${stale ? "border-amber-500/30 bg-amber-500/5 text-amber-200" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-200"}`}>{item.lastPriceCheckedAt ? `Price checked ${daysOld} day${daysOld === 1 ? "" : "s"} ago` : "Price has not been checked yet"}</div>
-          {quickEditId === item.id ? <div className="mt-4 grid gap-3 rounded-xl border border-cyan-400/30 bg-slate-950 p-4"><InputField label="New trade cost (£)" type="number" min="0" step="0.01" value={quickTradeCost} onChange={(e) => setQuickTradeCost(e.target.value)} /><InputField label="Markup (%)" type="number" min="0" step="0.1" value={quickMarkup} onChange={(e) => setQuickMarkup(e.target.value)} /><div className="flex gap-2"><Button onClick={() => saveQuickUpdate(item)}>Save price</Button><Button variant="secondary" onClick={() => setQuickEditId(null)}>Cancel</Button></div></div> : <div className="mt-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => openQuickUpdate(item)}><RefreshCw className="mr-2 size-4" />Quick update</Button>{item.supplierUrl ? <a href={item.supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a> : null}</div>}
+          {quickEditId === item.id ? <div className="mt-4 grid gap-3 rounded-xl border border-cyan-400/30 bg-slate-950 p-4"><InputField label="New trade cost (£)" type="number" min="0" step="0.01" value={quickTradeCost} onChange={(e) => setQuickTradeCost(e.target.value)} /><InputField label="Markup (%)" type="number" min="0" step="0.1" value={quickMarkup} onChange={(e) => setQuickMarkup(e.target.value)} /><div className="flex gap-2"><Button onClick={() => saveQuickUpdate(item)}>Save price</Button><Button variant="secondary" onClick={() => setQuickEditId(null)}>Cancel</Button></div></div> : <div className="mt-4 flex flex-wrap gap-2"><Button variant="secondary" onClick={() => openQuickUpdate(item)}><RefreshCw className="mr-2 size-4" />Quick update</Button>{supplierUrl ? <a href={supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a> : null}</div>}
           {lastHistory.length ? <details className="mt-4"><summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-400"><History className="size-4" />Recent price history</summary><div className="mt-2 space-y-2">{lastHistory.map((entry) => <div key={entry.id} className="flex justify-between rounded-lg bg-slate-950 p-2 text-xs text-slate-400"><span>{new Date(entry.recordedAt).toLocaleDateString("en-GB")}</span><span>{money.format(entry.tradeCost)} → {money.format(entry.sellPrice)}</span></div>)}</div></details> : null}
         </> : <>
           <div className="mt-5 border-t border-slate-800 pt-4 text-sm"><p className="text-slate-500">Stock code</p><p className="font-semibold">{item.stockCode || "—"}</p></div>
-          {item.supplierUrl ? <div className="mt-4"><a href={item.supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a></div> : null}
+          {supplierUrl ? <div className="mt-4"><a href={supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a></div> : null}
         </>}
+        <div className="mt-4 border-t border-slate-800 pt-4"><MaterialShareActions material={shareMaterial} enabled={sharingReady && materialIndex.unique.has(item.id)} contextKey={JSON.stringify([sharingAccountKey, item.id])} canUse={() => canShareMaterial(expectedShareMaterial)} /></div>
       </Card>;
     })}</section>}
   </div>;

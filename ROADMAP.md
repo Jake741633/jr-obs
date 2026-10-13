@@ -8,6 +8,10 @@ Build JR OS into the operating system for JR Electrical Services, capable of sup
 These features are delivered on the `jr-os-v2` preview track. Production release
 acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 
+- [x] Electrical catalogue with 40 editable job packs and 101 materials, separated buying/selling allowances and clearly labelled historical benchmarks
+- [x] Reviewed, non-overwriting catalogue imports with partial-save retries; durable pack editing and quote price/cost/hour preservation
+- [x] Phone-friendly supplier code/link paste, copy and native sharing with product-only payloads and safe fallbacks
+- [ ] Physical-phone acceptance of catalogue import/sync, real supplier sharing and real-job pricing comparison before everyday live use
 - [x] Saved calculation evidence linked to jobs, quotes, estimates and surveys
 - [x] Home-screen web app foundation with role-aware launch and installation help
 - [x] Phone quick actions and direct JR AI navigation

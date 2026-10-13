@@ -24,6 +24,7 @@ import { usePricingDocumentsCollection } from "../../lib/cloud/coreBusinessColle
 import { strictHttpsJobDocumentUrl } from "../../lib/cloud/fieldJobDocumentCapability-core.mjs";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
+import { jobPackQuoteLines, jobPackTotals } from "../../lib/jobPackCatalogue";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
 import { createJobFromAcceptedQuote, nextPricingDocumentNumber, pricingDocumentTotal } from "../../lib/workflow";
 import type { Builder, BusinessOverhead, BusinessProfile, BusinessTermsTemplate, Customer, DocumentBrandingSettings, FixedPriceWorkflow, Job, JobDocument, JobPack, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsTemplate, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment, VatSettings } from "../../lib/models";
@@ -382,24 +383,13 @@ export default function QuotesPage() {
   }
 
   function addJobPack() {
-    const pack = jobPacks.items.find((item) => item.id === selectedJobPackId);
-    if (!pack) { setError("Choose a job pack first."); return; }
-    const imported: PricingLineItem[] = [];
-    if (pack.labourHours > 0) imported.push({ id: makeId("line"), description: pack.labourDescription || `${pack.name} labour`, category: "Labour", quantity: pack.labourHours, unitPrice: pack.labourRate, unitCost: pack.labourRate });
-    pack.materials.forEach((packMaterial) => {
-      const source = packMaterial.materialId ? materials.items.find((item) => item.id === packMaterial.materialId) : undefined;
-      imported.push({
-        id: makeId("line"),
-        description: source?.name || packMaterial.description,
-        category: "Materials",
-        quantity: packMaterial.quantity,
-        unitPrice: source?.sellPrice ?? packMaterial.unitPrice,
-        unitCost: source?.tradeCost ?? packMaterial.unitPrice,
-        materialId: source?.id,
-        supplier: source?.supplier,
-        stockCode: source?.stockCode,
-      });
-    });
+    if (!jobPacks.isReady || !materials.isReady) { setError("Wait for job packs and materials to load."); return; }
+    const matches = jobPacks.items.filter((item) => item.id === selectedJobPackId);
+    if (matches.length !== 1) { setError("Choose one uniquely identified job pack first."); return; }
+    const pack = matches[0];
+    let imported: PricingLineItem[];
+    try { imported = jobPackQuoteLines(pack, materials.items, () => makeId("line")); }
+    catch (error) { setError(error instanceof Error ? error.message : "Check the job pack amounts."); return; }
     setItems((current) => [...current, ...imported]);
     setForm((current) => ({
       ...current,
@@ -409,10 +399,11 @@ export default function QuotesPage() {
     setSavePackName((current) => current || pack.name);
     setSelectedJobPackId("");
     setError("");
-    setSuccess(`${pack.name} added. Linked materials use the latest library price where available.`);
+    setSuccess(`${pack.name} added with its saved quantities and selling allowances. Review actual buying/labour costs and VAT before sending.`);
   }
 
   function saveAsJobPack() {
+    if (!jobPacks.isReady) { setError("Wait for job packs to load."); return; }
     const name = savePackName.trim() || form.title.trim();
     if (!name) { setError("Enter a name for the new job pack."); return; }
     if (items.length === 0) { setError("Add pricing lines before saving a job pack."); return; }
@@ -421,19 +412,26 @@ export default function QuotesPage() {
     const otherLines = items.filter((item) => item.category === "Other");
     const labourTotal = labourLines.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const singleLabour = labourLines.length === 1 ? labourLines[0] : undefined;
+    const recordedHours = labourLines.map((item) => item.labourHours ?? (!item.labourMode || item.labourMode === "Hours" ? item.quantity : undefined));
+    const knownHours = recordedHours.every((hours) => typeof hours === "number" && Number.isFinite(hours) && hours >= 0);
+    const hoursTotal = knownHours ? recordedHours.reduce<number>((sum, hours) => sum + (hours ?? 0), 0) : 0;
+    const labourHours = hoursTotal > 0 ? hoursTotal : (labourTotal > 0 ? 1 : 0);
     const now = new Date().toISOString();
     const pack: JobPack = {
       id: makeId("pack"), name, category: savePackCategory.trim() || "Custom", description: form.title.trim(),
       labourDescription: singleLabour?.description || labourLines.map((item) => item.description).filter(Boolean).join(" + ") || `${name} labour`,
-      labourHours: singleLabour?.quantity ?? (labourTotal > 0 ? 1 : 0), labourRate: singleLabour?.unitPrice ?? labourTotal,
-      materials: materialLines.map((item) => ({ id: makeId("pack-material"), materialId: item.materialId, description: item.description, quantity: item.quantity, unitPrice: item.unitPrice })),
+      labourHours, labourRate: labourHours > 0 ? labourTotal / labourHours : 0,
+      materials: materialLines.map((item) => ({ id: makeId("pack-material"), materialId: item.materialId, description: item.description, quantity: item.quantity, unitPrice: item.unitPrice, ...(item.unitCost === undefined ? {} : { unitCost: item.unitCost }) })),
       testingRequirements: "", certificatesRequired: "",
+      internalNotes: labourTotal > 0 && hoursTotal === 0 ? "Exact labour hours were not recorded. The 1h entry is a placeholder preserving the fixed labour selling allowance; replace it with your estimated hours and rate." : "",
       notes: [form.notes, otherLines.length ? `Other allowances from original quote:\n${otherLines.map((item) => `- ${item.description}: ${item.quantity} × ${money.format(item.unitPrice)}`).join("\n")}` : ""].filter(Boolean).join("\n\n"),
       createdAt: now, updatedAt: now,
     };
-    jobPacks.setItems((current) => [pack, ...current]);
+    if (jobPackTotals(pack, []).total === null || pack.materials.some((item) => item.unitCost !== undefined && (!Number.isFinite(item.unitCost) || item.unitCost < 0))) { setError("Check the quote amounts before saving a job pack."); return; }
+    try { jobPacks.createItem(pack); }
+    catch (error) { setError(error instanceof Error ? error.message : "The job pack could not be saved."); setSuccess(""); return; }
     setError("");
-    setSuccess(`${name} saved as a reusable job pack.`);
+    setSuccess(`${name} saved as a reusable job pack on this device or queued for sync. Check Cloud sync for confirmation.`);
   }
 
   function convertToJob(document: PricingDocument) {
@@ -614,7 +612,7 @@ export default function QuotesPage() {
         </div>
       </div>
       <div id="quote-preview" className="scroll-mt-4"><div className="mb-3 flex items-center justify-between"><div><h2 className="text-lg font-bold">Full quote preview</h2><p className="text-sm text-slate-500">This customer-facing layout matches the saved document and final PDF structure.</p></div><Eye className="size-5 text-cyan-300" /></div><QuotePreview number={editingId ? documents.items.find((item) => item.id === editingId)?.number ?? "DRAFT" : "DRAFT"} documentType={form.type} title={form.title} customer={customers.items.find((item) => item.id === form.customerId)} builder={builders.items.find((item) => item.id === form.builderId)} siteAddress={form.siteAddress} validUntil={form.validUntil} items={items} notes={form.notes} exclusions={form.exclusions} terms={form.terms} paymentTerms={paymentTerms} vatEnabled={form.vatEnabled} vatRate={Number(form.vatRate || 0)} subtotal={profitability.sellingPrice} businessProfile={businessProfile} vatSettings={vatSettings} branding={branding} /></div>
-      <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4"><h2 className="font-semibold">Save this version as a new job pack</h2><p className="mt-1 text-sm text-slate-400">Material links are retained so future quotes can use current library prices.</p><div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]"><InputField label="New pack name" value={savePackName} onChange={(e) => setSavePackName(e.target.value)} /><InputField label="Category" value={savePackCategory} onChange={(e) => setSavePackCategory(e.target.value)} /><Button type="button" className="self-end" onClick={saveAsJobPack}><Save className="mr-2 size-4" />Save as job pack</Button></div></div>
+      <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4"><h2 className="font-semibold">Save this version as a new job pack</h2><p className="mt-1 text-sm text-slate-400">Material links, buying-cost snapshots and selling allowances are retained. Review and update the saved pack when prices change.</p><div className="mt-4 grid gap-3 md:grid-cols-[1fr_220px_auto]"><InputField label="New pack name" value={savePackName} onChange={(e) => setSavePackName(e.target.value)} /><InputField label="Category" value={savePackCategory} onChange={(e) => setSavePackCategory(e.target.value)} /><Button type="button" className="self-end" onClick={saveAsJobPack}><Save className="mr-2 size-4" />Save as job pack</Button></div></div>
       <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}{success ? <p className="text-sm text-emerald-300">{success}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Selling price {money.format(profitability.sellingPrice)}</p>{form.vatEnabled ? <p className="text-sm text-slate-400">VAT {money.format(vat)}</p> : null}<p className="text-xl font-bold">Customer total {money.format(profitability.sellingPrice + vat)}</p><Button type="submit" className="mt-3">{editingId ? "Update document" : "Save draft"}</Button></div></div>
     </form></Card> : null}
 
