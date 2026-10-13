@@ -59,6 +59,23 @@ retried. Keep the page open until all chosen photos are saved, then check sync
 status. Device storage limits can interrupt a batch even within these file limits;
 the interface reports partial success instead of claiming cloud upload finished.
 
+The job folder shows eight saved records at a time with **Show more documents**,
+multiword search across names, filenames, notes and uploaders, and filters for
+photos or other documents/links. Newest known upload dates appear first; invalid
+dates are labelled unavailable. Missing or globally duplicated document IDs are
+withheld with a source-review count, including collisions across different jobs.
+Search and expanded photo state reset when the account or job changes.
+
+Office and local users can see thumbnails and expand supported JPEG, PNG and WebP
+photos. Previews use bounded saved image data or same-origin object URLs already
+provided by the authenticated private-file bridge; browsing does not fetch an
+external photo link. A downloaded cloud photo also offers **Download photo**.
+Unsupported or unavailable images show a fallback, preserving existing document
+actions. Field accounts retain click-time authorisation for external document
+links and do not receive cached inline previews. These browsing controls do not
+change records or send evidence to AI. Physical-phone viewing and signed-in
+private-photo download acceptance remain pending.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
 These notes are labelled as user-entered. The separate Quote Builder can prepare
