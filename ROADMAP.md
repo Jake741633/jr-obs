@@ -11,6 +11,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Electrical catalogue with 40 editable job packs and 101 materials, separated buying/selling allowances and clearly labelled historical benchmarks
 - [x] Reviewed, non-overwriting catalogue imports with partial-save retries; durable pack editing and quote price/cost/hour preservation
 - [x] Phone-friendly supplier code/link paste, copy and native sharing with product-only payloads and safe fallbacks
+- [x] AI suggestions retain pack allowances, distinguish missing costs from zero, and require complete cost review before saving quotes or purchase lists; historical cost samples use recorded quote allowances
 - [ ] Physical-phone acceptance of catalogue import/sync, real supplier sharing and real-job pricing comparison before everyday live use
 - [x] Saved calculation evidence linked to jobs, quotes, estimates and surveys
 - [x] Home-screen web app foundation with role-aware launch and installation help

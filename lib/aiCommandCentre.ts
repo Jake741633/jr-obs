@@ -1,4 +1,7 @@
 import { annualOverheadCost, calculateQuoteProfitability } from "./quoteEngine";
+import { savedIdentityIndex } from "./assistantIdentity";
+import { packLineCost } from "./jobPackCatalogue";
+import { reviewEstimateCosts, validEstimateAmount } from "./estimateCostReview";
 import { assistantInvoiceBalance, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "./assistantSignals-core.mjs";
 import { effectiveInvoicePaid, type PaymentRecord } from "./payments";
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
@@ -45,7 +48,8 @@ export interface AiMaterialSuggestion {
   materialId?: string;
   description: string;
   quantity: number;
-  unitCost: number;
+  unitCost?: number;
+  costBasis: "Saved pack allowance" | "Materials library" | "Recorded quote cost" | "Not recorded" | "Entered for this estimate";
   unitPrice: number;
   supplier: string;
   stockCode: string;
@@ -86,7 +90,8 @@ export interface AiQuoteDraft {
   scopeItems: string[];
   items: PricingLineItem[];
   pricingSettings: QuotePricingSettings;
-  profitability: ReturnType<typeof calculateQuoteProfitability>;
+  profitability: ReturnType<typeof calculateQuoteProfitability> | null;
+  costBasisByLineId: Record<string, string>;
   materials: AiMaterialSuggestion[];
   pricing: AiPricingRecommendation;
   notes: string;
@@ -245,36 +250,19 @@ export function suggestMaterials({
 }) {
   const jobType = inferJobType(notes, selectedJobType);
   const contextTokens = tokens(`${jobType} ${notes}`);
-  const materialById = new Map(materials.map((material) => [material.id, material]));
+  const materialIndex = savedIdentityIndex(materials);
+  const materialById = materialIndex.unique;
   const aggregates = new Map<string, {
     suggestion: AiMaterialSuggestion;
-    totalQuantity: number;
-    occurrences: number;
     score: number;
   }>();
 
   function addSuggestion(suggestion: AiMaterialSuggestion, score: number) {
-    const key = itemKey(suggestion.materialId, suggestion.description);
-    const existing = aggregates.get(key);
-    if (!existing) {
-      aggregates.set(key, {
-        suggestion,
-        totalQuantity: suggestion.quantity * Math.max(1, suggestion.evidenceCount),
-        occurrences: Math.max(1, suggestion.evidenceCount),
-        score,
-      });
-      return;
-    }
-    existing.totalQuantity += suggestion.quantity * Math.max(1, suggestion.evidenceCount);
-    existing.occurrences += Math.max(1, suggestion.evidenceCount);
-    existing.score = Math.max(existing.score, score) + 0.1;
-    const evidence = [...existing.suggestion.evidence, ...suggestion.evidence]
-      .filter((item, index, all) => all.findIndex((candidate) => candidate.id === item.id) === index);
-    if (existing.suggestion.source !== "Previous JR OS jobs" && suggestion.source === "Previous JR OS jobs") {
-      existing.suggestion = { ...suggestion, evidence };
-    } else {
-      existing.suggestion = { ...existing.suggestion, evidence };
-    }
+    if (!validEstimateAmount(suggestion.quantity) || suggestion.quantity <= 0 || !validEstimateAmount(suggestion.unitPrice)
+      || !validEstimateAmount(suggestion.quantity * suggestion.unitPrice)) return;
+    // History, then ranked packs, then library: retain one coherent allowance.
+    // Averaging a pack quantity with a library's default quantity of one corrupts it.
+    if (!aggregates.has(suggestion.key)) aggregates.set(suggestion.key, { suggestion, score });
   }
 
   buildMaterialLearningPatterns({ documents, jobs, invoices, materials })
@@ -290,14 +278,17 @@ export function suggestMaterials({
     .slice(0, limit)
     .forEach(({ pattern, relevantEvidence, score }) => {
       const material = pattern.materialId ? materialById.get(pattern.materialId) : undefined;
-      const unitCost = material?.tradeCost || pattern.averageUnitCost;
+      const libraryCost = validEstimateAmount(material?.tradeCost) ? material.tradeCost : undefined;
+      const recordedCost = validEstimateAmount(pattern.averageUnitCost) ? pattern.averageUnitCost : undefined;
+      const unitCost = libraryCost ?? recordedCost;
       addSuggestion({
         key: pattern.key,
-        materialId: pattern.materialId,
+        materialId: material?.id,
         description: material?.name || pattern.description,
         quantity: pattern.averageQuantity || 1,
         unitCost,
-        unitPrice: unitCost * (1 + markupPercent / 100),
+        costBasis: libraryCost !== undefined ? "Materials library" : recordedCost !== undefined ? "Recorded quote cost" : "Not recorded",
+        unitPrice: unitCost === undefined ? pattern.averageUnitPrice : roundMoney(unitCost * (1 + markupPercent / 100)),
         supplier: material?.supplier || "Supplier to confirm",
         stockCode: material?.stockCode || "",
         supplierUrl: material?.supplierUrl,
@@ -310,7 +301,7 @@ export function suggestMaterials({
       }, score + 2);
     });
 
-  jobPacks
+  savedIdentityIndex(jobPacks).selectable
     .map((pack) => ({
       pack,
       score: relevantRecordScore(`${pack.name} ${pack.category} ${pack.description} ${pack.notes}`, jobType, contextTokens),
@@ -321,14 +312,15 @@ export function suggestMaterials({
     .forEach(({ pack, score }) => {
       pack.materials.forEach((packMaterial) => {
         const material = packMaterial.materialId ? materialById.get(packMaterial.materialId) : undefined;
-        const unitCost = material?.tradeCost ?? packMaterial.unitPrice;
+        const unitCost = packLineCost(packMaterial, materialIndex.selectable) ?? undefined;
         addSuggestion({
           key: itemKey(packMaterial.materialId, packMaterial.description),
-          materialId: packMaterial.materialId,
-          description: material?.name || packMaterial.description,
+          materialId: material?.id,
+          description: packMaterial.description,
           quantity: packMaterial.quantity,
           unitCost,
-          unitPrice: unitCost * (1 + markupPercent / 100),
+          costBasis: unitCost === undefined ? "Not recorded" : packMaterial.unitCost !== undefined ? "Saved pack allowance" : "Materials library",
+          unitPrice: packMaterial.unitPrice,
           supplier: material?.supplier || "Supplier to confirm",
           stockCode: material?.stockCode || "",
           supplierUrl: material?.supplierUrl,
@@ -362,7 +354,7 @@ export function suggestMaterials({
       Domestic: ["accessories", "cable", "lighting", "protection"],
     };
     const wanted = categoryKeywords[jobType] ?? [];
-    materials
+    materialIndex.selectable
       .filter((material) => material.favourite || wanted.some((value) => `${material.category} ${material.name}`.toLowerCase().includes(value)))
       .toSorted((left, right) => Number(right.favourite) - Number(left.favourite) || right.updatedAt.localeCompare(left.updatedAt))
       .slice(0, limit)
@@ -371,8 +363,9 @@ export function suggestMaterials({
         materialId: material.id,
         description: material.name,
         quantity: 1,
-        unitCost: material.tradeCost,
-        unitPrice: material.tradeCost * (1 + markupPercent / 100),
+        unitCost: validEstimateAmount(material.tradeCost) ? material.tradeCost : undefined,
+        costBasis: validEstimateAmount(material.tradeCost) ? "Materials library" : "Not recorded",
+        unitPrice: validEstimateAmount(material.tradeCost) ? roundMoney(material.tradeCost * (1 + markupPercent / 100)) : material.sellPrice,
         supplier: material.supplier || "Supplier to confirm",
         stockCode: material.stockCode,
         supplierUrl: material.supplierUrl,
@@ -396,14 +389,10 @@ export function suggestMaterials({
   }
 
   return [...aggregates.values()]
-    .map(({ suggestion, totalQuantity, occurrences, score }) => ({
+    .map(({ suggestion, score }) => ({
       ...suggestion,
-      quantity: Math.max(0.01, roundMoney(totalQuantity / Math.max(1, occurrences))),
-      unitCost: roundMoney(suggestion.unitCost),
-      unitPrice: roundMoney(suggestion.unitCost * (1 + markupPercent / 100)),
-      evidenceCount: occurrences,
-      confidence: score >= 2.7 || occurrences >= 3 ? "High" as const : score >= 1.2 ? "Medium" as const : "Low" as const,
-      confidenceScore: Math.min(100, Math.max(suggestion.confidenceScore, Math.round(score * 24 + Math.min(4, occurrences) * 7))),
+      confidence: score >= 2.7 || suggestion.evidenceCount >= 3 ? "High" as const : score >= 1.2 ? "Medium" as const : "Low" as const,
+      confidenceScore: Math.min(100, Math.max(suggestion.confidenceScore, Math.round(score * 24 + Math.min(4, suggestion.evidenceCount) * 7))),
     }))
     .toSorted((left, right) => {
       const confidence = { High: 3, Medium: 2, Low: 1 };
@@ -582,6 +571,7 @@ export function buildAiQuoteDraft({
     markupPercent: pricing.materialMarkupPercent,
   });
   const items: PricingLineItem[] = [];
+  const costBasisByLineId: Record<string, string> = {};
   if (pricing.labourRate && pricing.labourPrice > 0) {
     items.push({
       id: createId("ai-line"),
@@ -596,8 +586,10 @@ export function buildAiQuoteDraft({
     });
   }
   materialSuggestions.forEach((suggestion) => {
+    const id = createId("ai-line");
+    costBasisByLineId[id] = suggestion.costBasis;
     items.push({
-      id: createId("ai-line"),
+      id,
       description: suggestion.description,
       category: "Materials",
       quantity: suggestion.quantity,
@@ -620,7 +612,8 @@ export function buildAiQuoteDraft({
     scopeItems: extractScopeItems(notes),
     items,
     pricingSettings,
-    profitability: calculateQuoteProfitability(items, pricingSettings, overheads, labourSettings),
+    profitability: reviewEstimateCosts(items).complete ? calculateQuoteProfitability(items, pricingSettings, overheads, labourSettings) : null,
+    costBasisByLineId,
     materials: materialSuggestions,
     pricing,
     notes: [

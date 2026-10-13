@@ -57,6 +57,35 @@ Account/session/readiness changes invalidate import/editor/sharing controls.
 Imports and pack edits require office/local access. Material sharing also supports
 authorized electricians without exposing the office price branches.
 
+## AI-assisted estimates
+
+Suggestions prefer relevant recorded work, then ranked packs, then library
+matches. Each material keeps one source allowance. To use a pack's complete
+schedule directly, add that pack in Quotes.
+
+AI Materials Assistant and the local priced-draft builder preserve a suggested
+pack line's exact quantity and saved buying/selling allowances. Library fallback
+suggestions do not average a pack quantity down or reprice a reviewed pack. Legacy
+pack costs use a uniquely linked library record; an invalid explicit pack cost
+remains unknown. Duplicate pack identities cannot be selected.
+
+Both screens expose editable costs and their source: saved pack allowance,
+materials library, recorded quote cost or an amount entered for this estimate.
+Blank costs are unknown; explicit zero is allowed. Missing costs and invalid
+quantities/prices prevent saving, and incomplete quote costs withhold profit
+figures. Purchase-list and quote creation use durable record writes; a storage
+failure leaves the draft available to retry.
+
+Historical material cost averages use only explicit costs saved on quote lines
+or job quote snapshots, including zero. Missing costs do not count as samples,
+and current library prices never backfill historical costs. These figures are
+recorded quote allowances, not verified actual buying spend. Learning memory
+signatures invalidate older cost summaries without a database/schema change.
+
+On a phone, also generate an AI materials suggestion and a priced draft. Clear
+one buying cost, confirm the review prompt and disabled save, then enter the
+reviewed allowance and verify it reaches the saved purchase list or quote.
+
 ## Phone acceptance still required
 
 Automated tests cover quantities/totals, invalid values, incomplete costs,

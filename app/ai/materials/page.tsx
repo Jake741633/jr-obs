@@ -7,7 +7,7 @@ import { AiToolNav } from "../../../components/ai/AiToolNav";
 import { WhyRecommendation } from "../../../components/ai/WhyRecommendation";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
-import { TextareaField } from "../../../components/ui/FormField";
+import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
 import { suggestMaterials, type AiMaterialSuggestion } from "../../../lib/aiCommandCentre";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
@@ -24,6 +24,8 @@ import type {
   QuoteTemplateType,
 } from "../../../lib/models";
 import { defaultQuotePricingSettings } from "../../../lib/quoteEngine";
+import { reviewEstimateCosts } from "../../../lib/estimateCostReview";
+import { savedIdentityIndex } from "../../../lib/assistantIdentity";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const jobTypes: Array<"" | QuoteTemplateType> = ["", "Domestic", "Commercial", "Rewire", "EICR", "Consumer Unit", "Fault Finding"];
@@ -76,7 +78,12 @@ export default function AiMaterialsAssistantPage() {
   }
 
   function updateQuantity(key: string, quantity: number) {
-    setSuggestions((current) => current.map((item) => item.key === key ? { ...item, quantity: Math.max(0, quantity) } : item));
+    setSuggestions((current) => current.map((item) => item.key === key ? { ...item, quantity } : item));
+  }
+
+  function updateCost(key: string, value: string) {
+    const unitCost = value.trim() === "" ? undefined : Number(value);
+    setSuggestions((current) => current.map((item) => item.key === key ? { ...item, unitCost, costBasis: unitCost === undefined ? "Not recorded" : "Entered for this estimate" } : item));
   }
 
   function toggle(key: string) {
@@ -84,12 +91,18 @@ export default function AiMaterialsAssistantPage() {
   }
 
   function createPurchaseList() {
-    const selected = suggestions.filter((suggestion) => selectedKeys.includes(suggestion.key) && suggestion.quantity > 0);
+    if (!ready) return;
+    const selected = suggestions.filter((suggestion) => selectedKeys.includes(suggestion.key));
     if (!selected.length) {
       setMessage("Select at least one suggested material with a quantity greater than zero.");
       return;
     }
-    const job = jobs.items.find((item) => item.id === jobId);
+    if (!reviewEstimateCosts(selected).complete) {
+      setMessage("Review every selected quantity and buying cost before saving. Enter zero only for an intentionally free item.");
+      return;
+    }
+    const job = savedIdentityIndex(jobs.items).unique.get(jobId);
+    if (jobId && !job) { setMessage("The linked job is missing or duplicated. Select it again before saving."); return; }
     const now = new Date().toISOString();
     const list: PurchaseList = {
       id: makeId("purchase"),
@@ -105,22 +118,21 @@ export default function AiMaterialsAssistantPage() {
         stockCode: suggestion.stockCode,
         supplierUrl: suggestion.supplierUrl,
         quantity: suggestion.quantity,
-        unitCost: suggestion.unitCost,
+        unitCost: suggestion.unitCost!,
         status: "Needed" as PurchaseItemStatus,
       })),
       notes: "AI-assisted materials list. Confirm design quantities, stock, compatibility and live supplier pricing before placing orders.",
       createdAt: now,
       updatedAt: now,
     };
-    purchaseLists.setItems((current) => [list, ...current]);
+    try { purchaseLists.createItem(list); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "The purchase list could not be saved. Your suggestions are still here."); return; }
     setMessage(`${list.number} saved to Purchase Lists with ${list.items.length} selected material line${list.items.length === 1 ? "" : "s"}.`);
   }
 
   if (!ready) return <Card>Preparing AI Materials Assistant…</Card>;
 
-  const selectedCost = suggestions
-    .filter((suggestion) => selectedKeys.includes(suggestion.key))
-    .reduce((sum, suggestion) => sum + suggestion.quantity * suggestion.unitCost, 0);
+  const costReview = reviewEstimateCosts(suggestions.filter((suggestion) => selectedKeys.includes(suggestion.key)));
 
   return (
     <main className="space-y-6">
@@ -160,7 +172,7 @@ export default function AiMaterialsAssistantPage() {
           <section className="grid gap-4 sm:grid-cols-3">
             <Card><PackageCheck className="size-5 text-cyan-300" /><p className="mt-3 text-sm text-slate-400">Suggested lines</p><p className="mt-2 text-2xl font-bold">{suggestions.length}</p></Card>
             <Card><Check className="size-5 text-emerald-300" /><p className="mt-3 text-sm text-slate-400">Selected</p><p className="mt-2 text-2xl font-bold">{selectedKeys.length}</p></Card>
-            <Card><Plus className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">Estimated trade cost</p><p className="mt-2 text-2xl font-bold">{money.format(selectedCost)}</p></Card>
+            <Card><Plus className="size-5 text-amber-300" /><p className="mt-3 text-sm text-slate-400">{costReview.complete ? "Estimated buying cost" : "Known buying costs"}</p><p className="mt-2 text-2xl font-bold">{money.format(costReview.knownCost)}</p>{selectedKeys.length && !costReview.complete ? <p className="mt-2 text-sm text-amber-300">Costs need review. {costReview.missingCosts} missing; check quantities and amounts.</p> : null}</Card>
           </section>
 
           {!suggestions.length ? (
@@ -177,10 +189,11 @@ export default function AiMaterialsAssistantPage() {
                         <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{suggestion.description}</p><p className="mt-1 text-xs text-slate-500">{suggestion.supplier} · {suggestion.stockCode || "No stock code"}</p></div><span className={`rounded-full px-2 py-1 text-xs font-semibold ${suggestion.confidence === "High" ? "bg-emerald-500/10 text-emerald-300" : suggestion.confidence === "Medium" ? "bg-amber-500/10 text-amber-300" : "bg-slate-800 text-slate-400"}`}>{suggestion.confidence} · {suggestion.confidenceScore}%</span></div>
                         <p className="mt-3 text-sm text-slate-400">{suggestion.reason}</p>
                         <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_1fr]">
-                          <label className="grid gap-1 text-xs text-slate-500"><span>Quantity</span><input type="number" min="0" step="0.01" value={suggestion.quantity} onChange={(event) => updateQuantity(suggestion.key, Number(event.target.value || 0))} className="min-h-10 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label>
-                          <div className="rounded-lg bg-slate-950 px-3 py-2"><p className="text-xs text-slate-500">Trade cost</p><p className="font-semibold">{money.format(suggestion.unitCost)}</p></div>
+                          <InputField label="Quantity" type="number" min="0" step="any" value={suggestion.quantity} onChange={(event) => updateQuantity(suggestion.key, Number(event.target.value || 0))} />
+                          <InputField label="Buying cost each (£)" type="number" min="0" step="any" value={suggestion.unitCost ?? ""} placeholder="Not recorded" onChange={(event) => updateCost(suggestion.key, event.target.value)} />
                           <div className="rounded-lg bg-slate-950 px-3 py-2"><p className="text-xs text-slate-500">Quote price</p><p className="font-semibold">{money.format(suggestion.unitPrice)}</p></div>
                         </div>
+                        <p className="mt-2 text-sm text-slate-400">Cost basis: {suggestion.costBasis}. Check the current supplier price.</p>
                         <p className="mt-3 text-xs font-semibold uppercase tracking-wider text-cyan-400">{suggestion.source} · {suggestion.evidenceCount} reference{suggestion.evidenceCount === 1 ? "" : "s"}</p>
                         <details className="mt-3 rounded-xl border border-slate-800 bg-slate-950/60 p-3">
                           <summary className="cursor-pointer text-sm font-semibold text-violet-300">Why this material?</summary>
@@ -194,7 +207,7 @@ export default function AiMaterialsAssistantPage() {
             </div>
           )}
 
-          {suggestions.length ? <Card><Button className="w-full" onClick={createPurchaseList}><PackageCheck className="mr-2 size-4" />Save selected items to Purchase Lists</Button><Link href="/purchases" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold hover:bg-slate-800">Open Purchase Lists</Link></Card> : null}
+          {suggestions.length ? <Card><p className="mb-4 text-sm text-slate-400">Check buying costs and quantities for this job. Blank costs need an allowance; enter £0 only when intentional.</p><Button className="w-full" disabled={!costReview.complete} onClick={createPurchaseList}><PackageCheck className="mr-2 size-4" />Save selected items to Purchase Lists</Button><Link href="/purchases" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold hover:bg-slate-800">Open Purchase Lists</Link></Card> : null}
         </div>
       </section>
     </main>
