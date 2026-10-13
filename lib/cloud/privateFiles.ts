@@ -112,6 +112,10 @@ export function privateDownloadCacheKey(identity: CloudIdentity, sourceId: strin
   return JSON.stringify([identity.organisationId, identity.userId, identity.role, identity.customerSourceId ?? null, sourceId]);
 }
 
+function privateAttachmentDownloadCacheKey(identity: CloudIdentity, record: PrivateFileBackedRecord) {
+  return JSON.stringify([privateDownloadCacheKey(identity, record.id), record.privateStoragePath ?? null, record.privateFileId ?? null]);
+}
+
 export function privateUploadQueueItemId(organisationId: string, userId: string, role: string, customerSourceId: string | undefined, storageKey: string, sourceId: string) {
   return JSON.stringify([organisationId, userId, role, customerSourceId ?? null, storageKey, sourceId]);
 }
@@ -417,16 +421,16 @@ export function usePrivateFileCollectionBridge<T>(input: {
     const missing = items.flatMap((item) => {
       const record = item as PrivateFileBackedRecord;
       if (storageKey === "jr-os-surveys") {
-        return (record.photos ?? []).filter((photo) => photo.privateStoragePath && !downloadUrls[privateDownloadCacheKey(identity, photo.id)]);
+        return (record.photos ?? []).filter((photo) => photo.privateStoragePath && !downloadUrls[privateAttachmentDownloadCacheKey(identity, photo)]);
       }
-      return record.privateStoragePath && !downloadUrls[privateDownloadCacheKey(identity, record.id)] ? [record] : [];
+      return record.privateStoragePath && !downloadUrls[privateAttachmentDownloadCacheKey(identity, record)] ? [record] : [];
     });
     if (missing.length === 0) return;
     const createdUrls: string[] = [];
     Promise.all(missing.map(async (record) => {
       const url = await authenticatedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId);
       createdUrls.push(url);
-      return [privateDownloadCacheKey(identity, record.id), url] as const;
+      return [privateAttachmentDownloadCacheKey(identity, record), url] as const;
     })).then((entries) => {
       if (!active) {
         for (const url of createdUrls) URL.revokeObjectURL(url);
@@ -448,10 +452,10 @@ export function usePrivateFileCollectionBridge<T>(input: {
     if (storageKey === "jr-os-surveys") {
       return {
         ...record,
-        photos: (record.photos ?? []).map((photo) => ({ ...photo, signedDownloadUrl: identity ? downloadUrls[privateDownloadCacheKey(identity, photo.id)] : undefined })),
+        photos: (record.photos ?? []).map((photo) => ({ ...photo, signedDownloadUrl: identity ? downloadUrls[privateAttachmentDownloadCacheKey(identity, photo)] : undefined })),
       } as T;
     }
-    return { ...record, signedDownloadUrl: identity ? downloadUrls[privateDownloadCacheKey(identity, record.id)] : undefined } as T;
+    return { ...record, signedDownloadUrl: identity ? downloadUrls[privateAttachmentDownloadCacheKey(identity, record)] : undefined } as T;
   }), [downloadUrls, identity, items, storageKey]);
 
   return { items: hydratedItems };

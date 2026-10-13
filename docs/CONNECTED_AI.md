@@ -1,8 +1,40 @@
 # Connected AI quote scope
 
-Quote Builder includes **Review notes, photos or a site recording with AI**. The user chooses one camera/gallery photo and explicitly submits it with the notes currently visible in the form. OpenAI returns an unpriced scope, questions and exclusions. The user edits and checks this text, then chooses **Use reviewed scope in quote notes**. The existing priced draft is cleared so it must be rebuilt and checked using saved pricing settings.
+Quote Builder includes **Review notes, photos or a site recording with AI**. The user chooses one camera/gallery photo, a saved job-evidence record or a reviewed recording, then explicitly submits it with the notes currently visible in the form. OpenAI returns an unpriced scope, questions and exclusions. The user edits and checks this text, then chooses **Use reviewed scope in quote notes**. The existing priced draft is cleared so it must be rebuilt and checked using saved pricing settings.
 
 This step does not save/send a quote, alter a job or send the CRM. The original video is not uploaded or saved by the AI workflow. Photo/clip evidence is transient; save job evidence through the separate job capture form. The deterministic priced-draft button is labelled **Create priced draft from notes**.
+
+## Reuse saved job evidence
+
+Choose an **Existing job** and open **Use saved job evidence** in the AI panel.
+The existing job-document browser provides search, photo/document filters and
+progressive records, withholding missing or globally duplicate document IDs.
+Only a unique loaded job can supply the evidence list, and a loaded office account
+is required to view or select it in this connected flow.
+
+**Use photo and notes** selects one supported saved JPEG, PNG or WebP and its
+recorded notes. **Use saved notes** selects just the text, including manually
+entered spoken details on a video-link record. External links are never fetched
+or treated as analysed video. The selected name, sharing choice and notes remain
+visible; typed notes stay unchanged. Selecting a record replaces any selected
+camera photo or recording, without sending a request or changing the job.
+
+**Review with AI** reads the selected photo locally, prepares a smaller JPEG and
+sends it with the visible typed and attributed saved notes through the existing
+review endpoint. Only bounded raster data or the same-origin object URL already
+provided by the authenticated private-file bridge can supply bytes. Blob reads
+omit credentials, reject redirects/type mismatches and enforce the 25 MiB source
+limit while streaming. The bridge retains ownership of its URLs and binds cached
+downloads to the current account, record, private-file path and file ID. Replacing
+an attachment cannot supply the previous photo to a new selection.
+
+Saved text, file identity and photo source are checked against the current exact
+record. Changes, deletion, duplicate IDs, missing readiness or account/session
+changes invalidate pending work and old Apply callbacks. An unavailable selection
+must be cleared or selected again. Combined notes remain limited to 12,000
+characters. Connection checks do not read or transmit saved evidence. Automated
+tests cover this flow; signed-in phone/private-download and funded live AI
+acceptance remain pending.
 
 ## Server activation
 

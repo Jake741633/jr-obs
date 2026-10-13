@@ -76,6 +76,14 @@ links and do not receive cached inline previews. These browsing controls do not
 change records or send evidence to AI. Physical-phone viewing and signed-in
 private-photo download acceptance remain pending.
 
+Quote Builder can reuse one saved photo and its notes from the selected existing
+job, or use only a record's saved notes. Open **Use saved job evidence** in the AI
+panel, choose the record, review the visible selection, then explicitly request
+AI review. Typed notes are retained. Changed, removed or ambiguous saved evidence
+blocks a pending review; choosing another photo or recording replaces the saved
+selection. Video links remain links: only their saved text is included by the
+notes-only action. See [Connected AI](CONNECTED_AI.md) for sharing and activation.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
 These notes are labelled as user-entered. The separate Quote Builder can prepare

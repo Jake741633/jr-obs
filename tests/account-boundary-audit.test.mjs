@@ -154,7 +154,8 @@ test("private authenticated transfers reject cross-organisation object paths", (
 test("authenticated attachment URLs cannot be reused after an authorisation context change", () => {
   assert.match(privateFiles, /export function privateDownloadCacheKey\(identity: CloudIdentity, sourceId: string\)/);
   assert.match(privateFiles, /return JSON\.stringify\(\[identity\.organisationId, identity\.userId, identity\.role, identity\.customerSourceId \?\? null, sourceId\]\)/);
-  assert.match(privateFiles, /privateDownloadCacheKey\(identity, photo\.id\)/);
+  assert.match(privateFiles, /privateAttachmentDownloadCacheKey\(identity, photo\)/);
+  assert.match(privateFiles, /privateAttachmentDownloadCacheKey\(identity, record\)/);
   assert.match(privateFiles, /privateDownloadCacheKey\(identity, record\.id\)/);
   assert.match(privateFiles, /URL\.revokeObjectURL\(url\)/);
   assert.doesNotMatch(privateFiles, /downloadUrls\[photo\.id\]/);

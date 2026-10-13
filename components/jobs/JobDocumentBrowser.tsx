@@ -9,6 +9,8 @@ import { canEditFinance } from "../../lib/cloud/permissions";
 import type { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import type { PrivateFileBackedRecord } from "../../lib/cloud/privateFiles";
 import type { JobDocument } from "../../lib/models";
+import { photoPreviewSource } from "../../lib/jobPhotoEvidence";
+export { photoPreviewSource } from "../../lib/jobPhotoEvidence";
 
 const PAGE_SIZE = 8;
 type DocumentFilter = "all" | "photos" | "other";
@@ -63,24 +65,6 @@ export function JobDocumentBrowser({ documents, jobId, children }: {
   </div>;
 }
 
-export function photoPreviewSource(document: JobDocument & Pick<PrivateFileBackedRecord, "signedDownloadUrl">, origin: string): string | null {
-  if (document.category !== "Photo" || !["image/jpeg", "image/png", "image/webp"].includes(document.mimeType)) return null;
-  const data = document.dataUrl;
-  if (typeof data === "string" && data.length <= 3 * 1024 * 1024) {
-    const prefix = `data:${document.mimeType};base64,`;
-    if (data.startsWith(prefix)) {
-      const bytes = data.slice(prefix.length);
-      if (bytes.length && bytes.length % 4 === 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(bytes)) return data;
-    }
-  }
-  // Borrow only a blob created by the existing authenticated private-file bridge.
-  // Never fetch an externalUrl or turn a stored HTTPS URL into an inline image.
-  const downloaded = document.signedDownloadUrl;
-  if (typeof downloaded !== "string" || !/^https?:\/\//.test(origin)) return null;
-  const prefix = `blob:${origin}/`;
-  if (!downloaded.startsWith(prefix) || !/^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i.test(downloaded.slice(prefix.length))) return null;
-  return downloaded;
-}
 
 export function JobPhotoPreview({ document, identityState: identity }: {
   document: JobDocument & Pick<PrivateFileBackedRecord, "signedDownloadUrl">;

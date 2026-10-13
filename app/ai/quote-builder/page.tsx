@@ -31,6 +31,7 @@ import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../
 import { defaultBusinessTermsTemplates } from "../../../lib/quoteTemplates";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { nextPricingDocumentNumber } from "../../../lib/workflow";
+import { savedIdentityIndex } from "../../../lib/assistantIdentity";
 import type {
   Builder,
   BusinessOverhead,
@@ -38,6 +39,7 @@ import type {
   Customer,
   Invoice,
   Job,
+  JobDocument,
   JobPack,
   LabourCostSettings,
   LabourRate,
@@ -74,6 +76,7 @@ export default function AiQuoteBuilderPage() {
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
+  const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const materials = useLocalStorageCollection<Material>("jr-os-materials");
   const jobPacks = useLocalStorageCollection<JobPack>("jr-os-job-packs");
@@ -100,6 +103,7 @@ export default function AiQuoteBuilderPage() {
   const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
   const quoteSettings = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
   const vatSettings = vatStore.items[0] ?? defaultVatSettings;
+  const evidenceJob = savedIdentityIndex(jobs.items).unique.get(jobId);
   const ready = [
     documents, customers, builders, jobs, invoices, materials, jobPacks, labourRates, overheads,
     labourSettingsStore, quoteSettingsStore, termsStore, paymentTermsStore, vatStore,
@@ -271,6 +275,7 @@ export default function AiQuoteBuilderPage() {
             <ConnectedQuoteAssistant
               notes={notes}
               contextKey={JSON.stringify([jobId, customerId, builderId, siteAddress])}
+              jobEvidence={evidenceJob ? { jobId: evidenceJob.id, title: evidenceJob.title, documents: jobDocuments.items, ready: jobDocuments.isReady } : undefined}
               ready={ready && (!jobId || jobs.items.filter(item => item.id === jobId).length === 1)}
               onApply={(sourceNotes, reviewedNotes) => {
                 if (!ready || sourceNotes !== notes) return;
