@@ -8,6 +8,7 @@ import * as paymentsCore from "../lib/payments-core.mjs";
 import * as jobsCore from "../lib/jobManagement-core.mjs";
 import * as taskCore from "../lib/jobTasks-core.mjs";
 import * as invoiceLink from "../lib/invoiceLink.ts";
+import { loadLocalTs } from "./helpers/load-local-ts.mjs";
 
 function compile(path, dependencies = {}) {
   const mod = { exports: {} };
@@ -147,6 +148,9 @@ test("assistant payment evidence follows existing credit/refund rules and leaves
 });
 
 const commandCentre = compile("../lib/aiCommandCentre.ts", {
+  "./assistantIdentity": assistantIdentity,
+  "./jobPackCatalogue": loadLocalTs(new URL("../lib/jobPackCatalogue.ts", import.meta.url)),
+  "./estimateCostReview": loadLocalTs(new URL("../lib/estimateCostReview.ts", import.meta.url)),
   "./quoteEngine": {}, "./workflow": {}, "./aiLearning": {}, "./scheduling": scheduling,
   "./jobManagement-core.mjs": jobsCore, "./dashboardIntelligence": dashboard,
   "./assistantSignals-core.mjs": signals, "./payments": payments,

@@ -32,6 +32,7 @@ import { defaultBusinessTermsTemplates } from "../../../lib/quoteTemplates";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { nextPricingDocumentNumber } from "../../../lib/workflow";
 import { savedIdentityIndex } from "../../../lib/assistantIdentity";
+import { reviewEstimateCosts } from "../../../lib/estimateCostReview";
 import type {
   Builder,
   BusinessOverhead,
@@ -164,21 +165,23 @@ export default function AiQuoteBuilderPage() {
     setMessage(`Draft prepared as ${generated.jobType}. Review every quantity, allowance and exclusion before saving.`);
   }
 
-  function updateItems(nextItems: PricingLineItem[]) {
+  function updateItems(nextItems: PricingLineItem[], editedCostId?: string) {
     if (!draft) return;
     setDraft({
       ...draft,
       items: nextItems,
-      profitability: calculateQuoteProfitability(nextItems, draft.pricingSettings, overheads.items, labourSettings),
+      costBasisByLineId: editedCostId ? { ...draft.costBasisByLineId, [editedCostId]: nextItems.find(item => item.id === editedCostId)?.unitCost === undefined ? "Not recorded" : "Entered for this estimate" } : draft.costBasisByLineId,
+      profitability: reviewEstimateCosts(nextItems).complete ? calculateQuoteProfitability(nextItems, draft.pricingSettings, overheads.items, labourSettings) : null,
     });
   }
 
   function updateLine(id: string, patch: Partial<PricingLineItem>) {
     if (!draft) return;
-    updateItems(draft.items.map((item) => item.id === id ? { ...item, ...patch } : item));
+    updateItems(draft.items.map((item) => item.id === id ? { ...item, ...patch } : item), "unitCost" in patch ? id : undefined);
   }
 
   function saveDraft() {
+    if (!ready) return;
     if (!draft) {
       setMessage("Generate the AI draft first.");
       return;
@@ -189,6 +192,16 @@ export default function AiQuoteBuilderPage() {
     }
     if (!draft.title.trim() || !draft.items.length) {
       setMessage("The quote needs a title and at least one priced line.");
+      return;
+    }
+    if (!reviewEstimateCosts(draft.items).complete) {
+      setMessage("Review every quantity, buying cost and selling price before saving. Enter zero only when intentional.");
+      return;
+    }
+    if ((customerId && !savedIdentityIndex(customers.items).unique.has(customerId))
+      || (builderId && !savedIdentityIndex(builders.items).unique.has(builderId))
+      || (jobId && !savedIdentityIndex(jobs.items).unique.has(jobId))) {
+      setMessage("A selected customer, builder or job is missing or duplicated. Select the record again before saving.");
       return;
     }
     const termsTemplate = termsStore.items.find((template) => template.id === termsTemplateId && template.active);
@@ -231,7 +244,8 @@ export default function AiQuoteBuilderPage() {
       createdAt: now,
       updatedAt: now,
     };
-    documents.setItems((current) => [document, ...current]);
+    try { documents.createItem(document); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "The quote could not be saved. Your draft is still here."); return; }
     setMessage(`${document.number} saved to Quotes as a draft. Open it in Quote Engine 2.0 for final review and preview.`);
   }
 
@@ -345,10 +359,11 @@ export default function AiQuoteBuilderPage() {
                     <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                       <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category}</p><p className="mt-1 font-medium">{item.description}</p></div><button type="button" onClick={() => updateItems(draft.items.filter((line) => line.id !== item.id))} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label={`Remove ${item.description}`}><Trash2 className="size-4" /></button></div>
                       <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                        <InputField label="Quantity" type="number" min="0.01" step="0.01" value={item.quantity} onChange={(event) => updateLine(item.id, { quantity: Number(event.target.value || 0) })} />
-                        <InputField label="Unit cost (£)" type="number" min="0" step="0.01" value={item.unitCost ?? 0} onChange={(event) => updateLine(item.id, { unitCost: Number(event.target.value || 0) })} />
-                        <InputField label="Unit price (£)" type="number" min="0" step="0.01" value={item.unitPrice} onChange={(event) => updateLine(item.id, { unitPrice: Number(event.target.value || 0) })} />
+                        <InputField label="Quantity" type="number" min="0" step="any" value={item.quantity} onChange={(event) => updateLine(item.id, { quantity: Number(event.target.value || 0) })} />
+                        <InputField label="Unit cost (£)" type="number" min="0" step="any" value={item.unitCost ?? ""} placeholder="Not recorded" onChange={(event) => updateLine(item.id, { unitCost: event.target.value.trim() === "" ? undefined : Number(event.target.value) })} />
+                        <InputField label="Unit price (£)" type="number" min="0" step="any" value={Number.isFinite(item.unitPrice) ? item.unitPrice : ""} onChange={(event) => updateLine(item.id, { unitPrice: event.target.value.trim() === "" ? NaN : Number(event.target.value) })} />
                       </div>
+                      <p className="mt-3 text-sm text-slate-400">Cost basis: {draft.costBasisByLineId[item.id] ?? "Saved labour rate"}. Check this allowance for the job.</p>
                     </div>
                   ))}
                 </div>
@@ -356,6 +371,7 @@ export default function AiQuoteBuilderPage() {
 
               <Card>
                 <h2 className="text-xl font-bold">Pre-send profitability</h2>
+                {draft.profitability ? <>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Cost price</p><p className="mt-1 text-xl font-bold">{money.format(draft.profitability.costPrice)}</p></div>
                   <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Selling price</p><p className="mt-1 text-xl font-bold">{money.format(draft.profitability.sellingPrice)}</p></div>
@@ -363,6 +379,7 @@ export default function AiQuoteBuilderPage() {
                   <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Net margin</p><p className={`mt-1 text-xl font-bold ${draft.profitability.netMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}`}>{draft.profitability.netMargin.toFixed(1)}%</p></div>
                 </div>
                 <p className="mt-4 text-sm text-slate-500">Includes {money.format(draft.profitability.overheadCost)} allocated business overhead and {draft.pricingSettings.contingencyPercent.toFixed(1)}% contingency.</p>
+                </> : <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100">Costs need review before profit can be estimated or this quote saved. Fill every buying cost and check quantities and selling prices. Enter £0 only when intentional.</p>}
                 {draft.pricing.learnedSellingPrice > 0 ? <p className="mt-2 text-xs text-slate-500">Closest successful records averaged {money.format(draft.pricing.learnedSellingPrice)} before VAT. This is context, not a price cap.</p> : null}
               </Card>
 
@@ -385,7 +402,7 @@ export default function AiQuoteBuilderPage() {
                     </select>
                   </label>
                 </div>
-                <Button className="mt-5 w-full" onClick={saveDraft}><Save className="mr-2 size-4" />Save draft to Quotes</Button>
+                <Button className="mt-5 w-full" disabled={!reviewEstimateCosts(draft.items).complete} onClick={saveDraft}><Save className="mr-2 size-4" />Save draft to Quotes</Button>
                 <Link href="/quotes" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold text-slate-200 hover:bg-slate-800">Open Quote Engine 2.0</Link>
               </Card>
             </>

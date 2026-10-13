@@ -183,7 +183,8 @@ export default function AiLearningPage() {
                 <div key={material.key} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                   <div className="flex items-start justify-between gap-3"><div><p className="font-bold">{material.description}</p><p className="mt-1 text-xs text-slate-500">{material.uses} successful use{material.uses === 1 ? "" : "s"} · {material.completedJobUses} completed</p></div><span className={`rounded-full px-2 py-1 text-xs font-semibold ${material.confidenceScore >= 75 ? "bg-emerald-500/10 text-emerald-300" : material.confidenceScore >= 45 ? "bg-amber-500/10 text-amber-300" : "bg-slate-800 text-slate-400"}`}>{material.confidenceScore}%</span></div>
                   <div className="mt-3 flex justify-between text-sm"><span className="text-slate-500">Average quantity</span><strong>{material.averageQuantity || "Not recorded"}</strong></div>
-                  <div className="mt-1 flex justify-between text-sm"><span className="text-slate-500">Average trade cost</span><strong>{material.averageUnitCost ? money.format(material.averageUnitCost) : "Not recorded"}</strong></div>
+                  <div className="mt-1 flex justify-between gap-3 text-sm"><span className="text-slate-500">Recorded quote unit cost</span><strong>{material.averageUnitCost !== undefined ? money.format(material.averageUnitCost) : "Not recorded"}</strong></div>
+                  <p className="mt-2 text-xs text-slate-500">{material.costSamples ?? 0} recorded cost sample{material.costSamples === 1 ? "" : "s"}. Quote allowances, not verified purchase spend.</p>
                   <details className="mt-3"><summary className="cursor-pointer text-xs font-semibold uppercase tracking-wider text-violet-300">Why recommended?</summary><div className="mt-3"><WhyRecommendation evidence={material.evidence.slice(0, 3)} showHeading={false} /></div></details>
                 </div>
               ))}

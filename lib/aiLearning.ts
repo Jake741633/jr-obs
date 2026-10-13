@@ -19,6 +19,8 @@ import type {
   QuoteTemplateType,
 } from "./models";
 import { invoiceTotal, pricingDocumentNetTotal } from "./workflow";
+import { savedIdentityIndex } from "./assistantIdentity";
+import { validEstimateAmount } from "./estimateCostReview";
 
 export const AI_LEARNING_MEMORY_KEY = "jr-os-ai-learning-memory";
 
@@ -236,7 +238,7 @@ function sourceRows(sources: AiLearningSources) {
 }
 
 export function learningSourceSignature(sources: AiLearningSources) {
-  return `v1-${hash(sourceRows(sources).join("|"))}`;
+  return `v1-recorded-costs-${hash(sourceRows(sources).join("|"))}`;
 }
 
 function successfulWork(sources: Pick<AiLearningSources, "documents" | "jobs" | "invoices">): SuccessfulWork[] {
@@ -411,7 +413,7 @@ export function buildQuoteLearningSuggestion({
 }
 
 function buildMaterialPatterns(sources: AiLearningSources) {
-  const library = new Map(sources.materials.map((material) => [material.id, material]));
+  const library = savedIdentityIndex(sources.materials).unique;
   const patterns = new Map<string, {
     key: string;
     materialId?: string;
@@ -442,7 +444,8 @@ function buildMaterialPatterns(sources: AiLearningSources) {
         evidence: [],
       };
       existing.quantities.push(item.quantity);
-      existing.unitCosts.push(item.unitCost ?? material?.tradeCost ?? 0);
+      // A present-day library price cannot establish what a historical quote allowed.
+      if (validEstimateAmount(item.unitCost)) existing.unitCosts.push(item.unitCost);
       existing.unitPrices.push(item.unitPrice);
       if (work.completed) existing.completedJobUses += 1;
       if (work.occurredAt > existing.lastUsedAt) existing.lastUsedAt = work.occurredAt;
@@ -461,7 +464,8 @@ function buildMaterialPatterns(sources: AiLearningSources) {
         uses,
         completedJobUses: pattern.completedJobUses,
         averageQuantity: round(average(pattern.quantities)),
-        averageUnitCost: round(average(pattern.unitCosts)),
+        averageUnitCost: pattern.unitCosts.length ? round(pattern.unitCosts.reduce((sum, cost) => sum + cost, 0) / pattern.unitCosts.length) : undefined,
+        costSamples: pattern.unitCosts.length,
         averageUnitPrice: round(average(pattern.unitPrices)),
         lastUsedAt: pattern.lastUsedAt,
         confidenceScore: clampScore(20 + uses * 13 + pattern.completedJobUses * 7),
