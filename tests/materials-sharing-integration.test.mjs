@@ -7,41 +7,54 @@ import { nodes, text } from "./helpers/customer-page-harness.mjs";
 import * as sharing from "../lib/materialSharing.ts";
 import * as identities from "../lib/assistantIdentity.ts";
 import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
+import * as repositoryCore from "../lib/cloud/repository-core.mjs";
 
 const source = ts.transpileModule(readFileSync(new URL("../app/materials/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 const item = { id: "mat-1", name: "Twin socket", category: "Accessories", manufacturer: "Example", supplier: "Screwfix", stockCode: "123AB", supplierUrl: "https://example.com/socket/123ab", unit: "Each", tradeCost: 7, sellPrice: 12, favourite: false, notes: "Private customer details", createdAt: "2026-10-01T09:00:00Z", updatedAt: "2026-10-01T09:00:00Z" };
 
 function harness() {
-  let cursor = 0, epoch = 1, sequence = 0, identityCalls = 0, collectionCalls = 0;
+  let cursor = 0, epoch = 1, sequence = 0, identityCalls = 0, collectionCalls = 0, sessionKey, failure = false, acknowledgement = false, beforeWrite;
   let session = { access_token: "token", user: { id: "user-1" } };
-  const slots = [], effects = [], writes = [], network = [];
+  const slots = [], rootSlots = [], effects = [], writes = [], attempts = [], legacyWrites = [], network = [], queue = [], confirmations = [];
+  let hookSlots = slots;
   const identityState = { mode: "cloud", isReady: true, identity: { organisationId: "org-1", userId: "user-1", role: "owner" } };
   const data = { items: [{ ...item }], isReady: true };
-  const useState = initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; };
+  const useState = initial => { const current=hookSlots,i = cursor++; if (!(i in current)) current[i] = typeof initial === "function" ? initial() : initial; return [current[i], value => { current[i] = typeof value === "function" ? value(current[i]) : value; }]; };
   const changed = (old, deps) => !old || !deps || deps.some((value, index) => !Object.is(value, old.deps?.[index]));
   const dependencies = {
-    react: { useState, useRef: value => useState({ current: value })[0], useMemo(fn, deps) { const i = cursor++; if (changed(slots[i], deps)) slots[i] = { value: fn(), deps }; return slots[i].value; }, useLayoutEffect(fn, deps) { const i = cursor++, old = slots[i]; if (changed(old, deps)) { const next = { deps, cleanup: old?.cleanup }; slots[i] = next; effects.push(() => { next.cleanup?.(); next.cleanup = fn(); }); } } },
-    "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
+    react: { useState, useRef: value => useState({ current: value })[0], useMemo(fn, deps) { const i = cursor++; if (changed(hookSlots[i], deps)) hookSlots[i] = { value: fn(), deps }; return hookSlots[i].value; }, useLayoutEffect(fn, deps) { const i = cursor++, old = hookSlots[i]; if (changed(old, deps)) { const next = { deps, cleanup: old?.cleanup }; hookSlots[i] = next; effects.push(() => { next.cleanup?.(); next.cleanup = fn(); }); } } },
+    "react/jsx-runtime": { jsx: (type, props, key) => ({ type, props, key }), jsxs: (type, props, key) => ({ type, props, key }) },
     "next/link": { default: "Link" }, "lucide-react": {},
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/crm/EntityEmptyState": { EntityEmptyState: "Empty" },
     "../../components/materials/MaterialShareActions": { MaterialShareActions: "MaterialShareActions" },
     "../../lib/materialSharing": sharing, "../../lib/assistantIdentity": identities, "../../lib/supabase/sessionOwnership-core.mjs": ownership,
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => { identityCalls++; return identityState; } },
-    "../../lib/cloud/coreBusinessCollections": { useMaterialsCollection: () => { collectionCalls++; return { ...data, setItems(updater) { data.items = updater(data.items); writes.push(data.items); }, remove() { throw new Error("Unexpected remove"); } }; } },
+    "../../lib/cloud/coreBusinessCollections": { useMaterialsCollection: () => { collectionCalls++; return { ...data,
+      setItems(updater) { legacyWrites.push("setItems"); if(failure)return; data.items = updater(data.items); writes.push(data.items); },
+      remove(predicate) { legacyWrites.push("remove"); if(failure)return; data.items=data.items.filter(item=>!predicate(item));writes.push(data.items); },
+      createItem(item) { attempts.push(item);beforeWrite?.();if(failure)throw new Error("Storage full");assert.ok(!data.items.some(old=>old.id===item.id),"Duplicate record");data.items=[item,...data.items];writes.push(data.items);if(acknowledgement)throw new Error("Acknowledgement lost");return item; },
+      updateItem(id,update) { beforeWrite?.();const old=data.items.find(item=>item.id===id);if(!old)throw new Error("Record missing");const item=update(old);attempts.push(item);if(failure)throw new Error("Storage full");data.items=data.items.map(old=>old.id===id?item:old);writes.push(data.items);if(acknowledgement)throw new Error("Acknowledgement lost");return item; },
+      removeItem(id,validate) { beforeWrite?.();const old=data.items.find(item=>item.id===id);if(!old)throw new Error("Record missing");validate?.(old);if(failure)throw new Error("Storage full");data.items=data.items.filter(item=>item.id!==id);writes.push(data.items);return old; },
+    }; } },
+    "../../lib/cloud/repository": { getSyncQueue:()=>queue }, "../../lib/cloud/repository-core.mjs": repositoryCore,
     "../../lib/supabase/client": { readSupabaseSession: () => session, readSupabaseSessionOwnershipEpoch: () => epoch, captureSupabaseSessionOwnership: () => ({ session, epoch }) },
-    "../../lib/storage": { makeId: prefix => `${prefix}-${++sequence}` },
+    "../../lib/storage": { makeId: prefix => `${prefix}-created-${++sequence}` },
   };
   const mod = { exports: {} };
-  vm.runInNewContext(source, { module: mod, exports: mod.exports, Date, Intl, Error, JSON, window: { confirm() { throw new Error("Unexpected confirmation"); } }, fetch: (...args) => { network.push(args); throw new Error("Unexpected network request"); }, require: key => { assert.ok(key in dependencies, key); return dependencies[key]; } });
-  function render() { cursor = 0; const tree = mod.exports.default(); effects.splice(0).forEach(fn => fn()); return tree; }
+  vm.runInNewContext(source, { module: mod, exports: mod.exports, Date, Intl, Error, JSON, structuredClone, navigator:{onLine:true}, window: { confirm(message) { confirmations.push(message);return true; } }, fetch: (...args) => { network.push(args); throw new Error("Unexpected network request"); }, require: key => { assert.ok(key in dependencies, key); return dependencies[key]; } });
+  function render() { hookSlots=rootSlots;cursor = 0; let tree = mod.exports.default();if(typeof tree.type==="function"){if(sessionKey!==tree.key){slots.forEach(slot=>slot?.cleanup?.());slots.length=0;effects.length=0;sessionKey=tree.key;}hookSlots=slots;cursor=0;tree=tree.type(tree.props);} effects.splice(0).forEach(fn => fn()); return tree; }
   function share() { const component = nodes(render()).find(node => node.type === "MaterialShareActions"); assert.ok(component, "Material product sharing is visible"); return component.props; }
   function field(label) { const node = nodes(render()).find(node => node.type === "InputField" && node.props.label === label); assert.ok(node, label); return node; }
-  return { data, identityState, writes, network, render, share, field, calls: () => ({ identityCalls, collectionCalls }),
+  function button(label) {const found=nodes(render()).find(node=>node.type==="Button"&&text(node)===label);assert.ok(found,label);return found;}
+  function action(label) {const found=nodes(render()).find(node=>node.props?.["aria-label"]===label);assert.ok(found,label);return found;}
+  function form() {const found=nodes(render()).find(node=>node.type==="form"&&nodes(node).some(child=>child.type==="InputField"));assert.ok(found,"Material form");return found;}
+  return { data, identityState, writes, attempts, legacyWrites, network, queue, confirmations, render, share, field, button, action, form, calls: () => ({ identityCalls, collectionCalls }),
+    fail(value=true){failure=value;},acknowledgement(){acknowledgement=true;},beforeWrite(fn){beforeWrite=fn;},
     session(next, advance = true) { session = next; if (advance) epoch++; },
     epoch() { epoch++; }, unmount() { slots.forEach(slot => slot?.cleanup?.()); },
     openForm() { nodes(render()).find(node => node.type === "PageHeader").props.action.props.onClick(); render(); },
     fill(label, value) { field(label).props.onChange({ target: { value } }); render(); },
-    submit() { const form = nodes(render()).find(node => node.type === "form" && nodes(node).some(child => child.type === "InputField")); assert.ok(form); form.props.onSubmit({ preventDefault() {} }); render(); },
+    submit() { form().props.onSubmit({ preventDefault() {} }); render(); },
   };
 }
 
@@ -122,4 +135,91 @@ test("invalid pasted product URLs block saving while safe links save sanitized a
 
 test("starter catalogue navigation is explicit and browsing does not import material records", () => {
   const h = harness(); const link = nodes(h.render()).find(node => node.type === "Link" && node.props.href === "/starter-library"); assert.ok(link); assert.match(text(link), /starter materials/i); assert.equal(h.writes.length, 0); assert.equal(h.network.length, 0);
+});
+
+const json = value => JSON.parse(JSON.stringify(value));
+function newMaterial(h) {h.openForm();h.fill("Material name","Test socket");h.fill("Trade cost (£)","4.123");h.fill("Selling price (£)","9.875");h.fill("Stock code","NEW-1");h.fill("Supplier link","https://example.com/new-1");}
+test("a failed material creation retains product details and retries one exact durable record",()=>{
+  const h=harness();newMaterial(h);h.fail();h.submit();assert.equal(h.writes.length,0);assert.equal(h.field("Stock code").props.value,"NEW-1");assert.equal(h.field("Trade cost (£)").props.value,"4.123");assert.match(text(h.render()),/Storage full/);
+  const first=h.attempts[0];h.fail(false);const save=h.form().props.onSubmit;save({preventDefault(){}});save({preventDefault(){}});assert.equal(h.writes.length,1);assert.deepEqual(json(h.data.items[0]),json(first));assert.equal(h.legacyWrites.length,0);assert.match(text(h.render()),/saved on this device/i);
+});
+test("material edits retain failed drafts and preserve unrelated original fields",()=>{
+  const h=harness();h.data.items[0].customEvidence="preserve";h.action("Edit Twin socket").props.onClick();h.fill("Stock code","UPDATED");h.fail();h.submit();assert.equal(h.data.items[0].stockCode,"123AB");assert.equal(h.field("Stock code").props.value,"UPDATED");h.fail(false);h.submit();assert.equal(h.data.items[0].stockCode,"UPDATED");assert.equal(h.data.items[0].customEvidence,"preserve");assert.equal(h.data.items[0].createdAt,item.createdAt);assert.equal(h.data.items[0].priceHistory.length,1);assert.equal(h.legacyWrites.length,0);
+});
+test("blank and invalid material prices cannot silently become zero, while explicit zero is accepted",()=>{
+  for(const amount of [""," ","-1","Infinity","NaN"]){const h=harness();newMaterial(h);h.fill("Trade cost (£)",amount);h.submit();assert.equal(h.writes.length,0);assert.match(text(h.render()),/price|cost/i);}
+  const h=harness();newMaterial(h);h.fill("Trade cost (£)","0");h.fill("Selling price (£)","0");h.submit();assert.equal(h.data.items[0].tradeCost,0);assert.equal(h.data.items[0].sellPrice,0);
+});
+test("old material save callbacks cannot overwrite a newer form render",()=>{
+  const h=harness();newMaterial(h);const old=h.form().props.onSubmit;h.fill("Stock code","LATEST");old({preventDefault(){}});assert.equal(h.writes.length,0);h.submit();assert.equal(h.data.items[0].stockCode,"LATEST");
+});
+test("material edit conflicts retain the draft when a source changes or becomes ambiguous",()=>{
+  for(const change of [h=>{h.data.items[0]={...h.data.items[0],stockCode:"OTHER"};},h=>{h.data.items=[];},h=>{h.data.items.push({...item});}]){const h=harness();h.action("Edit Twin socket").props.onClick();h.fill("Stock code","MINE");change(h);h.submit();assert.equal(h.writes.length,0);assert.equal(h.field("Stock code").props.value,"MINE");assert.match(text(h.render()),/changed|missing|ambiguous|duplicate/i);}
+});
+test("material update rechecks the persisted record inside the durable updater",()=>{
+  const h=harness();h.action("Edit Twin socket").props.onClick();h.fill("Stock code","MINE");h.beforeWrite(()=>{h.data.items=[{...item,stockCode:"NEWER"}];});h.submit();assert.equal(h.writes.length,0);assert.equal(h.data.items[0].stockCode,"NEWER");assert.match(text(h.render()),/changed/i);
+});
+test("quick material price saves retain errors and do not duplicate price history",()=>{
+  const h=harness();h.button("Quick update").props.onClick();h.fill("New trade cost (£)","8.123");h.fill("Markup (%)","25");h.fail();h.button("Save price").props.onClick();assert.equal(h.writes.length,0);assert.equal(h.field("New trade cost (£)").props.value,"8.123");assert.match(text(h.render()),/Storage full/);const first=h.attempts[0];h.fail(false);const save=h.button("Save price").props.onClick;save();save();assert.equal(h.writes.length,1);assert.deepEqual(json(h.data.items[0]),json(first));assert.equal(h.data.items[0].tradeCost,8.123);assert.equal(h.data.items[0].sellPrice,10.15);assert.equal(h.data.items[0].priceHistory.length,1);assert.equal(h.legacyWrites.length,0);
+});
+test("quick price validation reports blank, negative and overflowing prices",()=>{
+  for(const [cost,markup] of [["","20"],["5",""],["-1","20"],["1e308","1e308"]]){const h=harness();h.button("Quick update").props.onClick();h.fill("New trade cost (£)",cost);h.fill("Markup (%)",markup);h.button("Save price").props.onClick();assert.equal(h.writes.length,0);assert.ok(nodes(h.render()).some(node=>node.props.role==="alert"));}
+});
+test("favourite and delete actions surface storage errors and retry durably",()=>{
+  for(const label of ["Favourite Twin socket","Delete Twin socket"]){const h=harness();h.fail();h.action(label).props.onClick();assert.equal(h.writes.length,0);assert.equal(h.data.items.length,1);assert.equal(h.data.items[0].favourite,false);assert.match(text(h.render()),/Storage full/);h.fail(false);h.action(label).props.onClick();assert.equal(h.writes.length,1);assert.equal(h.legacyWrites.length,0);if(label.startsWith("Delete"))assert.equal(h.data.items.length,0);else assert.equal(h.data.items[0].favourite,true);}
+});
+test("retained material writes reject account, readiness, session and unmount changes",()=>{
+  for(const change of [h=>{h.identityState.identity={...h.identityState.identity,organisationId:"other"};h.render();},h=>{h.identityState.isReady=false;h.render();},h=>{h.data.isReady=false;h.render();},h=>h.session(null),h=>h.unmount()]){
+    const h=harness();newMaterial(h);const save=h.form().props.onSubmit;change(h);save({preventDefault(){}});assert.equal(h.writes.length,0);
+  }
+});
+test("switching accounts clears material forms and does not resurrect them on return",()=>{
+  const h=harness();newMaterial(h);h.identityState.identity={...h.identityState.identity,organisationId:"other"};h.render();assert.ok(!nodes(h.render()).some(node=>node.props.label==="Material name"));h.identityState.identity={...h.identityState.identity,organisationId:"org-1"};h.render();assert.ok(!nodes(h.render()).some(node=>node.props.label==="Material name"));
+});
+test("unauthorised cloud roles cannot begin or retain material mutation controls",()=>{
+  for(const role of ["electrician","customer","unknown"]){const h=harness();h.identityState.identity.role=role;const tree=h.render();const add=nodes(tree).find(node=>node.type==="PageHeader").props.action;assert.equal(add.props.disabled,true);add.props.onClick();assert.ok(!nodes(h.render()).some(node=>node.props.label==="Material name"));assert.ok(!nodes(tree).some(node=>node.props?.["aria-label"]?.startsWith("Edit ")&&!node.props.disabled));assert.equal(h.writes.length,0);}
+});
+test("materials derives visible prices from the current office account",()=>{
+  const h=harness();assert.match(text(h.render()),/Trade cost£7.00/);assert.match(text(h.render()),/Selling price£12.00/);h.identityState.identity.role="electrician";assert.doesNotMatch(text(h.render()),/Trade cost|Selling price|Prices over 30 days old|Quick update|Markup/);h.identityState.identity.role="office";assert.match(text(h.render()),/Trade cost£7.00/);
+});
+test("non-office accounts cannot expose material price inputs, history or deletion",()=>{
+  for(const role of ["electrician","customer","unknown",null]){const h=harness();h.data.items[0].priceHistory=[{id:"history",tradeCost:7,sellPrice:12,source:"Manual",recordedAt:item.createdAt}];h.identityState.identity=role?{...h.identityState.identity,role}:null;h.openForm();const tree=h.render();assert.doesNotMatch(text(tree),/Recent price history|Prices over 30 days old|Trade cost|Selling price|Markup|Quick update/);assert.ok(!nodes(tree).some(node=>/cost|price|markup/i.test(node.props?.label??"")||node.props?.["aria-label"]==="Delete Twin socket"));assert.equal(h.writes.length,0);}
+});
+
+function prepareWrite(h,kind) {
+  if(kind==="new"){newMaterial(h);const save=h.form().props.onSubmit;return ()=>save({preventDefault(){}});}
+  if(kind==="edit"){h.action("Edit Twin socket").props.onClick();h.fill("Stock code","UPDATED");const save=h.form().props.onSubmit;return ()=>save({preventDefault(){}});}
+  if(kind==="quick"){h.button("Quick update").props.onClick();h.fill("New trade cost (£)","8");return h.button("Save price").props.onClick;}
+  return h.action(`${kind==="favourite"?"Favourite":"Delete"} Twin socket`).props.onClick;
+}
+test("all material writes reject a changed session user even when a token string is unchanged",()=>{
+  for(const kind of ["new","edit","quick","favourite","delete"]){const h=harness(),save=prepareWrite(h,kind);h.session({access_token:"token",user:{id:"user-2"}},false);save();assert.equal(h.writes.length,0,kind);assert.equal(h.confirmations.length,0,kind);}
+});
+test("all material writes block failed or conflicting sync but allow pending offline changes",()=>{
+  for(const state of ["Failed","Conflict","Pending","Offline"])for(const kind of ["edit","quick","favourite","delete"]){const h=harness(),save=prepareWrite(h,kind);h.queue.push({table:"materials",sourceId:"mat-1",state});save();assert.equal(h.writes.length,["Failed","Conflict"].includes(state)?0:1,`${kind} ${state}`);if(["Failed","Conflict"].includes(state))assert.match(text(h.render()),/failed or conflicting sync/i);}
+});
+test("sync conflicts arriving inside the durable updater still block material changes",()=>{
+  for(const kind of ["edit","quick","favourite","delete"]){const h=harness(),save=prepareWrite(h,kind);h.beforeWrite(()=>h.queue.push({table:"materials",sourceId:"mat-1",state:"Conflict"}));save();assert.equal(h.writes.length,0,kind);assert.match(text(h.render()),/conflicting sync/i);}
+});
+const reorder = value => Array.isArray(value)?value.map(reorder):value&&typeof value==="object"?Object.fromEntries(Object.entries(value).reverse().map(([key,item])=>[key,reorder(item)])):value;
+test("material creation and price updates recover exact saved versions without another history entry",()=>{
+  for(const kind of ["new","edit","quick"]){const h=harness(),save=prepareWrite(h,kind);h.acknowledgement();save();assert.equal(h.writes.length,1);h.data.items=h.data.items.map(reorder);h.render();if(kind==="quick"){h.fill("New trade cost (£)","99");h.button("Save price").props.onClick();}else{h.fill("Stock code","NOT SAVED");h.submit();}assert.equal(h.writes.length,1);assert.equal(h.data.items[0].priceHistory.length,1);assert.match(text(h.render()),/recovered the previously saved version/i);assert.match(text(h.render()),/Later draft edits were not saved/);}
+});
+test("material retries after equivalent collection refreshes preserve the entire failed payload",()=>{
+  for(const kind of ["new","edit","quick"]){const h=harness(),save=prepareWrite(h,kind);h.fail();save();const first=h.attempts[0];h.data.items=h.data.items.map(reorder);h.fail(false);h.render();if(kind==="quick")h.button("Save price").props.onClick();else h.submit();assert.equal(h.writes.length,1);assert.deepEqual(json(h.data.items[0]),json(first));}
+});
+test("genuinely failed material drafts can be edited before retrying with their original identity",()=>{
+  const h=harness();newMaterial(h);h.fail();h.submit();const id=h.attempts[0].id;h.fill("Trade cost (£)","8.123");h.fail(false);h.submit();assert.equal(h.writes.length,1);assert.equal(h.data.items[0].id,id);assert.equal(h.data.items[0].tradeCost,8.123);assert.equal(h.data.items[0].priceHistory.length,1);
+});
+test("recovery rejects changed or duplicated material candidates",()=>{
+  for(const duplicate of [false,true]){const h=harness();newMaterial(h);h.acknowledgement();h.submit();const saved=h.data.items[0];h.data.items=duplicate?[saved,saved,...h.data.items.slice(1)]:[{...saved,stockCode:"OTHER"},...h.data.items.slice(1)];h.submit();assert.equal(h.writes.length,1);assert.match(text(h.render()),/changed|duplicate/i);assert.equal(h.field("Stock code").props.value,"NEW-1");}
+});
+test("closing or replacing a material draft invalidates its retained save immediately",()=>{
+  for(const replace of [false,true]){const h=harness();newMaterial(h);const old=h.form().props.onSubmit;if(replace)h.action("Edit Twin socket").props.onClick();else h.openForm();old({preventDefault(){}});assert.equal(h.writes.length,0);}
+});
+test("local mode permits durable material edits without a cloud session",()=>{
+  const h=harness();h.identityState.mode="local";h.identityState.identity=null;h.session(null);newMaterial(h);h.submit();assert.equal(h.writes.length,1);assert.equal(h.data.items[0].tradeCost,4.123);assert.equal(h.data.items[0].sellPrice,9.875);
+});
+test("returning from a supplier tab preserves material drafts through same-account identity refresh",()=>{
+  for(const kind of ["new","edit","quick"]){const h=harness(),old=prepareWrite(h,kind),owner=h.identityState.identity;h.fail();old();const first=h.attempts[0];h.identityState.identity=null;h.identityState.isReady=false;h.render();old();assert.equal(h.writes.length,0);h.identityState.identity={...owner};h.identityState.isReady=true;h.data.items=h.data.items.map(reorder);h.render();old();assert.equal(h.writes.length,0);h.fail(false);if(kind==="quick")h.button("Save price").props.onClick();else h.submit();assert.equal(h.writes.length,1);assert.deepEqual(json(h.data.items[0]),json(first));}
 });

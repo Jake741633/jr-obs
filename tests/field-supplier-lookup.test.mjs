@@ -4,15 +4,13 @@ import { readFileSync } from "node:fs";
 import { canAccessPath } from "../lib/cloud/permissions.ts";
 
 const fieldLookup = readFileSync(new URL("../app/field/material-lookup/page.tsx", import.meta.url), "utf8");
-const materialsPage = readFileSync(new URL("../app/materials/page.tsx", import.meta.url), "utf8");
 const navigation = readFileSync(new URL("../components/navigation.ts", import.meta.url), "utf8");
 const lookupRoute = readFileSync(new URL("../app/api/materials/lookup/route.ts", import.meta.url), "utf8");
 
 test("electricians use read-only field supplier lookup instead of materials authoring", () => {
   assert.equal(canAccessPath("electrician", "/materials"), false);
   assert.equal(canAccessPath("electrician", "/field/material-lookup"), true);
-  assert.match(materialsPage, /materials\.setItems/);
-  assert.doesNotMatch(fieldLookup, /materials\.setItems/);
+  assert.doesNotMatch(fieldLookup, /materials\.(?:setItems|createItem|updateItem|removeItem)/);
   assert.doesNotMatch(fieldLookup, /useMaterialsCollection/);
 });
 
