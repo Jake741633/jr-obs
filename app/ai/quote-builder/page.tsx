@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -33,6 +33,7 @@ import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { nextPricingDocumentNumber } from "../../../lib/workflow";
 import { savedIdentityIndex } from "../../../lib/assistantIdentity";
 import { reviewEstimateCosts } from "../../../lib/estimateCostReview";
+import { useEstimateSave } from "../../../lib/useEstimateSave";
 import type {
   Builder,
   BusinessOverhead,
@@ -109,6 +110,11 @@ export default function AiQuoteBuilderPage() {
     documents, customers, builders, jobs, invoices, materials, jobPacks, labourRates, overheads,
     labourSettingsStore, quoteSettingsStore, termsStore, paymentTermsStore, vatStore,
   ].every((store) => store.isReady);
+  const saveContext = useMemo(() => ({ draft, customerId, builderId, jobId, siteAddress, validUntil, termsTemplateId, paymentTermsTemplateId,
+    customers: customers.items, builders: builders.items, jobs: jobs.items, documents: documents.items,
+    terms: termsStore.items, paymentTerms: paymentTermsStore.items, overheads: overheads.items, labourSettings, vatSettings }),
+  [draft, customerId, builderId, jobId, siteAddress, validUntil, termsTemplateId, paymentTermsTemplateId, customers.items, builders.items, jobs.items, documents.items, termsStore.items, paymentTermsStore.items, overheads.items, labourSettings, vatSettings]);
+  const estimateSave = useEstimateSave<PricingDocument>(ready, saveContext);
 
   function selectCustomer(id: string) {
     const customer = customers.items.find((item) => item.id === id);
@@ -139,6 +145,7 @@ export default function AiQuoteBuilderPage() {
       setMessage("Add typed job notes or paste a voice transcript first.");
       return;
     }
+    if (!estimateSave.begin("doc")) return;
     const generated = buildAiQuoteDraft({
       notes,
       jobType,
@@ -166,7 +173,7 @@ export default function AiQuoteBuilderPage() {
   }
 
   function updateItems(nextItems: PricingLineItem[], editedCostId?: string) {
-    if (!draft) return;
+    if (!draft || !estimateSave.canSave()) return;
     setDraft({
       ...draft,
       items: nextItems,
@@ -181,7 +188,7 @@ export default function AiQuoteBuilderPage() {
   }
 
   function saveDraft() {
-    if (!ready) return;
+    if (!estimateSave.canSave()) return;
     if (!draft) {
       setMessage("Generate the AI draft first.");
       return;
@@ -206,47 +213,50 @@ export default function AiQuoteBuilderPage() {
     }
     const termsTemplate = termsStore.items.find((template) => template.id === termsTemplateId && template.active);
     const paymentTemplate = paymentTermsStore.items.find((template) => template.id === paymentTermsTemplateId && template.active);
-    const now = new Date().toISOString();
-    const profitability = calculateQuoteProfitability(draft.items, draft.pricingSettings, overheads.items, labourSettings);
-    const document: PricingDocument = {
-      id: makeId("doc"),
-      number: nextPricingDocumentNumber(documents.items, "Quote"),
-      type: "Quote",
-      status: "Draft",
-      customerId: customerId || undefined,
-      builderId: builderId || undefined,
-      jobId: jobId || undefined,
-      title: draft.title.trim(),
-      siteAddress: siteAddress.trim() || undefined,
-      validUntil: validUntil || addDays(30),
-      vatEnabled: vatSettings.registrationStatus === "VAT registered",
-      vatRate: vatSettings.defaultRate,
-      items: draft.items,
-      pricingSettings: draft.pricingSettings,
-      profitability: {
-        directCost: profitability.directCost,
-        overheadCost: profitability.overheadCost,
-        costPrice: profitability.costPrice,
-        sellingPrice: profitability.sellingPrice,
-        grossProfit: profitability.grossProfit,
-        expectedProfit: profitability.expectedProfit,
-        grossMargin: profitability.grossMargin,
-        netMargin: profitability.netMargin,
-        calculatedAt: now,
-      },
-      attachments: [],
-      notes: draft.notes,
-      terms: termsTemplate?.content ?? "Scope, access, testing, certification, exclusions and variations must be confirmed before work starts.",
-      termsTemplateId: termsTemplate?.id,
-      paymentTerms: paymentTemplate ? paymentTermsFromTemplate(paymentTemplate) : { type: "Due on completion" },
-      templateType: draft.jobType,
-      revisions: [],
-      createdAt: now,
-      updatedAt: now,
-    };
-    try { documents.createItem(document); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "The quote could not be saved. Your draft is still here."); return; }
-    setMessage(`${document.number} saved to Quotes as a draft. Open it in Quote Engine 2.0 for final review and preview.`);
+    try {
+      const document = estimateSave.save(id => {
+        const now = new Date().toISOString();
+        const profitability = calculateQuoteProfitability(draft.items, draft.pricingSettings, overheads.items, labourSettings);
+        return {
+          id,
+          number: nextPricingDocumentNumber(documents.items, "Quote"),
+          type: "Quote",
+          status: "Draft",
+          customerId: customerId || undefined,
+          builderId: builderId || undefined,
+          jobId: jobId || undefined,
+          title: draft.title.trim(),
+          siteAddress: siteAddress.trim() || undefined,
+          validUntil: validUntil || addDays(30),
+          vatEnabled: vatSettings.registrationStatus === "VAT registered",
+          vatRate: vatSettings.defaultRate,
+          items: draft.items,
+          pricingSettings: draft.pricingSettings,
+          profitability: {
+            directCost: profitability.directCost,
+            overheadCost: profitability.overheadCost,
+            costPrice: profitability.costPrice,
+            sellingPrice: profitability.sellingPrice,
+            grossProfit: profitability.grossProfit,
+            expectedProfit: profitability.expectedProfit,
+            grossMargin: profitability.grossMargin,
+            netMargin: profitability.netMargin,
+            calculatedAt: now,
+          },
+          attachments: [],
+          notes: draft.notes,
+          terms: termsTemplate?.content ?? "Scope, access, testing, certification, exclusions and variations must be confirmed before work starts.",
+          termsTemplateId: termsTemplate?.id,
+          paymentTerms: paymentTemplate ? paymentTermsFromTemplate(paymentTemplate) : { type: "Due on completion" },
+          templateType: draft.jobType,
+          revisions: [],
+          createdAt: now,
+          updatedAt: now,
+        };
+      }, documents.items, item => documents.createItem(item));
+      setDraft(null);
+      setMessage(`${document.number} saved on this device as a draft. Check sync status before switching devices, then review the saved quote before sending.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "The quote could not be saved. Your draft is still here."); }
   }
 
   if (!ready) return <Card>Preparing AI Quote Builder…</Card>;
@@ -263,6 +273,7 @@ export default function AiQuoteBuilderPage() {
       <AiToolNav />
 
       {message ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+      {estimateSave.saved ? <Card><p className="mb-3 text-sm text-emerald-200">{estimateSave.saved.number} is saved. Use Quotes for changes, or generate a priced draft again to start another quote.</p>{estimateSave.saved.recovered ? <p className="mb-3 text-sm text-amber-200">Recovered the previously saved version. Any later draft edits were not saved; open the saved quote to review it.</p> : null}<Link href={`/quotes/${encodeURIComponent(estimateSave.saved.id)}`} className="inline-flex min-h-12 items-center rounded-xl bg-cyan-400 px-4 font-semibold text-slate-950">Open saved quote · {estimateSave.saved.number}</Link></Card> : null}
 
       <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="space-y-6">
@@ -329,13 +340,13 @@ export default function AiQuoteBuilderPage() {
               <InputField label="Site address" value={siteAddress} onChange={(event) => setSiteAddress(event.target.value)} />
               <InputField label="Valid until" type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} />
             </div>
-            <Button className="mt-5 w-full" onClick={generateDraft}><Sparkles className="mr-2 size-4" />Create priced draft from notes</Button>
+            <Button className="mt-5 w-full" disabled={!estimateSave.enabled} onClick={generateDraft}><Sparkles className="mr-2 size-4" />Create priced draft from notes</Button>
           </Card>
 
           {draft ? (
             <Card>
               <div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-emerald-300" /><div><h2 className="text-xl font-bold">Detected scope</h2><p className="text-sm text-slate-500">{draft.jobType} · {draft.pricing.evidenceCount} similar pricing record{draft.pricing.evidenceCount === 1 ? "" : "s"}</p></div></div>
-              <InputField className="mt-5" label="Quote title" value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+              <InputField className="mt-5" disabled={Boolean(estimateSave.saved)} label="Quote title" value={draft.title} onChange={(event) => { if (estimateSave.canSave()) setDraft({ ...draft, title: event.target.value }); }} />
               <div className="mt-4 space-y-2">
                 {draft.scopeItems.length ? draft.scopeItems.map((item, index) => <p key={`${item}-${index}`} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-300">{item}</p>) : <p className="text-sm text-slate-500">No separate scope items were detected. Add more detail before sending.</p>}
               </div>
@@ -358,11 +369,11 @@ export default function AiQuoteBuilderPage() {
                   {draft.items.map((item) => (
                     <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                       <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category}</p><p className="mt-1 font-medium">{item.description}</p></div><button type="button" onClick={() => updateItems(draft.items.filter((line) => line.id !== item.id))} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label={`Remove ${item.description}`}><Trash2 className="size-4" /></button></div>
-                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                      <fieldset disabled={Boolean(estimateSave.saved)} className="mt-3 grid gap-3 sm:grid-cols-3">
                         <InputField label="Quantity" type="number" min="0" step="any" value={item.quantity} onChange={(event) => updateLine(item.id, { quantity: Number(event.target.value || 0) })} />
                         <InputField label="Unit cost (£)" type="number" min="0" step="any" value={item.unitCost ?? ""} placeholder="Not recorded" onChange={(event) => updateLine(item.id, { unitCost: event.target.value.trim() === "" ? undefined : Number(event.target.value) })} />
                         <InputField label="Unit price (£)" type="number" min="0" step="any" value={Number.isFinite(item.unitPrice) ? item.unitPrice : ""} onChange={(event) => updateLine(item.id, { unitPrice: event.target.value.trim() === "" ? NaN : Number(event.target.value) })} />
-                      </div>
+                      </fieldset>
                       <p className="mt-3 text-sm text-slate-400">Cost basis: {draft.costBasisByLineId[item.id] ?? "Saved labour rate"}. Check this allowance for the job.</p>
                     </div>
                   ))}
@@ -402,7 +413,7 @@ export default function AiQuoteBuilderPage() {
                     </select>
                   </label>
                 </div>
-                <Button className="mt-5 w-full" disabled={!reviewEstimateCosts(draft.items).complete} onClick={saveDraft}><Save className="mr-2 size-4" />Save draft to Quotes</Button>
+                <Button className="mt-5 w-full" disabled={!reviewEstimateCosts(draft.items).complete || !estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} onClick={saveDraft}><Save className="mr-2 size-4" />Save draft to Quotes</Button>
                 <Link href="/quotes" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold text-slate-200 hover:bg-slate-800">Open Quote Engine 2.0</Link>
               </Card>
             </>

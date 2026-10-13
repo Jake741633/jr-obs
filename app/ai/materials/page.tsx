@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeft, Check, PackageCheck, PackageSearch, Plus, Sparkles } from "lucide-react";
 import { AiToolNav } from "../../../components/ai/AiToolNav";
 import { WhyRecommendation } from "../../../components/ai/WhyRecommendation";
@@ -26,6 +26,8 @@ import type {
 import { defaultQuotePricingSettings } from "../../../lib/quoteEngine";
 import { reviewEstimateCosts } from "../../../lib/estimateCostReview";
 import { savedIdentityIndex } from "../../../lib/assistantIdentity";
+import { useEstimateSave } from "../../../lib/useEstimateSave";
+import { purchaseListReviewHref } from "../../../lib/purchaseListLink";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const jobTypes: Array<"" | QuoteTemplateType> = ["", "Domestic", "Commercial", "Rewire", "EICR", "Consumer Unit", "Fault Finding"];
@@ -46,6 +48,8 @@ export default function AiMaterialsAssistantPage() {
   const [message, setMessage] = useState("");
   const ready = [materials, documents, jobs, invoices, jobPacks, purchaseLists, quoteSettingsStore].every((store) => store.isReady);
   const quoteSettings = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
+  const saveContext = useMemo(() => ({ suggestions, selectedKeys, jobId, jobType, jobs: jobs.items, lists: purchaseLists.items }), [suggestions, selectedKeys, jobId, jobType, jobs.items, purchaseLists.items]);
+  const estimateSave = useEstimateSave<PurchaseList>(ready, saveContext);
 
   function selectJob(id: string) {
     const job = jobs.items.find((item) => item.id === id);
@@ -60,6 +64,7 @@ export default function AiMaterialsAssistantPage() {
       setMessage("Choose a job type, link a job or describe the work first.");
       return;
     }
+    if (!estimateSave.begin("purchase")) return;
     const result = suggestMaterials({
       notes: context,
       jobType,
@@ -78,20 +83,23 @@ export default function AiMaterialsAssistantPage() {
   }
 
   function updateQuantity(key: string, quantity: number) {
+    if (!estimateSave.canSave()) return;
     setSuggestions((current) => current.map((item) => item.key === key ? { ...item, quantity } : item));
   }
 
   function updateCost(key: string, value: string) {
+    if (!estimateSave.canSave()) return;
     const unitCost = value.trim() === "" ? undefined : Number(value);
     setSuggestions((current) => current.map((item) => item.key === key ? { ...item, unitCost, costBasis: unitCost === undefined ? "Not recorded" : "Entered for this estimate" } : item));
   }
 
   function toggle(key: string) {
+    if (!estimateSave.canSave()) return;
     setSelectedKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
   }
 
   function createPurchaseList() {
-    if (!ready) return;
+    if (!estimateSave.canSave()) return;
     const selected = suggestions.filter((suggestion) => selectedKeys.includes(suggestion.key));
     if (!selected.length) {
       setMessage("Select at least one suggested material with a quantity greater than zero.");
@@ -103,31 +111,34 @@ export default function AiMaterialsAssistantPage() {
     }
     const job = savedIdentityIndex(jobs.items).unique.get(jobId);
     if (jobId && !job) { setMessage("The linked job is missing or duplicated. Select it again before saving."); return; }
-    const now = new Date().toISOString();
-    const list: PurchaseList = {
-      id: makeId("purchase"),
-      number: nextPurchaseListNumber(purchaseLists.items),
-      title: job?.title || `${jobType || "Electrical"} materials`,
-      pricingDocumentId: job?.sourceQuoteId,
-      jobId: job?.id,
-      items: selected.map((suggestion) => ({
-        id: makeId("purchase-item"),
-        materialId: suggestion.materialId,
-        description: suggestion.description,
-        supplier: suggestion.supplier,
-        stockCode: suggestion.stockCode,
-        supplierUrl: suggestion.supplierUrl,
-        quantity: suggestion.quantity,
-        unitCost: suggestion.unitCost!,
-        status: "Needed" as PurchaseItemStatus,
-      })),
-      notes: "AI-assisted materials list. Confirm design quantities, stock, compatibility and live supplier pricing before placing orders.",
-      createdAt: now,
-      updatedAt: now,
-    };
-    try { purchaseLists.createItem(list); }
-    catch (error) { setMessage(error instanceof Error ? error.message : "The purchase list could not be saved. Your suggestions are still here."); return; }
-    setMessage(`${list.number} saved to Purchase Lists with ${list.items.length} selected material line${list.items.length === 1 ? "" : "s"}.`);
+    try {
+      const list = estimateSave.save(id => {
+        const now = new Date().toISOString();
+        return {
+          id,
+          number: nextPurchaseListNumber(purchaseLists.items),
+          title: job?.title || `${jobType || "Electrical"} materials`,
+          pricingDocumentId: job?.sourceQuoteId,
+          jobId: job?.id,
+          items: selected.map((suggestion) => ({
+            id: makeId("purchase-item"),
+            materialId: suggestion.materialId,
+            description: suggestion.description,
+            supplier: suggestion.supplier,
+            stockCode: suggestion.stockCode,
+            supplierUrl: suggestion.supplierUrl,
+            quantity: suggestion.quantity,
+            unitCost: suggestion.unitCost!,
+            status: "Needed" as PurchaseItemStatus,
+          })),
+          notes: "AI-assisted materials list. Confirm design quantities, stock, compatibility and live supplier pricing before placing orders.",
+          createdAt: now,
+          updatedAt: now,
+        };
+      }, purchaseLists.items, item => purchaseLists.createItem(item));
+      setSuggestions([]); setSelectedKeys([]);
+      setMessage(`${list.number} saved on this device with ${list.items.length} selected material line${list.items.length === 1 ? "" : "s"}. Check sync status before switching devices.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "The purchase list could not be saved. Your suggestions are still here."); }
   }
 
   if (!ready) return <Card>Preparing AI Materials Assistant…</Card>;
@@ -144,6 +155,7 @@ export default function AiMaterialsAssistantPage() {
       />
       <AiToolNav />
       {message ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+      {estimateSave.saved ? <Card><p className="mb-3 text-sm text-emerald-200">{estimateSave.saved.number} is saved. Review the saved list for changes, or generate suggestions again to start another list.</p>{estimateSave.saved.recovered ? <p className="mb-3 text-sm text-amber-200">Recovered the previously saved version. Any later draft edits were not saved; open the saved list to review it.</p> : null}<Link href={purchaseListReviewHref(estimateSave.saved.id)} className="inline-flex min-h-12 items-center rounded-xl bg-cyan-400 px-4 font-semibold text-slate-950">Open saved list · {estimateSave.saved.number}</Link></Card> : null}
 
       <section className="grid gap-6 xl:grid-cols-[0.75fr_1.25fr]">
         <Card className="h-fit">
@@ -164,7 +176,7 @@ export default function AiMaterialsAssistantPage() {
             </label>
             <TextareaField className="min-h-52" label="Scope notes" value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Include point quantities, cable routes, board type, accessories, containment, testing and known site conditions." />
           </div>
-          <Button className="mt-5 w-full" onClick={generate}><Sparkles className="mr-2 size-4" />Suggest materials</Button>
+          <Button className="mt-5 w-full" disabled={!estimateSave.enabled} onClick={generate}><Sparkles className="mr-2 size-4" />Suggest materials</Button>
           <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100">Suggestions never replace electrical design, manufacturer instructions, cable calculations, protective-device selection or a physical stock check.</div>
         </Card>
 
@@ -184,13 +196,13 @@ export default function AiMaterialsAssistantPage() {
                 return (
                   <Card key={suggestion.key} className={selected ? "border-cyan-400/30" : "opacity-60"}>
                     <div className="flex items-start gap-3">
-                      <button type="button" onClick={() => toggle(suggestion.key)} className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border ${selected ? "border-cyan-400 bg-cyan-400 text-slate-950" : "border-slate-700"}`} aria-label={`${selected ? "Remove" : "Select"} ${suggestion.description}`}>{selected ? <Check className="size-4" /> : null}</button>
+                      <button type="button" disabled={Boolean(estimateSave.saved)} onClick={() => toggle(suggestion.key)} className={`mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border ${selected ? "border-cyan-400 bg-cyan-400 text-slate-950" : "border-slate-700"}`} aria-label={`${selected ? "Remove" : "Select"} ${suggestion.description}`}>{selected ? <Check className="size-4" /> : null}</button>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="font-bold">{suggestion.description}</p><p className="mt-1 text-xs text-slate-500">{suggestion.supplier} · {suggestion.stockCode || "No stock code"}</p></div><span className={`rounded-full px-2 py-1 text-xs font-semibold ${suggestion.confidence === "High" ? "bg-emerald-500/10 text-emerald-300" : suggestion.confidence === "Medium" ? "bg-amber-500/10 text-amber-300" : "bg-slate-800 text-slate-400"}`}>{suggestion.confidence} · {suggestion.confidenceScore}%</span></div>
                         <p className="mt-3 text-sm text-slate-400">{suggestion.reason}</p>
                         <div className="mt-3 grid gap-3 sm:grid-cols-[140px_1fr_1fr]">
-                          <InputField label="Quantity" type="number" min="0" step="any" value={suggestion.quantity} onChange={(event) => updateQuantity(suggestion.key, Number(event.target.value || 0))} />
-                          <InputField label="Buying cost each (£)" type="number" min="0" step="any" value={suggestion.unitCost ?? ""} placeholder="Not recorded" onChange={(event) => updateCost(suggestion.key, event.target.value)} />
+                          <InputField label="Quantity" disabled={Boolean(estimateSave.saved)} type="number" min="0" step="any" value={suggestion.quantity} onChange={(event) => updateQuantity(suggestion.key, Number(event.target.value || 0))} />
+                          <InputField label="Buying cost each (£)" disabled={Boolean(estimateSave.saved)} type="number" min="0" step="any" value={suggestion.unitCost ?? ""} placeholder="Not recorded" onChange={(event) => updateCost(suggestion.key, event.target.value)} />
                           <div className="rounded-lg bg-slate-950 px-3 py-2"><p className="text-xs text-slate-500">Quote price</p><p className="font-semibold">{money.format(suggestion.unitPrice)}</p></div>
                         </div>
                         <p className="mt-2 text-sm text-slate-400">Cost basis: {suggestion.costBasis}. Check the current supplier price.</p>
@@ -207,7 +219,7 @@ export default function AiMaterialsAssistantPage() {
             </div>
           )}
 
-          {suggestions.length ? <Card><p className="mb-4 text-sm text-slate-400">Check buying costs and quantities for this job. Blank costs need an allowance; enter £0 only when intentional.</p><Button className="w-full" disabled={!costReview.complete} onClick={createPurchaseList}><PackageCheck className="mr-2 size-4" />Save selected items to Purchase Lists</Button><Link href="/purchases" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold hover:bg-slate-800">Open Purchase Lists</Link></Card> : null}
+          {suggestions.length ? <Card><p className="mb-4 text-sm text-slate-400">Check buying costs and quantities for this job. Blank costs need an allowance; enter £0 only when intentional.</p><Button className="w-full" disabled={!costReview.complete || !estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} onClick={createPurchaseList}><PackageCheck className="mr-2 size-4" />Save selected items to Purchase Lists</Button><Link href="/purchases" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold hover:bg-slate-800">Open Purchase Lists</Link></Card> : null}
         </div>
       </section>
     </main>
