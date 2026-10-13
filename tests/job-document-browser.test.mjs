@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import { savedIdentityIndex } from "../lib/assistantIdentity.ts";
 import * as permissions from "../lib/cloud/permissions.ts";
+import * as photoEvidence from "../lib/jobPhotoEvidence.ts";
 import { nodes, text } from "./helpers/customer-page-harness.mjs";
 
 const file = new URL("../components/jobs/JobDocumentBrowser.tsx", import.meta.url);
@@ -24,7 +25,7 @@ function harness(exportName = "JobDocumentBrowser", props = {}) {
     react: { useState, useMemo: fn => fn() },
     "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
     "next/image": { default: "Image" }, "../ui/Button": { Button: "Button" }, "../ui/FormField": { InputField: "InputField" },
-    "../../lib/assistantIdentity": { savedIdentityIndex }, "../../lib/cloud/permissions": permissions,
+    "../../lib/jobPhotoEvidence": photoEvidence, "../../lib/assistantIdentity": { savedIdentityIndex }, "../../lib/cloud/permissions": permissions,
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => { identitySubscriptions += 1; return identity; } },
   };
   const mod = { exports: {} };
