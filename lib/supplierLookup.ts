@@ -18,11 +18,23 @@ const origins: Record<SupplierName, readonly string[]> = {
 };
 
 function safeLink(value: unknown, supplier: SupplierName): value is string {
-  if (typeof value !== "string") return false;
+  if (typeof value !== "string" || /[\p{Cc}\p{Cf}\u2028\u2029\s\\]|%(?:0[0-9a-f]|1[0-9a-f]|7f)|%(?![0-9a-f]{2})/iu.test(value)
+    || !/^https:\/\/[^/]/i.test(value) || value.split("/")[2]?.includes("@")) return false;
   try {
     const url = new URL(value);
     return !url.username && !url.password && origins[supplier].includes(url.origin);
   } catch { return false; }
+}
+
+/** Office-only price reference; it is never included in the field response allowlist. */
+export function officeSupplierLookupResult(value: unknown, supplier: SupplierName, stockCode: string): SupplierLookupResult & { publicPrice?: number } {
+  const checked = supplierLookupResult(value, supplier, stockCode);
+  const publicPrice = (value as Record<string, unknown>).publicPrice;
+  if (!checked.exactMatch || publicPrice === undefined) return checked;
+  if (typeof publicPrice !== "number" || !Number.isFinite(publicPrice) || publicPrice < 0 || publicPrice > 1_000_000) {
+    throw new Error("The supplier response has an invalid public price. Try the lookup again.");
+  }
+  return { ...checked, publicPrice };
 }
 
 /** Accept only a result for this submitted lookup; never turn a stale response into a new answer. */

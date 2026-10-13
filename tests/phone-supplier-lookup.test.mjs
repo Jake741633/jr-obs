@@ -138,3 +138,28 @@ test("response validation rejects mismatched identities, malformed fields and of
 test("a mismatched successful payload cannot become a visible product", async () => {
   const h = harness(); h.code("C1"); const pending = h.submit(); h.finish(0, result({ stockCode: "C2" })); await pending; assert.equal(h.result(), undefined); assert.match(text(h.render()), /does not match this lookup/); assert.equal(h.busy(), false);
 });
+
+test("office response validation imports only a checked exact numeric public price", () => {
+  for (const price of [0, 12.34, 1_000_000]) {
+    const payload = result({ publicPrice: price, privateNotes: "secret", tradeCost: 1 });
+    const checked = lookup.officeSupplierLookupResult(payload, "CEF", "C1");
+    assert.equal(checked.publicPrice, price);
+    assert.equal("privateNotes" in checked, false);
+    assert.equal("tradeCost" in checked, false);
+    assert.equal("publicPrice" in lookup.supplierLookupResult(payload, "CEF", "C1"), false);
+  }
+  assert.equal("publicPrice" in lookup.officeSupplierLookupResult(result(), "CEF", "C1"), false);
+  for (const publicPrice of [NaN, Infinity, -Infinity, -1, 1_000_000.01, "12.34", null, {}, []]) {
+    assert.throws(() => lookup.officeSupplierLookupResult(result({ publicPrice }), "CEF", "C1"), /price|response/);
+    assert.equal("publicPrice" in lookup.officeSupplierLookupResult(result({ exactMatch: false, publicPrice }), "CEF", "C1"), false);
+  }
+  assert.equal("publicPrice" in lookup.officeSupplierLookupResult(result({ exactMatch: false, publicPrice: 12 }), "CEF", "C1"), false);
+  assert.throws(() => lookup.officeSupplierLookupResult(result({ stockCode: "C2", publicPrice: 12 }), "CEF", "C1"), /response/);
+});
+
+test("supplier links reject parser-normalised controls, backslashes, malformed escapes and hidden credentials", () => {
+  for (const productUrl of ["https://www.cef.co.uk/pa\nth", "https://www.cef.co.uk/\u200bpath", "https://www.cef.co.uk\\product", "https://www.cef.co.uk/p%0a", "https://www.cef.co.uk/p%", "https://@www.cef.co.uk/product", "https://www.cef.co.uk/a b"]) {
+    assert.throws(() => lookup.supplierLookupResult(result({ productUrl }), "CEF", "C1"), /response/);
+    assert.throws(() => lookup.officeSupplierLookupResult(result({ productUrl }), "CEF", "C1"), /response/);
+  }
+});

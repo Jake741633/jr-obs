@@ -45,3 +45,65 @@ test("imported fractional hours, quantities and material prices stay editable wi
   for(const label of ["Labour hours","Quantity · Socket","Buying cost each (£) · Socket","Selling price each (£) · Socket"])assert.equal(h.field(label).props.step,"any",label);
   h.field("Internal pricing notes","Scope reviewed");h.submit();assert.equal(h.writes[0].materials[0].unitPrice,1.416);assert.equal(h.writes[0].materials[0].unitCost,1.183);assert.equal(h.writes[0].materials[0].quantity,2.333);assert.equal(h.writes[0].labourHours,6.1);assert.equal(helpers.jobPackTotals(h.writes[0],h.library.items).labour,350);
 });
+const packCards = view => nodes(view).filter(node => node.type === "Breakdown").map(node => node.props.pack);
+const searchPacks = (h, value) => {
+  const input = nodes(h.render()).find(node => node.type === "input" && node.props.placeholder === "Search job packs");
+  assert.ok(input, "saved-pack search"); input.props.onChange({ target: { value } });
+};
+const categoryFilter = h => {
+  const select = nodes(h.render()).find(node => node.type === "select" && node.props["aria-label"] === "Filter job packs by category");
+  assert.ok(select, "labelled saved-pack category filter"); return select;
+};
+test("saved-pack search matches every case-insensitive word across name, category, scope and material descriptions", () => {
+  const h = harness(), pack = { ...h.packs.items[0], name: "Kitchen job", description: "Fit outlet" };
+  h.packs.items = [pack, { ...pack, id: "p2", name: "Other job", description: "Fit light", materials: [] }];
+  searchPacks(h, "  SOCKET   CUSTOM KITCHEN FIT  ");
+  assert.deepEqual(packCards(h.render()).map(item => item.id), ["p1"]);
+  searchPacks(h, "CUSTOM socket impossible");
+  assert.equal(packCards(h.render()).length, 0);
+  searchPacks(h, "  \t  ");
+  assert.equal(packCards(h.render()).length, 2);
+  assert.equal(h.writes.length, 0);
+});
+test("category filter uses usable saved categories and combines with search; clear restores the catalogue", () => {
+  const h = harness(), pack = h.packs.items[0];
+  h.packs.items = [pack, { ...pack, id: "p2", category: "Lighting", name: "Socket lighting" }, { ...pack, id: "duplicate", category: "Hidden category" }, { ...pack, id: "duplicate", category: "Hidden category" }, { ...pack, id: "", category: "Blank ID category" }];
+  const filter = categoryFilter(h);
+  assert.deepEqual(nodes(filter).filter(node => node.type === "option").map(text), ["All categories", "Custom", "Lighting"]);
+  assert.match(text(h.render()), /Showing 2 of 2 matching job packs · 2 saved/);
+  filter.props.onChange({ target: { value: "Lighting" } }); searchPacks(h, "SOCKET");
+  assert.deepEqual(packCards(h.render()).map(item => item.id), ["p2"]);
+  assert.match(text(h.render()), /Showing 1 of 1 matching job packs · 2 saved/);
+  h.button("Clear filters").props.onClick();
+  assert.equal(categoryFilter(h).props.value, "");
+  assert.equal(packCards(h.render()).length, 2);
+  assert.match(text(h.render()), /missing or duplicate IDs/);
+  assert.equal(h.writes.length, 0);
+});
+test("saved-pack cards start at eight, expand by eight and reset when either filter changes", () => {
+  const h = harness(), pack = h.packs.items[0];
+  h.packs.items = Array.from({ length: 19 }, (_, index) => ({ ...pack, id: `p${index}`, name: `Socket ${index}`, category: index < 12 ? "Lighting" : "Custom" }));
+  assert.equal(packCards(h.render()).length, 8);
+  assert.match(text(h.render()), /Showing 8 of 19 matching job packs · 19 saved/);
+  h.button("Show more").props.onClick(); assert.equal(packCards(h.render()).length, 16);
+  h.button("Show more").props.onClick(); assert.equal(packCards(h.render()).length, 19);
+  assert.equal(nodes(h.render()).some(node => node.type === "Button" && text(node) === "Show more"), false);
+  searchPacks(h, "socket"); assert.equal(packCards(h.render()).length, 8);
+  h.button("Show more").props.onClick(); assert.equal(packCards(h.render()).length, 16);
+  categoryFilter(h).props.onChange({ target: { value: "Lighting" } }); assert.equal(packCards(h.render()).length, 8);
+  h.button("Show more").props.onClick(); assert.equal(packCards(h.render()).length, 12);
+  h.button("Clear filters").props.onClick(); assert.equal(packCards(h.render()).length, 8);
+  assert.equal(h.writes.length, 0);
+});
+test("saved-pack browsing remains gated to ready office or local accounts", () => {
+  for (const disable of [h => { h.identity.identity.role = "engineer"; }, h => { h.packs.isReady = false; }]) {
+    const h = harness(); disable(h);
+    assert.equal(packCards(h.render()).length, 0);
+    const filter = categoryFilter(h);
+    assert.equal(filter.props.disabled, true);
+    assert.deepEqual(nodes(filter).filter(node => node.type === "option").map(text), ["All categories"]);
+    assert.doesNotMatch(text(h.render()), /matching job packs/);
+  }
+  const h = harness(); h.identity.mode = "local"; h.identity.identity = null;
+  assert.equal(packCards(h.render()).length, 1);
+});

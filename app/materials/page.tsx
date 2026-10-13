@@ -18,28 +18,23 @@ import { savedIdentityIndex } from "../../lib/assistantIdentity";
 import { getSyncQueue } from "../../lib/cloud/repository";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
 import { safeMaterialProductUrl } from "../../lib/materialSharing";
+import { officeSupplierLookupResult, supplierNames as suppliers, type SupplierName } from "../../lib/supplierLookup";
 import { makeId } from "../../lib/storage";
 import type { Material, MaterialCategory, MaterialPriceHistory, MaterialPriceSource, MaterialUnit } from "../../lib/models";
 
 const categories: MaterialCategory[] = ["Cable", "Protection", "Accessories", "Lighting", "Containment", "EV", "Testing", "Fire alarm", "Emergency lighting", "Other"];
 const units: MaterialUnit[] = ["Each", "Metre", "Drum", "Box", "Pack"];
-const suppliers = ["CEF", "Screwfix", "TLC Direct"] as const;
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const pageLoadedAt = Date.now();
 const blank = { name: "", category: "Accessories" as MaterialCategory, manufacturer: "", supplier: "", supplierUrl: "", stockCode: "", unit: "Each" as MaterialUnit, tradeCost: "", sellPrice: "", favourite: false, notes: "" };
 
-type SupplierName = typeof suppliers[number];
-type LookupResult = {
-  supplier: SupplierName;
-  stockCode: string;
-  name?: string;
-  manufacturer?: string;
-  productUrl?: string;
-  publicPrice?: number;
-  searchUrl: string;
-  exactMatch: boolean;
-  message: string;
-};
+type LookupScope = { key: string; ready: boolean; ownership: ReturnType<typeof captureSupabaseSessionOwnership> };
+type LookupRequest = { controller: AbortController; scope: LookupScope; timer?: ReturnType<typeof setTimeout> };
+type LookupState = { scope: LookupScope | null; request?: LookupRequest; result?: ReturnType<typeof officeSupplierLookupResult>; message: string };
+function stopLookup(request: LookupRequest | null) {
+  if (request?.timer !== undefined) clearTimeout(request.timer);
+  request?.controller.abort();
+}
 type MaterialDraft = { id: string; original?: Material; candidate?: Material; input?: string; busy: boolean; complete: boolean };
 function materialSnapshot(value: unknown) {
   return JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
@@ -74,7 +69,9 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
   const [draft, setDraft] = useState<MaterialDraft | null>(null);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState<"All" | MaterialCategory>("All");
+  const [supplierFilter, setSupplierFilter] = useState("");
   const [favouritesOnly, setFavouritesOnly] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(12);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [quickDraft, setQuickDraft] = useState<MaterialDraft | null>(null);
@@ -82,9 +79,11 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
   const [quickMarkup, setQuickMarkup] = useState("20");
   const [lookupSupplier, setLookupSupplier] = useState<SupplierName>("CEF");
   const [lookupCode, setLookupCode] = useState("");
-  const [lookupBusy, setLookupBusy] = useState(false);
-  const [lookupMessage, setLookupMessage] = useState("");
-  const [lookupResult, setLookupResult] = useState<LookupResult | null>(null);
+  const [lookupState, setLookupState] = useState<LookupState>({ scope: null, message: "" });
+  const [lookupVersion, setLookupVersion] = useState(0);
+  const lookupVersionRef = useRef(0);
+  const lookupRequest = useRef<LookupRequest | null>(null);
+  const lookupInput = useRef<HTMLInputElement | null>(null);
   const draftRefs = useRef<{ main: MaterialDraft | null; quick: MaterialDraft | null }>({ main: null, quick: null });
 
   const sharingAccountKey = JSON.stringify([identityState.mode, identity?.organisationId, identity?.userId, identity?.role, identity?.customerSourceId, readSupabaseSessionOwnershipEpoch()]);
@@ -93,6 +92,25 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
   const sharingRoleAllowed = identityState.mode === "local" || Boolean(identity && ["owner", "admin", "office", "electrician"].includes(identity.role));
   const sharingSessionReady = identityState.mode === "local" || Boolean(sharingOwnership.session?.access_token && !sharingOwnership.session.is_password_recovery && supabaseSessionUserId(sharingOwnership.session) === identity?.userId);
   const sharingReady = identityState.isReady && materials.isReady && sharingRoleAllowed && sharingSessionReady;
+  const lookupScope = useMemo(() => ({ key: sharingAccountKey, ready: sharingReady && identityState.mode === "cloud", ownership: sharingOwnership }), [sharingAccountKey, sharingReady, identityState.mode, sharingOwnership]);
+  const latestLookup = useRef({ active: false, scope: lookupScope });
+  useLayoutEffect(() => {
+    latestLookup.current = { active: true, scope: lookupScope };
+    return () => {
+      latestLookup.current.active = false;
+      stopLookup(lookupRequest.current);
+      lookupRequest.current = null;
+    };
+  }, [lookupScope]);
+  function lookupSessionCurrent() {
+    const session = readSupabaseSession();
+    return lookupScope.ready && Boolean(session?.access_token && !session.is_password_recovery && supabaseSessionUserId(session) === identity?.userId
+      && sameSupabaseSessionOwnership(session, readSupabaseSessionOwnershipEpoch(), lookupScope.ownership.session, lookupScope.ownership.epoch));
+  }
+  const lookupVisible = lookupState.scope === lookupScope && lookupSessionCurrent();
+  const lookupResult = lookupVisible ? lookupState.result : undefined;
+  const lookupBusy = lookupVisible && Boolean(lookupState.request);
+  const lookupMessage = lookupState.scope === lookupScope ? lookupState.message : "";
   const sharingScope = useMemo(() => ({ key: sharingAccountKey, ready: sharingReady, ownership: sharingOwnership, items: materials.items }), [sharingAccountKey, sharingReady, sharingOwnership, materials.items]);
   const materialIndex = useMemo(() => savedIdentityIndex(materials.items), [materials.items]);
   const latestSharing = useRef({ active: false, scope: sharingScope, ready: sharingReady, items: materials.items });
@@ -104,7 +122,7 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
   const showForm = mutationReady && Boolean(draft);
   const editingId = draft?.original?.id;
   const quickEditId = mutationReady ? quickDraft?.id : undefined;
-  const editFrame = useMemo(() => ({ sharingScope, mutationReady, form, draft, quickDraft, quickTradeCost, quickMarkup, lookupResult }), [sharingScope, mutationReady, form, draft, quickDraft, quickTradeCost, quickMarkup, lookupResult]);
+  const editFrame = useMemo(() => ({ sharingScope, mutationReady, form, draft, quickDraft, quickTradeCost, quickMarkup, lookupResult, lookupVersion }), [sharingScope, mutationReady, form, draft, quickDraft, quickTradeCost, quickMarkup, lookupResult, lookupVersion]);
   const latestEdit = useRef({ active: false, frame: editFrame, materials });
   useLayoutEffect(() => {
     const current = latestEdit.current;
@@ -184,15 +202,20 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
   }
 
   const filtered = useMemo(() => materials.items.filter((item) => {
-    const matchesSearch = `${item.name} ${item.manufacturer} ${item.supplier} ${item.stockCode}`.toLowerCase().includes(search.toLowerCase());
-    return matchesSearch && (category === "All" || item.category === category) && (!favouritesOnly || item.favourite);
-  }), [materials.items, search, category, favouritesOnly]);
+    const haystack = `${item.name} ${item.manufacturer} ${item.supplier} ${item.stockCode} ${item.category} ${item.unit}`.toLowerCase();
+    const matchesSearch = search.toLowerCase().trim().split(/\s+/).every(word => haystack.includes(word));
+    return matchesSearch && (category === "All" || item.category === category) && (!supplierFilter || item.supplier.trim() === supplierFilter) && (!favouritesOnly || item.favourite);
+  }), [materials.items, search, category, supplierFilter, favouritesOnly]);
+  const savedSuppliers = useMemo(() => [...new Set(materialIndex.selectable.map(item => item.supplier.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [materialIndex]);
+  const visible = filtered.slice(0, visibleLimit);
+  const filtersActive = Boolean(search || category !== "All" || supplierFilter || favouritesOnly);
+  const ambiguousCount = materials.items.length - materialIndex.selectable.length;
 
   const summary = useMemo(() => ({
-    stale: materials.items.filter((item) => ageInDays(item.lastPriceCheckedAt) > 30).length,
-    linked: materials.items.filter((item) => safeMaterialProductUrl(item.supplierUrl)).length,
-    favourites: materials.items.filter((item) => item.favourite).length,
-  }), [materials.items]);
+    stale: materialIndex.selectable.filter((item) => ageInDays(item.lastPriceCheckedAt) > 30).length,
+    linked: materialIndex.selectable.filter((item) => safeMaterialProductUrl(item.supplierUrl)).length,
+    favourites: materialIndex.selectable.filter((item) => item.favourite).length,
+  }), [materialIndex]);
 
   function reset() {
     draftRefs.current.main = null;
@@ -253,40 +276,49 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
     } catch (error) { showError(error); }
   }
 
+  function lookupActive() { return latestLookup.current.active && latestLookup.current.scope === lookupScope; }
+  function clearLookup(notice = "") {
+    if (!lookupActive()) return;
+    stopLookup(lookupRequest.current); lookupRequest.current = null;
+    lookupVersionRef.current += 1; setLookupVersion(lookupVersionRef.current);
+    setLookupState({ scope: lookupScope, message: notice });
+  }
   async function lookupStockCode(event: FormEvent) {
     event.preventDefault();
+    if (!lookupActive() || lookupVersion !== lookupVersionRef.current || lookupRequest.current) return;
     const stockCode = lookupCode.trim();
-    if (!stockCode) { setLookupMessage("Enter a supplier stock code."); return; }
-    setLookupBusy(true);
-    setLookupMessage("");
-    setLookupResult(null);
+    if (!stockCode || stockCode.length > 80 || !suppliers.includes(lookupSupplier)) { setLookupState({ scope: lookupScope, message: "Enter a supplier stock code of 1–80 characters." }); return; }
+    const session = readSupabaseSession();
+    if (!lookupSessionCurrent() || !session) { setLookupState({ scope: lookupScope, message: "Sign in and load your materials before using supplier lookups." }); return; }
+    const request: LookupRequest = { controller: new AbortController(), scope: lookupScope };
+    lookupRequest.current = request;
+    setLookupState({ scope: lookupScope, request, message: "" });
+    lookupInput.current?.blur();
+    const current = () => lookupActive() && lookupRequest.current === request && !request.controller.signal.aborted;
+    request.timer = setTimeout(() => { if (current()) clearLookup("The supplier lookup took too long. Your code is still here; try again or open the supplier directly."); }, 20_000);
     try {
-      const session = readSupabaseSession();
-      if (!session || session.is_password_recovery) {
-        throw new Error("Sign in before using supplier lookups.");
-      }
       const response = await fetch("/api/materials/lookup", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${session.access_token}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
         body: JSON.stringify({ supplier: lookupSupplier, stockCode }),
+        signal: request.controller.signal,
       });
-      const result = await response.json() as LookupResult & { error?: string };
-      if (!response.ok) throw new Error(result.error || "Supplier lookup failed.");
-      setLookupResult(result);
-      setLookupMessage(result.message);
+      const payload: unknown = await response.json();
+      if (!current()) return;
+      if (!lookupSessionCurrent()) throw new Error("Your sign-in changed. Run the lookup again after signing in.");
+      if (!response.ok) throw new Error(payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : "Supplier lookup failed. Try again.");
+      const result = officeSupplierLookupResult(payload, lookupSupplier, stockCode);
+      setLookupState({ scope: lookupScope, result, message: result.message });
     } catch (lookupError) {
-      setLookupMessage(lookupError instanceof Error ? lookupError.message : "Supplier lookup failed.");
+      if (current()) setLookupState({ scope: lookupScope, message: lookupError instanceof Error ? lookupError.message : "Supplier lookup failed. Try again." });
     } finally {
-      setLookupBusy(false);
+      if (request.timer !== undefined) clearTimeout(request.timer);
+      if (lookupRequest.current === request) lookupRequest.current = null;
     }
   }
 
   function useLookupResult() {
-    if (!lookupResult || !canMutate()) return;
-    const suggestedPrice = priceRestricted || lookupResult.publicPrice === undefined ? "" : String(lookupResult.publicPrice.toFixed(2));
+    if (!lookupResult?.exactMatch || !canMutate() || !lookupSessionCurrent() || lookupVersion !== lookupVersionRef.current || draftRefs.current.main || draftRefs.current.quick) return;
     openForm({
       ...blank,
       name: lookupResult.name || `${lookupResult.supplier} item ${lookupResult.stockCode}`,
@@ -294,9 +326,7 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
       supplier: lookupResult.supplier,
       supplierUrl: safeMaterialProductUrl(lookupResult.productUrl) || safeMaterialProductUrl(lookupResult.searchUrl),
       stockCode: lookupResult.stockCode,
-      tradeCost: suggestedPrice,
-      sellPrice: suggestedPrice,
-      notes: priceRestricted ? "Supplier product details imported for field use." : lookupResult.publicPrice === undefined ? "Confirm your trade price before saving." : "Public website price imported. Confirm your account-specific trade price before saving.",
+      notes: lookupResult.publicPrice === undefined ? "Confirm your buying and selling prices, VAT and pack size before saving." : `Public website reference: ${money.format(lookupResult.publicPrice)}. Confirm your buying and selling prices, VAT and pack size before saving.`,
     });
   }
 
@@ -357,7 +387,7 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
     } catch (error) { showError(error); }
   }
 
-  const lookupProductUrl = lookupResult ? safeMaterialProductUrl(lookupResult.productUrl) || safeMaterialProductUrl(lookupResult.searchUrl) : "";
+  const lookupProductUrl = lookupResult ? (lookupResult.exactMatch ? lookupResult.productUrl || lookupResult.searchUrl : lookupResult.searchUrl) : "";
 
   return <div className="space-y-6">
     <PageHeader eyebrow={priceRestricted ? "Materials" : "Pricing"} title="Materials Library" description={priceRestricted ? "Browse supplier-linked materials without office pricing. Catalogue changes are managed by the office." : "Track supplier links, trade costs, selling prices and price-check dates for faster, safer quoting."} action={<Button disabled={!mutationReady} onClick={() => { if (!canMutate()) return; if (showForm) reset(); else openForm(); }}><Plus className="mr-2 size-4" />{showForm ? "Close form" : "Add material"}</Button>} />
@@ -374,14 +404,21 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
     </section>
 
     <Card className="border-cyan-400/30">
-      <div className="flex items-start gap-3"><Search className="mt-0.5 size-5 text-cyan-300" /><div><h2 className="font-semibold">Find material by supplier stock code</h2><p className="mt-1 text-sm text-slate-400">Search CEF, Screwfix or TLC Direct. JR OS will import machine-readable product details when available and otherwise open the supplier result for confirmation.</p></div></div>
-      <form onSubmit={lookupStockCode} className="mt-5 grid gap-3 md:grid-cols-[200px_1fr_auto]">
-        <select value={lookupSupplier} onChange={(event) => setLookupSupplier(event.target.value as SupplierName)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{suppliers.map((supplier) => <option key={supplier}>{supplier}</option>)}</select>
-        <input aria-label="Supplier stock code lookup" value={lookupCode} onChange={(event) => setLookupCode(event.target.value)} placeholder="Enter or paste stock code or product code" maxLength={128} autoCapitalize="none" spellCheck={false} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 outline-none focus:border-cyan-400" />
-        <Button type="submit" disabled={lookupBusy}>{lookupBusy ? "Searching…" : "Find product"}</Button>
+      <div className="flex items-start gap-3"><Search className="mt-0.5 size-5 text-cyan-300" /><div><h2 className="font-semibold">Find material by supplier stock code</h2><p className="mt-1 text-sm text-slate-400">Search CEF, Screwfix or TLC Direct. Check the matched product, then open a material draft to review before saving.</p></div></div>
+      <form aria-label="Supplier lookup" aria-busy={lookupBusy} onSubmit={lookupStockCode} className="mt-5 grid items-end gap-3 md:grid-cols-[200px_1fr_auto]">
+        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Supplier</span><select aria-label="Lookup supplier" value={lookupSupplier} onChange={(event) => { if (!lookupActive()) return; clearLookup(); setLookupSupplier(event.target.value as SupplierName); }} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">{suppliers.map((supplier) => <option key={supplier}>{supplier}</option>)}</select></label>
+        <label className="grid min-w-0 gap-2 text-sm font-medium text-slate-300"><span>Stock or product code</span><input ref={lookupInput} aria-label="Supplier stock code lookup" value={lookupCode} onChange={(event) => { if (!lookupActive()) return; clearLookup(); setLookupCode(event.target.value); }} placeholder="Enter or paste a stock code" maxLength={80} autoCapitalize="none" autoComplete="off" enterKeyHint="search" spellCheck={false} className="min-h-12 min-w-0 rounded-xl border border-slate-700 bg-slate-950 px-3 text-base outline-none focus:border-cyan-400" /></label>
+        <Button type="submit" className="min-h-12" disabled={lookupBusy}>{lookupBusy ? "Searching…" : "Find product"}</Button>
       </form>
-      {lookupMessage ? <p className="mt-4 rounded-xl bg-slate-950 p-3 text-sm text-slate-300">{lookupMessage}</p> : null}
-      {lookupResult ? <div className="mt-4 flex flex-wrap gap-3"><Button disabled={!mutationReady} onClick={useLookupResult}><Plus className="mr-2 size-4" />Add to materials</Button>{lookupProductUrl ? <a href={lookupProductUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold"><ExternalLink className="size-4" />Open supplier result</a> : null}</div> : null}
+      <div className="mt-3 flex flex-wrap gap-3">{lookupBusy ? <Button className="min-h-12" variant="secondary" onClick={() => clearLookup("Lookup cancelled. Your code is still here.")}>Cancel lookup</Button> : null}{lookupCode || lookupMessage || lookupResult ? <Button className="min-h-12" variant="secondary" onClick={() => { if (!lookupActive()) return; clearLookup(); setLookupCode(""); }}>Clear lookup</Button> : null}</div>
+      {lookupMessage ? <p role="status" className="mt-4 rounded-xl bg-slate-950 p-3 text-sm text-slate-300">{lookupMessage}</p> : null}
+      {lookupResult ? <div aria-label="Supplier lookup result" className="mt-4 space-y-3 rounded-xl border border-slate-700 p-4">
+        <p className="break-words text-sm text-slate-400">{lookupResult.supplier} · {lookupResult.stockCode}</p>
+        <h3 className="font-semibold">{lookupResult.exactMatch ? "Supplier code match" : "Not an exact code match"}</h3>
+        {lookupResult.exactMatch ? <><p className="break-words">{lookupResult.name || "Product details found"}</p>{lookupResult.manufacturer ? <p className="text-sm text-slate-400">{lookupResult.manufacturer}</p> : null}{!priceRestricted && lookupResult.publicPrice !== undefined ? <p className="text-sm text-amber-200">Public website reference: {money.format(lookupResult.publicPrice)}. Check VAT, pack size and your account price. Enter buying and selling prices before saving.</p> : null}</> : <p className="text-sm text-slate-400">Open the supplier search to confirm the product. You can add it manually once checked.</p>}
+        {lookupResult.exactMatch && (draft || quickDraft) ? <p className="text-sm text-amber-200">Finish or close your current material edit before adding this product.</p> : null}
+        <div className="flex flex-wrap gap-3">{lookupResult.exactMatch ? <Button className="min-h-12" disabled={!mutationReady || Boolean(draft || quickDraft)} onClick={useLookupResult}><Plus className="mr-2 size-4" />Add to materials</Button> : null}{lookupProductUrl ? <a href={lookupProductUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold"><ExternalLink className="size-4" />{lookupResult.exactMatch ? "Open supplier product" : "Open supplier search"}</a> : null}</div>
+      </div> : null}
     </Card>
 
     {showForm ? <Card><form onSubmit={submit} className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -400,13 +437,18 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
       <div className="flex justify-end md:col-span-2 xl:col-span-4"><Button type="submit">{editingId ? "Update material" : "Save material"}</Button></div>
     </form></Card> : null}
 
-    <div className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
-      <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search materials, supplier or stock code" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
-      <select value={category} onChange={(e) => setCategory(e.target.value as "All" | MaterialCategory)} className="min-h-11 rounded-xl border border-slate-800 bg-slate-900 px-4 text-sm"><option>All</option>{categories.map((item) => <option key={item}>{item}</option>)}</select>
-      <Button variant={favouritesOnly ? "primary" : "secondary"} onClick={() => setFavouritesOnly((value) => !value)}><Star className="mr-2 size-4" />Favourites</Button>
-    </div>
+    {mutationReady && quickDraft ? <Card className="border-cyan-400/30"><h2 className="mb-4 font-semibold">Update price: {quickDraft.original?.name}</h2><div className="grid gap-3 sm:grid-cols-2"><InputField label="New trade cost (£)" type="number" inputMode="decimal" min="0" step="any" value={quickTradeCost} onChange={(e) => { if (draftCurrent(quickDraft, "quick")) setQuickTradeCost(e.target.value); }} /><InputField label="Markup (%)" type="number" inputMode="decimal" min="0" step="any" value={quickMarkup} onChange={(e) => { if (draftCurrent(quickDraft, "quick")) setQuickMarkup(e.target.value); }} /><div className="flex gap-2 sm:col-span-2"><Button onClick={saveQuickUpdate}>Save price</Button><Button variant="secondary" onClick={() => { if (draftCurrent(quickDraft, "quick")) closeQuick(); }}>Cancel</Button></div></div></Card> : null}
 
-    {!materials.isReady ? <Card>Loading materials…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<Package className="size-6" />} title={materials.items.length ? "No matching materials" : "No materials yet"} description={materials.items.length ? "Change the search or filters." : "Search a supplier stock code or add a commonly used product."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{filtered.map((item) => {
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_180px_180px_auto]">
+      <div className="relative sm:col-span-2 xl:col-span-1"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input aria-label="Search materials" value={search} onChange={(e) => { setSearch(e.target.value); setVisibleLimit(12); }} placeholder="Search materials, supplier or stock code" className="min-h-12 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-base outline-none focus:border-cyan-400" /></div>
+      <select aria-label="Filter materials by category" value={category} onChange={(e) => { setCategory(e.target.value as "All" | MaterialCategory); setVisibleLimit(12); }} className="min-h-12 min-w-0 rounded-xl border border-slate-800 bg-slate-900 px-4 text-base"><option value="All">All categories</option>{categories.map((item) => <option key={item}>{item}</option>)}</select>
+      <select aria-label="Filter materials by supplier" value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setVisibleLimit(12); }} className="min-h-12 min-w-0 rounded-xl border border-slate-800 bg-slate-900 px-4 text-base"><option value="">All suppliers</option>{savedSuppliers.map(supplier => <option key={supplier}>{supplier}</option>)}</select>
+      <Button className="min-h-12" aria-pressed={favouritesOnly} variant={favouritesOnly ? "primary" : "secondary"} onClick={() => { setFavouritesOnly((value) => !value); setVisibleLimit(12); }}><Star className="mr-2 size-4" />Favourites</Button>
+    </div>
+    {materials.isReady ? <div className="flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-sm text-slate-400">Showing {visible.length} of {filtered.length} matching records · {materials.items.length} saved</p>{filtersActive ? <Button variant="secondary" className="min-h-12" onClick={() => { setSearch(""); setCategory("All"); setSupplierFilter(""); setFavouritesOnly(false); setVisibleLimit(12); }}>Clear filters</Button> : null}</div> : null}
+    {materials.isReady && ambiguousCount ? <p role="alert" className="rounded-xl border border-amber-400/30 p-4 text-sm text-amber-200">{ambiguousCount} record{ambiguousCount === 1 ? " needs" : "s need"} identity review. Editing and sharing are disabled for these records, and they are excluded from the summary totals.</p> : null}
+
+    {!materials.isReady ? <Card>Loading materials…</Card> : filtered.length === 0 ? <EntityEmptyState icon={<Package className="size-6" />} title={materials.items.length ? "No matching materials" : "No materials yet"} description={materials.items.length ? "Change the search or filters." : "Search a supplier stock code or add a commonly used product."} /> : <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{visible.map((item, index) => {
       const tradeCost = item.tradeCost ?? 0;
       const sellPrice = item.sellPrice ?? 0;
       const markup = tradeCost > 0 ? ((sellPrice - tradeCost) / tradeCost) * 100 : 0;
@@ -416,12 +458,12 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
       const supplierUrl = safeMaterialProductUrl(item.supplierUrl);
       const shareMaterial = { name: item.name, supplier: item.supplier, stockCode: item.stockCode, supplierUrl: item.supplierUrl };
       const expectedShareMaterial = { id: item.id, createdAt: item.createdAt, ...shareMaterial };
-      return <Card key={item.id}>
+      return <Card key={materialIndex.unique.has(item.id) ? item.id : `ambiguous-${index}`}>
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category} · {item.unit}</p><h2 className="mt-1 text-lg font-bold">{item.name}</h2><p className="text-sm text-slate-500">{item.manufacturer || item.supplier || "No manufacturer or supplier"}</p></div><div className="flex"><button disabled={!mutationReady || !materialIndex.unique.has(item.id)} onClick={() => toggleFavourite(item)} aria-label={`Favourite ${item.name}`} className={`min-h-11 min-w-11 rounded-lg p-2 ${item.favourite ? "text-amber-300" : "text-slate-500 hover:text-amber-300"}`}><Star className="size-4" fill={item.favourite ? "currentColor" : "none"} /></button><button disabled={!mutationReady || !materialIndex.unique.has(item.id)} onClick={() => startEdit(item)} aria-label={`Edit ${item.name}`} className="min-h-11 min-w-11 rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Pencil className="size-4" /></button>{!priceRestricted ? <button disabled={!mutationReady || !materialIndex.unique.has(item.id)} onClick={() => remove(item)} aria-label={`Delete ${item.name}`} className="min-h-11 min-w-11 rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div></div>
         {!priceRestricted ? <>
           <div className="mt-5 grid grid-cols-2 gap-3 border-t border-slate-800 pt-4 text-sm"><div><p className="text-slate-500">Trade cost</p><p className="font-semibold">{money.format(tradeCost)}</p></div><div><p className="text-slate-500">Selling price</p><p className="font-semibold">{money.format(sellPrice)}</p></div><div><p className="text-slate-500">Markup</p><p className="font-semibold">{markup.toFixed(1)}%</p></div><div><p className="text-slate-500">Stock code</p><p className="font-semibold">{item.stockCode || "—"}</p></div></div>
           <div className={`mt-4 rounded-xl border p-3 text-xs ${stale ? "border-amber-500/30 bg-amber-500/5 text-amber-200" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-200"}`}>{item.lastPriceCheckedAt ? `Price checked ${daysOld} day${daysOld === 1 ? "" : "s"} ago` : "Price has not been checked yet"}</div>
-          {quickEditId === item.id ? <div className="mt-4 grid gap-3 rounded-xl border border-cyan-400/30 bg-slate-950 p-4"><InputField label="New trade cost (£)" type="number" inputMode="decimal" min="0" step="any" value={quickTradeCost} onChange={(e) => { if (draftCurrent(quickDraft, "quick")) setQuickTradeCost(e.target.value); }} /><InputField label="Markup (%)" type="number" inputMode="decimal" min="0" step="any" value={quickMarkup} onChange={(e) => { if (draftCurrent(quickDraft, "quick")) setQuickMarkup(e.target.value); }} /><div className="flex gap-2"><Button onClick={saveQuickUpdate}>Save price</Button><Button variant="secondary" onClick={() => { if (draftCurrent(quickDraft, "quick")) closeQuick(); }}>Cancel</Button></div></div> : <div className="mt-4 flex flex-wrap gap-2"><Button disabled={!mutationReady || !materialIndex.unique.has(item.id)} variant="secondary" onClick={() => openQuickUpdate(item)}><RefreshCw className="mr-2 size-4" />Quick update</Button>{supplierUrl ? <a href={supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a> : null}</div>}
+          <div className="mt-4 flex flex-wrap gap-2">{quickEditId === item.id ? <p className="text-sm text-cyan-200">Quick price editor open above.</p> : <Button disabled={!mutationReady || !materialIndex.unique.has(item.id)} variant="secondary" onClick={() => openQuickUpdate(item)}><RefreshCw className="mr-2 size-4" />Quick update</Button>}{supplierUrl ? <a href={supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a> : null}</div>
           {lastHistory.length ? <details className="mt-4"><summary className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-400"><History className="size-4" />Recent price history</summary><div className="mt-2 space-y-2">{lastHistory.map((entry) => <div key={entry.id} className="flex justify-between rounded-lg bg-slate-950 p-2 text-xs text-slate-400"><span>{new Date(entry.recordedAt).toLocaleDateString("en-GB")}</span><span>{money.format(entry.tradeCost)} → {money.format(entry.sellPrice)}</span></div>)}</div></details> : null}
         </> : <>
           <div className="mt-5 border-t border-slate-800 pt-4 text-sm"><p className="text-slate-500">Stock code</p><p className="font-semibold">{item.stockCode || "—"}</p></div>
@@ -430,5 +472,6 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
         <div className="mt-4 border-t border-slate-800 pt-4"><MaterialShareActions material={shareMaterial} enabled={sharingReady && materialIndex.unique.has(item.id)} contextKey={JSON.stringify([sharingAccountKey, item.id])} canUse={() => canShareMaterial(expectedShareMaterial)} /></div>
       </Card>;
     })}</section>}
+    {materials.isReady && visible.length < filtered.length ? <Button variant="secondary" className="min-h-12 w-full sm:w-auto" onClick={() => setVisibleLimit(value => value + 12)}>Show more materials</Button> : null}
   </div>;
 }
