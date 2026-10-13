@@ -8,6 +8,7 @@ import * as sharing from "../lib/materialSharing.ts";
 import * as identities from "../lib/assistantIdentity.ts";
 import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
 import * as repositoryCore from "../lib/cloud/repository-core.mjs";
+import * as supplierLookup from "../lib/supplierLookup.ts";
 
 const source = ts.transpileModule(readFileSync(new URL("../app/materials/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 const item = { id: "mat-1", name: "Twin socket", category: "Accessories", manufacturer: "Example", supplier: "Screwfix", stockCode: "123AB", supplierUrl: "https://example.com/socket/123ab", unit: "Each", tradeCost: 7, sellPrice: 12, favourite: false, notes: "Private customer details", createdAt: "2026-10-01T09:00:00Z", updatedAt: "2026-10-01T09:00:00Z" };
@@ -15,7 +16,8 @@ const item = { id: "mat-1", name: "Twin socket", category: "Accessories", manufa
 function harness() {
   let cursor = 0, epoch = 1, sequence = 0, identityCalls = 0, collectionCalls = 0, sessionKey, failure = false, acknowledgement = false, beforeWrite;
   let session = { access_token: "token", user: { id: "user-1" } };
-  const slots = [], rootSlots = [], effects = [], writes = [], attempts = [], legacyWrites = [], network = [], queue = [], confirmations = [];
+  const slots = [], rootSlots = [], effects = [], writes = [], attempts = [], legacyWrites = [], network = [], queue = [], confirmations = [], requests = [], timers = new Map();
+  let timerId = 0;
   let hookSlots = slots;
   const identityState = { mode: "cloud", isReady: true, identity: { organisationId: "org-1", userId: "user-1", role: "owner" } };
   const data = { items: [{ ...item }], isReady: true };
@@ -28,6 +30,7 @@ function harness() {
     "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" }, "../../components/crm/EntityEmptyState": { EntityEmptyState: "Empty" },
     "../../components/materials/MaterialShareActions": { MaterialShareActions: "MaterialShareActions" },
     "../../lib/materialSharing": sharing, "../../lib/assistantIdentity": identities, "../../lib/supabase/sessionOwnership-core.mjs": ownership,
+    "../../lib/supplierLookup": supplierLookup,
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => { identityCalls++; return identityState; } },
     "../../lib/cloud/coreBusinessCollections": { useMaterialsCollection: () => { collectionCalls++; return { ...data,
       setItems(updater) { legacyWrites.push("setItems"); if(failure)return; data.items = updater(data.items); writes.push(data.items); },
@@ -41,14 +44,14 @@ function harness() {
     "../../lib/storage": { makeId: prefix => `${prefix}-created-${++sequence}` },
   };
   const mod = { exports: {} };
-  vm.runInNewContext(source, { module: mod, exports: mod.exports, Date, Intl, Error, JSON, structuredClone, navigator:{onLine:true}, window: { confirm(message) { confirmations.push(message);return true; } }, fetch: (...args) => { network.push(args); throw new Error("Unexpected network request"); }, require: key => { assert.ok(key in dependencies, key); return dependencies[key]; } });
+  vm.runInNewContext(source, { module: mod, exports: mod.exports, Date, Intl, Error, JSON, structuredClone, AbortController, setTimeout(fn, ms) { const id = ++timerId; timers.set(id, { fn, ms }); return id; }, clearTimeout(id) { timers.delete(id); }, navigator:{onLine:true}, window: { confirm(message) { confirmations.push(message);return true; } }, fetch: (...args) => { network.push(args); return new Promise((resolve, reject) => requests.push({ args, resolve, reject })); }, require: key => { assert.ok(key in dependencies, key); return dependencies[key]; } });
   function render() { hookSlots=rootSlots;cursor = 0; let tree = mod.exports.default();if(typeof tree.type==="function"){if(sessionKey!==tree.key){slots.forEach(slot=>slot?.cleanup?.());slots.length=0;effects.length=0;sessionKey=tree.key;}hookSlots=slots;cursor=0;tree=tree.type(tree.props);} effects.splice(0).forEach(fn => fn()); return tree; }
   function share() { const component = nodes(render()).find(node => node.type === "MaterialShareActions"); assert.ok(component, "Material product sharing is visible"); return component.props; }
   function field(label) { const node = nodes(render()).find(node => node.type === "InputField" && node.props.label === label); assert.ok(node, label); return node; }
   function button(label) {const found=nodes(render()).find(node=>node.type==="Button"&&text(node)===label);assert.ok(found,label);return found;}
   function action(label) {const found=nodes(render()).find(node=>node.props?.["aria-label"]===label);assert.ok(found,label);return found;}
   function form() {const found=nodes(render()).find(node=>node.type==="form"&&nodes(node).some(child=>child.type==="InputField"));assert.ok(found,"Material form");return found;}
-  return { data, identityState, writes, attempts, legacyWrites, network, queue, confirmations, render, share, field, button, action, form, calls: () => ({ identityCalls, collectionCalls }),
+  return { data, identityState, writes, attempts, legacyWrites, network, queue, confirmations, requests, timers, render, share, field, button, action, form, calls: () => ({ identityCalls, collectionCalls }),
     fail(value=true){failure=value;},acknowledgement(){acknowledgement=true;},beforeWrite(fn){beforeWrite=fn;},
     session(next, advance = true) { session = next; if (advance) epoch++; },
     epoch() { epoch++; }, unmount() { slots.forEach(slot => slot?.cleanup?.()); },
@@ -121,7 +124,7 @@ test("material supplier anchors never expose unsafe raw URLs for office or elect
 test("material stock code and product link support native paste without clipboard access", () => {
   const h = harness(); h.openForm();
   for (const label of ["Stock code", "Supplier link"]) { const props = h.field(label).props; assert.ok(props.maxLength > 0); assert.equal(props.autoCapitalize, "none"); assert.equal(props.spellCheck, false); assert.match(props.placeholder, /paste/i); }
-  const lookup = nodes(h.render()).find(node => node.type === "input" && node.props["aria-label"] === "Supplier stock code lookup"); assert.ok(lookup); assert.equal(lookup.props.maxLength, 128); assert.equal(lookup.props.autoCapitalize, "none");
+  const lookup = nodes(h.render()).find(node => node.type === "input" && node.props["aria-label"] === "Supplier stock code lookup"); assert.ok(lookup); assert.equal(lookup.props.maxLength, 80); assert.equal(lookup.props.autoCapitalize, "none");
   assert.equal(h.writes.length, 0); assert.equal(h.network.length, 0);
 });
 
@@ -222,4 +225,108 @@ test("local mode permits durable material edits without a cloud session",()=>{
 });
 test("returning from a supplier tab preserves material drafts through same-account identity refresh",()=>{
   for(const kind of ["new","edit","quick"]){const h=harness(),old=prepareWrite(h,kind),owner=h.identityState.identity;h.fail();old();const first=h.attempts[0];h.identityState.identity=null;h.identityState.isReady=false;h.render();old();assert.equal(h.writes.length,0);h.identityState.identity={...owner};h.identityState.isReady=true;h.data.items=h.data.items.map(reorder);h.render();old();assert.equal(h.writes.length,0);h.fail(false);if(kind==="quick")h.button("Save price").props.onClick();else h.submit();assert.equal(h.writes.length,1);assert.deepEqual(json(h.data.items[0]),json(first));}
+});
+
+const change = (h, label, value) => { h.action(label).props.onChange({ target: { value } }); h.render(); };
+const cards = h => nodes(h.render()).filter(node => node.type === "MaterialShareActions");
+const manyMaterials = count => Array.from({ length: count }, (_, i) => ({ ...item, id: `m-${i}`, name: `Socket ${i}`, stockCode: `CODE-${i}`, category: i % 2 ? "Cable" : "Accessories", supplier: i % 2 ? "CEF" : "Screwfix", favourite: i % 3 === 0 }));
+
+test("material browsing matches words in any order across product fields and combines filters", () => {
+  const h = harness(); h.data.items = manyMaterials(26);
+  assert.equal(cards(h).length, 12); assert.match(text(h.render()), /Showing 12 of 26/);
+  h.button("Show more materials").props.onClick(); assert.equal(cards(h).length, 24);
+  change(h, "Search materials", "CODE-1 socket CEF"); assert.deepEqual(cards(h).map(card => card.props.material.stockCode), ["CODE-1", "CODE-11", "CODE-13", "CODE-15", "CODE-17", "CODE-19"]);
+  change(h, "Filter materials by category", "Accessories"); assert.equal(cards(h).length, 0);
+  h.button("Clear filters").props.onClick(); assert.equal(cards(h).length, 12);
+  change(h, "Filter materials by supplier", "CEF"); h.button("Favourites").props.onClick();
+  assert.deepEqual(cards(h).map(card => card.props.material.stockCode), ["CODE-3", "CODE-9", "CODE-15", "CODE-21"]);
+  h.button("Clear filters").props.onClick(); h.button("Show more materials").props.onClick(); change(h, "Search materials", "  socket   "); assert.equal(cards(h).length, 12);
+  assert.equal(h.writes.length, 0); assert.equal(h.network.length, 0);
+});
+
+test("filtering and progressive cards leave an unfinished quick price edit available", () => {
+  const h = harness(); h.data.items = manyMaterials(26); h.button("Quick update").props.onClick(); h.fill("New trade cost (£)", "17.25");
+  change(h, "Search materials", "CODE-25"); assert.equal(cards(h).length, 1); assert.equal(h.field("New trade cost (£)").props.value, "17.25");
+  assert.match(text(h.render()), /Update price: Socket 0/); h.button("Save price").props.onClick();
+  assert.equal(h.data.items.find(item => item.id === "m-0").tradeCost, 17.25); assert.equal(h.data.items.find(item => item.id === "m-25").tradeCost, 7);
+});
+
+test("ambiguous material records remain visibly marked and cannot inflate usable summaries", () => {
+  const h = harness(); h.data.items = [{ ...item, favourite: true }, { ...item, favourite: true, name: "Hidden duplicate" }];
+  const tree = h.render(); assert.match(text(tree), /2 records need identity review/);
+  assert.match(text(tree), /Supplier-linked items0/); assert.match(text(tree), /Favourite materials0/);
+  for (const share of cards(h)) assert.equal(share.props.enabled, false);
+});
+
+const lookupPayload = (patch = {}) => ({ supplier: "CEF", stockCode: "C1", name: "Verified socket", manufacturer: "Maker", exactMatch: true, message: "Check the product and price.", productUrl: "https://www.cef.co.uk/product/socket", searchUrl: "https://www.cef.co.uk/search?q=C1", publicPrice: 12.34, ...patch });
+const lookupForm = h => h.action("Supplier lookup");
+const lookupSubmit = h => lookupForm(h).props.onSubmit({ preventDefault() {} });
+const lookupFinish = (h, i, payload = lookupPayload(), ok = true) => h.requests[i].resolve({ ok, json: async () => payload });
+const lookupResult = h => nodes(h.render()).find(node => node.props["aria-label"] === "Supplier lookup result");
+
+test("office lookup validates code length, authenticates and prevents duplicate requests", async () => {
+  const h = harness(); await lookupSubmit(h); assert.equal(h.requests.length, 0); assert.match(text(h.render()), /1–80 characters/);
+  change(h, "Supplier stock code lookup", "x".repeat(81)); await lookupSubmit(h); assert.equal(h.requests.length, 0);
+  change(h, "Supplier stock code lookup", " C1 "); const callback = lookupForm(h).props.onSubmit; const pending = callback({ preventDefault() {} }); await callback({ preventDefault() {} });
+  assert.equal(h.requests.length, 1); assert.deepEqual(JSON.parse(h.requests[0].args[1].body), { supplier: "CEF", stockCode: "C1" }); assert.equal(h.requests[0].args[1].headers.Authorization, "Bearer token");
+  assert.equal(lookupForm(h).props["aria-busy"], true); lookupFinish(h, 0); await pending; assert.equal(lookupForm(h).props["aria-busy"], false); assert.equal(h.timers.size, 0);
+});
+
+test("signed-out, recovery and mismatched-user sessions cannot start an office lookup", async () => {
+  for (const session of [null, { access_token: "token", user: { id: "user-1" }, is_password_recovery: true }, { access_token: "token", user: { id: "user-2" } }]) {
+    const h = harness(); h.session(session); change(h, "Supplier stock code lookup", "C1"); await lookupSubmit(h);
+    assert.equal(h.requests.length, 0); assert.equal(h.action("Supplier stock code lookup").props.value, "C1"); assert.equal(lookupForm(h).props["aria-busy"], false); assert.match(text(h.render()), /Sign in and load your materials/);
+  }
+});
+
+test("code and supplier changes abort requests and clear old results even on input round trips", async () => {
+  const h = harness(); change(h, "Supplier stock code lookup", "C1"); const stale = lookupForm(h).props.onSubmit; const first = stale({ preventDefault() {} });
+  change(h, "Supplier stock code lookup", "C2"); change(h, "Supplier stock code lookup", "C1"); await stale({ preventDefault() {} }); assert.equal(h.requests.length, 1); assert.equal(h.requests[0].args[1].signal.aborted, true);
+  const current = lookupSubmit(h); lookupFinish(h, 0, lookupPayload({ name: "Old result" })); await first; assert.equal(lookupResult(h), undefined); assert.equal(lookupForm(h).props["aria-busy"], true);
+  lookupFinish(h, 1); await current; assert.ok(lookupResult(h)); change(h, "Lookup supplier", "Screwfix"); assert.equal(lookupResult(h), undefined);
+});
+
+test("lookup cancel, clear and timeout allow retry without losing chosen supplier", async () => {
+  for (const action of ["Cancel lookup", "Clear lookup", "timeout"]) {
+    const h = harness(); change(h, "Supplier stock code lookup", "C1"); const pending = lookupSubmit(h);
+    if (action === "timeout") { const timer = [...h.timers.values()][0]; assert.equal(timer.ms, 20000); timer.fn(); } else h.button(action).props.onClick();
+    assert.equal(h.requests[0].args[1].signal.aborted, true); assert.equal(h.action("Supplier stock code lookup").props.value, action === "Clear lookup" ? "" : "C1"); assert.equal(h.action("Lookup supplier").props.value, "CEF"); assert.equal(lookupForm(h).props["aria-busy"], false); assert.equal(h.timers.size, 0);
+    if (action === "Clear lookup") change(h, "Supplier stock code lookup", "C1"); const retry = lookupSubmit(h); lookupFinish(h, 0, lookupPayload({ name: "Late result" })); await pending; assert.equal(lookupResult(h), undefined);
+    lookupFinish(h, 1); await retry; assert.match(text(lookupResult(h)), /Verified socket/);
+  }
+});
+
+test("account, readiness, session and unmount changes prevent old supplier responses", async () => {
+  for (const changed of [h => { h.identityState.identity = { ...h.identityState.identity, organisationId: "other" }; h.render(); }, h => { h.identityState.isReady = false; h.render(); }, h => h.session(null, false), h => h.session({ access_token: "token", user: { id: "user-2" } }, false), h => h.unmount()]) {
+    const h = harness(); change(h, "Supplier stock code lookup", "C1"); const callback = lookupForm(h).props.onSubmit, pending = callback({ preventDefault() {} }); changed(h); lookupFinish(h, 0); await pending; await callback({ preventDefault() {} });
+    assert.equal(h.requests.length, 1); assert.equal(lookupResult(h), undefined); assert.equal(h.writes.length, 0);
+  }
+});
+
+test("exact supplier results create a reviewable draft without assuming buying or selling prices", async () => {
+  const h = harness(); change(h, "Supplier stock code lookup", "C1"); const pending = lookupSubmit(h); lookupFinish(h, 0); await pending;
+  assert.match(text(lookupResult(h)), /Supplier code match/); assert.match(text(lookupResult(h)), /£12.34/); assert.match(text(lookupResult(h)), /VAT|pack size/);
+  h.button("Add to materials").props.onClick(); assert.equal(h.field("Material name").props.value, "Verified socket"); assert.equal(h.field("Stock code").props.value, "C1"); assert.equal(h.field("Trade cost (£)").props.value, ""); assert.equal(h.field("Selling price (£)").props.value, ""); assert.equal(h.writes.length, 0);
+  h.fill("Trade cost (£)", "9"); h.fill("Selling price (£)", "15"); h.submit(); assert.equal(h.writes.length, 1); assert.equal(h.data.items[0].priceSource, "Manual");
+});
+
+test("supplier suggestions remain search-only and cannot import a mismatched product", async () => {
+  const h = harness(); change(h, "Supplier stock code lookup", "C1"); const pending = lookupSubmit(h); lookupFinish(h, 0, lookupPayload({ exactMatch: false, name: "Wrong item" })); await pending;
+  assert.match(text(lookupResult(h)), /Not an exact code match/); assert.doesNotMatch(text(lookupResult(h)), /Wrong item|£12.34/); assert.equal(nodes(lookupResult(h)).find(node => node.type === "a").props.href, lookupPayload().searchUrl); assert.ok(!nodes(h.render()).some(node => node.type === "Button" && text(node) === "Add to materials")); assert.equal(h.writes.length, 0);
+});
+
+test("lookup import never replaces unfinished material or quick price drafts", async () => {
+  for (const kind of ["main", "quick"]) {
+    const h = harness(); change(h, "Supplier stock code lookup", "C1"); const pending = lookupSubmit(h); lookupFinish(h, 0); await pending; const staleImport = h.button("Add to materials").props.onClick;
+    if (kind === "main") { newMaterial(h); } else { h.button("Quick update").props.onClick(); h.fill("New trade cost (£)", "22"); }
+    assert.equal(h.button("Add to materials").props.disabled, true); h.button("Add to materials").props.onClick(); staleImport(); assert.match(text(h.render()), /Finish or close/);
+    if (kind === "main") assert.equal(h.field("Material name").props.value, "Test socket"); else assert.equal(h.field("New trade cost (£)").props.value, "22"); assert.equal(h.writes.length, 0);
+  }
+});
+
+test("invalid supplier payloads remain errors and keep the stock code for retry", async () => {
+  for (const payload of [null, lookupPayload({ stockCode: "OTHER" }), lookupPayload({ productUrl: "https://evil.example/p" }), lookupPayload({ publicPrice: -3 })]) {
+    const h = harness(); change(h, "Supplier stock code lookup", "C1"); const pending = lookupSubmit(h); lookupFinish(h, 0, payload); await pending;
+    assert.equal(lookupResult(h), undefined); assert.equal(lookupForm(h).props["aria-busy"], false); assert.equal(h.action("Supplier stock code lookup").props.value, "C1"); assert.equal(h.timers.size, 0); assert.match(text(h.render()), /response|price/i);
+  }
 });

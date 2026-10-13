@@ -35,6 +35,8 @@ export default function JobPacksPage() {
   const showForm = enabled && draft?.ownerKey === accountKey;
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [visibleLimit, setVisibleLimit] = useState(8);
   const [error, setError] = useState("");
   const [form, setForm] = useState(blankForm);
   const [materials, setMaterials] = useState<JobPackMaterial[]>([]);
@@ -47,7 +49,15 @@ export default function JobPacksPage() {
       && sameSupabaseSessionOwnership(readSupabaseSession(), readSupabaseSessionOwnershipEpoch(), ownership.session, ownership.epoch)));
   const draftActive = () => active() && showForm && latest.current.draft === draft && consumed.current !== draft;
   const packIndex = savedIdentityIndex(packs.items), materialIndex = savedIdentityIndex(materialsLibrary.items);
-  const filtered = enabled ? packIndex.selectable.filter(pack => `${pack.name} ${pack.category} ${pack.description} ${pack.materials.map(line => line.description).join(" ")}`.toLowerCase().includes(search.toLowerCase())) : [];
+  const savedPacks = enabled ? packIndex.selectable : [];
+  const savedCategories = [...new Set(savedPacks.map(pack => pack.category.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const searchWords = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = savedPacks.filter(pack => {
+    if (categoryFilter && pack.category.trim() !== categoryFilter) return false;
+    const content = `${pack.name} ${pack.category} ${pack.description} ${pack.materials.map(line => line.description).join(" ")}`.toLowerCase();
+    return searchWords.every(word => content.includes(word));
+  });
+  const visiblePacks = filtered.slice(0, visibleLimit);
   const labourTotal = Number(form.labourHours || 0) * Number(form.labourRate || 0);
   const materialsTotal = materials.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
 
@@ -165,16 +175,21 @@ export default function JobPacksPage() {
       <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Labour {money.format(labourTotal)}</p><p className="text-sm text-slate-400">Materials {money.format(materialsTotal)}</p><p className="text-xl font-bold">Pack total {money.format(labourTotal + materialsTotal)}</p><Button type="submit" className="mt-3">{editingId ? "Update job pack" : "Save job pack"}</Button></div></div>
     </form></Card> : null}
 
-    <div className="relative"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search job packs" className="min-h-11 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400" /></div>
+    <div className="grid gap-3 sm:grid-cols-2">
+      <label className="grid min-w-0 gap-2 text-sm font-medium text-slate-300"><span>Search saved job packs</span><div className="relative"><Search aria-hidden="true" className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" /><input aria-label="Search saved job packs" value={search} disabled={!enabled} onChange={(e) => { if (!active()) return; setSearch(e.target.value); setVisibleLimit(8); }} placeholder="Search job packs" className="min-h-12 w-full rounded-xl border border-slate-800 bg-slate-900 pl-10 pr-4 text-sm outline-none focus:border-cyan-400 disabled:opacity-50" /></div></label>
+      <label className="grid min-w-0 gap-2 text-sm font-medium text-slate-300"><span>Saved pack category</span><select aria-label="Filter job packs by category" value={categoryFilter} disabled={!enabled} onChange={(e) => { if (!active()) return; setCategoryFilter(e.target.value); setVisibleLimit(8); }} className="min-h-12 min-w-0 rounded-xl border border-slate-800 bg-slate-900 px-3 text-sm outline-none focus:border-cyan-400 disabled:opacity-50"><option value="">All categories</option>{savedCategories.map(category => <option key={category} value={category}>{category}</option>)}</select></label>
+    </div>
 
     {!enabled ? <Card>Load your job packs and sign in with an office account to view or edit saved prices.</Card> : <>
       {packIndex.unusableCount ? <p role="alert" className="text-sm text-amber-200">Some packs have missing or duplicate IDs and are withheld. Resolve them before editing.</p> : null}
-      {filtered.length === 0 ? <EntityEmptyState icon={<BriefcaseBusiness className="size-6" />} title={packs.items.length ? "No matching job packs" : "No job packs yet"} description="Browse the starter catalogue above or create your own job pack." /> : <section className="grid gap-4 lg:grid-cols-2">{filtered.map(pack => <Card key={pack.id}>
+      <div className="flex flex-wrap items-center justify-between gap-3"><p role="status" className="text-sm text-slate-400">Showing {visiblePacks.length} of {filtered.length} matching job packs · {savedPacks.length} saved</p>{search || categoryFilter ? <Button variant="secondary" onClick={() => { if (!active()) return; setSearch(""); setCategoryFilter(""); setVisibleLimit(8); }}>Clear filters</Button> : null}</div>
+      {filtered.length === 0 ? <EntityEmptyState icon={<BriefcaseBusiness className="size-6" />} title={packs.items.length ? "No matching job packs" : "No job packs yet"} description={search || categoryFilter ? "Try fewer search words or clear the filters to see saved packs." : "Browse the starter catalogue above or create your own job pack."} /> : <section className="grid gap-4 lg:grid-cols-2">{visiblePacks.map(pack => <Card key={pack.id}>
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{pack.category}</p><h2 className="mt-1 text-lg font-bold">{pack.name}</h2></div><Star className="size-4 text-amber-300" /></div>
         <p className="mt-3 text-sm leading-6 text-slate-400">{pack.description}</p>
         <JobPackBreakdown pack={pack} materials={materialsLibrary.items} contextKey={accountKey} canUseMaterial={canUseMaterial} />
         <div className="mt-4 flex gap-2 border-t border-slate-800 pt-4"><Button variant="secondary" onClick={() => edit(pack)}>Edit</Button><Button variant="danger" onClick={() => remove(pack)}>Delete</Button></div>
       </Card>)}</section>}
+      {visiblePacks.length < filtered.length ? <Button variant="secondary" className="w-full sm:w-auto" onClick={() => { if (active()) setVisibleLimit(current => current + 8); }}>Show more</Button> : null}
     </>}
   </div>;
 }

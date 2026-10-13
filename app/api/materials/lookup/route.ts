@@ -41,8 +41,9 @@ function plainRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function numberValue(value: unknown) {
-  const parsed = Number(String(value ?? "").replace(/[^0-9.]/g, ""));
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+  if (typeof value !== "number" && (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value.trim()))) return undefined;
+  const parsed = typeof value === "number" ? value : Number(value.trim());
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1_000_000 ? parsed : undefined;
 }
 
 function sameOriginRequest(request: Request) {
@@ -101,9 +102,11 @@ async function materialLookupAccess(request: Request): Promise<LookupAccess> {
 }
 
 function allowedSupplierUrl(value: string, supplier: SupplierKey, baseUrl?: string) {
+  if (/[\p{Cc}\p{Cf}\u2028\u2029\s\\]|%(?:0[0-9a-f]|1[0-9a-f]|7f)|%(?![0-9a-f]{2})/iu.test(value)
+    || /^(?:[a-z][a-z0-9+.-]*:)?\/\/[^/?#]*@/i.test(value)) return null;
   try {
     const url = new URL(value, baseUrl);
-    return url.protocol === "https:" && supplierHosts[supplier].has(url.hostname.toLowerCase())
+    return url.protocol === "https:" && !url.username && !url.password && !url.port && supplierHosts[supplier].has(url.hostname.toLowerCase())
       ? url.toString()
       : null;
   } catch {
@@ -160,7 +163,7 @@ function productFromJsonLd(html: string, stockCode: string) {
   const records = collectJsonLd(html).flatMap(flatten);
   const products = records.filter((record) => {
     const type = text(record["@type"]).toLowerCase();
-    return type === "product" || type === "listitem";
+    return type === "product";
   });
 
   const exact = products.find((record) => {
@@ -172,12 +175,8 @@ function productFromJsonLd(html: string, stockCode: string) {
   const candidate = exact ?? products[0];
   if (!candidate) return null;
 
-  const item = candidate.item && typeof candidate.item === "object"
-    ? candidate.item as Record<string, unknown>
-    : candidate;
-  const offers = item.offers && typeof item.offers === "object"
-    ? item.offers as Record<string, unknown>
-    : undefined;
+  const item = candidate;
+  const offers = plainRecord(item.offers) ? item.offers : undefined;
   const brand = item.brand && typeof item.brand === "object"
     ? text((item.brand as Record<string, unknown>).name)
     : text(item.brand);
@@ -185,8 +184,8 @@ function productFromJsonLd(html: string, stockCode: string) {
   return {
     name: text(item.name),
     manufacturer: brand || text(item.manufacturer),
-    productUrl: text(item.url),
-    publicPrice: numberValue(offers?.price),
+    productUrl: typeof item.url === "string" ? item.url : "",
+    publicPrice: exact && (offers?.priceCurrency === undefined || offers.priceCurrency === "GBP") ? numberValue(offers?.price) : undefined,
     exactMatch: Boolean(exact),
   };
 }

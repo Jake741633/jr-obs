@@ -56,7 +56,8 @@ test("supplier lookup authenticates an active permitted profile before supplier 
 test("supplier lookup uses explicit validated bearer authority without duplicating the session into cookies", () => {
   assert.match(materialsPage, /import \{ readSupabaseSession \} from "\.\.\/\.\.\/lib\/supabase\/client"/);
   assert.match(materialsPage, /const session = readSupabaseSession\(\);/);
-  assert.match(materialsPage, /if \(!session \|\| session\.is_password_recovery\)/);
+  // Signed-out/recovery and ownership guards are exercised by the actual page
+  // in materials-sharing-integration.test.mjs, rather than a fixed if statement.
   assert.match(materialsPage, /Authorization: `Bearer \$\{session\.access_token\}`/);
   assert.match(lookupRoute, /request\.headers\.get\("authorization"\)/);
   assert.match(lookupRoute, /\^Bearer\\s\+\(\.\+\)\$\/i/);

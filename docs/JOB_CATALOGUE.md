@@ -111,6 +111,23 @@ Confirmed account/role changes and session-ownership changes clear drafts;
 leaving or reloading the page still loses unsaved edits. Success messages confirm
 a save on this device, not completed cloud sync.
 
+Saved Job Packs support words in any order across name, category, scope and
+material descriptions, with a saved-category filter and eight cards at a time.
+Materials combine product/stock-code search with category, supplier and favourite
+filters, showing twelve cards at a time. Both show matching/visible totals, clear
+filters and Show more. Quick material price edits remain above the results when
+filters hide their original card. Ambiguous material records remain read-only
+and are excluded from summary totals.
+
+Office supplier lookups retain the chosen supplier/code on cancel or timeout,
+discard results when inputs or account ownership change, and reject mismatched
+or unsafe responses. Only a supplier code match can open an imported draft;
+suggestions link to supplier search for manual review. Importing cannot replace
+an unfinished material or quick price edit. Public prices are reference values:
+buying/selling inputs stay blank until reviewed for account price, VAT and pack
+size. Missing/malformed, nonexact and stated non-GBP prices are not imported as
+price references; field lookups still omit all prices.
+
 Historical material cost averages use only explicit costs saved on quote lines
 or job quote snapshots, including zero. Missing costs do not count as samples,
 and current library prices never backfill historical costs. These figures are
@@ -131,6 +148,10 @@ Before everyday live use, check on Jake's actual iPhone/Android and installed ap
 
 - Import once, edit a pack, refresh and confirm Cloud sync.
 - Paste a real supplier code/link, copy both and verify the pasted result.
+- Search using words in a different order, combine catalogue filters and Show
+  more, then confirm an unfinished quick price edit stays accessible.
+- Cancel a supplier lookup and retry; confirm exact product details and enter
+  reviewed buying/selling prices before saving the resulting material draft.
 - Share the product, cancel, and test denied clipboard permission/selectable text.
 - Compare one real small job and one surveyed rewire quote against the reviewed
   pack, buying basket, labour cost, overheads and VAT settings.
