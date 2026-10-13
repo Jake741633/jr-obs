@@ -5,13 +5,14 @@ import vm from "node:vm";
 import ts from "typescript";
 
 // Execute the real local dependency graph; no browser, network or external API.
-export function loadLocalTs(url) {
+export function loadLocalTs(url, overrides = {}) {
   const cache = new Map();
   function load(path) {
     if (cache.has(path)) return cache.get(path).exports;
     const mod = { exports: {} }; cache.set(path, mod);
     const source = ts.transpileModule(readFileSync(path, "utf8"), { fileName: path.replace(/\.(mjs|js)$/, ".ts"), compilerOptions: { allowJs: true, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
     const require = name => {
+      if (Object.hasOwn(overrides, name)) return overrides[name];
       if (!name.startsWith(".")) throw new Error(`Unexpected dependency: ${name}`);
       const candidate = resolve(dirname(path), name);
       const resolved = [candidate, ...[".ts", ".tsx", ".mjs", ".js"].map(extension => candidate + extension)].find(existsSync);

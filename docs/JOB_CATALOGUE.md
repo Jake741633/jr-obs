@@ -76,6 +76,22 @@ quantities/prices prevent saving, and incomplete quote costs withhold profit
 figures. Purchase-list and quote creation use durable record writes; a storage
 failure leaves the draft available to retry.
 
+Each explicit generation saves at most one quote or purchase list during that
+page visit. Repeated taps and retained actions cannot create another record.
+A successful save closes the unsaved pricing editor and links to the exact saved
+record. Generate again only to start a separate quote or list. Unchanged failed
+attempts retain the same record/line identities and payload on retry; edited
+failed drafts retain the record identity and rebuild their reviewed amounts.
+
+If a write succeeded but its acknowledgement was lost, retry recognises only
+one exactly matching saved record. It links to that saved version and explicitly
+says later draft edits were not saved. Changed or duplicate saved identities
+block recovery. Account/session changes, unmounting and old render callbacks
+cannot submit a draft. Readiness refreshes require the current Save action.
+This does not provide cross-device or page-reload draft recovery: leaving the
+page still loses an unsaved review. Local save/queued sync is distinct from
+confirmed cloud sync.
+
 Historical material cost averages use only explicit costs saved on quote lines
 or job quote snapshots, including zero. Missing costs do not count as samples,
 and current library prices never backfill historical costs. These figures are
