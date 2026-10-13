@@ -47,6 +47,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Reviewed phone contacts: native picker where available, iPhone vCard-file import, editable choices, duplicate review and durable partial-save retries
 - [x] Job evidence capture from camera/photo library with optimised copies, video links and clearly attributed user-entered spoken notes
 - [x] Reviewed job photo batches with shared notes, sequential preparation, per-photo progress and partial-save retries without duplicating completed evidence
+- [x] Searchable job evidence with photo/document filters, progressive records and expandable private photo previews for office/local use
 - [ ] Direct large video-file uploads with durable private binary storage and progress/retry controls
 - [x] Connected photo/notes quote-scope implementation with live account guards, explicit sharing, editable human review and clear billing errors; hosted activation and live generation acceptance remain below
 - [ ] Activate the server-side AI secret/business allowlist on the development preview and verify a funded live generation request (local key authenticates; API credit exhausted)

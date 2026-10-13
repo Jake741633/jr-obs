@@ -97,7 +97,7 @@ test("job detail never treats restricted commercial projections as authoritative
 test("finance gates leave assigned documents and operational timeline available", () => {
   const assignedDocuments = section(
     jobPage,
-    "      {jobDocuments.length === 0",
+    "      <JobDocumentBrowser",
     "\n\n      {!financeRestricted && (linkedQuotes.length > 0 || linkedInvoices.length > 0)",
   );
   assert.match(assignedDocuments, /jobDocuments\.map/);

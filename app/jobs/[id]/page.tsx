@@ -12,7 +12,6 @@ import {
   Download,
   ExternalLink,
   FileText,
-  FolderOpen,
   MapPin,
   Plus,
   ReceiptText,
@@ -28,6 +27,7 @@ import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { SavedCalculationRecords } from "../../../components/calculators/CalculationRecords";
 import { JobAssistantLink } from "../../../components/ai/JobAssistantLink";
 import { JobMediaCapture } from "../../../components/jobs/JobMediaCapture";
+import { JobDocumentBrowser, JobPhotoPreview, jobDocumentDateLabel, jobDocumentSelection } from "../../../components/jobs/JobDocumentBrowser";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
 import { useJobVariationsCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { strictHttpsJobDocumentUrl } from "../../../lib/cloud/fieldJobDocumentCapability-core.mjs";
@@ -191,9 +191,7 @@ export default function JobDetailPage() {
   const entries = timeline.items
     .filter((item) => item.jobId === jobId)
     .toSorted((a, b) => new Date(b.completedAt).getTime() - new Date(a.completedAt).getTime());
-  const jobDocuments = documents.items
-    .filter((item) => item.jobId === jobId)
-    .toSorted((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
+  const jobDocuments = jobDocumentSelection(documents.items, jobId).records;
   const linkedQuotes = quotes.items.filter((item) => item.jobId === jobId);
   const linkedInvoices = invoices.items.filter((item) => item.jobId === jobId);
   const linkedVariations = variations.items.filter((item) => item.jobId === jobId);
@@ -476,7 +474,9 @@ export default function JobDetailPage() {
       </form></Card> : null}
 
       {documentNotice ? <p className="text-sm text-amber-200">{documentNotice}</p> : null}
-      {jobDocuments.length === 0 ? <Card><div className="flex items-start gap-3"><FolderOpen className="mt-0.5 size-5 text-slate-500" /><div><h3 className="font-semibold">No uploaded documents yet</h3><p className="mt-1 text-sm text-slate-400">{documentMutationRestricted ? "No assigned job documents are currently available to review." : "Add certificates, site photos, drawings, RAMS or external cloud links to build this job folder."}</p></div></div></Card> : <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((document) => <Card key={document.id}><div className="flex items-start gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p><h3 className="mt-1 truncate font-bold">{document.name}</h3><p className="mt-1 text-xs text-slate-500">{new Date(document.uploadedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })} · {document.uploadedBy}</p></div>{!documentMutationRestricted ? <button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div>{document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{document.dataUrl ? <a href={document.dataUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}{documentExternalLink(document)}</div></div></div></Card>)}</div>}
+      <JobDocumentBrowser key={JSON.stringify([identityState.mode, identityState.identity?.organisationId, identityState.identity?.userId, identityState.identity?.role, identityState.identity?.customerSourceId, jobId])} jobId={jobId} documents={documents.items}>
+        {(jobDocuments) => <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((document) => <Card key={document.id}><div className="flex items-start gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p><h3 className="mt-1 truncate font-bold">{document.name}</h3><p className="mt-1 text-xs text-slate-500">{jobDocumentDateLabel(document.uploadedAt)} · {document.uploadedBy}</p></div>{!documentMutationRestricted ? <button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div><JobPhotoPreview document={document} identityState={identityState} />{document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{document.dataUrl ? <a href={document.dataUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}{documentExternalLink(document)}</div></div></div></Card>)}</div>}
+      </JobDocumentBrowser>
 
       {!financeRestricted && (linkedQuotes.length > 0 || linkedInvoices.length > 0) ? <div className="grid gap-4 md:grid-cols-2">
         <Card><div className="flex items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Commercial documents</p><h3 className="mt-1 text-lg font-bold">Quotes and estimates</h3></div><Link href="/quotes" className="text-sm text-cyan-300 hover:text-cyan-200">Open all</Link></div><div className="mt-4 space-y-2">{linkedQuotes.map((quote) => <Link key={quote.id} href={`/quotes/${quote.id}`} className="flex items-center justify-between rounded-xl bg-slate-950/60 px-3 py-3 hover:bg-slate-950"><span><span className="block font-semibold">{quote.number}</span><span className="text-xs text-slate-500">{quote.type} · {quote.status}</span></span><span className="font-semibold">{new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(documentTotal(quote))}</span></Link>)}</div></Card>
