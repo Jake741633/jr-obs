@@ -92,6 +92,25 @@ This does not provide cross-device or page-reload draft recovery: leaving the
 page still loses an unsaved review. Local save/queued sync is distinct from
 confirmed cloud sync.
 
+Materials Library creation, editing, quick price updates, favourites and deletion
+use durable record writes. Failed form/price saves retain the entered details;
+unchanged retries retain record and price-history identities. Exact saved-version
+recovery avoids duplicate history and explicitly warns when later edits were not
+applied. Updated records are checked again inside the durable updater, including
+failed/conflicting sync; pending and offline saves remain usable.
+
+Blank buying/selling prices require review instead of becoming zero. Explicit
+zero is allowed, and full-form decimal allowances are retained without rounding.
+Quick update calculates the selling price to two decimal places and records a
+manual price check. Financial editing remains office/local only; field product
+sharing does not grant catalogue write permission.
+
+Material drafts survive temporary same-account identity refreshes, including
+returning from a supplier tab. Changes are disabled while account data loads.
+Confirmed account/role changes and session-ownership changes clear drafts;
+leaving or reloading the page still loses unsaved edits. Success messages confirm
+a save on this device, not completed cloud sync.
+
 Historical material cost averages use only explicit costs saved on quote lines
 or job quote snapshots, including zero. Missing costs do not count as samples,
 and current library prices never backfill historical costs. These figures are
