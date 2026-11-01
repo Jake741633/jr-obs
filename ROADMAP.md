@@ -8,9 +8,11 @@ Build JR OS into the operating system for JR Electrical Services, capable of sup
 These features are delivered on the `jr-os-v2` preview track. Production release
 acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 
-- [x] Electrical catalogue with 40 editable job packs and 101 materials, separated buying/selling allowances and clearly labelled historical benchmarks
+- [x] Electrical catalogue with 64 editable job packs and 129 materials, separated buying/selling allowances and clearly labelled historical benchmarks
 - [x] Reviewed, non-overwriting catalogue imports with partial-save retries; durable pack editing and quote price/cost/hour preservation
 - [x] Phone-friendly supplier code/link paste, copy and native sharing with product-only payloads and safe fallbacks
+- [x] Multiple wholesaler references per material, preferred-source swaps, supplier/code search and per-reference product sharing
+- [x] Scope-aware local estimates that separate included work/questions/exclusions and require task relevance for saved packs/history
 - [x] AI suggestions retain pack allowances, distinguish missing costs from zero, and require complete cost review before saving quotes or purchase lists; historical cost samples use recorded quote allowances
 - [x] AI quote/list saves prevent repeated-tap duplicates, retain retry identities, recover exact saved versions and link directly to the saved record
 - [x] Durable Materials Library forms and price updates with retained failed drafts, exact retry recovery, changed-record review and account/sync guards

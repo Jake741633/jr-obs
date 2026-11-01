@@ -18,15 +18,16 @@ import { savedIdentityIndex } from "../../lib/assistantIdentity";
 import { getSyncQueue } from "../../lib/cloud/repository";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
 import { safeMaterialProductUrl } from "../../lib/materialSharing";
+import { materialSupplierDraft, materialSupplierReferences, maxMaterialSupplierOptions, normaliseMaterialSupplierOptions, promoteMaterialSupplier } from "../../lib/materialSuppliers";
 import { officeSupplierLookupResult, supplierNames as suppliers, type SupplierName } from "../../lib/supplierLookup";
 import { makeId } from "../../lib/storage";
-import type { Material, MaterialCategory, MaterialPriceHistory, MaterialPriceSource, MaterialUnit } from "../../lib/models";
+import type { Material, MaterialCategory, MaterialPriceHistory, MaterialPriceSource, MaterialSupplierOption, MaterialUnit } from "../../lib/models";
 
 const categories: MaterialCategory[] = ["Cable", "Protection", "Accessories", "Lighting", "Containment", "EV", "Testing", "Fire alarm", "Emergency lighting", "Other"];
 const units: MaterialUnit[] = ["Each", "Metre", "Drum", "Box", "Pack"];
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const pageLoadedAt = Date.now();
-const blank = { name: "", category: "Accessories" as MaterialCategory, manufacturer: "", supplier: "", supplierUrl: "", stockCode: "", unit: "Each" as MaterialUnit, tradeCost: "", sellPrice: "", favourite: false, notes: "" };
+const blank = { name: "", category: "Accessories" as MaterialCategory, manufacturer: "", supplier: "", supplierUrl: "", stockCode: "", supplierOptions: [] as MaterialSupplierOption[], supplierOptionsNeedsReview: false, unit: "Each" as MaterialUnit, tradeCost: "", sellPrice: "", favourite: false, notes: "" };
 
 type LookupScope = { key: string; ready: boolean; ownership: ReturnType<typeof captureSupabaseSessionOwnership> };
 type LookupRequest = { controller: AbortController; scope: LookupScope; timer?: ReturnType<typeof setTimeout> };
@@ -189,7 +190,7 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
   }
   function showError(reason: unknown) { setMessage(""); setError(reason instanceof Error ? reason.message : "The material could not be saved. Your draft is still here."); }
 
-  function canShareMaterial(expected: Pick<Material, "id" | "createdAt" | "name" | "supplier" | "stockCode" | "supplierUrl">) {
+  function canShareMaterial(expected: Pick<Material, "id" | "createdAt" | "name" | "supplier" | "stockCode" | "supplierUrl" | "supplierOptions">) {
     const latest = latestSharing.current;
     if (!latest.active || latest.scope !== sharingScope || !latest.ready) return false;
     if (identityState.mode !== "local") {
@@ -198,22 +199,24 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
     }
     // Recheck the entire collection, not the filtered cards: hidden duplicates are ambiguous.
     const current = savedIdentityIndex(latest.items).unique.get(expected.id);
-    return Boolean(current && current.createdAt === expected.createdAt && current.name === expected.name && current.supplier === expected.supplier && current.stockCode === expected.stockCode && current.supplierUrl === expected.supplierUrl);
+    return Boolean(current && current.createdAt === expected.createdAt && current.name === expected.name && current.supplier === expected.supplier && current.stockCode === expected.stockCode && current.supplierUrl === expected.supplierUrl
+      && materialSnapshot(current.supplierOptions ?? []) === materialSnapshot(expected.supplierOptions ?? []));
   }
 
   const filtered = useMemo(() => materials.items.filter((item) => {
-    const haystack = `${item.name} ${item.manufacturer} ${item.supplier} ${item.stockCode} ${item.category} ${item.unit}`.toLowerCase();
+    const sources = materialSupplierReferences(item);
+    const haystack = `${item.name} ${item.manufacturer} ${item.supplier} ${item.stockCode} ${item.category} ${item.unit} ${sources.flatMap(source => [source.supplier, source.stockCode, source.supplierUrl]).join(" ")}`.toLowerCase();
     const matchesSearch = search.toLowerCase().trim().split(/\s+/).every(word => haystack.includes(word));
-    return matchesSearch && (category === "All" || item.category === category) && (!supplierFilter || item.supplier.trim() === supplierFilter) && (!favouritesOnly || item.favourite);
+    return matchesSearch && (category === "All" || item.category === category) && (!supplierFilter || sources.some(source => source.supplier === supplierFilter)) && (!favouritesOnly || item.favourite);
   }), [materials.items, search, category, supplierFilter, favouritesOnly]);
-  const savedSuppliers = useMemo(() => [...new Set(materialIndex.selectable.map(item => item.supplier.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [materialIndex]);
+  const savedSuppliers = useMemo(() => [...new Set(materialIndex.selectable.flatMap(item => materialSupplierReferences(item).map(source => source.supplier)).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [materialIndex]);
   const visible = filtered.slice(0, visibleLimit);
   const filtersActive = Boolean(search || category !== "All" || supplierFilter || favouritesOnly);
   const ambiguousCount = materials.items.length - materialIndex.selectable.length;
 
   const summary = useMemo(() => ({
     stale: materialIndex.selectable.filter((item) => ageInDays(item.lastPriceCheckedAt) > 30).length,
-    linked: materialIndex.selectable.filter((item) => safeMaterialProductUrl(item.supplierUrl)).length,
+    linked: materialIndex.selectable.filter((item) => materialSupplierReferences(item).some(source => source.supplierUrl)).length,
     favourites: materialIndex.selectable.filter((item) => item.favourite).length,
   }), [materialIndex]);
 
@@ -238,7 +241,8 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
     if (!canMutate()) return;
     try {
       requireRecord(item);
-      openForm({ name: item.name, category: item.category, manufacturer: item.manufacturer, supplier: item.supplier, supplierUrl: item.supplierUrl, stockCode: item.stockCode, unit: item.unit, tradeCost: item.tradeCost === undefined ? "" : String(item.tradeCost), sellPrice: item.sellPrice === undefined ? "" : String(item.sellPrice), favourite: item.favourite, notes: item.notes }, item);
+      const supplierDraft = materialSupplierDraft(item.supplierOptions);
+      openForm({ name: item.name, category: item.category, manufacturer: item.manufacturer, supplier: item.supplier, supplierUrl: item.supplierUrl, stockCode: item.stockCode, supplierOptions: supplierDraft.options, supplierOptionsNeedsReview: supplierDraft.needsReview, unit: item.unit, tradeCost: item.tradeCost === undefined ? "" : String(item.tradeCost), sellPrice: item.sellPrice === undefined ? "" : String(item.sellPrice), favourite: item.favourite, notes: item.notes }, item);
     } catch (error) { showError(error); }
   }
 
@@ -248,8 +252,12 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
     const tradeCost = Number(form.tradeCost);
     const sellPrice = Number(form.sellPrice);
     if (!form.name.trim()) { setError("Material name is required."); return; }
+    if (form.supplierOptionsNeedsReview) { setError("The saved wholesaler references need review. Explicitly replace the invalid list before saving; the saved record is unchanged."); return; }
     const supplierUrl = safeMaterialProductUrl(form.supplierUrl);
     if (form.supplierUrl.trim() && !supplierUrl) { setError("Supplier link must be a valid http:// or https:// product URL without credentials or control characters."); return; }
+    let supplierOptions: MaterialSupplierOption[];
+    try { supplierOptions = normaliseMaterialSupplierOptions(form.supplierOptions, form); }
+    catch (error) { showError(error); return; }
     if (!validAmount(form.tradeCost) || !validAmount(form.sellPrice)) { setError("Enter a valid non-negative trade cost and selling price. Use £0 only when intentional."); return; }
     if (!categories.includes(form.category) || !units.includes(form.unit)) { setError("Choose a valid material category and unit."); return; }
     const payload = {
@@ -259,6 +267,7 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
       supplier: form.supplier.trim(),
       supplierUrl,
       stockCode: form.stockCode.trim(),
+      supplierOptions,
       unit: form.unit,
       tradeCost,
       sellPrice,
@@ -428,6 +437,26 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
       <InputField label="Supplier" value={form.supplier} onChange={(e) => changeForm({ supplier: e.target.value })} />
       <InputField label="Supplier link" type="url" value={form.supplierUrl} onChange={(e) => changeForm({ supplierUrl: e.target.value })} placeholder="Paste a supplier product link" maxLength={2048} autoCapitalize="none" spellCheck={false} />
       <InputField label="Stock code" value={form.stockCode} onChange={(e) => changeForm({ stockCode: e.target.value })} placeholder="Paste a supplier stock code" maxLength={128} autoCapitalize="none" spellCheck={false} />
+      <fieldset className="min-w-0 space-y-3 rounded-2xl border border-slate-700 p-4 md:col-span-2 xl:col-span-4">
+        <legend className="px-2 text-sm font-semibold text-cyan-200">Other wholesalers</legend>
+        <p className="text-sm leading-6 text-slate-400">Supplier, stock code and link above are your preferred source. Keep other wholesalers’ references for the same product here. Pasting a link saves the reference; enter and review your own buying and selling allowances.</p>
+        {form.supplierOptionsNeedsReview ? <div role="alert" className="space-y-3 rounded-xl border border-amber-400/30 p-3 text-sm text-amber-200">
+          <p>The saved wholesaler references need review and could not be loaded into this form. The original record is unchanged. Replace the invalid list explicitly, then add the references again before saving.</p>
+          <Button type="button" variant="secondary" onClick={() => changeForm({ supplierOptions: [], supplierOptionsNeedsReview: false })}>Replace invalid wholesaler list</Button>
+        </div> : null}
+        {form.supplierOptions.map((option, index) => <div key={`${option.id}-${index}`} className="space-y-3 rounded-xl border border-slate-800 bg-slate-950/50 p-3">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <InputField label={`Wholesaler ${index + 1}`} value={option.supplier} onChange={event => changeForm({ supplierOptions: form.supplierOptions.map((row, rowIndex) => rowIndex === index ? { ...row, supplier: event.target.value } : row) })} maxLength={100} placeholder="CEF, Edmundson, TLC…" />
+            <InputField label={`Stock code ${index + 1}`} value={option.stockCode} onChange={event => changeForm({ supplierOptions: form.supplierOptions.map((row, rowIndex) => rowIndex === index ? { ...row, stockCode: event.target.value } : row) })} maxLength={128} placeholder="Paste the stock code" autoCapitalize="none" spellCheck={false} />
+            <InputField label={`Product link ${index + 1}`} type="url" value={option.supplierUrl} onChange={event => changeForm({ supplierOptions: form.supplierOptions.map((row, rowIndex) => rowIndex === index ? { ...row, supplierUrl: event.target.value } : row) })} maxLength={2048} placeholder="Paste the product link" autoCapitalize="none" spellCheck={false} />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" className="min-h-12" onClick={() => { if (!draftCurrent(draft, "main")) return; try { changeForm(promoteMaterialSupplier(form, form.supplierOptions, option.id)); setError(""); setMessage("Preferred wholesaler changed in this draft. Prices are unchanged; review the buying allowance before saving."); } catch (reason) { showError(reason); } }}>Use as preferred</Button>
+            <Button type="button" variant="secondary" aria-label={`Remove wholesaler ${index + 1}`} className="min-h-12" onClick={() => changeForm({ supplierOptions: form.supplierOptions.filter((_, rowIndex) => rowIndex !== index) })}>Remove</Button>
+          </div>
+        </div>)}
+        <Button type="button" variant="secondary" className="min-h-12" disabled={form.supplierOptionsNeedsReview || form.supplierOptions.length >= maxMaterialSupplierOptions} onClick={() => { if (form.supplierOptionsNeedsReview || form.supplierOptions.length >= maxMaterialSupplierOptions) return; changeForm({ supplierOptions: [...form.supplierOptions, { id: makeId("supplier"), supplier: "", stockCode: "", supplierUrl: "" }] }); }}><Plus aria-hidden="true" className="mr-2 size-5" />Add wholesaler</Button>
+      </fieldset>
       <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Unit</span><select value={form.unit} onChange={(e) => changeForm({ unit: e.target.value as MaterialUnit })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{units.map((item) => <option key={item}>{item}</option>)}</select></label>
       {!priceRestricted ? <InputField required label="Trade cost (£)" type="number" inputMode="decimal" min="0" step="any" value={form.tradeCost} onChange={(e) => changeForm({ tradeCost: e.target.value })} /> : null}
       {!priceRestricted ? <InputField required label="Selling price (£)" type="number" inputMode="decimal" min="0" step="any" value={form.sellPrice} onChange={(e) => changeForm({ sellPrice: e.target.value })} /> : null}
@@ -457,7 +486,8 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
       const lastHistory = priceRestricted ? [] : (item.priceHistory ?? []).slice(-3).reverse();
       const supplierUrl = safeMaterialProductUrl(item.supplierUrl);
       const shareMaterial = { name: item.name, supplier: item.supplier, stockCode: item.stockCode, supplierUrl: item.supplierUrl };
-      const expectedShareMaterial = { id: item.id, createdAt: item.createdAt, ...shareMaterial };
+      const expectedShareMaterial = { id: item.id, createdAt: item.createdAt, ...shareMaterial, supplierOptions: structuredClone(item.supplierOptions ?? []) };
+      const otherSuppliers = materialSupplierReferences(item).filter(source => source.id !== "preferred");
       return <Card key={materialIndex.unique.has(item.id) ? item.id : `ambiguous-${index}`}>
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category} · {item.unit}</p><h2 className="mt-1 text-lg font-bold">{item.name}</h2><p className="text-sm text-slate-500">{item.manufacturer || item.supplier || "No manufacturer or supplier"}</p></div><div className="flex"><button disabled={!mutationReady || !materialIndex.unique.has(item.id)} onClick={() => toggleFavourite(item)} aria-label={`Favourite ${item.name}`} className={`min-h-11 min-w-11 rounded-lg p-2 ${item.favourite ? "text-amber-300" : "text-slate-500 hover:text-amber-300"}`}><Star className="size-4" fill={item.favourite ? "currentColor" : "none"} /></button><button disabled={!mutationReady || !materialIndex.unique.has(item.id)} onClick={() => startEdit(item)} aria-label={`Edit ${item.name}`} className="min-h-11 min-w-11 rounded-lg p-2 text-slate-500 hover:bg-slate-800 hover:text-cyan-300"><Pencil className="size-4" /></button>{!priceRestricted ? <button disabled={!mutationReady || !materialIndex.unique.has(item.id)} onClick={() => remove(item)} aria-label={`Delete ${item.name}`} className="min-h-11 min-w-11 rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div></div>
         {!priceRestricted ? <>
@@ -470,6 +500,14 @@ function MaterialsSession({ materials, identityState }: { materials: ReturnType<
           {supplierUrl ? <div className="mt-4"><a href={supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold text-slate-100 hover:bg-slate-800"><ExternalLink className="size-4" />Supplier</a></div> : null}
         </>}
         <div className="mt-4 border-t border-slate-800 pt-4"><MaterialShareActions material={shareMaterial} enabled={sharingReady && materialIndex.unique.has(item.id)} contextKey={JSON.stringify([sharingAccountKey, item.id])} canUse={() => canShareMaterial(expectedShareMaterial)} /></div>
+        {otherSuppliers.length ? <details className="mt-4 rounded-xl border border-slate-800">
+          <summary className="flex min-h-12 cursor-pointer items-center px-3 text-sm font-semibold text-cyan-200">Other wholesalers ({otherSuppliers.length})</summary>
+          <div className="space-y-3 border-t border-slate-800 p-3">{otherSuppliers.map(source => <div key={source.id} className="space-y-3 rounded-xl bg-slate-950 p-3">
+            <div><h3 className="font-semibold text-slate-200">{source.supplier}</h3><p className="mt-1 break-all text-sm text-slate-400">{source.stockCode || "Product link saved"}</p></div>
+            {source.supplierUrl ? <a href={source.supplierUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-12 items-center gap-2 rounded-xl border border-slate-700 px-3 text-sm font-semibold text-slate-200"><ExternalLink aria-hidden="true" className="size-4" />Open product</a> : null}
+            <MaterialShareActions material={{ name: item.name, supplier: source.supplier, stockCode: source.stockCode, supplierUrl: source.supplierUrl }} enabled={sharingReady && materialIndex.unique.has(item.id)} contextKey={JSON.stringify([sharingAccountKey, item.id, source.id])} canUse={() => canShareMaterial(expectedShareMaterial)} />
+          </div>)}</div>
+        </details> : null}
       </Card>;
     })}</section>}
     {materials.isReady && visible.length < filtered.length ? <Button variant="secondary" className="min-h-12 w-full sm:w-auto" onClick={() => setVisibleLimit(value => value + 12)}>Show more materials</Button> : null}

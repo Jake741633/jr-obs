@@ -33,13 +33,27 @@ migration tools remain available in a collapsed section below installation help.
 
 ## Electrical catalogue and product sharing
 
-Job Packs and Starter Library expose the same reviewed catalogue: 40 job packs
-and 101 materials, from small jobs through rewire examples. Adding missing records
+Job Packs and Starter Library expose the same reviewed catalogue: 64 job packs
+and 129 materials, from small jobs through rewire examples. Adding missing records
 preserves existing prices and supplier details; partial saves are retryable.
 Pack edits show quantities and separate buying/selling/labour allowances. Internal
 pricing notes are not copied into customer quote scope, and quotes keep reviewed
 pack prices even when the materials library changes. See [Job Catalogue](JOB_CATALOGUE.md)
 for estimate limitations, import behavior and acceptance checks.
+
+Materials keeps the preferred supplier/code/product link and up to ten additional
+wholesaler references for the same item. Add or edit a material, then choose
+Other wholesalers → Add wholesaler. Stock-code and link inputs support normal
+phone paste. Use as preferred swaps references without changing the reviewed
+price allowances. Search/filter matches additional codes and suppliers, and each
+saved alternative has separate product-only copy/share controls. Save the material
+to keep edits; failed saves retain the complete supplier draft to retry.
+
+The local AI Quote Builder separates included work from questions and exclusions,
+matches saved packs/history by the task rather than its broad category, and shows
+why a pack matched. Different point quantities prompt review rather than silently
+scaling a saved pack. This estimating step works without API credit; the separate
+live notes/photo/recording review still needs a configured, funded connection.
 
 Material code/link inputs support normal phone paste. Copy and Share use only
 product identity and a validated URL, never private costs, margins or job details.

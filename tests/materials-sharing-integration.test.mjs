@@ -9,6 +9,8 @@ import * as identities from "../lib/assistantIdentity.ts";
 import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
 import * as repositoryCore from "../lib/cloud/repository-core.mjs";
 import * as supplierLookup from "../lib/supplierLookup.ts";
+import { loadLocalTs } from "./helpers/load-local-ts.mjs";
+const materialSuppliers = loadLocalTs(new URL("../lib/materialSuppliers.ts", import.meta.url));
 
 const source = ts.transpileModule(readFileSync(new URL("../app/materials/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
 const item = { id: "mat-1", name: "Twin socket", category: "Accessories", manufacturer: "Example", supplier: "Screwfix", stockCode: "123AB", supplierUrl: "https://example.com/socket/123ab", unit: "Each", tradeCost: 7, sellPrice: 12, favourite: false, notes: "Private customer details", createdAt: "2026-10-01T09:00:00Z", updatedAt: "2026-10-01T09:00:00Z" };
@@ -31,6 +33,7 @@ function harness() {
     "../../components/materials/MaterialShareActions": { MaterialShareActions: "MaterialShareActions" },
     "../../lib/materialSharing": sharing, "../../lib/assistantIdentity": identities, "../../lib/supabase/sessionOwnership-core.mjs": ownership,
     "../../lib/supplierLookup": supplierLookup,
+    "../../lib/materialSuppliers": materialSuppliers,
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => { identityCalls++; return identityState; } },
     "../../lib/cloud/coreBusinessCollections": { useMaterialsCollection: () => { collectionCalls++; return { ...data,
       setItems(updater) { legacyWrites.push("setItems"); if(failure)return; data.items = updater(data.items); writes.push(data.items); },
@@ -328,5 +331,93 @@ test("invalid supplier payloads remain errors and keep the stock code for retry"
   for (const payload of [null, lookupPayload({ stockCode: "OTHER" }), lookupPayload({ productUrl: "https://evil.example/p" }), lookupPayload({ publicPrice: -3 })]) {
     const h = harness(); change(h, "Supplier stock code lookup", "C1"); const pending = lookupSubmit(h); lookupFinish(h, 0, payload); await pending;
     assert.equal(lookupResult(h), undefined); assert.equal(lookupForm(h).props["aria-busy"], false); assert.equal(h.action("Supplier stock code lookup").props.value, "C1"); assert.equal(h.timers.size, 0); assert.match(text(h.render()), /response|price/i);
+  }
+});
+
+const supplierAlternative = { id: "supplier-alt", supplier: "TLC Direct", stockCode: "ALT/1", supplierUrl: "https://example.com/alternative" };
+function addWholesaler(h, number, values) {
+  h.button("Add wholesaler").props.onClick(); h.render();
+  h.fill(`Wholesaler ${number}`, values.supplier);
+  h.fill(`Stock code ${number}`, values.stockCode);
+  h.fill(`Product link ${number}`, values.supplierUrl);
+}
+
+test("multiple wholesaler codes and product links survive failed material saves and retry exactly once", () => {
+  const h = harness(); newMaterial(h); h.fill("Supplier", "CEF");
+  addWholesaler(h, 1, supplierAlternative);
+  addWholesaler(h, 2, { supplier: "Local wholesaler", stockCode: "", supplierUrl: "https://example.com/product-only" });
+  h.fail(); h.submit(); assert.equal(h.writes.length, 0);
+  assert.equal(h.field("Stock code 1").props.value, "ALT/1");
+  assert.equal(h.field("Product link 2").props.value, "https://example.com/product-only");
+  const expected = json(h.attempts[0]);
+  h.fail(false); const save = h.form().props.onSubmit; save({ preventDefault() {} }); save({ preventDefault() {} });
+  assert.equal(h.writes.length, 1); assert.deepEqual(json(h.data.items[0]), expected);
+  assert.equal(h.data.items[0].supplierOptions.length, 2);
+  assert.equal(h.data.items[0].supplierOptions[0].stockCode, "ALT/1");
+  assert.equal(h.data.items[0].supplierOptions[1].stockCode, "");
+});
+
+test("preferred wholesaler swaps keep the old reference and reviewed material allowances", () => {
+  const h = harness(); h.data.items[0].supplierOptions = [{ ...supplierAlternative }];
+  h.action("Edit Twin socket").props.onClick(); h.render();
+  h.button("Use as preferred").props.onClick(); h.render();
+  assert.equal(h.field("Supplier").props.value, "TLC Direct");
+  assert.equal(h.field("Stock code").props.value, "ALT/1");
+  assert.equal(h.field("Wholesaler 1").props.value, "Screwfix");
+  assert.equal(h.field("Stock code 1").props.value, "123AB");
+  assert.equal(h.field("Trade cost (£)").props.value, "7");
+  assert.equal(h.field("Selling price (£)").props.value, "12");
+  h.submit(); assert.equal(h.data.items[0].stockCode, "ALT/1");
+  assert.equal(h.data.items[0].supplierOptions[0].stockCode, "123AB");
+  assert.equal(h.data.items[0].tradeCost, 7); assert.equal(h.data.items[0].sellPrice, 12);
+});
+
+test("material search and supplier filters find secondary wholesalers and expose price-free product sharing", () => {
+  const h = harness(); h.data.items[0].supplierOptions = [{ ...supplierAlternative, notes: "Private supplier notes", tradeCost: 999 }];
+  h.action("Search materials").props.onChange({ target: { value: "TLC ALT/1" } });
+  let tree = h.render(); assert.match(text(tree), /Twin socket/); assert.doesNotMatch(text(tree), /No matching materials/);
+  h.action("Filter materials by supplier").props.onChange({ target: { value: "TLC Direct" } });
+  tree = h.render(); assert.match(text(tree), /Twin socket/);
+  const shares = nodes(tree).filter(node => node.type === "MaterialShareActions");
+  assert.equal(shares.length, 2);
+  assert.deepEqual(json(shares[1].props.material), { name: "Twin socket", supplier: "TLC Direct", stockCode: "ALT/1", supplierUrl: "https://example.com/alternative" });
+  assert.doesNotMatch(JSON.stringify(shares[1].props.material), /notes|tradeCost|Private|999/);
+  assert.equal(shares[1].props.canUse(), true);
+  const oldCanUse = shares[1].props.canUse;
+  h.data.items[0].supplierOptions[0].stockCode = "CHANGED";
+  assert.equal(oldCanUse(), false);
+});
+
+test("invalid secondary links are rejected without discarding the material draft", () => {
+  const h = harness(); newMaterial(h);
+  addWholesaler(h, 1, { ...supplierAlternative, supplierUrl: "javascript:alert(1)" });
+  h.submit(); assert.equal(h.writes.length, 0);
+  assert.equal(h.field("Stock code 1").props.value, "ALT/1");
+  assert.match(text(h.render()), /valid.*http|http.*valid/i);
+});
+
+test("removing an alternative does not remove the preferred supplier or mutate the saved record before Save", () => {
+  const h = harness(); h.data.items[0].supplierOptions = [{ ...supplierAlternative }];
+  h.action("Edit Twin socket").props.onClick(); h.render();
+  h.action("Remove wholesaler 1").props.onClick(); h.render();
+  assert.equal(h.field("Stock code").props.value, "123AB");
+  assert.equal(h.data.items[0].supplierOptions.length, 1);
+  h.submit(); assert.equal(h.data.items[0].supplierOptions.length, 0);
+  assert.equal(h.data.items[0].stockCode, "123AB");
+});
+
+test("malformed saved supplier lists open a guarded editor and stay unchanged until explicitly replaced", () => {
+  for (const invalid of [{}, [null], null, [{ id: "bad", supplier: 7, stockCode: "A", supplierUrl: "" }]]) {
+    const h = harness(); h.data.items[0].supplierOptions = structuredClone(invalid);
+    h.action("Edit Twin socket").props.onClick();
+    assert.doesNotThrow(() => h.render());
+    assert.match(text(h.render()), /saved wholesaler references.*review/i);
+    h.fill("Stock code", "REVIEWED"); h.submit();
+    assert.equal(h.writes.length, 0); assert.deepEqual(h.data.items[0].supplierOptions, invalid);
+    h.button("Replace invalid wholesaler list").props.onClick(); h.render();
+    assert.deepEqual(h.data.items[0].supplierOptions, invalid);
+    addWholesaler(h, 1, supplierAlternative); h.submit();
+    assert.equal(h.writes.length, 1); assert.equal(h.data.items[0].supplierOptions[0].stockCode, "ALT/1");
+    assert.equal(h.data.items[0].stockCode, "REVIEWED");
   }
 });

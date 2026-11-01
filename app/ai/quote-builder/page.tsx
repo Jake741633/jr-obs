@@ -266,7 +266,7 @@ export default function AiQuoteBuilderPage() {
       <PageHeader
         eyebrow="AI Command Centre"
         title="AI Quote Builder"
-        description="Turn rough typed notes or a voice-note transcript into a reviewable Quote Engine 2.0 draft using saved labour rates, materials, overheads and business defaults."
+        description="Create a local estimate from typed notes or a voice-note transcript using saved job packs, similar work, materials, labour rates and business defaults."
         action={<Link href="/ai" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold hover:bg-slate-800"><ArrowLeft className="size-4" />Command Centre</Link>}
       />
 
@@ -345,11 +345,25 @@ export default function AiQuoteBuilderPage() {
 
           {draft ? (
             <Card>
-              <div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-emerald-300" /><div><h2 className="text-xl font-bold">Detected scope</h2><p className="text-sm text-slate-500">{draft.jobType} · {draft.pricing.evidenceCount} similar pricing record{draft.pricing.evidenceCount === 1 ? "" : "s"}</p></div></div>
+              <div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-emerald-300" /><div><h2 className="text-xl font-bold">Detected scope</h2><p className="text-sm text-slate-500">Local estimate · {draft.jobType} · {draft.pricing.evidenceCount} matching saved record{draft.pricing.evidenceCount === 1 ? "" : "s"}</p></div></div>
+              <p className="mt-3 text-sm text-slate-400">The priced draft uses saved records and defaults; no API credit is required. Check each allowance against the site.</p>
               <InputField className="mt-5" disabled={Boolean(estimateSave.saved)} label="Quote title" value={draft.title} onChange={(event) => { if (estimateSave.canSave()) setDraft({ ...draft, title: event.target.value }); }} />
-              <div className="mt-4 space-y-2">
+              <section aria-label="Included work" className="mt-4 space-y-2">
+                <h3 className="font-semibold">Included work</h3>
                 {draft.scopeItems.length ? draft.scopeItems.map((item, index) => <p key={`${item}-${index}`} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-300">{item}</p>) : <p className="text-sm text-slate-500">No separate scope items were detected. Add more detail before sending.</p>}
-              </div>
+              </section>
+              {draft.questionsToConfirm.length ? <section aria-label="Questions to confirm" className="mt-5 space-y-2">
+                <h3 className="font-semibold text-amber-200">Questions to confirm</h3>
+                <ul className="list-disc space-y-2 pl-5 text-sm text-slate-300">{draft.questionsToConfirm.map((question, index) => <li key={`${index}-${question}`}>{question}</li>)}</ul>
+              </section> : null}
+              {draft.exclusions.length ? <section aria-label="Exclusions" className="mt-5 space-y-2">
+                <h3 className="font-semibold">Exclusions stated in the notes</h3>
+                <ul className="list-disc space-y-2 pl-5 text-sm text-slate-300">{draft.exclusions.map((exclusion, index) => <li key={`${index}-${exclusion}`}>{exclusion}</li>)}</ul>
+              </section> : null}
+              {draft.packMatches.length ? <section aria-label="Saved pack matches" className="mt-5 space-y-3">
+                <h3 className="font-semibold">Saved pack matches</h3>
+                {draft.packMatches.map(pack => <div key={pack.id} className="rounded-xl bg-slate-950 p-3"><p className="text-sm font-semibold">{pack.name}</p><p className="mt-1 text-sm text-slate-400">{pack.reason}</p></div>)}
+              </section> : null}
               <div className="mt-5"><AiConfidenceScore confidence={draft.pricing.confidence} compact /></div>
               <div className="mt-5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100"><TriangleAlert className="mb-2 size-5 text-amber-300" />This is a drafting aid. Verify design, quantities, access, regulations, testing, certification and exclusions yourself.</div>
             </Card>

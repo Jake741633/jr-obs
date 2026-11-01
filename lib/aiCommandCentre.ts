@@ -2,6 +2,7 @@ import { annualOverheadCost, calculateQuoteProfitability } from "./quoteEngine";
 import { savedIdentityIndex } from "./assistantIdentity";
 import { packLineCost } from "./jobPackCatalogue";
 import { reviewEstimateCosts, validEstimateAmount } from "./estimateCostReview";
+import { analyseEstimateScope, estimateReviewQuestions, matchEstimateScope, rankEstimatePacks } from "./estimateScope";
 import { assistantInvoiceBalance, assistantQuoteFollowUpDue, isAssistantInvoiceOverdue } from "./assistantSignals-core.mjs";
 import { effectiveInvoicePaid, type PaymentRecord } from "./payments";
 import { isJobInactiveStatus } from "./jobManagement-core.mjs";
@@ -88,6 +89,9 @@ export interface AiQuoteDraft {
   jobType: QuoteTemplateType;
   title: string;
   scopeItems: string[];
+  questionsToConfirm: string[];
+  exclusions: string[];
+  packMatches: Array<{ id: string; name: string; reason: string }>;
   items: PricingLineItem[];
   pricingSettings: QuotePricingSettings;
   profitability: ReturnType<typeof calculateQuoteProfitability> | null;
@@ -121,20 +125,6 @@ export interface AiBusinessCoachSnapshot {
   coaching: AiRecommendation[];
 }
 
-const jobTypeKeywords: Array<[QuoteTemplateType, string[]]> = [
-  ["Rewire", ["rewire", "re-wire", "full house wiring", "first fix", "second fix"]],
-  ["EICR", ["eicr", "condition report", "landlord report", "periodic inspection"]],
-  ["Consumer Unit", ["consumer unit", "fuse board", "fuseboard", "board change", "rcbo board"]],
-  ["Fault Finding", ["fault finding", "fault", "tripping", "diagnostic", "loss of power", "not working"]],
-  ["Commercial", ["commercial", "office", "shop", "warehouse", "church", "pub", "containment", "three phase"]],
-  ["Domestic", ["domestic", "house", "flat", "socket", "light", "bathroom", "kitchen"]],
-];
-
-const stopWords = new Set([
-  "and", "the", "for", "with", "from", "this", "that", "then", "into", "onto", "will", "need", "needs",
-  "quote", "price", "customer", "job", "work", "works", "supply", "install", "replace", "move", "add", "new",
-]);
-
 const fallbackHours: Record<QuoteTemplateType, number> = {
   Domestic: 8,
   Commercial: 16,
@@ -165,19 +155,6 @@ function normalise(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function tokens(value: string) {
-  return new Set(normalise(value).split(/\s+/).filter((token) => token.length > 2 && !stopWords.has(token)));
-}
-
-function overlapScore(left: Set<string>, right: Set<string>) {
-  if (!left.size || !right.size) return 0;
-  let matches = 0;
-  left.forEach((token) => {
-    if (right.has(token)) matches += 1;
-  });
-  return matches / Math.max(1, Math.min(left.size, right.size));
-}
-
 function itemKey(materialId: string | undefined, description: string) {
   return materialId || normalise(description);
 }
@@ -206,25 +183,11 @@ function titleFromNotes(notes: string, jobType: QuoteTemplateType) {
 }
 
 export function inferJobType(notes: string, selected?: QuoteTemplateType | ""): QuoteTemplateType {
-  if (selected) return selected;
-  const source = normalise(notes);
-  for (const [type, keywords] of jobTypeKeywords) {
-    if (keywords.some((keyword) => source.includes(normalise(keyword)))) return type;
-  }
-  return "Domestic";
+  return analyseEstimateScope(notes, selected).jobType;
 }
 
 export function extractScopeItems(notes: string) {
-  const pieces = notes
-    .split(/\n|[.;](?=\s|$)/)
-    .map((item) => item.replace(/^[-*•\d).\s]+/, "").replace(/\s+/g, " ").trim())
-    .filter((item) => item.length >= 4);
-  return [...new Set(pieces)].slice(0, 12);
-}
-
-function relevantRecordScore(text: string, jobType: QuoteTemplateType, contextTokens: Set<string>, templateType?: QuoteTemplateType) {
-  const typeBoost = templateType === jobType ? 1 : inferJobType(text) === jobType ? 0.55 : 0;
-  return typeBoost + overlapScore(contextTokens, tokens(text));
+  return analyseEstimateScope(notes).scopeItems;
 }
 
 export function suggestMaterials({
@@ -248,8 +211,8 @@ export function suggestMaterials({
   markupPercent: number;
   limit?: number;
 }) {
-  const jobType = inferJobType(notes, selectedJobType);
-  const contextTokens = tokens(`${jobType} ${notes}`);
+  const scope = analyseEstimateScope(notes, selectedJobType);
+  const jobType = scope.jobType;
   const materialIndex = savedIdentityIndex(materials);
   const materialById = materialIndex.unique;
   const aggregates = new Map<string, {
@@ -265,9 +228,9 @@ export function suggestMaterials({
     if (!aggregates.has(suggestion.key)) aggregates.set(suggestion.key, { suggestion, score });
   }
 
-  buildMaterialLearningPatterns({ documents, jobs, invoices, materials })
+  buildMaterialLearningPatterns({ documents, jobs, invoices, materials, scope })
     .map((pattern) => {
-      const relevantEvidence = pattern.evidence.filter((evidence) => evidence.jobType === jobType);
+      const relevantEvidence = pattern.evidence;
       const score = pattern.confidenceScore / 100
         + relevantEvidence.length * 0.35
         + Math.max(0, pattern.evidence.reduce((sum, evidence) => sum + evidence.relevance, 0) / Math.max(1, pattern.evidence.length) / 100);
@@ -301,15 +264,8 @@ export function suggestMaterials({
       }, score + 2);
     });
 
-  savedIdentityIndex(jobPacks).selectable
-    .map((pack) => ({
-      pack,
-      score: relevantRecordScore(`${pack.name} ${pack.category} ${pack.description} ${pack.notes}`, jobType, contextTokens),
-    }))
-    .filter(({ score }) => score > 0.35)
-    .toSorted((left, right) => right.score - left.score)
-    .slice(0, 5)
-    .forEach(({ pack, score }) => {
+  rankEstimatePacks({ scope, jobPacks })
+    .forEach(({ pack, score, reason }) => {
       pack.materials.forEach((packMaterial) => {
         const material = packMaterial.materialId ? materialById.get(packMaterial.materialId) : undefined;
         const unitCost = packLineCost(packMaterial, materialIndex.selectable) ?? undefined;
@@ -339,12 +295,12 @@ export function suggestMaterials({
             relevance: Math.min(100, Math.round(score * 50)),
             href: "/job-packs",
           }],
-          reason: `Included in the ${pack.name} JR OS job pack.`,
+          reason: `${pack.name}: ${reason}`,
         }, score + 1);
       });
     });
 
-  if (aggregates.size < Math.min(5, limit)) {
+  if (!aggregates.size) {
     const categoryKeywords: Partial<Record<QuoteTemplateType, string[]>> = {
       Rewire: ["cable", "protection", "accessories", "consumer unit"],
       EICR: ["testing", "labels", "accessories"],
@@ -355,8 +311,8 @@ export function suggestMaterials({
     };
     const wanted = categoryKeywords[jobType] ?? [];
     materialIndex.selectable
-      .filter((material) => material.favourite || wanted.some((value) => `${material.category} ${material.name}`.toLowerCase().includes(value)))
-      .toSorted((left, right) => Number(right.favourite) - Number(left.favourite) || right.updatedAt.localeCompare(left.updatedAt))
+      .filter((material) => matchEstimateScope(scope, material.name).score > 0 && (material.favourite || wanted.some((value) => `${material.category} ${material.name}`.toLowerCase().includes(value))))
+      .toSorted((left, right) => Number(right.favourite) - Number(left.favourite) || right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
       .slice(0, limit)
       .forEach((material) => addSuggestion({
         key: material.id,
@@ -384,7 +340,7 @@ export function suggestMaterials({
           relevance: material.favourite ? 35 : 20,
           href: "/materials",
         }],
-        reason: `Matches the ${jobType.toLowerCase()} job type or is saved as a favourite.`,
+        reason: "Matches the supplied work in the Materials Library; quantity is a starting allowance.",
       }, material.favourite ? 0.65 : 0.35));
   }
 
@@ -396,15 +352,16 @@ export function suggestMaterials({
     }))
     .toSorted((left, right) => {
       const confidence = { High: 3, Medium: 2, Low: 1 };
-      return confidence[right.confidence] - confidence[left.confidence] || right.evidenceCount - left.evidenceCount;
+      return confidence[right.confidence] - confidence[left.confidence] || right.evidenceCount - left.evidenceCount || left.key.localeCompare(right.key);
     })
     .slice(0, limit);
 }
 
-function rateHourlyCost(rate: LabourRate | undefined, labourSettings: LabourCostSettings) {
+function rateHourlyCost(rate: LabourRate | undefined, labourSettings: LabourCostSettings, hours: number) {
   if (!rate) return 0;
   if (rate.unit === "Day") return rate.costRate / Math.max(1, labourSettings.billableHoursPerDay);
   if (rate.unit === "Half day") return rate.costRate / Math.max(1, labourSettings.billableHoursPerDay / 2);
+  if (rate.unit === "Call-out" || rate.unit === "Minimum charge") return rate.costRate / Math.max(1, hours);
   return rate.costRate;
 }
 
@@ -431,8 +388,8 @@ export function recommendPricing({
   invoices?: Invoice[];
   jobPacks: JobPack[];
 }): AiPricingRecommendation {
-  const jobType = inferJobType(notes, selectedJobType);
-  const contextTokens = tokens(`${jobType} ${notes}`);
+  const scope = analyseEstimateScope(notes, selectedJobType);
+  const jobType = scope.jobType;
   const learned = buildQuoteLearningSuggestion({
     notes,
     jobType,
@@ -441,48 +398,37 @@ export function recommendPricing({
     invoices,
     labourSettings,
   });
-  const packHours = jobPacks
-    .map((pack) => ({
-      score: relevantRecordScore(`${pack.name} ${pack.category} ${pack.description}`, jobType, contextTokens),
-      hours: pack.labourHours,
-    }))
-    .filter((item) => item.score > 0.5 && item.hours > 0)
-    .toSorted((left, right) => right.score - left.score)
-    .slice(0, 5);
-  const packAverage = packHours.length
-    ? packHours.reduce((sum, item) => sum + item.hours, 0) / packHours.length
-    : 0;
+  const packHours = rankEstimatePacks({ scope, jobPacks }).filter(({ pack }) => validEstimateAmount(pack.labourHours) && pack.labourHours > 0);
+  const packAllowance = packHours.reduce((sum, { pack }) => sum + pack.labourHours, 0);
   const labourHours = learned.averageLabourHours > 0
-    ? packAverage > 0 && learned.confidence.labour < 75
-      ? learned.averageLabourHours * 0.75 + packAverage * 0.25
+    ? packAllowance > 0 && learned.confidence.labour < 75
+      ? learned.averageLabourHours * 0.75 + packAllowance * 0.25
       : learned.averageLabourHours
-    : packAverage || fallbackHours[jobType];
+    : packAllowance || fallbackHours[jobType];
   const roundedHours = Math.max(1, Math.round(labourHours * 2) / 2);
-  const labourMode: QuoteLabourMode = roundedHours >= labourSettings.billableHoursPerDay * 1.5 ? "Days" : "Hours";
+  const suggestedMode: QuoteLabourMode = roundedHours >= labourSettings.billableHoursPerDay * 1.5 ? "Days" : "Hours";
   const activeRates = labourRates.filter((rate) => rate.active);
   const preferred = activeRates.find((rate) => rate.id === quoteSettings.defaultLabourRateId);
-  const matchingUnit = labourMode === "Days"
-    ? activeRates.find((rate) => rate.unit === "Day" && /day|electrician/i.test(rate.name))
-    : activeRates.find((rate) => rate.unit === "Hour" && /hour|electrician/i.test(rate.name));
-  const labourRate = preferred ?? matchingUnit ?? activeRates.find((rate) => rate.unit === (labourMode === "Days" ? "Day" : "Hour")) ?? activeRates[0];
+  const labourRate = preferred ?? activeRates.find((rate) => rate.unit === (suggestedMode === "Days" ? "Day" : "Hour")) ?? activeRates[0];
+  const labourMode: QuoteLabourMode = !labourRate ? suggestedMode : labourRate.unit === "Hour" ? "Hours" : labourRate.unit === "Day" ? "Days" : "Fixed";
+  const hoursPerRateUnit = labourRate?.unit === "Day" ? labourSettings.billableHoursPerDay
+    : labourRate?.unit === "Half day" ? labourSettings.billableHoursPerDay / 2
+      : labourRate?.unit === "Hour" ? 1 : roundedHours;
   const annualOverheads = overheads.reduce((sum, overhead) => sum + annualOverheadCost(overhead), 0);
   const annualBillableHours = labourSettings.workingDaysPerYear * labourSettings.billableHoursPerDay;
   const overheadHourlyCost = annualBillableHours > 0 ? annualOverheads / annualBillableHours : 0;
-  const labourHourlyCost = rateHourlyCost(labourRate, labourSettings);
+  const labourHourlyCost = rateHourlyCost(labourRate, labourSettings, roundedHours);
   const breakEvenHourlyRate = labourHourlyCost + overheadHourlyCost;
   const marginDivisor = Math.max(0.05, 1 - labourSettings.targetNetMargin / 100);
   const recommendedHourlyRate = breakEvenHourlyRate / marginDivisor;
   const labourQuantity = labourMode === "Days"
     ? Math.max(0.5, Math.ceil((roundedHours / labourSettings.billableHoursPerDay) * 2) / 2)
-    : roundedHours;
+    : labourMode === "Hours" ? roundedHours
+      : labourRate?.unit === "Half day" ? Math.max(1, Math.ceil(roundedHours / Math.max(1, hoursPerRateUnit))) : 1;
   const unitCost = labourRate?.costRate ?? 0;
   const savedCharge = labourRate?.chargeRate ?? 0;
-  const learnedUnitCharge = labourMode === "Days"
-    ? learned.averageLabourPricePerHour * labourSettings.billableHoursPerDay
-    : learned.averageLabourPricePerHour;
-  const recommendedUnitCharge = labourMode === "Days"
-    ? Math.max(savedCharge, recommendedHourlyRate * labourSettings.billableHoursPerDay, learnedUnitCharge)
-    : Math.max(savedCharge, recommendedHourlyRate, learnedUnitCharge);
+  const learnedUnitCharge = learned.averageLabourPricePerHour * hoursPerRateUnit;
+  const recommendedUnitCharge = Math.max(savedCharge, recommendedHourlyRate * hoursPerRateUnit, learnedUnitCharge);
   const labourCost = labourQuantity * unitCost;
   const labourPrice = labourQuantity * recommendedUnitCharge;
   const totalLabourCost = labourCost + roundedHours * overheadHourlyCost;
@@ -559,6 +505,8 @@ export function buildAiQuoteDraft({
   quoteSettings: QuotePricingSettings;
   createId: (prefix: string) => string;
 }): AiQuoteDraft {
+  const scope = analyseEstimateScope(notes, jobType);
+  const packMatches = rankEstimatePacks({ scope, jobPacks });
   const pricing = recommendPricing({ notes, jobType, labourRates, overheads, labourSettings, quoteSettings, documents, jobs, invoices, jobPacks });
   const materialSuggestions = suggestMaterials({
     notes,
@@ -572,7 +520,7 @@ export function buildAiQuoteDraft({
   });
   const items: PricingLineItem[] = [];
   const costBasisByLineId: Record<string, string> = {};
-  if (pricing.labourRate && pricing.labourPrice > 0) {
+  if (scope.workText && pricing.labourRate && pricing.labourPrice > 0) {
     items.push({
       id: createId("ai-line"),
       description: `${pricing.labourRate.name} · ${pricing.labourMode.toLowerCase()}`,
@@ -609,7 +557,10 @@ export function buildAiQuoteDraft({
   return {
     jobType: pricing.jobType,
     title: titleFromNotes(notes, pricing.jobType),
-    scopeItems: extractScopeItems(notes),
+    scopeItems: scope.scopeItems,
+    questionsToConfirm: estimateReviewQuestions(scope, packMatches),
+    exclusions: scope.exclusions,
+    packMatches: packMatches.map(({ pack, reason }) => ({ id: pack.id, name: pack.name, reason })),
     items,
     pricingSettings,
     profitability: reviewEstimateCosts(items).complete ? calculateQuoteProfitability(items, pricingSettings, overheads, labourSettings) : null,

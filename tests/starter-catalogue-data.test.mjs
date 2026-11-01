@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
+import { catalogueImportPlan, jobPackQuoteLines, jobPackTotals } from "../lib/jobPackCatalogue.ts";
 
 const source = readFileSync(new URL("../lib/starterData.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText;
@@ -11,13 +12,63 @@ const materialById = new Map(starterMaterials.map((item) => [item.id, item]));
 const packById = new Map(starterJobPacks.map((item) => [item.id, item]));
 const lines = (pack) => new Map(pack.materials.map((line) => [line.materialId, line.quantity]));
 
-test("catalogue expands to 101 materials and 40 packs without retiring any original IDs", () => {
-  assert.equal(starterMaterials.length, 101);
-  assert.equal(starterJobPacks.length, 40);
+test("catalogue expands to 129 materials and 64 packs without retiring any existing IDs", () => {
+  assert.equal(starterMaterials.length, 129);
+  assert.equal(starterJobPacks.length, 64);
   assert.equal(materialById.size, starterMaterials.length);
   assert.equal(packById.size, starterJobPacks.length);
-  for (let i = 1; i <= 70; i++) assert.ok(materialById.has(`starter-mat-${String(i).padStart(3, "0")}`));
-  for (let i = 1; i <= 20; i++) assert.ok(packById.has(`starter-pack-${String(i).padStart(3, "0")}`));
+  for (let i = 1; i <= 101; i++) assert.ok(materialById.has(`starter-mat-${String(i).padStart(3, "0")}`));
+  for (let i = 1; i <= 40; i++) assert.ok(packById.has(`starter-pack-${String(i).padStart(3, "0")}`));
+});
+
+test("24 additional scopes have distinct category/material schedules and explicit survey boundaries", () => {
+  const additions = starterJobPacks.filter((pack) => Number(pack.id.slice(-3)) > 40);
+  assert.equal(additions.length, 24);
+  const schedules = new Set(starterJobPacks.slice(0, 40).map((pack) => JSON.stringify([pack.category, [...lines(pack)].sort()])));
+  const names = new Set(starterJobPacks.slice(0, 40).map((pack) => pack.name.toLowerCase()));
+  for (const pack of additions) {
+    const schedule = JSON.stringify([pack.category, [...lines(pack)].sort()]);
+    assert.ok(!schedules.has(schedule), `${pack.id}: renamed material schedule`);
+    assert.ok(!names.has(pack.name.toLowerCase()), `${pack.id}: duplicate name`);
+    schedules.add(schedule);
+    names.add(pack.name.toLowerCase());
+    assert.match(pack.internalNotes, /assumptions?:/i, pack.id);
+    assert.match(pack.internalNotes, /survey.*certification.*boundary/i, pack.id);
+    assert.match(pack.internalNotes, /unverified.*allowances?/i, pack.id);
+    assert.match(pack.certificatesRequired, /confirm appropriate certification after scope review/i, pack.id);
+    assert.match(pack.testingRequirements, /check|test|inspect|verif/i, pack.id);
+  }
+});
+
+test("expanded catalogue imports only missing templates and keeps their allowance snapshots quotable", () => {
+  const savedMaterials = structuredClone(starterMaterials.filter((item) => Number(item.id.slice(-3)) <= 101));
+  const savedPacks = structuredClone(starterJobPacks.filter((item) => Number(item.id.slice(-3)) <= 40));
+  savedMaterials[0].tradeCost = 999;
+  savedPacks[0].description = "Reviewed saved scope";
+  const before = structuredClone({ savedMaterials, savedPacks });
+  const plan = catalogueImportPlan(savedMaterials, savedPacks, starterMaterials, starterJobPacks, true);
+  assert.equal(plan.materials.length, 28);
+  assert.equal(plan.packs.length, 24);
+  assert.deepEqual({ savedMaterials, savedPacks }, before);
+  assert.ok(plan.materials.every((item) => Number(item.id.slice(-3)) > 101));
+  assert.ok(plan.packs.every((item) => Number(item.id.slice(-3)) > 40));
+  const repricedLibrary = [...savedMaterials, ...plan.materials].map((item) => ({ ...item, tradeCost: 999, sellPrice: 1999 }));
+  let sequence = 0;
+  for (const pack of plan.packs) {
+    const quote = jobPackQuoteLines(pack, repricedLibrary, () => `expanded-line-${++sequence}`);
+    assert.equal(quote.length, pack.materials.length + 1, pack.id);
+    for (const [index, material] of pack.materials.entries()) {
+      const quoted = quote[index + 1];
+      assert.equal(quoted.materialId, material.materialId, pack.id);
+      assert.equal(quoted.quantity, material.quantity, pack.id);
+      assert.equal(quoted.unitCost, material.unitCost, pack.id);
+      assert.equal(quoted.unitPrice, material.unitPrice, pack.id);
+    }
+    const totals = jobPackTotals(pack, repricedLibrary);
+    assert.equal(totals.missingCosts, 0, pack.id);
+    assert.ok(Number.isFinite(totals.total) && totals.total > 0, pack.id);
+    assert.doesNotMatch(JSON.stringify(quote), /Assumptions:|unverified.*allowance/i, pack.id);
+  }
 });
 
 test("pack material links use exact catalogue products with separate buying-cost snapshots", () => {
