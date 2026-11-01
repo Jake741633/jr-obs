@@ -35,6 +35,9 @@ import { nextPricingDocumentNumber } from "../../../lib/workflow";
 import { savedIdentityIndex } from "../../../lib/assistantIdentity";
 import { editQuoteDraftLine, materialQuoteDraftLine, reviewQuoteDraftLines, type QuoteLineReviewField } from "../../../lib/quoteDraftLines";
 import { jobPackQuoteDraftAddition, labourQuoteDraftAddition, type QuoteDraftAddition } from "../../../lib/quoteDraftAdditions";
+import { quoteDraftMaterialChoices, quoteDraftMaterialProduct, quoteDraftPackChoices } from "../../../lib/quoteDraftCatalogue";
+import { materialSupplierReferences } from "../../../lib/materialSuppliers";
+import { validEstimateAmount } from "../../../lib/estimateCostReview";
 import { useEstimateSave } from "../../../lib/useEstimateSave";
 import type {
   Builder,
@@ -105,15 +108,27 @@ export default function AiQuoteBuilderPage() {
   const [draft, setDraft] = useState<AiQuoteDraft | null>(null);
   const [message, setMessage] = useState("");
   const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [selectedMaterialSupplierId, setSelectedMaterialSupplierId] = useState("preferred");
+  const [materialSearch, setMaterialSearch] = useState("");
+  const [packSearch, setPackSearch] = useState("");
   const [selectedLabourId, setSelectedLabourId] = useState("");
   const [selectedJobPackId, setSelectedJobPackId] = useState("");
   const [reviewOnly, setReviewOnly] = useState(false);
   const [reviewIds, setReviewIds] = useState<string[]>([]);
   const lastLineAddition = useRef<object | null>(null);
   const draftReview = reviewQuoteDraftLines(draft?.items ?? []);
-  const materialChoices = [...savedIdentityIndex(materials.items).unique.values()].filter(item => typeof item.name === "string" && item.name.trim()).sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
+  const materialChoices = quoteDraftMaterialChoices(materials.items, materialSearch);
   const labourChoices = savedIdentityIndex(labourRates.items).selectable.filter(item => item.active === true && typeof item.name === "string" && item.name.trim()).sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
-  const packChoices = savedIdentityIndex(jobPacks.items).selectable.filter(item => typeof item.name === "string" && item.name.trim()).sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
+  const packChoices = quoteDraftPackChoices(jobPacks.items, packSearch);
+  const materialPicker = useMemo(() => ({ materialSearch, selectedMaterialId, selectedMaterialSupplierId }), [materialSearch, selectedMaterialId, selectedMaterialSupplierId]);
+  const packPicker = useMemo(() => ({ packSearch, selectedJobPackId }), [packSearch, selectedJobPackId]);
+  const materialPreview = useMemo(() => {
+    const material = savedIdentityIndex(materials.items).unique.get(selectedMaterialId);
+    if (!material) return { material: null, product: null, references: [], error: "Choose a current uniquely identified material." };
+    const references = materialSupplierReferences(material).filter(reference => reference.id !== "preferred");
+    try { return { material, product: quoteDraftMaterialProduct(material, selectedMaterialSupplierId), references, error: "" }; }
+    catch (error) { return { material, product: null, references, error: error instanceof Error ? error.message : "Review this material reference before adding it." }; }
+  }, [materials.items, selectedMaterialId, selectedMaterialSupplierId]);
   const packPreview = useMemo(() => {
     const selectedPack = savedIdentityIndex(jobPacks.items).unique.get(selectedJobPackId);
     if (!selectedPack) return { addition: null, error: "Choose a current uniquely identified job pack." };
@@ -140,12 +155,44 @@ export default function AiQuoteBuilderPage() {
   const estimateSave = useEstimateSave<PricingDocument>(ready, saveContext);
   const sourceContext = useMemo(() => ({ notes, jobType, ready, saveContext, materials: materials.items, jobPacks: jobPacks.items, labourRates: labourRates.items, invoices: invoices.items, quoteSettings }),
     [notes, jobType, ready, saveContext, materials.items, jobPacks.items, labourRates.items, invoices.items, quoteSettings]);
-  const latestSource = useRef({ active: false, context: sourceContext, selectedMaterialId, selectedLabourId, selectedJobPackId });
+  const latestSource = useRef({ active: false, context: sourceContext, selectedMaterialId, selectedLabourId, selectedJobPackId, materialPicker: materialPicker as object | null, packPicker: packPicker as object | null });
   useLayoutEffect(() => {
-    latestSource.current = { active: true, context: sourceContext, selectedMaterialId, selectedLabourId, selectedJobPackId };
+    latestSource.current = { active: true, context: sourceContext, selectedMaterialId, selectedLabourId, selectedJobPackId, materialPicker, packPicker };
     return () => { latestSource.current.active = false; };
   });
   const currentSource = () => ready && latestSource.current.active && latestSource.current.context === sourceContext;
+
+  function searchMaterials(value: string) {
+    if (!currentSource() || !estimateSave.canSave()) return;
+    latestSource.current.materialPicker = null;
+    setMaterialSearch(value); setSelectedMaterialId(""); setSelectedMaterialSupplierId("preferred");
+  }
+
+  function chooseMaterial(id: string) {
+    if (!currentSource() || !estimateSave.canSave() || latestSource.current.materialPicker !== materialPicker || (id && !materialChoices.some(item => item.id === id))) return;
+    latestSource.current.materialPicker = null;
+    setSelectedMaterialId(id); setSelectedMaterialSupplierId("preferred");
+  }
+
+  function chooseMaterialSupplier(id: string) {
+    if (!currentSource() || !estimateSave.canSave() || latestSource.current.materialPicker !== materialPicker || !materialPreview.material) return;
+    try { quoteDraftMaterialProduct(materialPreview.material, id); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Choose a current wholesaler reference."); return; }
+    latestSource.current.materialPicker = null;
+    setSelectedMaterialSupplierId(id);
+  }
+
+  function searchPacks(value: string) {
+    if (!currentSource() || !estimateSave.canSave()) return;
+    latestSource.current.packPicker = null;
+    setPackSearch(value); setSelectedJobPackId("");
+  }
+
+  function choosePack(id: string) {
+    if (!currentSource() || !estimateSave.canSave() || latestSource.current.packPicker !== packPicker || (id && !packChoices.some(item => item.id === id))) return;
+    latestSource.current.packPicker = null;
+    setSelectedJobPackId(id);
+  }
 
   function selectCustomer(id: string) {
     const customer = customers.items.find((item) => item.id === id);
@@ -194,6 +241,7 @@ export default function AiQuoteBuilderPage() {
     });
     setDraft({ ...generated, profitability: reviewQuoteDraftLines(generated.items).complete ? generated.profitability : null });
     setReviewOnly(false); setReviewIds([]); setSelectedMaterialId(""); setSelectedLabourId(""); setSelectedJobPackId("");
+    setMaterialSearch(""); setPackSearch(""); setSelectedMaterialSupplierId("preferred");
     setJobType(generated.jobType);
     setValidUntil((current) => current || addDays(30));
     const defaultTerms = termsStore.items.find((template) => template.active && template.name.toLowerCase().includes(generated.jobType.toLowerCase()))
@@ -238,15 +286,17 @@ export default function AiQuoteBuilderPage() {
 
   function addMaterial(id?: string) {
     if (!currentSource() || !draft || !estimateSave.canSave() || lastLineAddition.current === sourceContext
+      || latestSource.current.materialPicker !== materialPicker
       || (id !== undefined && id !== latestSource.current.selectedMaterialId)) return;
     const material = id ? savedIdentityIndex(materials.items).unique.get(id) : null;
-    if (id !== undefined && !material) { setMessage("The saved material is missing or duplicated. Choose a current material again."); return; }
+    if (id !== undefined && (!material || !materialChoices.some(item => item.id === id))) { setMessage("The saved material is missing, duplicated or outside this search. Choose a current material again."); return; }
     try {
       const nextId = makeId("ai-line");
       if (draft.items.some(item => item.id === nextId)) throw new Error("A line identity was repeated. Try adding the material again.");
-      const added = materialQuoteDraftLine(material ?? null, nextId);
+      const product = material ? quoteDraftMaterialProduct(material, selectedMaterialSupplierId) : null;
+      const added = materialQuoteDraftLine(material && product ? { ...material, ...product } : null, nextId);
       if (!appendAddition({ lines: [added.line], costBasisByLineId: { [nextId]: added.costBasis } })) return;
-      setSelectedMaterialId("");
+      setSelectedMaterialId(""); setSelectedMaterialSupplierId("preferred");
       setMessage("Material line added to this draft. Check its description, quantity and buying/selling allowances before saving.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "This material could not be added. Your draft is unchanged."); }
   }
@@ -263,9 +313,9 @@ export default function AiQuoteBuilderPage() {
   }
 
   function addJobPack(id: string) {
-    if (!currentSource() || !draft || !estimateSave.canSave() || lastLineAddition.current === sourceContext || id !== latestSource.current.selectedJobPackId) return;
+    if (!currentSource() || !draft || !estimateSave.canSave() || lastLineAddition.current === sourceContext || latestSource.current.packPicker !== packPicker || id !== latestSource.current.selectedJobPackId) return;
     const pack = savedIdentityIndex(jobPacks.items).unique.get(id);
-    if (!pack) { setMessage("Choose a current uniquely identified job pack."); return; }
+    if (!pack || !packChoices.some(item => item.id === id)) { setMessage("Choose a current uniquely identified job pack from this search."); return; }
     try {
       if (!appendAddition(jobPackQuoteDraftAddition(pack, materials.items, () => makeId("ai-line")))) return;
       setSelectedJobPackId(""); setMessage("Job pack lines and public scope notes added. Check for overlapping allowances and complete missing buying costs before saving.");
@@ -488,8 +538,11 @@ export default function AiQuoteBuilderPage() {
                 <details className="mt-4 rounded-xl border border-slate-700 p-3">
                   <summary className="min-h-12 cursor-pointer py-3 font-semibold">Add a reviewed job pack</summary>
                   <fieldset disabled={!estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} className="mt-3 space-y-3">
+                    <InputField label="Search saved job packs" type="search" enterKeyHint="search" maxLength={2048} value={packSearch} placeholder="Job name, category or work description" onChange={event => searchPacks(event.target.value)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p role="status" aria-label="Job pack search results" className="text-sm text-slate-400">{packChoices.length} matching saved job {packChoices.length === 1 ? "pack" : "packs"}</p>{packSearch ? <Button className="min-h-12" variant="secondary" onClick={() => searchPacks("")}>Clear job pack search</Button> : null}</div>
+                    {!packChoices.length ? <p className="text-sm text-amber-200">No matching saved job packs. Try another work description or clear the search.</p> : null}
                     <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Saved job pack</span>
-                      <select value={selectedJobPackId} onChange={event => setSelectedJobPackId(event.target.value)} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
+                      <select value={selectedJobPackId} onChange={event => choosePack(event.target.value)} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
                         <option value="">Choose a saved job pack to review</option>
                         {packChoices.map(pack => <option key={pack.id} value={pack.id}>{pack.name}</option>)}
                       </select>
@@ -507,13 +560,29 @@ export default function AiQuoteBuilderPage() {
                   <summary className="min-h-12 cursor-pointer py-3 font-semibold">Add a material to this draft</summary>
                   <p className="my-3 text-sm text-slate-400">Use a saved material or add a blank allowance without leaving the quote. Each addition is a separate line.</p>
                   <fieldset disabled={!estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} className="space-y-3">
+                    <InputField label="Search saved materials" type="search" enterKeyHint="search" autoCapitalize="none" autoCorrect="off" maxLength={2048} value={materialSearch} placeholder="Name, wholesaler, stock code or saved product link" onChange={event => searchMaterials(event.target.value)} onKeyDown={event => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p role="status" aria-label="Material search results" className="text-sm text-slate-400">{materialChoices.length} matching saved {materialChoices.length === 1 ? "material" : "materials"}</p>{materialSearch ? <Button className="min-h-12" variant="secondary" onClick={() => searchMaterials("")}>Clear material search</Button> : null}</div>
+                    {!materialChoices.length ? <p className="text-sm text-amber-200">No matching saved materials. Try another code or name, clear the search, or add a blank allowance below. This searches your saved catalogue; it does not check supplier availability.</p> : null}
                     <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Saved material</span>
-                      <select value={selectedMaterialId} onChange={event => setSelectedMaterialId(event.target.value)} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
+                      <select value={selectedMaterialId} onChange={event => chooseMaterial(event.target.value)} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
                         <option value="">Choose a saved material</option>
                         {materialChoices.map(material => <option key={material.id} value={material.id}>{material.name}{typeof material.stockCode === "string" && material.stockCode ? ` · ${material.stockCode}` : ""}</option>)}
                       </select>
                     </label>
-                    <div className="flex flex-wrap gap-3"><Button className="min-h-12" disabled={!selectedMaterialId} onClick={() => addMaterial(selectedMaterialId)}>Add saved material</Button><Button className="min-h-12" variant="secondary" onClick={() => addMaterial()}>Add blank material allowance</Button></div>
+                    {selectedMaterialId && materialPreview.material ? <section aria-label="Selected material preview" className="space-y-3 rounded-xl bg-slate-950 p-3 text-sm">
+                      <p className="break-words font-semibold">{typeof materialPreview.material.name === "string" ? materialPreview.material.name : "Review selected material"}</p>
+                      <p>Saved allowances per {typeof materialPreview.material.unit === "string" ? materialPreview.material.unit : "unit"}: buying {validEstimateAmount(materialPreview.material.tradeCost) ? money.format(materialPreview.material.tradeCost) : "needs review"} · selling {validEstimateAmount(materialPreview.material.sellPrice) ? money.format(materialPreview.material.sellPrice) : "needs review"}</p>
+                      <label className="grid gap-2 font-medium text-slate-300"><span>Quote wholesaler reference</span>
+                        <select value={selectedMaterialSupplierId} onChange={event => chooseMaterialSupplier(event.target.value)} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
+                          <option value="preferred">Saved preferred source</option>
+                          {selectedMaterialSupplierId !== "preferred" && !materialPreview.references.some(reference => reference.id === selectedMaterialSupplierId) ? <option value={selectedMaterialSupplierId} disabled>Reference unavailable · choose again</option> : null}
+                          {materialPreview.references.map(reference => <option key={reference.id} value={reference.id}>{reference.supplier} · {reference.stockCode || "Product link"}</option>)}
+                        </select>
+                      </label>
+                      {materialPreview.product ? <><p>Selected supplier: {materialPreview.product.supplier || "Not recorded"}</p><InputField label="Selected stock code" value={materialPreview.product.stockCode} placeholder="No code saved" readOnly onFocus={event => event.currentTarget.select()} /><InputField label="Selected product link" value={materialPreview.product.supplierUrl} placeholder="No safe product link saved" readOnly onFocus={event => event.currentTarget.select()} /></> : <p role="alert" className="text-amber-200">{materialPreview.error}</p>}
+                      <p className="text-xs text-slate-400">Tap a code or link field to select and copy it. This choice changes only the new line&apos;s supplier/code; the library preference and saved price allowances stay unchanged. Confirm the actual buying price with the wholesaler.</p>
+                    </section> : selectedMaterialId ? <p role="alert" className="text-sm text-amber-200">{materialPreview.error}</p> : null}
+                    <div className="flex flex-wrap gap-3"><Button className="min-h-12" disabled={!selectedMaterialId || !materialPreview.product} onClick={() => addMaterial(selectedMaterialId)}>Add saved material</Button><Button className="min-h-12" variant="secondary" onClick={() => addMaterial()}>Add blank material allowance</Button></div>
                   </fieldset>
                 </details>
                 <section aria-label="Pricing review" className="mt-5 space-y-3 rounded-xl border border-cyan-500/20 p-3">

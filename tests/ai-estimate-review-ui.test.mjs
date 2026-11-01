@@ -8,7 +8,7 @@ import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
 const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
 const text = tree => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 const reorderProperties = value => Array.isArray(value) ? value.map(reorderProperties) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reorderProperties(item)])) : value;
-const pure = Object.fromEntries(["aiCommandCentre", "assistantIdentity", "estimateCostReview", "quoteDraftLines", "quoteDraftAdditions", "quoteEngine", "workflow", "businessSettings", "quoteTemplates", "purchaseListLink"].map(name => [name, loadLocalTs(new URL(`../lib/${name}.ts`, import.meta.url))]));
+const pure = Object.fromEntries(["aiCommandCentre", "assistantIdentity", "estimateCostReview", "quoteDraftLines", "quoteDraftAdditions", "quoteDraftCatalogue", "materialSuppliers", "quoteEngine", "workflow", "businessSettings", "quoteTemplates", "purchaseListLink"].map(name => [name, loadLocalTs(new URL(`../lib/${name}.ts`, import.meta.url))]));
 function harness(page, initialReady = true) {
   const slots = [], stores = {}, writes = [], attempts = [], effects = []; let cursor = 0, seq = 0, fixedLineId, fail = false, failAfterWrite = false, epoch = 1, session = {access_token:"test-session",user:{id:"u1"}};
   const identity = {mode:"local",isReady:true,identity:{userId:"u1",organisationId:"o1",role:"owner"}};
@@ -43,6 +43,70 @@ const savedMaterial={id:"material-1",name:"Double socket",unit:"Each",tradeCost:
 const savedRate={id:"extra-rate",name:"Additional electrician",unit:"Hour",costRate:21.123,chargeRate:76.875,active:true};
 const extraPack={id:"extra-pack",name:"Garden light addition",category:"Domestic",description:"Fit garden light",labourDescription:"Light installation",labourHours:1.5,labourRate:55.555,materials:[{id:"extra-material",materialId:"material-1",description:"Light fixing",quantity:2.333,unitPrice:9.875}],otherAllowances:[{id:"parking",category:"Parking",description:"Parking",quantity:2,unitPrice:7.125,unitCost:4.125}],testingRequirements:"Test affected circuit",certificatesRequired:"Minor Works",notes:"Making good excluded",internalNotes:"Private benchmark"};
 function additionsDraft(){const h=harness("quote-builder");h.render();h.pack.materials[0].unitCost=4.123;h.generate();h.chooseCustomer();return h;}
+const searchableMaterial={...savedMaterial,manufacturer:"BG",category:"Accessories",supplier:"CEF",supplierUrl:"https://www.cef.co.uk/product?id=one",supplierOptions:[{id:"second",supplier:"Screwfix",stockCode:"002-Z5",supplierUrl:"https://www.screwfix.com/product?id=200"}]};
+const optionIds=(h,label)=>nodes(h.field(label)).filter(n=>n.type==="option"&&n.props.value).map(n=>n.props.value);
+test("draft material search finds secondary wholesaler codes and adds the explicitly chosen reference at exact saved prices",()=>{
+ const h=additionsDraft();h.stores["jr-os-materials"].items=[searchableMaterial,{...savedMaterial,id:"other",name:"Garden light"}];const before=structuredClone(searchableMaterial);
+ h.field("Search saved materials","SCREWFIX 002-z5 socket");h.render();assert.deepEqual(optionIds(h,"Saved material"),["material-1"]);h.field("Saved material","material-1");h.render();
+ const preview=nodes(h.render()).find(n=>n.props["aria-label"]==="Selected material preview");assert.ok(preview);assert.equal(h.field("Selected stock code").props.value,"001234");assert.equal(h.field("Selected product link").props.value,"https://www.cef.co.uk/product?id=one");assert.equal(h.field("Selected stock code").props.readOnly,true);
+ h.field("Quote wholesaler reference","second");h.render();assert.equal(h.field("Selected stock code").props.value,"002-Z5");assert.equal(h.field("Selected product link").props.value,"https://www.screwfix.com/product?id=200");assert.equal(h.writes.length,0);
+ h.button("Add saved material").props.onClick();h.render();h.button("Save draft to Quotes").props.onClick();const line=h.writes[0].items[1];assert.equal(line.supplier,"Screwfix");assert.equal(line.stockCode,"002-Z5");assert.equal(line.materialId,"material-1");assert.equal(line.unitCost,4.123);assert.equal(line.unitPrice,9.875);assert.deepEqual(searchableMaterial,before);assert.doesNotMatch(JSON.stringify(h.writes[0]),/Private buying note|supplierOptions/);
+});
+test("saved product-link search stays local and empty results can be cleared without changing the quote",()=>{
+ const h=additionsDraft();h.stores["jr-os-materials"].items=[searchableMaterial,{...searchableMaterial,id:"other",name:"Other product",supplierUrl:"https://www.cef.co.uk/product?id=two",supplierOptions:[]}];
+ h.field("Search saved materials","https://www.cef.co.uk/product?id=one");h.render();assert.deepEqual(optionIds(h,"Saved material"),["material-1"]);h.field("Saved material","material-1");h.render();
+ h.field("Search saved materials","unknown-code");h.render();assert.equal(h.field("Saved material").props.value,"");assert.equal(h.button("Add saved material").props.disabled,true);assert.match(text(h.render()),/No matching saved materials/);assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.button("Save draft to Quotes").props.disabled,false);
+ h.button("Clear material search").props.onClick();h.render();assert.equal(h.field("Search saved materials").props.value,"");assert.equal(optionIds(h,"Saved material").length,2);assert.equal(h.writes.length,0);
+});
+test("material and job-pack searches exclude private fields and globally duplicated identities",()=>{
+ const h=additionsDraft();h.stores["jr-os-materials"].items=[searchableMaterial,{...searchableMaterial,name:"Other hidden duplicate",supplier:"Other",stockCode:"other",supplierUrl:"",supplierOptions:[]}];h.field("Search saved materials","Double socket");h.render();assert.equal(optionIds(h,"Saved material").length,0);
+ h.stores["jr-os-materials"].items=[searchableMaterial];h.field("Search saved materials","Private buying note");h.render();assert.equal(optionIds(h,"Saved material").length,0);
+ h.stores["jr-os-job-packs"].items=[h.pack,extraPack];h.field("Search saved job packs","Private benchmark");h.render();assert.equal(optionIds(h,"Saved job pack").length,0);assert.equal(h.writes.length,0);
+});
+test("job-pack search narrows public work descriptions, clears a previous preview and retains existing lines",()=>{
+ const h=additionsDraft();h.stores["jr-os-job-packs"].items=[h.pack,extraPack];h.field("Search saved job packs","garden fixing");h.render();assert.deepEqual(optionIds(h,"Saved job pack"),["extra-pack"]);h.field("Saved job pack","extra-pack");h.render();assert.ok(nodes(h.render()).some(n=>n.props["aria-label"]==="Selected job pack preview"));
+ h.field("Search saved job packs","not-found");h.render();assert.equal(h.field("Saved job pack").props.value,"");assert.match(text(h.render()),/No matching saved job packs/);assert.equal(h.button("Add reviewed job pack").props.disabled,true);assert.ok(!nodes(h.render()).some(n=>n.props["aria-label"]==="Selected job pack preview"));
+ h.button("Clear job pack search").props.onClick();h.render();assert.equal(optionIds(h,"Saved job pack").length,2);assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.writes.length,0);
+});
+test("search and clear preserve edited notes, held review lines, hidden priced lines and full-draft saving",()=>{
+ const h=additionsDraft();lineField(h,1,"Unit price (£)","12.345");h.field("Quote notes & exclusions","Keep reviewed scope");h.button("Add blank material").props.onClick();h.render();nodes(h.render()).find(n=>n.props["aria-label"]==="Show lines needing review").props.onChange({target:{checked:true}});h.render();
+ h.field("Search saved materials","no-result");h.render();h.field("Search saved job packs","no-result");h.render();h.button("Clear material search").props.onClick();h.render();h.button("Clear job pack search").props.onClick();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.field("Quote notes & exclusions").props.value,"Keep reviewed scope");
+ lineField(h,2,"Description","Fixings");lineField(h,2,"Unit cost (£)","0");lineField(h,2,"Unit price (£)","2.123");h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes[0].items.length,2);assert.equal(h.writes[0].items[0].unitPrice,12.345);assert.equal(h.writes[0].items[1].unitPrice,2.123);assert.equal(h.writes[0].notes,"Keep reviewed scope");
+});
+test("materials without a preferred reference remain addable without silently choosing another supplier",()=>{
+ const h=additionsDraft();h.stores["jr-os-materials"].items=[{...searchableMaterial,supplier:"",stockCode:"",supplierUrl:""}];h.field("Saved material","material-1");h.render();assert.equal(h.field("Selected stock code").props.value,"");assert.equal(h.field("Quote wholesaler reference").props.value,"preferred");
+ h.button("Add saved material").props.onClick();h.render();h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes[0].items[1].supplier,"");assert.equal(h.writes[0].items[1].stockCode,"");assert.equal(h.writes[0].items[1].unitPrice,9.875);
+});
+test("material add callbacks retire after query, record or supplier choices change away and back",()=>{
+ for(const change of [h=>{h.field("Search saved materials","other");h.render();h.field("Search saved materials","");h.render();h.field("Saved material","material-1");h.render();},h=>{h.field("Saved material","");h.render();h.field("Saved material","material-1");h.render();},h=>{h.field("Quote wholesaler reference","second");h.render();h.field("Quote wholesaler reference","preferred");h.render();}]){
+  const h=additionsDraft();h.stores["jr-os-materials"].items=[searchableMaterial];h.field("Saved material","material-1");const old=h.button("Add saved material").props.onClick;change(h);old();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);h.button("Add saved material").props.onClick();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,2);assert.equal(h.writes.length,0);
+ }
+});
+test("material query and wholesaler changes reject an old add action even before the next render",()=>{
+ for(const change of [h=>h.field("Search saved materials","new query"),h=>h.field("Quote wholesaler reference","second")]){
+  const h=additionsDraft();h.stores["jr-os-materials"].items=[searchableMaterial];h.field("Saved material","material-1");const old=h.button("Add saved material").props.onClick;change(h);old();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.writes.length,0);
+ }
+});
+test("pack add callbacks retire after search/selection changes away and back",()=>{
+ const h=additionsDraft();h.stores["jr-os-job-packs"].items=[h.pack,extraPack];h.field("Saved job pack","extra-pack");const old=h.button("Add reviewed job pack").props.onClick;h.field("Search saved job packs","other");h.render();h.field("Search saved job packs","");h.render();h.field("Saved job pack","extra-pack");h.render();old();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);h.button("Add reviewed job pack").props.onClick();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,4);assert.equal(h.writes.length,0);
+});
+test("removed or duplicated alternate supplier references cannot append a material after a refresh",()=>{
+ for(const references of [[],[searchableMaterial.supplierOptions[0],searchableMaterial.supplierOptions[0]]]){
+  const h=additionsDraft();h.stores["jr-os-materials"].items=[searchableMaterial];h.field("Saved material","material-1");h.render();h.field("Quote wholesaler reference","second");const old=h.button("Add saved material").props.onClick;h.stores["jr-os-materials"].items=[{...searchableMaterial,supplierOptions:references}];h.render();assert.equal(h.button("Add saved material").props.disabled,true);old();h.button("Add saved material").props.onClick();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.writes.length,0);
+ }
+});
+test("catalogue browsing leaves a current checked-media callback usable and new priced drafts clear search state",()=>{
+ const h=additionsDraft(),old=h.assistant().props.onBuildDraft;h.field("Search saved materials","socket");h.render();h.field("Search saved job packs","Domestic");h.render();old("Domestic socket installation","Install a domestic socket\nConfirm access");h.render();assert.equal(h.field("Search saved materials").props.value,"");assert.equal(h.field("Search saved job packs").props.value,"");assert.equal(h.field("Saved material").props.value,"");assert.equal(h.writes.length,0);
+});
+test("a removed wholesaler stays unavailable until explicitly replaced and unsafe links never become preview actions",()=>{
+ const h=additionsDraft();h.stores["jr-os-materials"].items=[searchableMaterial];h.field("Saved material","material-1");h.render();h.field("Quote wholesaler reference","second");h.render();h.stores["jr-os-materials"].items=[{...searchableMaterial,supplierOptions:[],supplierUrl:"javascript:private-code"}];h.render();
+ assert.equal(h.field("Quote wholesaler reference").props.value,"second");assert.equal(h.button("Add saved material").props.disabled,true);h.field("Quote wholesaler reference","preferred");h.render();assert.equal(h.field("Selected stock code").props.value,"001234");assert.equal(h.field("Selected product link").props.value,"");assert.equal(h.button("Add saved material").props.disabled,false);
+ h.button("Add saved material").props.onClick();h.render();h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes[0].items[1].supplier,"CEF");assert.equal(h.writes[0].items[1].stockCode,"001234");assert.doesNotMatch(JSON.stringify(h.writes[0]),/javascript|private-code/);
+});
+test("a retained material whose name becomes malformed renders review text rather than a raw object",()=>{
+ const h=additionsDraft();h.stores["jr-os-materials"].items=[searchableMaterial];h.field("Saved material","material-1");h.render();h.stores["jr-os-materials"].items=[{...searchableMaterial,name:{private:"bad-name"}}];
+ const preview=nodes(h.render()).find(n=>n.props["aria-label"]==="Selected material preview");assert.ok(preview);const heading=nodes(preview).find(n=>n.type==="p"&&n.props.className?.includes("font-semibold"));assert.equal(typeof heading.props.children,"string");assert.match(text(preview),/review|choose/i);assert.equal(h.button("Add saved material").props.disabled,true);assert.equal(h.writes.length,0);
+});
 test("saved labour adds exact rate and hourly time to an existing draft without changing the source",()=>{
  const h=additionsDraft();h.stores["jr-os-labour-rates"].items=[savedRate];const before=structuredClone(savedRate);h.field("Saved labour rate","extra-rate");h.button("Add saved labour").props.onClick();h.render();
  assert.equal(lineField(h,2,"Unit cost (£)").props.value,21.123);assert.equal(lineField(h,2,"Unit price (£)").props.value,76.875);assert.equal(h.field("Saved labour rate").props.value,"");assert.equal(h.writes.length,0);

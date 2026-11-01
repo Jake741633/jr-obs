@@ -181,6 +181,24 @@ and quote-level travel/parking/contingency. New lines stay visible in an open
 review-only list. Refreshed, changed-selection, revoked, ambiguous or saved-draft
 callbacks cannot append old choices; malformed/empty packs cannot append partly.
 
+In-draft catalogue searches now narrow saved materials by public name, maker,
+category/unit and every valid saved wholesaler code/link; packs search public
+work and material descriptions. All words must match, ignoring case. Leading
+zeroes remain in stock codes, meaningful URL query identifiers remain intact,
+and no supplier request or item import occurs. Private notes/prices are not
+search fields; duplicate saved identities stay unavailable before filtering.
+
+The selected material previews its saved buying/selling allowances and a
+quote-only wholesaler choice. It starts with the saved preferred source, even
+when another source matched the search. An explicitly selected alternative
+changes only the new line's supplier/code, retaining exact material prices and
+identity. The library preference is unchanged. Read-only code/link fields select
+their public text for copying; links are preview metadata under the existing
+pricing-line model. Removed or ambiguous references need an explicit new choice.
+Search/Clear resets picker choices while retaining all draft edits, notes,
+review-filter identities and totals. Browsing does not invalidate unrelated
+checked-media work. Search results describe saved items, not supplier availability.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
 These notes are labelled as user-entered. The separate Quote Builder can prepare
