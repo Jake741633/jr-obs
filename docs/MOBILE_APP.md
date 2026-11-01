@@ -153,6 +153,17 @@ Pending AI work is cancelled and scope reviews must be requested again; failed
 verification or changed account/session/target retires the retained evidence.
 Keep this page open: this recovery is transient and does not save the originals.
 
+Quote draft lines have editable descriptions, current buying/selling line amounts
+and a count of missing review fields. **Show lines needing review** holds its list
+while a line is completed; **Refresh review list** hides completed entries only
+when requested. Hidden lines remain in all totals and the saved quote. Add a saved
+material or blank material allowance directly in this draft, preserving source
+prices, preferred supplier/code and existing edits. Blank descriptions or unknown
+prices require review. Hourly quantity edits update their time allowance; other
+labour billing modes have a separate hours field used for overheads. Remove/save
+and review controls have phone-sized targets. This does not save catalogue edits
+or activate paid AI, and the open draft remains transient until explicitly saved.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
 These notes are labelled as user-entered. The separate Quote Builder can prepare

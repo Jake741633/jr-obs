@@ -8,7 +8,7 @@ import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
 const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
 const text = tree => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 const reorderProperties = value => Array.isArray(value) ? value.map(reorderProperties) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reorderProperties(item)])) : value;
-const pure = Object.fromEntries(["aiCommandCentre", "assistantIdentity", "estimateCostReview", "quoteEngine", "workflow", "businessSettings", "quoteTemplates", "purchaseListLink"].map(name => [name, loadLocalTs(new URL(`../lib/${name}.ts`, import.meta.url))]));
+const pure = Object.fromEntries(["aiCommandCentre", "assistantIdentity", "estimateCostReview", "quoteDraftLines", "quoteEngine", "workflow", "businessSettings", "quoteTemplates", "purchaseListLink"].map(name => [name, loadLocalTs(new URL(`../lib/${name}.ts`, import.meta.url))]));
 function harness(page, initialReady = true) {
   const slots = [], stores = {}, writes = [], attempts = [], effects = []; let cursor = 0, seq = 0, fail = false, failAfterWrite = false, epoch = 1, session = {access_token:"test-session",user:{id:"u1"}};
   const identity = {mode:"local",isReady:true,identity:{userId:"u1",organisationId:"o1",role:"owner"}};
@@ -38,6 +38,46 @@ function harness(page, initialReady = true) {
   const field = (label, value) => { const found = nodes(render()).find(n => n.props.label === label) ?? nodes(render()).find(n => n.type === "label" && text(n).startsWith(label))?.props.children?.find?.(n => n?.type === "input" || n?.type === "select"); assert.ok(found,label); if (value !== undefined) found.props.onChange({target:{value}}); return found; };
   return {render,button,field,writes,attempts,stores,pack,identity,assistant(){const found=nodes(render()).find(n=>n.type==="ConnectedQuoteAssistant");assert.ok(found);return found;},notes(value){nodes(render()).find(n=>n.type==="TextareaField").props.onChange({target:{value}});render();},fail(value=true){fail=value;},failAfterWrite(){failAfterWrite=true;},session(){epoch++;session=null;},unmount(){slots.forEach(slot=>slot?.cleanup?.());},generate(notes="Domestic socket installation"){render();const input=nodes(render()).find(n=>n.type==="TextareaField");input.props.onChange({target:{value:notes}});button(page==="materials"?"Suggest materials":"Create priced draft").props.onClick();render();},chooseCustomer(){const select=nodes(render()).find(n=>n.type==="select"&&nodes(n).some(o=>o.type==="option"&&o.props.value==="c1"));assert.ok(select);select.props.onChange({target:{value:"c1"}});render();}};
 }
+function lineField(h,index,label,value){const card=nodes(h.render()).find(n=>n.type==="article"&&n.props["aria-label"]===`Pricing line ${index}`);assert.ok(card,`line ${index}`);const field=nodes(card).find(n=>n.props.label===label);assert.ok(field,label);if(value!==undefined){field.props.onChange({target:{value}});h.render();}return field;}
+const savedMaterial={id:"material-1",name:"Double socket",unit:"Each",tradeCost:4.123,sellPrice:9.875,supplier:"Wholesaler",stockCode:"001234",notes:"Private buying note"};
+test("saved materials can be added to an open quote with exact prices and no source or record mutation",()=>{
+ const h=harness("quote-builder");h.render();h.stores["jr-os-materials"].items=[savedMaterial];h.generate();const before=structuredClone(savedMaterial);
+ h.field("Saved material","material-1");h.button("Add saved material").props.onClick();h.render();
+ assert.match(lineField(h,2,"Description").props.value,/Double socket/);assert.equal(lineField(h,2,"Unit cost (£)").props.value,4.123);assert.equal(lineField(h,2,"Unit price (£)").props.value,9.875);
+ assert.equal(h.writes.length,0);assert.deepEqual(savedMaterial,before);assert.equal(h.field("Saved material").props.value,"");
+});
+test("adding and completing a blank allowance in a review filter keeps it visible and saves the full draft",()=>{
+ const h=harness("quote-builder");h.render();h.pack.materials[0].unitCost=4.123;h.generate();h.chooseCustomer();h.button("Add blank material").props.onClick();h.render();
+ const toggle=()=>nodes(h.render()).find(n=>n.type==="input"&&n.props.type==="checkbox"&&n.props["aria-label"]==="Show lines needing review");assert.ok(toggle());toggle().props.onChange({target:{checked:true}});h.render();
+ assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.button("Save draft to Quotes").props.disabled,true);
+ lineField(h,2,"Description","Extra fixing material");lineField(h,2,"Unit cost (£)","0");lineField(h,2,"Unit price (£)","12.345");
+ assert.ok(nodes(h.render()).some(n=>n.type==="article"&&n.props["aria-label"]==="Pricing line 2"));assert.match(text(h.render()),/0 lines need review/);assert.equal(h.button("Save draft to Quotes").props.disabled,false);
+ h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes.length,1);assert.equal(h.writes[0].items.length,2);assert.equal(h.writes[0].items[0].unitCost,4.123);assert.equal(h.writes[0].items[1].unitPrice,12.345);
+});
+test("descriptions and line amounts are editable and a blank description blocks saving",()=>{
+ const h=harness("quote-builder");h.render();h.pack.materials[0].unitCost=4.123;h.generate();h.chooseCustomer();lineField(h,1,"Quantity","2");lineField(h,1,"Unit price (£)","9.875");
+ assert.match(text(h.render()),/Line selling amount.*£19.75/);lineField(h,1,"Description"," ");assert.equal(h.button("Save draft to Quotes").props.disabled,true);h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes.length,0);
+ lineField(h,1,"Description","Reviewed socket allowance");h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes[0].items[0].description,"Reviewed socket allowance");assert.equal(h.pack.materials[0].description,"Socket");
+});
+test("hourly quantity edits update saved labour hours and overhead without altering the hourly rate",()=>{
+ const h=harness("quote-builder");h.render();h.pack.materials[0].unitCost=4.123;h.stores["jr-os-labour-rates"].items=[{id:"r1",name:"Electrician",unit:"Hour",costRate:20,chargeRate:75,active:true}];h.stores["jr-os-business-overheads"].items=[{id:"overhead",active:true,frequency:"Annual",amount:1650}];h.generate();h.chooseCustomer();
+ const price=lineField(h,1,"Unit price (£)").props.value;lineField(h,1,"Quantity","");assert.equal(h.button("Save draft to Quotes").props.disabled,true);lineField(h,1,"Quantity","3.5");h.button("Save draft to Quotes").props.onClick();
+ const labour=h.writes[0].items.find(i=>i.category==="Labour");assert.equal(labour.labourHours,3.5);assert.equal(labour.quantity,3.5);assert.equal(labour.unitPrice,price);assert.equal(h.writes[0].profitability.overheadCost,3.5);
+});
+test("day billing has an independent reviewed hours allowance and missing hours block profit and saving",()=>{
+ const h=harness("quote-builder");h.render();h.pack.materials[0].unitCost=4.123;h.stores["jr-os-labour-rates"].items=[{id:"r1",name:"Electrician",unit:"Day",costRate:100,chargeRate:300,active:true}];h.stores["jr-os-business-overheads"].items=[{id:"overhead",active:true,frequency:"Annual",amount:1650}];h.generate();h.chooseCustomer();
+ lineField(h,1,"Quantity","1");assert.equal(lineField(h,1,"Time allowance (hours)").props.value,2);lineField(h,1,"Time allowance (hours)","");assert.equal(h.button("Save draft to Quotes").props.disabled,true);assert.doesNotMatch(text(h.render()),/Expected profit£/);
+ lineField(h,1,"Time allowance (hours)","4");h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes[0].items.find(i=>i.category==="Labour").quantity,1);assert.equal(h.writes[0].profitability.overheadCost,4);
+});
+test("old material-add actions reject source refreshes, changed selection and lost ownership",()=>{
+ for(const change of [h=>{h.stores["jr-os-materials"].items=[{...savedMaterial,sellPrice:200}];h.render();},h=>{h.field("Saved material","");h.render();},h=>{h.identity.identity={...h.identity.identity,organisationId:"other"};h.render();},h=>h.session(),h=>h.unmount()]){
+  const h=harness("quote-builder");h.identity.mode="cloud";h.render();h.stores["jr-os-materials"].items=[savedMaterial];h.generate();h.field("Saved material","material-1");const add=h.button("Add saved material").props.onClick;change(h);add();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.writes.length,0);
+ }
+});
+test("ambiguous material sources cannot be added and double taps do not replace or duplicate a new allowance",()=>{
+ const h=harness("quote-builder");h.render();h.stores["jr-os-materials"].items=[savedMaterial,{...savedMaterial,name:"Duplicate"}];h.generate();h.field("Saved material","material-1");h.button("Add saved material").props.onClick();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);
+ const add=h.button("Add blank material").props.onClick;add();add();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,2);assert.equal(h.writes.length,0);
+});
 test("a loaded quote page keeps its media subtree hidden and inert while collections refresh",()=>{
  const h=harness("quote-builder");h.generate();h.stores["jr-os-jobs"].isReady=false;const loading=h.render();
  const main=nodes(loading).find(n=>n.type==="main");assert.ok(main);assert.equal(main.props.hidden,true);assert.equal(main.props.inert,true);assert.ok(nodes(main).some(n=>n.type==="ConnectedQuoteAssistant"));
