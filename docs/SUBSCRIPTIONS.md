@@ -1,6 +1,6 @@
 # JR OS subscriptions — commercialisation foundation
 
-Status: initial server policy implemented and tested; **not connected to runtime access, checkout, payment collection or live billing**. Existing JR access remains unchanged. Jake approved GBP 29/month, GBP 290/year and a founding offer of GBP 19/month for 12 months for the first 20 businesses. Sandbox catalog created; no public paid checkout or trial has been launched.
+Status: server policy, Stripe adapter, unapplied persistence migration and disabled webhook receipt implemented and locally tested; **not connected to runtime access, checkout, payment collection or live billing**. Existing JR access remains unchanged. Jake approved GBP 29/month, GBP 290/year and a founding offer of GBP 19/month for 12 months for the first 20 businesses. Sandbox catalog created; no public paid checkout or trial has been launched.
 
 ## Proposed product
 
@@ -26,6 +26,6 @@ Inputs must come from trusted server records reconciled with Stripe. This helper
 
 ## Setup still required
 
-Stripe plugin connected on 1 November 2026 to the JR Electrical Services sandbox (test mode). The implementation planner was run and its applicable paths accepted; see `STRIPE_INTEGRATION_PLAN.md`. The server-only sandbox SDK adapter is implemented and locally tested; it is not exposed through HTTP routes. Server restricted API key/webhook secret, configured portal, server persistence/migrations, authenticated payment routes, durable webhook processing and real integration acceptance are still required. The approved JR OS Product, monthly/annual Prices and capped founding discount now exist in the sandbox; IDs and enforcement limits are in the integration plan. No provider account, secret, subscription or charge was created by this work. The pure policy is deliberately not a sale-ready billing system.
+Stripe plugin connected on 1 November 2026 to the JR Electrical Services sandbox (test mode). The implementation planner was run and its applicable paths accepted; see `STRIPE_INTEGRATION_PLAN.md`. The server-only sandbox SDK adapter is implemented and locally tested; the webhook receipt route is disabled by default and Checkout/portal HTTP routes remain unimplemented. Server restricted API key/webhook secret, configured portal, hosted application/verification of the prepared migration, authenticated payment routes, reconciliation worker and real integration acceptance are still required. The approved JR OS Product, monthly/annual Prices and capped founding discount now exist in the sandbox; IDs and enforcement limits are in the integration plan. No provider account, secret, subscription or charge was created by this work. The pure policy is deliberately not a sale-ready billing system.
 
 Primary implementation references: https://docs.stripe.com/billing/subscriptions/webhooks , https://docs.stripe.com/webhooks , https://docs.stripe.com/billing/subscriptions/integrating-customer-portal , https://docs.stripe.com/payments/checkout/limit-subscriptions . Verify current API/SDK contracts when wiring the provider.
