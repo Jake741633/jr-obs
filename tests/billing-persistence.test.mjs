@@ -69,6 +69,8 @@ test('failed work can retry and exhausted attempts go to review without silently
   await rpc('jr_billing_receive_event',[account,event('evt_retry')]);
   const item=await rpc('jr_billing_claim_event');
   assert.equal(await rpc('jr_billing_finish_event',[item.event_id,item.lease_token,'retry']),true);
+  assert.equal(await rpc('jr_billing_claim_event'),null);
+  await db.exec("update public.jr_billing_events set available_at=clock_timestamp()-interval '1 second' where event_id='evt_retry'");
   const retried=await rpc('jr_billing_claim_event');assert.equal(retried.attempts,2);
   await db.exec(`update public.jr_billing_events set attempts=10 where event_id='evt_retry'`);
   await rpc('jr_billing_finish_event',[retried.event_id,retried.lease_token,'retry']);

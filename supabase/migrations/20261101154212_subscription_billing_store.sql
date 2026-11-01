@@ -8,6 +8,12 @@ create table public.jr_billing_customers (
   account_id text not null default 'acct_1UWyMhRxGUITlJWL' check(account_id = 'acct_1UWyMhRxGUITlJWL'),
   customer_id text not null check(customer_id ~ '^cus_[a-zA-Z0-9]+$'),
   created_at timestamptz not null default now(),
+  reconcile_token uuid unique,
+  reconcile_expires_at timestamptz,
+  reconcile_event_id text,
+  reconcile_event_lease uuid,
+  check ((reconcile_token is null and reconcile_expires_at is null and reconcile_event_id is null and reconcile_event_lease is null)
+    or (reconcile_token is not null and reconcile_expires_at is not null and reconcile_event_id is not null and reconcile_event_lease is not null)),
   primary key(mode,account_id,organisation_id),
   unique(mode,account_id,customer_id),
   unique(mode,account_id,organisation_id,customer_id)
@@ -62,6 +68,7 @@ create table public.jr_billing_events (
   lease_token uuid,
   lease_expires_at timestamptz,
   received_at timestamptz not null default clock_timestamp(),
+  available_at timestamptz not null default clock_timestamp(),
   completed_at timestamptz,
   primary key(mode,account_id,event_id),
   check((state='processing' and lease_token is not null and lease_expires_at is not null)
@@ -110,7 +117,7 @@ begin
   update public.jr_billing_events set state='review',lease_token=null,lease_expires_at=null
     where attempts>=10 and (state='pending' or (state='processing' and lease_expires_at<=clock_timestamp()));
   select * into candidate from public.jr_billing_events
-    where attempts<10 and (state='pending' or (state='processing' and lease_expires_at<=clock_timestamp()))
+    where attempts<10 and ((state='pending' and available_at<=clock_timestamp()) or (state='processing' and lease_expires_at<=clock_timestamp()))
     order by received_at,event_id for update skip locked limit 1;
   if not found then return null; end if;
   update public.jr_billing_events set state='processing',attempts=attempts+1,
@@ -125,23 +132,111 @@ create function public.jr_billing_finish_event(p_event_id text,p_lease_token uui
 returns boolean language plpgsql security invoker set search_path='' as $$
 declare changed integer;
 begin
-  if p_outcome is null or p_outcome not in ('processed','retry','review') then
+  if p_outcome is null or p_outcome not in ('processed','retry','review','defer') then
     raise exception 'billing_invalid_outcome' using errcode='22023';
   end if;
   update public.jr_billing_events
-    set state=case when p_outcome='retry' and attempts<10 then 'pending'
+    set state=case when p_outcome='defer' or (p_outcome='retry' and attempts<10) then 'pending'
       when p_outcome='retry' then 'review' else p_outcome end,
+      attempts=case when p_outcome='defer' then greatest(attempts-1,0) else attempts end,
+      available_at=case when p_outcome='defer' then clock_timestamp()+interval '60 seconds' when p_outcome='retry' then clock_timestamp()+interval '30 seconds' else available_at end,
       lease_token=null,lease_expires_at=null,
       completed_at=case when p_outcome='processed' then clock_timestamp() else null end
     where event_id=p_event_id and mode='test' and account_id='acct_1UWyMhRxGUITlJWL'
       and state='processing' and lease_token=p_lease_token and lease_expires_at>clock_timestamp();
   get diagnostics changed=row_count;
+  if changed=1 then
+    update public.jr_billing_customers set reconcile_token=null,reconcile_expires_at=null,reconcile_event_id=null,reconcile_event_lease=null
+      where reconcile_event_id=p_event_id and reconcile_event_lease=p_lease_token;
+  end if;
   return changed=1;
 end $$;
 
 revoke execute on function public.jr_billing_receive_event(text,jsonb),public.jr_billing_claim_event(),public.jr_billing_finish_event(text,uuid,text)
   from public,anon,authenticated,service_role;
 grant execute on function public.jr_billing_receive_event(text,jsonb),public.jr_billing_claim_event(),public.jr_billing_finish_event(text,uuid,text)
+  to service_role;
+
+create function public.jr_billing_begin_reconciliation(p_event_id text,p_lease_token uuid,p_customer_id text)
+returns jsonb language plpgsql security invoker set search_path='' as $$
+declare e public.jr_billing_events%rowtype; c public.jr_billing_customers%rowtype;
+begin
+  select * into e from public.jr_billing_events where mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and event_id=p_event_id for update;
+  if not found or e.state<>'processing' or e.lease_token is distinct from p_lease_token or e.lease_expires_at<=clock_timestamp() then
+    return pg_catalog.jsonb_build_object('state','stale');
+  end if;
+  select * into c from public.jr_billing_customers where mode=e.mode and account_id=e.account_id and customer_id=p_customer_id for update;
+  if not found then return pg_catalog.jsonb_build_object('state','unbound'); end if;
+  if c.reconcile_token is not null and c.reconcile_expires_at>clock_timestamp() then
+    if c.reconcile_event_id=p_event_id and c.reconcile_event_lease=p_lease_token then
+      return pg_catalog.jsonb_build_object('state','acquired','organisation_id',c.organisation_id,'token',c.reconcile_token);
+    end if;
+    return pg_catalog.jsonb_build_object('state','busy');
+  end if;
+  -- Recheck after the customer row lock; waiting must not extend an expired job.
+  if e.lease_expires_at<=clock_timestamp() then return pg_catalog.jsonb_build_object('state','stale'); end if;
+  update public.jr_billing_customers set reconcile_token=gen_random_uuid(),
+    reconcile_expires_at=least(e.lease_expires_at,clock_timestamp()+interval '45 seconds'),
+    reconcile_event_id=p_event_id,reconcile_event_lease=p_lease_token
+    where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id returning * into c;
+  return pg_catalog.jsonb_build_object('state','acquired','organisation_id',c.organisation_id,'token',c.reconcile_token);
+end $$;
+
+create function public.jr_billing_complete_reconciliation(p_event_id text,p_lease_token uuid,p_reconcile_token uuid,p_snapshot jsonb,p_outcome text)
+returns boolean language plpgsql security invoker set search_path='' as $$
+declare e public.jr_billing_events%rowtype; c public.jr_billing_customers%rowtype; field text; changed integer;
+begin
+  select * into e from public.jr_billing_events where mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and event_id=p_event_id for update;
+  if not found or e.state<>'processing' or e.lease_token is distinct from p_lease_token then return false; end if;
+  select * into c from public.jr_billing_customers where mode=e.mode and account_id=e.account_id
+    and reconcile_token=p_reconcile_token and reconcile_event_id=p_event_id and reconcile_event_lease=p_lease_token for update;
+  if not found or e.lease_expires_at<=clock_timestamp() or c.reconcile_expires_at<=clock_timestamp() then return false; end if;
+  if p_outcome is null or p_outcome not in ('processed','retry','review') then raise exception 'billing_invalid_outcome'; end if;
+  if p_outcome='processed' then
+    if pg_catalog.jsonb_typeof(p_snapshot) is distinct from 'object' then raise exception 'billing_invalid_snapshot'; end if;
+    foreach field in array array['organisationId','customerId','subscriptionId','priceId','status'] loop
+      if pg_catalog.jsonb_typeof(p_snapshot->field) is distinct from 'string' then raise exception 'billing_invalid_snapshot'; end if;
+    end loop;
+    if p_snapshot->>'organisationId' is distinct from c.organisation_id::text or p_snapshot->>'customerId' is distinct from c.customer_id
+      or (p_snapshot->>'subscriptionId') !~ '^sub_[a-zA-Z0-9]+$'
+      or p_snapshot->>'priceId' not in ('price_1UX0fdRxGUITlJWLXoEGdcBE','price_1UX0fpRxGUITlJWLs2gwl34S')
+      or p_snapshot->>'status' not in ('active','trialing','canceled','past_due','unpaid','paused','incomplete','incomplete_expired')
+      or pg_catalog.jsonb_typeof(p_snapshot->'cancelAtPeriodEnd') is distinct from 'boolean' then raise exception 'billing_invalid_snapshot'; end if;
+    if p_snapshot->>'status'='active' then
+      if pg_catalog.jsonb_typeof(p_snapshot->'paidThroughMs') is distinct from 'number'
+        or pg_catalog.jsonb_typeof(p_snapshot->'paidInvoiceId') is distinct from 'string'
+        or (p_snapshot->>'paidInvoiceId') !~ '^in_[a-zA-Z0-9]+$'
+        or p_snapshot->'trialEndsAtMs' is distinct from 'null'::jsonb then raise exception 'billing_invalid_snapshot'; end if;
+    elsif p_snapshot->>'status'='trialing' then
+      if pg_catalog.jsonb_typeof(p_snapshot->'trialEndsAtMs') is distinct from 'number'
+        or p_snapshot->'paidThroughMs' is distinct from 'null'::jsonb or p_snapshot->'paidInvoiceId' is distinct from 'null'::jsonb then raise exception 'billing_invalid_snapshot'; end if;
+    elsif p_snapshot->'trialEndsAtMs' is distinct from 'null'::jsonb or p_snapshot->'paidThroughMs' is distinct from 'null'::jsonb or p_snapshot->'paidInvoiceId' is distinct from 'null'::jsonb then raise exception 'billing_invalid_snapshot'; end if;
+    foreach field in array array['paidThroughMs','trialEndsAtMs'] loop
+      if p_snapshot->field is distinct from 'null'::jsonb then
+        if (p_snapshot->>field)::numeric<=0 or (p_snapshot->>field)::numeric>8640000000000000
+          or floor((p_snapshot->>field)::numeric)<>(p_snapshot->>field)::numeric then raise exception 'billing_invalid_snapshot'; end if;
+      end if;
+    end loop;
+    insert into public.jr_billing_subscriptions(mode,account_id,organisation_id,customer_id,subscription_id,price_id,status,paid_through,paid_invoice_id,trial_ends_at,cancel_at_period_end,reconciled_at)
+      values(c.mode,c.account_id,c.organisation_id,c.customer_id,p_snapshot->>'subscriptionId',p_snapshot->>'priceId',p_snapshot->>'status',
+        to_timestamp((p_snapshot->>'paidThroughMs')::double precision/1000),p_snapshot->>'paidInvoiceId',
+        to_timestamp((p_snapshot->>'trialEndsAtMs')::double precision/1000),(p_snapshot->>'cancelAtPeriodEnd')::boolean,clock_timestamp())
+      on conflict(mode,account_id,subscription_id) do update set price_id=excluded.price_id,status=excluded.status,
+        paid_through=excluded.paid_through,paid_invoice_id=excluded.paid_invoice_id,trial_ends_at=excluded.trial_ends_at,
+        cancel_at_period_end=excluded.cancel_at_period_end,reconciled_at=excluded.reconciled_at
+        where jr_billing_subscriptions.organisation_id=excluded.organisation_id and jr_billing_subscriptions.customer_id=excluded.customer_id;
+    get diagnostics changed=row_count;
+    if changed<>1 then raise exception 'billing_invalid_snapshot'; end if;
+  elsif p_snapshot is not null then raise exception 'billing_invalid_snapshot'; end if;
+  if not public.jr_billing_finish_event(p_event_id,p_lease_token,p_outcome) then raise exception 'billing_expired_lease'; end if;
+  update public.jr_billing_customers set reconcile_token=null,reconcile_expires_at=null,reconcile_event_id=null,reconcile_event_lease=null
+    where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id;
+  return true;
+end $$;
+
+revoke execute on function public.jr_billing_begin_reconciliation(text,uuid,text),public.jr_billing_complete_reconciliation(text,uuid,uuid,jsonb,text)
+  from public,anon,authenticated,service_role;
+grant execute on function public.jr_billing_begin_reconciliation(text,uuid,text),public.jr_billing_complete_reconciliation(text,uuid,uuid,jsonb,text)
   to service_role;
 
 create or replace function public.jr_os_deployed_migration()
