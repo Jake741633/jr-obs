@@ -1,4 +1,5 @@
 import type { BusinessExpense, Invoice, PricingDocument } from "./models";
+import { pricingDocumentTotal } from "./workflow";
 export { paymentTargetForInvoice } from "./payments-core.mjs";
 
 export type PaymentMethod = "Bank transfer" | "Card" | "Cash" | "Cheque" | "Direct debit" | "Other";
@@ -19,5 +20,8 @@ export function effectiveInvoicePaid(invoice: Invoice, payments: PaymentRecord[]
 export function invoiceBalance(invoice: Invoice, payments: PaymentRecord[]) { return Math.max(0, invoiceGross(invoice) - effectiveInvoicePaid(invoice, payments)); }
 export function invoiceHasOutstandingBalance(invoice: Invoice, payments: PaymentRecord[]) { return ["Sent", "Part paid", "Overdue"].includes(invoice.status) && invoiceGross(invoice) > 0 && invoiceBalance(invoice, payments) > 0; }
 export function calculatedInvoiceState(invoice: Invoice, payments: PaymentRecord[], today = new Date().toISOString().slice(0, 10)) { const total = invoiceGross(invoice); const paid = effectiveInvoicePaid(invoice, payments); if (invoice.status === "Paid" || (paid >= total && total > 0)) return "Paid" as const; if (paid > 0) return "Part paid" as const; if (invoice.status === "Overdue" || (invoice.dueDate && invoice.dueDate < today)) return "Overdue" as const; return "Due" as const; }
-export function depositAmount(document: PricingDocument, requirement?: DepositRequirement) { if (!requirement) return 0; const total = document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0) * (document.vatEnabled ? 1 + document.vatRate / 100 : 1); return requirement.mode === "Percentage" ? total * requirement.value / 100 : requirement.value; }
+export function depositAmount(document: PricingDocument, requirement?: DepositRequirement, grossTotal = pricingDocumentTotal(document)) {
+  if (!requirement) return 0;
+  return requirement.mode === "Percentage" ? grossTotal * requirement.value / 100 : requirement.value;
+}
 export function forecastWindow(days: number, invoices: Invoice[], payments: PaymentRecord[], schedules: ScheduledCashFlow[], expenses: BusinessExpense[], today = new Date().toISOString().slice(0, 10)) { const end = new Date(`${today}T12:00:00`); end.setDate(end.getDate() + days); const endDate = end.toISOString().slice(0, 10); const invoiceIn = invoices.filter((invoice) => invoice.dueDate >= today && invoice.dueDate <= endDate).reduce((sum, invoice) => sum + invoiceBalance(invoice, payments), 0); const scheduledIn = schedules.filter((item) => item.direction === "In" && item.dueDate >= today && item.dueDate <= endDate).reduce((sum, item) => sum + item.amount, 0); const scheduledOut = schedules.filter((item) => item.direction === "Out" && item.dueDate >= today && item.dueDate <= endDate).reduce((sum, item) => sum + item.amount, 0); const expenseOut = expenses.filter((expense) => expense.expenseDate >= today && expense.expenseDate <= endDate).reduce((sum, expense) => sum + expense.grossAmount, 0); return { cashIn: invoiceIn + scheduledIn, cashOut: scheduledOut + expenseOut, net: invoiceIn + scheduledIn - scheduledOut - expenseOut }; }

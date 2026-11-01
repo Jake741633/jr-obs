@@ -35,3 +35,9 @@ img, video, canvas, svg { max-width: 100%; }
   body.quote-printing [data-quote-print-root], body.quote-printing [data-quote-print-root] * { visibility: visible; }
   body.quote-printing [data-quote-print-root] { position: absolute; inset: 0; width: 100%; }
 }
+
+body > [data-portal-quote-print] { display: none; }
+@media print {
+  body:has(> [data-portal-quote-print]) > :not([data-portal-quote-print]) { display: none !important; }
+  body > [data-portal-quote-print] { display: block; color: #111; background: white; }
+}

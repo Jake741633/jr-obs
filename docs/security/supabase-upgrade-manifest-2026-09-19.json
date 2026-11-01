@@ -11,8 +11,8 @@
     "matched_effective_migrations": 36,
     "initial_schema_present": true
   },
-  "target_migration": "20260919084500_allow_authenticated_storage_download_checks.sql",
-  "pending_count": 70,
+  "target_migration": "20261101085426_project_customer_quote_total.sql",
+  "pending_count": 71,
   "superseded_file_excluded": "20260810_063_guard_planner_team_assignments.sql",
   "self_contained_replacement": "20260810_064_preserve_planner_history_team_lifecycle.sql",
   "pending_migrations": [
@@ -365,6 +365,11 @@
       "order": 70,
       "file": "supabase/migrations/20260919084500_allow_authenticated_storage_download_checks.sql",
       "sha256": "61f1dc7846d56a7d9d22720060d8060bcaf31d63c0f671db1305c1f1ebf78373"
+    },
+    {
+      "order": 71,
+      "file": "supabase/migrations/20261101085426_project_customer_quote_total.sql",
+      "sha256": "39c79220628181116367d89ecb95abefda57b22178835b5363b4ad2709920caf"
     }
   ]
 }

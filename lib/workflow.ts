@@ -9,6 +9,7 @@ import type {
   PaymentTermsTemplate,
   PricingDocument,
   PricingDocumentType,
+  PricingLineItem,
   PurchaseItemStatus,
   PurchaseList,
   PurchaseListItem,
@@ -47,9 +48,39 @@ interface CreatePurchaseListInput {
   createId: (prefix: string) => string;
 }
 
-export function pricingDocumentNetTotal(document: PricingDocument) {
-  return document.profitability?.sellingPrice
-    ?? document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+type QuoteBillingSource = Pick<PricingDocument, "items" | "pricingSettings" | "profitability">;
+const billingAmountFormat = new Intl.NumberFormat("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: false });
+
+export function pricingDocumentNetTotal(document: QuoteBillingSource) {
+  const recorded = document.profitability?.sellingPrice;
+  if (typeof recorded === "number" && Number.isFinite(recorded)) return recorded;
+  const subtotal = (Array.isArray(document.items) ? document.items : []).reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const pricing = document.pricingSettings;
+  return subtotal + subtotal * ((pricing?.contingencyPercent ?? 0) / 100)
+    + (pricing?.travelPrice ?? 0) + (pricing?.parkingPrice ?? 0);
+}
+
+export function invoiceItemsFromQuote(document: QuoteBillingSource & Pick<PricingDocument, "vatEnabled" | "vatRate">, createId: (prefix: string) => string): PricingLineItem[] {
+  const sourceItems = Array.isArray(document.items) ? document.items : [];
+  const agreedNet = pricingDocumentNetTotal(document);
+  const agreedGross = agreedNet + (document.vatEnabled ? agreedNet * document.vatRate / 100 : 0);
+  if (!Number.isFinite(agreedNet) || agreedNet < 0 || !Number.isFinite(agreedGross) || agreedGross < 0
+    || (!sourceItems.length && !Number.isFinite(document.profitability?.sellingPrice))) {
+    throw new Error("Review the accepted quote price before creating an invoice.");
+  }
+  const items = sourceItems.map((item) => ({ ...item, id: createId("invoice-line") }));
+  const subtotal = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const pricing = document.pricingSettings;
+  if (pricing?.travelPrice) items.push({ id: createId("invoice-line"), description: "Travel allowance", category: "Travel", quantity: 1, unitPrice: pricing.travelPrice, unitCost: pricing.travelCost });
+  if (pricing?.parkingPrice) items.push({ id: createId("invoice-line"), description: "Parking allowance", category: "Parking", quantity: 1, unitPrice: pricing.parkingPrice, unitCost: pricing.parkingCost });
+  if (pricing?.contingencyPercent) items.push({ id: createId("invoice-line"), description: `Contingency (${pricing.contingencyPercent}%)`, category: "Contingency", quantity: 1, unitPrice: subtotal * (pricing.contingencyPercent / 100) });
+  const itemNet = items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const itemGross = itemNet + (document.vatEnabled ? itemNet * document.vatRate / 100 : 0);
+  if (billingAmountFormat.format(itemNet) !== billingAmountFormat.format(agreedNet)
+    || billingAmountFormat.format(itemGross) !== billingAmountFormat.format(agreedGross) || !items.length) {
+    return [{ id: createId("invoice-line"), description: "Accepted scope — fixed price", category: "Other", quantity: 1, unitPrice: agreedNet }];
+  }
+  return items;
 }
 
 export function pricingDocumentTotal(document: PricingDocument) {
@@ -208,11 +239,7 @@ export function createInvoiceFromCompletedJob({
   defaultPaymentTerms,
 }: CreateInvoiceFromJobInput) {
   const snapshot = job.quoteSnapshot;
-  const sourceItems = snapshot?.items?.length
-    ? snapshot.items
-    : quote?.items?.length
-      ? quote.items
-      : [{ id: createId("invoice-source-line"), description: job.title, category: "Labour" as const, quantity: 1, unitPrice: job.originalContractValue ?? job.value }];
+  const source = snapshot ?? quote;
   const vatEnabled = snapshot?.vatEnabled ?? quote?.vatEnabled ?? false;
   const vatRate = snapshot?.vatRate ?? quote?.vatRate ?? 0;
   const paymentTerms = snapshot?.paymentTerms ?? quote?.paymentTerms ?? (defaultPaymentTerms ? paymentTermsFromTemplate(defaultPaymentTerms) : undefined);
@@ -221,18 +248,28 @@ export function createInvoiceFromCompletedJob({
   const dueDate = addDays(new Date(`${issueDate}T12:00:00`), dueDays);
   const quoteId = job.sourceQuoteId ?? snapshot?.quoteId ?? quote?.id;
   const quoteNumber = snapshot?.quoteNumber ?? quote?.number;
-  const pricingSettings = snapshot?.pricingSettings ?? quote?.pricingSettings;
   const liveInvoiceIds = new Set(invoices.filter((invoice) => invoice.status !== "Cancelled").map((invoice) => invoice.id));
   const acceptedVariations = variations.filter((variation) => variation.jobId === job.id
     && isAcceptedVariationStatus(variation.status)
     && (!variation.invoiceId || !liveInvoiceIds.has(variation.invoiceId)));
-  const baseSellingPrice = sourceItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-  const invoiceItems = sourceItems.map((item) => ({ ...item, id: createId("invoice-line") }));
-  if (pricingSettings?.travelPrice) invoiceItems.push({ id: createId("invoice-line"), description: "Travel allowance", category: "Travel", quantity: 1, unitPrice: pricingSettings.travelPrice, unitCost: pricingSettings.travelCost });
-  if (pricingSettings?.parkingPrice) invoiceItems.push({ id: createId("invoice-line"), description: "Parking allowance", category: "Parking", quantity: 1, unitPrice: pricingSettings.parkingPrice, unitCost: pricingSettings.parkingCost });
-  if (pricingSettings?.contingencyPercent) invoiceItems.push({ id: createId("invoice-line"), description: `Contingency (${pricingSettings.contingencyPercent}%)`, category: "Contingency", quantity: 1, unitPrice: baseSellingPrice * pricingSettings.contingencyPercent / 100 });
+  const hasRecordedTotal = typeof source?.profitability?.sellingPrice === "number" && Number.isFinite(source.profitability.sellingPrice);
+  // Job contract values already include VAT. A fallback is the complete scope,
+  // so neither quote allowances nor VAT should be applied to that value again.
+  const aggregateValue = job.originalContractValue ?? job.value;
+  const aggregateNet = aggregateValue / (vatEnabled ? 1 + vatRate / 100 : 1);
+  const aggregateGross = aggregateNet + (vatEnabled ? aggregateNet * vatRate / 100 : 0);
+  const sourceItems = Array.isArray(source?.items) ? source.items : [];
+  const hasSourcePrice = source && (sourceItems.length || hasRecordedTotal);
+  if (!hasSourcePrice && (!Number.isFinite(aggregateValue) || aggregateValue < 0
+    || !Number.isFinite(aggregateNet) || aggregateNet < 0 || !Number.isFinite(aggregateGross))) {
+    throw new Error("Review the agreed job value before creating an invoice.");
+  }
+  const invoiceItems: PricingLineItem[] = hasSourcePrice
+    ? invoiceItemsFromQuote({ ...source, vatEnabled, vatRate }, createId)
+    : [{ id: createId("invoice-line"), description: job.title, category: "Other", quantity: 1, unitPrice: aggregateNet }];
+  const sourceVariationIds = new Set(sourceItems.map((item) => item.variationId).filter(Boolean));
   acceptedVariations
-    .filter((variation) => !invoiceItems.some((item) => item.variationId === variation.id))
+    .filter((variation) => !sourceVariationIds.has(variation.id))
     .forEach((variation) => invoiceItems.push(variationInvoiceLine(variation, createId("invoice-line"))));
 
   const invoice: Invoice = {

@@ -6,7 +6,8 @@ import ts from "typescript";
 import * as signals from "../lib/assistantSignals-core.mjs";
 import * as jobsCore from "../lib/jobManagement-core.mjs";
 import * as taskCore from "../lib/jobTasks-core.mjs";
-import * as payments from "../lib/payments.ts";
+import { loadLocalTs } from "./helpers/load-local-ts.mjs";
+const payments = loadLocalTs(new URL("../lib/payments.ts", import.meta.url));
 import * as permissions from "../lib/cloud/permissions.ts";
 import * as invoiceLink from "../lib/invoiceLink.ts";
 

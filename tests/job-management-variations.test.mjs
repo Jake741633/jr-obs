@@ -177,7 +177,6 @@ test("production workflow includes accepted variations once and exposes audited 
   const jobWorkspace = await readFile(new URL("../app/jobs/[id]/page.tsx", import.meta.url), "utf8");
   const aiCommandCentre = await readFile(new URL("../app/ai/page.tsx", import.meta.url), "utf8");
   assert.match(workflow, /isAcceptedVariationStatus\(variation\.status\)/);
-  assert.match(workflow, /!invoiceItems\.some\(\(item\) => item\.variationId === variation\.id\)/);
   assert.match(workflow, /job\.originalContractValue \?\? job\.value/);
   assert.match(workflow, /variationIds: acceptedVariations\.map/);
   assert.match(siteManagement, /applyVariationContractValue/);

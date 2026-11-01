@@ -148,6 +148,8 @@ async function checkAccess(connection,actors) {
   assert.deepEqual(other,[{organisation_id:actors.other.org}],"Second tenant scope");
   const { checkSavedCalculationAccess } = await import("./calculation-access.mjs");
   await checkSavedCalculationAccess(connection, actors);
+  const { checkCustomerQuoteTotals } = await import("./customer-quote-totals.mjs");
+  await checkCustomerQuoteTotals(connection, actors);
 }
 
 
