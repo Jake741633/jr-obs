@@ -26,6 +26,6 @@ Inputs must come from trusted server records reconciled with Stripe. This helper
 
 ## Setup still required
 
-A connected Stripe account, test keys/webhook secret, configured products/prices/portal, server persistence/migrations, payment routes/webhooks and real integration acceptance. No payment-provider account, secret, product, subscription or charge was created in this change. The pure policy is deliberately not a sale-ready billing system.
+Stripe plugin connected on 1 November 2026 to the JR Electrical Services sandbox (test mode). The implementation planner was run and its applicable paths accepted; see `STRIPE_INTEGRATION_PLAN.md`. Server restricted API key/webhook secret, configured products/prices/portal, server persistence/migrations, payment routes/webhooks and real integration acceptance are still required. No payment-provider account, secret, product, subscription or charge was created by this foundation or planning work. The pure policy is deliberately not a sale-ready billing system.
 
 Primary implementation references: https://docs.stripe.com/billing/subscriptions/webhooks , https://docs.stripe.com/webhooks , https://docs.stripe.com/billing/subscriptions/integrating-customer-portal , https://docs.stripe.com/payments/checkout/limit-subscriptions . Verify current API/SDK contracts when wiring the provider.

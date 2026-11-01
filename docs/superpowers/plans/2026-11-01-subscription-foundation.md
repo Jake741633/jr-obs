@@ -8,6 +8,8 @@ Design: docs/SUBSCRIPTIONS.md. Proposed one subscription per business, monthly/a
 - [x] Verify Stripe primary documentation and distinguish hosted Checkout/Portal, trusted webhooks and duplicate subscription controls.
 - [x] Observe six policy tests RED; implement exact tenant/product/environment, paid/trial time boundaries and owner-only management.
 - [x] Full tests/lint/build and independent policy review:2,859 tests, zero-warning ESLint and production build passed; review found no actionable issue. Trusted-input and deferred-integration boundaries remain explicit; this is not live billing.
-- [ ] Commit code/design and prepare a reviewable draft PR. Full provider implementation follows the integration sequence; it requires provider configuration and business pricing decisions.
+- [x] Commit code/design and prepare reviewable draft PR #327. Full provider implementation follows the integration sequence; it requires provider configuration and business pricing decisions.
 
 Constraints: no credentials, charges, provider account changes, migrations, runtime paywall, dependency changes or customer-data changes. Do not treat this pure predicate as authentication or accept client records. Review focus: exact expiry, invalid clocks, unsupported statuses, tenant/mode/product confusion, and unverified browser-success claims.
+
+- [x] Connect Stripe plugin, confirm JR Electrical Services sandbox, and run/accept implementation planner. Tailored integration and foundation review: `docs/STRIPE_INTEGRATION_PLAN.md`.
