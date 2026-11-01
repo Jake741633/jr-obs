@@ -12,6 +12,14 @@ Photos can accompany a reviewed recording, with at most six images together coun
 
 Adding/removing photos preserves a finished prepared recording and checked transcript, including when correcting the combined image limit. Photo preparation and connection/review requests temporarily block recording actions without discarding finished evidence; in-progress recording work is cancelled. Account, target, notes, source evidence or session changes still invalidate use. A valid arriving photo selection cancels the old pending photo preparation/review and requires preparing the complete new selection before sending.
 
+## Returning from the phone camera or picker
+
+Native camera/gallery controls can bring JR OS back into focus while its account checks refresh. For the same verified office account, exact session and quote target, selected local files and completed photo/recording preparation are retained on this open page. Local picker results can arrive during those checks without being silently lost. The quote page stays hidden and inactive until verification and job-data loading finish. Completed local evidence can then be used in a new explicit review; updating typed notes also retains those local copies.
+
+Pending preparation, transcription and AI scope requests are cancelled when readiness or notes change. Old scope answers and Apply actions do not return after a refresh. Failed verification, changed permissions, account/session replacement or a different quote target clears the binding; switching back does not restore its old files. Saved cloud job evidence keeps its stricter record checks. This adds no durable storage: keep the quote page open, and save the finished quote or job evidence separately. Actual iPhone/Android picker timing and funded live AI remain acceptance checks.
+
+Collection cache persistence also waits for current identity readiness. A retained page cannot copy its previous account rows into bare legacy keys while the account snapshot is being checked; existing legacy data and account-scoped caches remain separate.
+
 ## Reuse saved job evidence
 
 Choose an **Existing job** and open **Use saved job evidence** in the AI panel.

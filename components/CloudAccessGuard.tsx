@@ -6,10 +6,25 @@ import { Fragment, type ReactNode } from "react";
 import { LockKeyhole } from "lucide-react";
 import { canAccessPath, canUseLocalWorkspaceWithoutIdentity, isOperatorOnlyPath, roleDeniedRouteHandoff, roleLandingPath } from "../lib/cloud/permissions";
 import { useCloudIdentity } from "../lib/cloud/useCloudIdentity";
+import { useQuoteMediaIdentity } from "../lib/useQuoteMediaIdentity";
 
 export function CloudAccessGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { identity, isReady, mode } = useCloudIdentity();
+  const mediaOwner = useQuoteMediaIdentity({ identity, isReady, mode }, pathname, pathname === "/ai/quote-builder");
+
+  // Only the quote page has a local native-picker handoff to preserve. While
+  // the same session is rechecked, keep it mounted but invisible and inert.
+  // An unknown/failed/replaced account has no binding and follows the normal
+  // unmounting access boundary below. This does not permit a request or write.
+  if (pathname === "/ai/quote-builder" && mediaOwner && (!isReady || (identity && canAccessPath(identity.role, pathname, identity.email)))) {
+    return <Fragment key="quote-media-continuity">
+      {!isReady ? <div className="grid min-h-[50vh] place-items-center text-sm text-slate-400">Checking secure account access…</div> : null}
+      <div hidden={!isReady} inert={!isReady} aria-hidden={!isReady}>
+        <Fragment key={mediaOwner.accountKey}>{children}</Fragment>
+      </div>
+    </Fragment>;
+  }
 
   // Account and app-launch routes contain no business records and must remain
   // reachable before an organisation profile resolves. The launcher only

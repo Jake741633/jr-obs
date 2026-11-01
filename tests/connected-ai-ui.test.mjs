@@ -48,6 +48,7 @@ function harness() {
     "../../lib/jobPhotoEvidence": { ...evidenceHelpers, readSavedJobPhoto: (...args) => { savedReads.push(args); return readSaved(...args); } },
     "../jobs/JobDocumentBrowser": { JobDocumentBrowser: "JobDocumentBrowser", JobPhotoPreview: "JobPhotoPreview" },
   };
+  dependencies["../../lib/useQuoteMediaIdentity"] = loadLocalTs(new URL("../lib/useQuoteMediaIdentity.ts",import.meta.url), {react:dependencies.react,"./supabase/client":dependencies["../../lib/supabase/client"],"./supabase/sessionOwnership-core.mjs":ownership});
   const mod = { exports: {} };
   vm.runInNewContext(source, { module: mod, exports: mod.exports, Error, JSON, AbortController, window: { location: { origin: "https://preview.example.com" } }, require: key => { assert.ok(key in dependencies, key); return dependencies[key]; }, fetch: async (url, init) => { calls.push({ url, init }); return fetcher(); } });
   function render() { cursor = 0; const tree = mod.exports.ConnectedQuoteAssistant(props); effects.splice(0).forEach(fn => fn()); return tree; }
@@ -60,6 +61,8 @@ function harness() {
   }
   function photos(files) { nodes(render()).find(node => node.type === "input" && node.props.type === "file" && !node.props.capture).props.onChange({ target: { files, value: "" } }); render(); }
   return { props, identity, calls, applies, builds, preparedFiles, savedReads, render, button, evidenceAction, photos,
+    picker(){return nodes(render()).find(node=>node.type==="input"&&node.props.type==="file"&&!node.props.capture).props.onChange;},
+    loading(){identity.identity=null;identity.isReady=false;render();},office(){identity.identity={organisationId:"org-1",userId:"user-1",role:"owner"};identity.isReady=true;render();},failed(){identity.identity=null;identity.isReady=true;render();},
     saved(withPhoto = true) { evidenceAction(withPhoto)(); render(); }, readSaved(fn) { readSaved = fn; },
     fetch(fn) { fetcher = fn; }, prepare(fn) { prepare = fn; },
     photo() { photos([{ name: "kitchen.jpg", type: "image/jpeg", size: 100 }]); },
@@ -73,6 +76,40 @@ function harness() {
     unmount() { slots.forEach(slot => slot?.cleanup?.()); },
   };
 }
+
+test("a gallery result arriving during focus identity checks is retained locally until the same office account returns",async()=>{
+ const h=harness(),choose=h.picker();h.loading();choose({target:{files:[photoFile("camera-return.jpg")],value:""}});h.render();
+ assert.equal(h.calls.length,0);assert.equal(h.button("Review with AI").props.disabled,true);assert.doesNotMatch(text(h.render()),/camera-return.jpg/);
+ h.office();assert.match(text(h.render()),/camera-return.jpg/);await h.run();assert.equal(JSON.parse(h.calls[0].init.body).photos.length,1);
+});
+test("finished photos recover after same-owner checks and notes edits without re-preparing or sending automatically",async()=>{
+ const h=harness();h.photo();await h.preparePhotos();assert.equal(h.preparedFiles.length,1);
+ const oldReview=h.button("Review with AI").props.onClick;h.loading();assert.equal(nodes(h.render()).filter(n=>n.type==="Image").length,0);await oldReview();assert.equal(h.calls.length,0);
+ h.office();h.props.notes="Updated socket positions";h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="Image").length,1);assert.equal(h.button("Prepare photos").props.disabled,true);
+ await h.run();assert.equal(h.preparedFiles.length,1);assert.equal(JSON.parse(h.calls[0].init.body).notes,"Updated socket positions");
+});
+test("failed verification, changed targets and account changes cannot restore earlier media or delayed picker callbacks",()=>{
+ for(const change of [h=>{h.loading();h.failed();h.office();},h=>{h.props.contextKey="job-2";h.render();h.props.contextKey="job-1";h.render();},h=>{h.account({organisationId:"other"});h.office();},h=>{h.changeSession();h.office();}]){
+  const h=harness();h.photo();const choose=h.picker();change(h);choose({target:{files:[photoFile("late.jpg")],value:""}});h.render();assert.doesNotMatch(text(h.render()),/kitchen.jpg|late.jpg/);assert.equal(h.calls.length,0);
+ }
+});
+test("a delayed gallery result appends to the current held collection rather than replacing a newer photo",()=>{
+ const h=harness(),choose=h.picker();h.photo();h.loading();choose({target:{files:[photoFile("late.jpg")],value:""}});h.office();
+ assert.match(text(h.render()),/kitchen.jpg/);assert.match(text(h.render()),/late.jpg/);assert.match(text(h.render()),/2 photos selected/);
+});
+test("focus refresh retains only local recording identity while disabling all AI actions",()=>{
+ const h=harness(),before=h.clipPanel();assert.equal(typeof before.props.canSelectLocal,"function");h.loading();const during=h.clipPanel();
+ assert.equal(during.props.mediaContext,before.props.mediaContext);assert.equal(during.props.enabled,false);assert.equal(before.props.canSelectLocal(),true);assert.equal(during.props.userId,"user-1");
+ h.failed();assert.equal(before.props.canSelectLocal(),false);h.office();assert.notEqual(h.clipPanel().props.mediaContext,before.props.mediaContext);
+});
+test("a replaced raw session disables media and AI actions before the identity notification catches up",()=>{
+ const h=harness();h.photo();h.changeSession();h.render();assert.equal(h.button("Review with AI").props.disabled,true);assert.doesNotMatch(text(h.render()),/kitchen.jpg/);assert.equal(h.calls.length,0);
+});
+test("a pending AI result and its apply action cannot revive after a complete same-owner focus refresh",async()=>{
+ const h=harness();let finish;h.fetch(()=>new Promise(resolve=>{finish=resolve;}));const pending=h.run();h.loading();h.office();finish(new Response(JSON.stringify({draft})));await pending;
+ assert.doesNotMatch(text(h.render()),/Confirm cable route/);assert.equal(h.applies.length,0);assert.equal(h.builds.length,0);
+ const applied=harness();await applied.run();applied.review();const apply=applied.button("Build labour & materials draft").props.onClick;applied.loading();applied.office();apply();assert.equal(applied.builds.length,0);
+});
 
 test("connected scope requires an explicit send, review and apply without writing a quote", async () => {
   const h = harness(); h.render(); assert.equal(h.calls.length, 0); h.photo(); assert.equal(h.calls.length, 0);

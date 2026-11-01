@@ -9,12 +9,12 @@ const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof
 const text = tree => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 const reorderProperties = value => Array.isArray(value) ? value.map(reorderProperties) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reorderProperties(item)])) : value;
 const pure = Object.fromEntries(["aiCommandCentre", "assistantIdentity", "estimateCostReview", "quoteEngine", "workflow", "businessSettings", "quoteTemplates", "purchaseListLink"].map(name => [name, loadLocalTs(new URL(`../lib/${name}.ts`, import.meta.url))]));
-function harness(page) {
+function harness(page, initialReady = true) {
   const slots = [], stores = {}, writes = [], attempts = [], effects = []; let cursor = 0, seq = 0, fail = false, failAfterWrite = false, epoch = 1, session = {access_token:"test-session",user:{id:"u1"}};
   const identity = {mode:"local",isReady:true,identity:{userId:"u1",organisationId:"o1",role:"owner"}};
   const pack = { id:"p1", name:"Domestic socket", category:"Domestic", description:"Fit socket", notes:"", labourHours:2, labourRate:50, createdAt:"2026-01-01", updatedAt:"2026-01-01", materials:[{id:"l1", description:"Socket", quantity:2.333, unitPrice:9.875}] };
   function collection(key, defaults = []) {
-    return stores[key] ??= { items:key === "jr-os-job-packs" ? [pack] : key === "jr-os-customers" ? [{id:"c1",name:"Customer",address:"Site"}] : defaults, isReady:true,
+    return stores[key] ??= { items:key === "jr-os-job-packs" ? [pack] : key === "jr-os-customers" ? [{id:"c1",name:"Customer",address:"Site"}] : defaults, isReady:initialReady,
       createItem(item) { attempts.push(item); if (fail) throw new Error("Storage full"); if(this.items.some(old=>old.id===item.id))throw new Error("Duplicate identity");writes.push(item); this.items = [item, ...this.items]; if(failAfterWrite)throw new Error("Save acknowledgement lost");return item; },
       setItems() { throw new Error("Must use durable record creation"); } };
   }
@@ -38,6 +38,12 @@ function harness(page) {
   const field = (label, value) => { const found = nodes(render()).find(n => n.props.label === label) ?? nodes(render()).find(n => n.type === "label" && text(n).startsWith(label))?.props.children?.find?.(n => n?.type === "input" || n?.type === "select"); assert.ok(found,label); if (value !== undefined) found.props.onChange({target:{value}}); return found; };
   return {render,button,field,writes,attempts,stores,pack,identity,assistant(){const found=nodes(render()).find(n=>n.type==="ConnectedQuoteAssistant");assert.ok(found);return found;},notes(value){nodes(render()).find(n=>n.type==="TextareaField").props.onChange({target:{value}});render();},fail(value=true){fail=value;},failAfterWrite(){failAfterWrite=true;},session(){epoch++;session=null;},unmount(){slots.forEach(slot=>slot?.cleanup?.());},generate(notes="Domestic socket installation"){render();const input=nodes(render()).find(n=>n.type==="TextareaField");input.props.onChange({target:{value:notes}});button(page==="materials"?"Suggest materials":"Create priced draft").props.onClick();render();},chooseCustomer(){const select=nodes(render()).find(n=>n.type==="select"&&nodes(n).some(o=>o.type==="option"&&o.props.value==="c1"));assert.ok(select);select.props.onChange({target:{value:"c1"}});render();}};
 }
+test("a loaded quote page keeps its media subtree hidden and inert while collections refresh",()=>{
+ const h=harness("quote-builder");h.generate();h.stores["jr-os-jobs"].isReady=false;const loading=h.render();
+ const main=nodes(loading).find(n=>n.type==="main");assert.ok(main);assert.equal(main.props.hidden,true);assert.equal(main.props.inert,true);assert.ok(nodes(main).some(n=>n.type==="ConnectedQuoteAssistant"));
+ assert.match(text(loading),/Preparing AI Quote Builder/);h.stores["jr-os-jobs"].isReady=true;const ready=h.render();assert.equal(nodes(ready).find(n=>n.type==="main").props.hidden,false);assert.equal(h.field("Job notes").props.value,"Domestic socket installation");assert.equal(h.writes.length,0);
+ const initial=harness("quote-builder",false);assert.ok(!nodes(initial.render()).some(n=>n.type==="ConnectedQuoteAssistant"));
+});
 
 const reviewedLighting = "Kitchen lighting\nReviewed photos and requested work\nProposed scope\n- Install six LED downlights\nQuestions to confirm\n- Confirm cable route\nExclusions\n- Replace sockets excluded";
 test("reviewed media scope builds current saved labour and materials immediately without saving", () => {

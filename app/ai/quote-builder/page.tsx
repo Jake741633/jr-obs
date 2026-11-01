@@ -111,6 +111,8 @@ export default function AiQuoteBuilderPage() {
     documents, customers, builders, jobs, invoices, materials, jobPacks, labourRates, overheads,
     labourSettingsStore, quoteSettingsStore, termsStore, paymentTermsStore, vatStore,
   ].every((store) => store.isReady);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  if (ready && !hasLoaded) setHasLoaded(true);
   const saveContext = useMemo(() => ({ draft, customerId, builderId, jobId, siteAddress, validUntil, termsTemplateId, paymentTermsTemplateId,
     customers: customers.items, builders: builders.items, jobs: jobs.items, documents: documents.items,
     terms: termsStore.items, paymentTerms: paymentTermsStore.items, overheads: overheads.items, labourSettings, vatSettings }),
@@ -270,10 +272,12 @@ export default function AiQuoteBuilderPage() {
     } catch (error) { setMessage(error instanceof Error ? error.message : "The quote could not be saved. Your draft is still here."); }
   }
 
-  if (!ready) return <Card>Preparing AI Quote Builder…</Card>;
+  if (!ready && !hasLoaded) return <Card>Preparing AI Quote Builder…</Card>;
 
   return (
-    <main className="space-y-6">
+    <>
+    {!ready ? <Card>Preparing AI Quote Builder…</Card> : null}
+    <main hidden={!ready} inert={!ready} className="space-y-6">
       <PageHeader
         eyebrow="AI Command Centre"
         title="AI Quote Builder"
@@ -457,5 +461,6 @@ export default function AiQuoteBuilderPage() {
         </div>
       </section>
     </main>
+    </>
   );
 }

@@ -145,6 +145,14 @@ saved packs/rates. Separate labour/material lines remain editable, and missing
 sources offer setup links. This does not save/send a quote or retain original
 media. Hosted activation, funding and physical-phone acceptance remain pending.
 
+Returning from a native camera/gallery picker can refresh account and job-data
+checks. The quote page now retains selected local files and completed preparation
+for the same verified office session/target, hidden and inactive until checks
+finish. A delayed local picker result is accepted only by that original owner.
+Pending AI work is cancelled and scope reviews must be requested again; failed
+verification or changed account/session/target retires the retained evidence.
+Keep this page open: this recovery is transient and does not save the originals.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
 These notes are labelled as user-entered. The separate Quote Builder can prepare
