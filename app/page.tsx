@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { ArrowRight, BriefcaseBusiness, CircleAlert, FileText, Percent, PoundSterling, TrendingUp, Users } from "lucide-react";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { ArrowRight, BriefcaseBusiness, ChartNoAxesCombined, ChevronDown, CircleAlert, FileText, Percent, PoundSterling, TrendingUp, Users } from "lucide-react";
+import { PhoneHome } from "../components/mobile/PhoneHome";
 import { TodaysAssistant } from "../components/ai/TodaysAssistant";
 import { ComplianceDashboard } from "../components/ComplianceDashboard";
 import { FinanceDirectorInsights } from "../components/FinanceDirectorInsights";
@@ -35,7 +36,35 @@ import type { AiReminderPriority, LabourCostSettings } from "../lib/models";
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const defaultLabourSettings: LabourCostSettings = { id: "labour-cost-settings", workingDaysPerYear: 220, billableHoursPerDay: 7.5, targetNetMargin: 25, contingencyPercent: 10, createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString() };
 
+function subscribeToDesktop(onChange: () => void) {
+  const media = window.matchMedia("(min-width: 1024px)");
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
+
+const desktopSnapshot = () => window.matchMedia("(min-width: 1024px)").matches;
+const serverDesktopSnapshot = () => false;
+
 export default function Home() {
+  const desktop = useSyncExternalStore(subscribeToDesktop, desktopSnapshot, serverDesktopSnapshot);
+  const [overviewOpen, setOverviewOpen] = useState(false);
+
+  if (desktop) return <CommandCentre />;
+
+  return <div className="space-y-4">
+    <PhoneHome />
+    <details open={overviewOpen} onToggle={(event) => setOverviewOpen(event.currentTarget.open)} className="group rounded-2xl border border-slate-800 bg-slate-900/50">
+      <summary className="flex min-h-16 cursor-pointer list-none items-center gap-3 rounded-2xl px-4 py-3 text-sm font-semibold text-slate-200 focus-visible:outline-2 focus-visible:outline-cyan-400 [&::-webkit-details-marker]:hidden">
+        <ChartNoAxesCombined aria-hidden="true" className="size-6 shrink-0 text-slate-400" />
+        <span className="flex-1">Business overview<span className="mt-0.5 block text-xs font-normal text-slate-500">Figures, priorities & recent work</span></span>
+        <ChevronDown aria-hidden="true" className="size-5 shrink-0 text-slate-500 transition group-open:rotate-180 motion-reduce:transition-none" />
+      </summary>
+      {overviewOpen ? <div className="border-t border-slate-800 py-5"><CommandCentre /></div> : null}
+    </details>
+  </div>;
+}
+
+function CommandCentre() {
   const jobs = useJobsCollection();
   const customers = useCustomersCollection();
   const quotes = usePricingDocumentsCollection();

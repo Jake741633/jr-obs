@@ -1,5 +1,21 @@
 # JR OS on a phone
 
+## App-style home and tools
+
+Below 1024px, Home opens a compact launcher with six large icon tiles for Jobs,
+Quotes, Customers, Planner, Materials and Invoices, plus direct JR AI and All tools
+links. It does not wait for the Command Centre's business collections to load.
+Business overview opens the full existing dashboard on demand; closing it unmounts
+that view. Desktop keeps its full Command Centre.
+
+The bottom tabs retain their existing destinations and role restrictions, with
+larger 28px icons and a clearer selected state. The header's Quick actions sheet
+and More's Daily tools have large icon cards. More keeps permission-filtered
+search and groups the complete tool list into native collapsible sections.
+Home-screen installation, sync indicators and fixed action docks keep their
+existing behaviour. Physical installed-app acceptance remains separate from
+browser layout and automated regression checks.
+
 JR OS can be installed from its normal HTTPS address as a home-screen app. It
 opens in a standalone window and uses the existing role-aware mobile workspaces.
 

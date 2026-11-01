@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, Search, Settings } from "lucide-react";
+import { ArrowRight, ChevronDown, Search, Settings } from "lucide-react";
 import { Card } from "../../components/ui/Card";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { InstallAppGuide } from "../../components/mobile/InstallAppGuide";
+import { WorkspaceIcon } from "../../components/mobile/WorkspaceIcon";
 import { secondaryNavigation } from "../../components/navigation";
 import { canAccessPath, isOperatorOnlyPath } from "../../lib/cloud/permissions";
 import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
@@ -43,10 +44,11 @@ function WorkspaceLink({ item, prominent = false }: { item: NavigationItem; prom
   return (
     <Link
       href={href}
-      className={`flex min-h-14 items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm font-semibold transition active:scale-[.99] ${prominent ? "border-cyan-500/30 bg-cyan-500/5 text-cyan-100" : "border-slate-800 bg-slate-950/60 text-slate-200 hover:border-slate-700 hover:bg-slate-900"}`}
+      className={`flex min-h-14 gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold transition active:scale-[.99] focus-visible:outline-2 focus-visible:outline-cyan-400 motion-reduce:transform-none motion-reduce:transition-none ${prominent ? "min-h-28 flex-col items-start justify-center border-cyan-500/20 bg-slate-900 text-cyan-100" : "items-center justify-between border-slate-800 bg-slate-950/60 text-slate-200 hover:border-slate-700 hover:bg-slate-900"}`}
     >
-      <span className="min-w-0 truncate">{label}</span>
-      <ArrowRight className="size-4 shrink-0 text-cyan-300" />
+      {prominent ? <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-cyan-400/10 text-cyan-300"><WorkspaceIcon href={href} className="size-7" /></span> : null}
+      <span className="min-w-0 flex-1">{label}</span>
+      {prominent ? null : <ArrowRight aria-hidden="true" className="size-4 shrink-0 text-cyan-300" />}
     </Link>
   );
 }
@@ -122,19 +124,23 @@ export default function MenuPage() {
                 <h2 id="daily-tools-heading" className="mt-1 text-xl font-bold">Daily tools</h2>
                 <p className="mt-1 text-sm text-slate-500">The quickest routes for the active account and role.</p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">{dailyNavigation.map((item) => <WorkspaceLink key={item[1]} item={item} prominent />)}</div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-3">{dailyNavigation.map((item) => <WorkspaceLink key={item[1]} item={item} prominent />)}</div>
             </section>
           ) : null}
 
-          <div className="space-y-6">
+          <div className="space-y-3">
             {groupedNavigation.map((section) => (
-              <section key={section.id} aria-labelledby={`workspace-section-${section.id}`} className="space-y-3">
-                <div>
-                  <h2 id={`workspace-section-${section.id}`} className="text-lg font-bold">{section.title}</h2>
-                  <p className="mt-1 text-sm text-slate-500">{section.description}</p>
+              <details key={section.id} className="group rounded-2xl border border-slate-800 bg-slate-900/50">
+                <summary className="flex min-h-16 cursor-pointer list-none items-center gap-3 rounded-2xl px-4 py-3 focus-visible:outline-2 focus-visible:outline-cyan-400 [&::-webkit-details-marker]:hidden">
+                  <span id={`workspace-section-${section.id}`} className="min-w-0 flex-1 text-base font-semibold">{section.title}</span>
+                  <span aria-label={`${section.items.length} tools`} className="rounded-lg bg-slate-800 px-2 py-1 text-xs font-semibold text-slate-400">{section.items.length}</span>
+                  <ChevronDown aria-hidden="true" className="size-5 shrink-0 text-slate-400 transition group-open:rotate-180 motion-reduce:transition-none" />
+                </summary>
+                <div className="border-t border-slate-800 p-3">
+                  <p className="mb-3 px-1 text-sm text-slate-400">{section.description}</p>
+                  <div className="grid gap-3 sm:grid-cols-2">{section.items.map((item) => <WorkspaceLink key={item[1]} item={item} />)}</div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2">{section.items.map((item) => <WorkspaceLink key={item[1]} item={item} />)}</div>
-              </section>
+              </details>
             ))}
           </div>
         </>

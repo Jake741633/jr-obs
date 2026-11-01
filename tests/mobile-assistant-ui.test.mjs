@@ -126,6 +126,7 @@ function quickActions(snapshot, pathname = "/") {
     react: { useRef: () => ({ current: dialog }), useEffect: (fn) => effects.push(fn) },
     "next/navigation": { usePathname: () => pathname },
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => snapshot },
+    "./WorkspaceIcon": compile("../components/mobile/WorkspaceIcon.tsx", {}),
   });
   const wrapper = components.MobileQuickActions();
   return { view: wrapper ? wrapper.type(wrapper.props) : null, key: wrapper?.key, calls, effects };

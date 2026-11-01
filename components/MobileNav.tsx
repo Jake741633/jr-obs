@@ -59,9 +59,9 @@ export function MobileNav() {
             key={href}
             href={href}
             aria-current={active ? "page" : undefined}
-            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-xs font-semibold transition active:scale-[.98] focus-visible:outline-2 focus-visible:outline-cyan-400 ${active ? "bg-cyan-400/10 text-cyan-300" : "text-slate-400 hover:bg-slate-900 hover:text-slate-300"}`}
+            className={`flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-2xl px-1 py-1.5 text-xs font-semibold transition active:scale-[.98] focus-visible:outline-2 focus-visible:outline-cyan-400 motion-reduce:transform-none motion-reduce:transition-none ${active ? "bg-cyan-400/15 text-cyan-200" : "text-slate-400 hover:bg-slate-900 hover:text-slate-300"}`}
           >
-            <Icon aria-hidden="true" className="size-5 shrink-0" />
+            <Icon aria-hidden="true" className="size-7 shrink-0" strokeWidth={active ? 2.5 : 1.8} />
             <span className="max-w-full truncate">{label}</span>
           </Link>
         );
