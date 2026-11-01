@@ -374,7 +374,7 @@
     {
       "order": 72,
       "file": "supabase/migrations/20261101154212_subscription_billing_store.sql",
-      "sha256": "816ceba90e659f7d50cdc88303782860c1f211532a990a9c67020918128a7106"
+      "sha256": "59e166c7ade288763bfacefca95cfdebf91a0a660d08e987ac808d8de4d89e1d"
     }
   ]
 }

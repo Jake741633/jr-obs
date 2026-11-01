@@ -44,3 +44,8 @@ test('completed attempts remain resumable and a provider-confirmed ended subscri
  assert.equal((await db.query('select state from public.jr_billing_operations')).rows[0].state,'ready');
  status='canceled';const next=await run(gateway);assert.notEqual(next.sessionId,first.sessionId);assert.equal(gateway.creates.filter(c=>c[0]==='customer').length,1);
 });
+test('service reservation refuses a held customer before creating or resuming an operation',async()=>{
+ await db.query("insert into public.jr_billing_customers(organisation_id,customer_id,review_required,review_reason,review_source_id,review_event_id,review_marked_at) values($1,'cus_A',true,'refund','ch_A','evt_A',clock_timestamp())",[org]);
+ assert.deepEqual(await store().reserve(owner,'monthly'),{state:'review'});assert.equal((await db.query('select * from public.jr_billing_operations')).rows.length,0);
+ const gateway=provider();await assert.rejects(run(gateway),/billing_checkout_review/);assert.equal(gateway.creates.length,0);
+});

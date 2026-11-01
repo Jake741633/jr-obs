@@ -7,7 +7,7 @@ const db=new PGlite(),org='11111111-1111-4111-8111-111111111111',uid='22222222-2
 const env=()=>({JR_OS_BILLING_CHECKOUT_ENABLED:'true',JR_OS_BILLING_SCHEDULE_ENABLED:'true',JR_OS_BILLING_WEBHOOK_ENABLED:'true',JR_OS_BILLING_RECONCILIATION_ENABLED:'true',JR_OS_BILLING_SANDBOX_VERIFIED:'true',NEXT_PUBLIC_SUPABASE_URL:'https://fixture.supabase.co',NEXT_PUBLIC_SUPABASE_ANON_KEY:'fixture-public',SUPABASE_SERVICE_ROLE_KEY:'fixture-service',STRIPE_MODE:'test',STRIPE_ACCOUNT_ID:'acct_1UWyMhRxGUITlJWL',STRIPE_RESTRICTED_KEY:'rk_test_fixture',STRIPE_WEBHOOK_SECRET:'whsec_fixture',STRIPE_PRICE_MONTHLY:'price_1UX0fdRxGUITlJWLXoEGdcBE',STRIPE_PRICE_ANNUAL:'price_1UX0fpRxGUITlJWLs2gwl34S',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_fixture',APP_ORIGIN:'https://jr-os.example'});
 const request=(patch={})=>new Request('https://jr-os.example/api/billing/checkout',{method:'POST',headers:{Origin:'https://jr-os.example',Authorization:'Bearer fixture-user','x-jr-organisation':org,'Content-Type':'application/json',...patch.headers},body:patch.body??'{"plan":"monthly"}',signal:patch.signal});
 const order={jr_billing_reserve_checkout:['p_organisation_id','p_actor_id','p_plan'],jr_billing_bind_checkout_customer:['p_operation_id','p_lease_token','p_actor_id','p_customer_id'],jr_billing_record_checkout_session:['p_operation_id','p_lease_token','p_actor_id','p_session_id','p_expires_at'],jr_billing_release_checkout:['p_operation_id','p_lease_token','p_actor_id','p_outcome']};
-function setup({environment=env(),revokeAt,providerError,abortAfter}={}){
+function setup({environment=env(),revokeAt,providerError,abortAfter,afterRpc,mapOwnerStatus}={}){
  const calls=[],writes=[],sessions=new Map();
  const gateway={async createBillingCustomer(op){writes.push('customer');return {customerId:'cus_A',op};},async createCheckout(op){writes.push('checkout');if(providerError)throw Error(providerError);const value={sessionId:'cs_test_A',url:'https://checkout.stripe.com/c/pay/A',status:'open',expiresAt:op.expiresAt,subscriptionId:null};sessions.set(value.sessionId,value);return value;},async readCheckoutSession(op){return sessions.get(op.sessionId);},async readSubscriptionStatus(){return {status:'active'};}};
  const fetchImpl=async(url,options)=>{
@@ -16,7 +16,7 @@ function setup({environment=env(),revokeAt,providerError,abortAfter}={}){
   assert.equal(options.headers.apikey,isOwner?'fixture-public':'fixture-service');assert.equal(options.headers.Authorization,isOwner?'Bearer fixture-user':'Bearer fixture-service');
   try{
    const result=await db.transaction(async tx=>{await tx.exec('set local role '+(isOwner?'authenticated':'service_role'));const fields=isOwner?[]:order[name];assert.ok(fields,'Only known RPCs');return (await tx.query(`select public.${name}(${fields.map((_,i)=>'$'+(i+1)).join(',')}) as value`,fields.map(k=>parameters[k]))).rows[0].value;});
-   if(name===revokeAt)await db.exec('update public.profiles set active=false');if(name===abortAfter?.name)abortAfter.controller.abort();return Response.json(result);
+   if(name===revokeAt)await db.exec('update public.profiles set active=false');if(name===abortAfter?.name)abortAfter.controller.abort();await afterRpc?.(name);return Response.json(isOwner&&mapOwnerStatus?mapOwnerStatus(result):result);
   }catch(error){return Response.json({message:'private SQL details'},{status:error.code==='42501'?403:500});}
  };
  return {calls,writes,handler:createBillingCheckoutHandler({env:environment,fetchImpl,createGateway:()=>gateway})};
@@ -42,7 +42,7 @@ test('normal owner gets a persisted sandbox Session and repeated requests reuse 
  const repeated=await h.handler(request());assert.equal(repeated.status,200);assert.deepEqual(h.writes,['customer','checkout']);assert.equal((await db.query('select state from public.jr_billing_operations')).rows[0].state,'ready');
 });
 test('wrong origin, missing bearer and body-supplied resources are rejected before network',async()=>{
- for(const patch of [{headers:{Origin:'https://evil.example'}},{headers:{Authorization:''}},{body:'{"plan":"monthly","customerId":"cus_wrong"}'},{body:'{"plan":"price_other"}'},{body:'{"plan":"annual","verified":true}'}]){const h=setup(),res=await h.handler(request(patch));assert.ok([400,401,403].includes(res.status));assert.equal(h.calls.length,0);assert.equal(h.writes.length,0);}
+ for(const patch of [{headers:{Origin:'https://evil.example'}},{headers:{Authorization:''}},{body:'{"plan":"monthly","customerId":"cus_wrong"}'},{body:'{"plan":"price_other"}'},{body:'{"plan":"annual","verified":true}'},{body:'{"plan":"monthly","reviewRequired":false}'}]){const h=setup(),res=await h.handler(request(patch));assert.ok([400,401,403].includes(res.status));assert.equal(h.calls.length,0);assert.equal(h.writes.length,0);}
 });
 test('cross-business, staff, revoked and recovery sessions cannot start Checkout',async()=>{
  const cross=setup();assert.equal((await cross.handler(request({headers:{'x-jr-organisation':'33333333-3333-4333-8333-333333333333'}}))).status,403);assert.equal(cross.writes.length,0);
@@ -66,5 +66,27 @@ test('disconnects after reservation or session persistence return no URL and ret
   const controller=new AbortController(),h=setup({abortAfter:{name,controller}});
   const interrupted=await h.handler(request({signal:controller.signal}));assert.equal(interrupted.status,403);assert.deepEqual(await interrupted.json(),{code:'billing_checkout_denied'});
   const resumed=await h.handler(request());assert.equal(resumed.status,200);assert.equal((await resumed.json()).sessionId,'cs_test_A');assert.deepEqual(h.writes,['customer','checkout']);assert.equal((await db.query('select * from public.jr_billing_operations')).rows.length,1);
+ }
+});
+const markReview=()=>db.exec("update public.jr_billing_customers set review_required=true,review_reason='refund',review_source_id='ch_A',review_event_id='evt_A',review_marked_at=clock_timestamp()");
+test('reviewed business cannot reserve or receive Checkout',async()=>{
+ await db.query("insert into public.jr_billing_customers(organisation_id,customer_id) values($1,'cus_A')",[org]);await markReview();
+ const h=setup(),response=await h.handler(request());assert.equal(response.status,409);assert.deepEqual(await response.json(),{code:'billing_checkout_review'});assert.equal(h.writes.length,0);assert.equal((await db.query('select * from public.jr_billing_operations')).rows.length,0);
+});
+test('a review hold after reservation, customer binding or recording blocks the next provider action or URL',async()=>{
+ for(const point of ['jr_billing_reserve_checkout','jr_billing_bind_checkout_customer','jr_billing_record_checkout_session']){
+  await db.exec('delete from public.jr_billing_operations;delete from public.jr_billing_customers');
+  if(point==='jr_billing_reserve_checkout')await db.query("insert into public.jr_billing_customers(organisation_id,customer_id) values($1,'cus_A')",[org]);
+  const h=setup({afterRpc:async name=>{if(name===point)await markReview();}}),response=await h.handler(request());
+  assert.equal(response.status,409,point);assert.deepEqual(await response.json(),{code:'billing_checkout_review'});
+  assert.deepEqual(h.writes,point==='jr_billing_reserve_checkout'?[]:point==='jr_billing_bind_checkout_customer'?['customer']:['customer','checkout']);
+  assert.equal((await db.query('select review_required from public.jr_billing_customers')).rows[0].review_required,true);
+ }
+});
+test('missing review provenance at initial or late verification returns no Checkout link',async()=>{
+ for(const late of [false,true]){
+  await db.exec('delete from public.jr_billing_operations;delete from public.jr_billing_customers');let reads=0;
+  const h=setup({mapOwnerStatus:value=>{reads++;if(!late||reads>=3){const withoutReview={...value};delete withoutReview.reviewRequired;return withoutReview;}return value;}}),response=await h.handler(request());
+  assert.equal(response.status,503);assert.deepEqual(await response.json(),{code:'billing_checkout_unavailable'});assert.equal(h.writes.length,0);
  }
 });

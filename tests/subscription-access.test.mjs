@@ -3,7 +3,7 @@ import test from 'node:test';
 const path='../lib/billing/subscriptionAccess.mjs';
 let api={};try{api=await import(path);}catch(error){if(error.code!=='ERR_MODULE_NOT_FOUND')throw error;}
 const nowMs=1793534400000;
-const record={organisationId:'business-a',mode:'test',subscriptionId:'sub_example',priceId:'price_example',status:'active',paidThroughMs:nowMs+3600000,trialEndsAtMs:null};
+const record={organisationId:'business-a',mode:'test',subscriptionId:'sub_example',priceId:'price_example',status:'active',paidThroughMs:nowMs+3600000,trialEndsAtMs:null,reviewRequired:false};
 const input=patch=>({organisationId:'business-a',mode:'test',allowedPriceIds:['price_example'],subscription:record,nowMs,...patch});
 test('only matching server billing records with paid coverage enable the configured product',()=>{
  assert.equal(typeof api.subscriptionAccess,'function');assert.equal(api.subscriptionAccess(input()).paidFeatures,true);
@@ -28,4 +28,10 @@ test('browser success flags and unrecognised environments cannot establish payme
 test('billing management requires an active owner of the same exact business',()=>{
  assert.equal(typeof api.canManageSubscription,'function');const actor={role:'owner',membershipActive:true,organisationId:'business-a',actorOrganisationId:'business-a'};assert.equal(api.canManageSubscription(actor),true);
  for(const patch of [{role:'admin'},{role:'office'},{role:'customer'},{membershipActive:false},{membershipActive:'true'},{actorOrganisationId:'other'},{organisationId:''}])assert.equal(api.canManageSubscription({...actor,...patch}),false);
+});
+test('paid and trial coverage require an explicitly clear trusted billing review state',()=>{
+ for(const status of ['active','trialing'])for(const reviewRequired of [true,undefined,null,'false',0]){
+  const subscription={...record,status,trialEndsAtMs:nowMs+1000,reviewRequired};
+  assert.deepEqual(api.subscriptionAccess(input({subscription})),{paidFeatures:false,reason:'payment_or_subscription_review'});
+ }
 });

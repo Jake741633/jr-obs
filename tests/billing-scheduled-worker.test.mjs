@@ -19,7 +19,7 @@ function setup({env=environment(),deployment=production,beforeRpc,afterRpc,readE
   const overridden=await beforeRpc?.(name,args);if(overridden)return overridden;
   try{const value=await rpc(name,fields[name].map(key=>args[key]));await afterRpc?.(name,value);return Response.json(value);}catch{return new Response('private SQL diagnostic',{status:500});}
  };
- const createGateway=options=>{gatewayOptions.push(options);return {async resolveSubscriptionTarget(event){providerCalls.push('resolve');return resolveTarget?resolveTarget(event,options):{customerId:'cus_A',subscriptionId:'sub_A'};},async readSubscriptionEvidence(target){providerCalls.push('read');return readEvidence?readEvidence(target,options):evidence();}};};
+ const createGateway=options=>{gatewayOptions.push(options);return {async resolveBillingRisk(){throw Error('billing_evidence_review');},async resolveSubscriptionTarget(event){providerCalls.push('resolve');return resolveTarget?resolveTarget(event,options):{customerId:'cus_A',subscriptionId:'sub_A'};},async readSubscriptionEvidence(target){providerCalls.push('read');return readEvidence?readEvidence(target,options):evidence();}};};
  return {requests,providerCalls,gatewayOptions,fetchImpl,createGateway,run:()=>runBillingScheduledBatch({env,deployment,fetchImpl,createGateway,now})};
 }
 before(async()=>{

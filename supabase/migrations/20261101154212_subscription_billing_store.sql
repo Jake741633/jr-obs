@@ -8,10 +8,19 @@ create table public.jr_billing_customers (
   account_id text not null default 'acct_1UWyMhRxGUITlJWL' check(account_id = 'acct_1UWyMhRxGUITlJWL'),
   customer_id text not null check(customer_id ~ '^cus_[a-zA-Z0-9]+$'),
   created_at timestamptz not null default now(),
+  review_required boolean not null default false,
+  review_reason text,
+  review_source_id text,
+  review_event_id text,
+  review_marked_at timestamptz,
   reconcile_token uuid unique,
   reconcile_expires_at timestamptz,
   reconcile_event_id text,
   reconcile_event_lease uuid,
+  check ((not review_required and review_reason is null and review_source_id is null and review_event_id is null and review_marked_at is null)
+    or (review_required and review_reason is not null and review_reason in ('refund','dispute','fraud','credit_note')
+      and review_source_id is not null and review_source_id ~ '^[a-z]+_[a-zA-Z0-9]+$'
+      and review_event_id is not null and review_event_id ~ '^evt_[a-zA-Z0-9_]+$' and review_marked_at is not null)),
   check ((reconcile_token is null and reconcile_expires_at is null and reconcile_event_id is null and reconcile_event_lease is null)
     or (reconcile_token is not null and reconcile_expires_at is not null and reconcile_event_id is not null and reconcile_event_lease is not null)),
   primary key(mode,account_id,organisation_id),
@@ -248,6 +257,30 @@ revoke execute on function public.jr_billing_begin_reconciliation(text,uuid,text
 grant execute on function public.jr_billing_begin_reconciliation(text,uuid,text),public.jr_billing_complete_reconciliation(text,uuid,uuid,jsonb,text)
   to service_role;
 
+-- A risk marker never writes paid coverage and cannot clear prior review. Its
+-- first evidence remains on the Customer; every event also stays in the inbox.
+create function public.jr_billing_mark_review(p_event_id text,p_lease_token uuid,p_reconcile_token uuid,p_reason text,p_source_id text)
+returns boolean language plpgsql security invoker set search_path='' as $$
+declare e public.jr_billing_events%rowtype; c public.jr_billing_customers%rowtype; expected_reason text;
+begin
+  select * into e from public.jr_billing_events where mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and event_id=p_event_id for update;
+  if not found or e.state<>'processing' or e.lease_token is distinct from p_lease_token or e.lease_expires_at<=clock_timestamp() then return false; end if;
+  select * into c from public.jr_billing_customers where mode=e.mode and account_id=e.account_id
+    and reconcile_token=p_reconcile_token and reconcile_event_id=p_event_id and reconcile_event_lease=p_lease_token for update;
+  if not found or c.reconcile_expires_at<=clock_timestamp() then return false; end if;
+  expected_reason:=case e.payload->>'type' when 'charge.refunded' then 'refund' when 'charge.dispute.created' then 'dispute' when 'radar.early_fraud_warning.created' then 'fraud' when 'credit_note.created' then 'credit_note' else null end;
+  if expected_reason is null or p_reason is distinct from expected_reason or p_source_id is null or p_source_id !~ '^[a-z]+_[a-zA-Z0-9]+$'
+    or p_source_id is distinct from e.payload#>>'{data,object,id}' then raise exception 'billing_invalid_review'; end if;
+  if not c.review_required then
+    update public.jr_billing_customers set review_required=true,review_reason=p_reason,review_source_id=p_source_id,review_event_id=p_event_id,review_marked_at=clock_timestamp()
+      where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id;
+  end if;
+  if not public.jr_billing_finish_event(p_event_id,p_lease_token,'review') then raise exception 'billing_expired_lease'; end if;
+  return true;
+end $$;
+revoke execute on function public.jr_billing_mark_review(text,uuid,uuid,text,text) from public,anon,authenticated,service_role;
+grant execute on function public.jr_billing_mark_review(text,uuid,uuid,text,text) to service_role;
+
 -- Private definer is necessary to read service-owned billing tables. Every
 -- invocation checks the existing live membership/session helpers first.
 create schema if not exists private;
@@ -276,6 +309,7 @@ begin
     order by case when status in ('canceled','incomplete_expired') then 1 else 0 end,reconciled_at desc,subscription_id limit 1;
   return pg_catalog.jsonb_build_object('actorUserId',actor,'organisationId',business,'role','owner','mode','test',
     'hasBillingCustomer',exists(select 1 from public.jr_billing_customers where organisation_id=business and mode='test' and account_id='acct_1UWyMhRxGUITlJWL'),
+    'reviewRequired',exists(select 1 from public.jr_billing_customers where organisation_id=business and mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and review_required),
     'subscription',case when current_subscription.subscription_id is null then null else pg_catalog.jsonb_build_object(
       'plan',case current_subscription.price_id when 'price_1UX0fdRxGUITlJWLXoEGdcBE' then 'monthly' when 'price_1UX0fpRxGUITlJWLs2gwl34S' then 'annual' else null end,
       'status',current_subscription.status,'paidThroughMs',floor(extract(epoch from current_subscription.paid_through)*1000),
@@ -298,6 +332,7 @@ begin
   if not exists(select 1 from public.profiles where id=p_actor_id and organisation_id=p_organisation_id and active and role='owner') then raise exception 'billing_checkout_denied' using errcode='42501'; end if;
   if p_plan is null or p_plan not in ('monthly','annual') then raise exception 'billing_checkout_invalid'; end if;
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('jr_billing_checkout:'||p_organisation_id::text,0));
+  if exists(select 1 from public.jr_billing_customers where organisation_id=p_organisation_id and mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and review_required) then return pg_catalog.jsonb_build_object('state','review'); end if;
   if exists(select 1 from public.jr_billing_subscriptions where organisation_id=p_organisation_id and mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and status not in ('canceled','incomplete_expired')) then return pg_catalog.jsonb_build_object('state','subscribed'); end if;
   select * into op from public.jr_billing_operations where organisation_id=p_organisation_id and mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and kind='checkout' and state in ('pending','ready','review') for update;
   if found then

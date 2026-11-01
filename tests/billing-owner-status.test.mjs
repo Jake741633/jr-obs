@@ -38,3 +38,8 @@ test('a signed recovery-session claim cannot read billing through the RPC direct
  await db.exec('reset role');await db.query("select set_config('test.claims',$1,false)",[JSON.stringify({session_id:session,is_anonymous:false,amr:[{method:'recovery',timestamp:1790000000}]})]);await db.exec('set role authenticated');
  await assert.rejects(rpc(),/billing_access_denied/);
 });
+test('owner projection returns only the own-business review Boolean even alongside active coverage',async()=>{
+ const mark=async organisation=>{await db.exec('reset role');await db.query("update public.jr_billing_customers set review_required=true,review_reason='refund',review_source_id='ch_Private',review_event_id='evt_Private',review_marked_at=clock_timestamp() where organisation_id=$1",[organisation]);await db.exec('set role authenticated');};
+ assert.equal((await rpc()).reviewRequired,false);await mark(other);assert.equal((await rpc()).reviewRequired,false);await mark(org);
+ const data=await rpc();assert.equal(data.reviewRequired,true);assert.equal(data.subscription.status,'active');assert.doesNotMatch(JSON.stringify(data),/ch_Private|evt_Private|review_reason|review_source_id|review_marked_at/);
+});

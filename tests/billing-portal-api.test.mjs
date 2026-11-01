@@ -89,3 +89,8 @@ test('provider errors, malformed results and expired completion return safe erro
   await db.exec('delete from public.jr_billing_operations');const h=setup(opts),res=await h.handler(request());assert.equal(res.status,503);assert.deepEqual(await res.json(),{code:'billing_portal_unavailable'});
  }
 });
+test('a payment review hold preserves current owner billing management for only the bound business',async()=>{
+ await db.query("update public.jr_billing_customers set review_required=true,review_reason='dispute',review_source_id='dp_A',review_event_id='evt_A',review_marked_at=clock_timestamp() where organisation_id=$1",[org]);
+ const h=setup(),response=await h.handler(request());assert.equal(response.status,200);assert.equal((await response.json()).url,'https://billing.stripe.com/p/session/A');assert.equal(h.operations[0].customerId,'cus_Own');
+ assert.equal((await db.query('select review_required from public.jr_billing_customers where organisation_id=$1',[org])).rows[0].review_required,true);
+});

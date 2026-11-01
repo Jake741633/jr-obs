@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {loadOwnerBillingStatus} from '../lib/billingStatusClient.mjs';
 const owner={userId:'22222222-2222-4222-8222-222222222222',organisationId:'11111111-1111-4111-8111-111111111111',role:'owner',accessToken:'fixture-token'};
 test('client reads server status without sending provider IDs or trusting browser payment flags',async()=>{
- const calls=[];const value=await loadOwnerBillingStatus({owner,isCurrent:()=>true,fetchImpl:async(url,init)=>{calls.push({url,init});return Response.json({mode:'test',checkoutAvailable:false,portalAvailable:false,subscription:null});}});
+ const calls=[];const value=await loadOwnerBillingStatus({owner,isCurrent:()=>true,fetchImpl:async(url,init)=>{calls.push({url,init});return Response.json({mode:'test',reviewRequired:false,checkoutAvailable:false,portalAvailable:false,subscription:null});}});
  assert.equal(value.state,'ready');assert.equal(value.data.subscription,null);assert.equal(calls[0].url,'/api/billing/status');assert.equal(calls[0].init.body,'{}');assert.equal(calls[0].init.headers['x-jr-organisation'],owner.organisationId);assert.equal(calls[0].init.cache,'no-store');
 });
 test('stale identity, non-owner and aborted reads make no billing request',async()=>{
@@ -12,11 +12,17 @@ test('stale identity, non-owner and aborted reads make no billing request',async
  assert.equal(calls,0);
 });
 test('late responses from another account or retired operation are discarded',async()=>{
- let current=true,finish;const promise=loadOwnerBillingStatus({owner,isCurrent:()=>current,fetchImpl:()=>new Promise(resolve=>{finish=resolve;})});current=false;finish(Response.json({mode:'test',checkoutAvailable:false,portalAvailable:false,subscription:null}));assert.equal(await promise,null);
+ let current=true,finish;const promise=loadOwnerBillingStatus({owner,isCurrent:()=>current,fetchImpl:()=>new Promise(resolve=>{finish=resolve;})});current=false;finish(Response.json({mode:'test',reviewRequired:false,checkoutAvailable:false,portalAvailable:false,subscription:null}));assert.equal(await promise,null);
 });
 test('errors and malformed payloads return fixed safe UI states',async()=>{
- for(const response of [new Response('secret',{status:503}),Response.json({mode:'live',subscription:null}),Response.json({mode:'test',checkoutAvailable:'yes',portalAvailable:false,subscription:null})]){
+ for(const response of [new Response('secret',{status:503}),Response.json({mode:'live',subscription:null}),Response.json({mode:'test',reviewRequired:false,checkoutAvailable:'yes',portalAvailable:false,subscription:null})]){
   const result=await loadOwnerBillingStatus({owner,isCurrent:()=>true,fetchImpl:async()=>response});assert.equal(result.state,'unavailable');assert.equal('error'in result,false);
  }
  const forbidden=await loadOwnerBillingStatus({owner,isCurrent:()=>true,fetchImpl:async()=>new Response('',{status:403})});assert.equal(forbidden.state,'denied');
+});
+test('client requires explicit review provenance and retains only its public Boolean',async()=>{
+ const status={mode:'test',checkoutAvailable:false,portalAvailable:true,subscription:null};
+ for(const reviewRequired of [undefined,null,'false',0])assert.deepEqual(await loadOwnerBillingStatus({owner,isCurrent:()=>true,fetchImpl:async()=>Response.json({...status,reviewRequired})}),{state:'unavailable'});
+ const held=await loadOwnerBillingStatus({owner,isCurrent:()=>true,fetchImpl:async()=>Response.json({...status,reviewRequired:true,review_source_id:'ch_Private',review_reason:'fraud'})});
+ assert.deepEqual(held,{state:'ready',data:{...status,reviewRequired:true}});
 });
