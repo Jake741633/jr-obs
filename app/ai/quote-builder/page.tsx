@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  Camera,
   CheckCircle2,
   FilePenLine,
   Mic2,
@@ -89,7 +90,7 @@ export default function AiQuoteBuilderPage() {
   const termsStore = useLocalStorageCollection<BusinessTermsTemplate>("jr-os-business-terms-templates", defaultBusinessTermsTemplates);
   const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
   const vatStore = useLocalStorageCollection<VatSettings>(businessStorageKeys.vat, [defaultVatSettings]);
-  const [sourceMode, setSourceMode] = useState<"Typed notes" | "Voice transcript">("Typed notes");
+  const [sourceMode, setSourceMode] = useState<"Typed notes" | "Photos & video" | "Voice transcript">("Typed notes");
   const [notes, setNotes] = useState(startingNotes);
   const [jobType, setJobType] = useState<"" | QuoteTemplateType>("");
   const [customerId, setCustomerId] = useState("");
@@ -115,6 +116,14 @@ export default function AiQuoteBuilderPage() {
     terms: termsStore.items, paymentTerms: paymentTermsStore.items, overheads: overheads.items, labourSettings, vatSettings }),
   [draft, customerId, builderId, jobId, siteAddress, validUntil, termsTemplateId, paymentTermsTemplateId, customers.items, builders.items, jobs.items, documents.items, termsStore.items, paymentTermsStore.items, overheads.items, labourSettings, vatSettings]);
   const estimateSave = useEstimateSave<PricingDocument>(ready, saveContext);
+  const sourceContext = useMemo(() => ({ notes, jobType, ready, saveContext, materials: materials.items, jobPacks: jobPacks.items, labourRates: labourRates.items, invoices: invoices.items, quoteSettings }),
+    [notes, jobType, ready, saveContext, materials.items, jobPacks.items, labourRates.items, invoices.items, quoteSettings]);
+  const latestSource = useRef({ active: false, context: sourceContext });
+  useLayoutEffect(() => {
+    latestSource.current = { active: true, context: sourceContext };
+    return () => { latestSource.current.active = false; };
+  });
+  const currentSource = () => ready && latestSource.current.active && latestSource.current.context === sourceContext;
 
   function selectCustomer(id: string) {
     const customer = customers.items.find((item) => item.id === id);
@@ -140,14 +149,15 @@ export default function AiQuoteBuilderPage() {
     setNotes((current) => current || `${job.title}\n${job.notes}`);
   }
 
-  function generateDraft() {
-    if (!notes.trim()) {
+  function generateDraft(sourceNotes: string): boolean {
+    if (!currentSource()) return false;
+    if (!sourceNotes.trim()) {
       setMessage("Add typed job notes or paste a voice transcript first.");
-      return;
+      return false;
     }
-    if (!estimateSave.begin("doc")) return;
+    if (!estimateSave.begin("doc")) return false;
     const generated = buildAiQuoteDraft({
-      notes,
+      notes: sourceNotes,
       jobType,
       materials: materials.items,
       documents: documents.items,
@@ -170,6 +180,7 @@ export default function AiQuoteBuilderPage() {
     setTermsTemplateId((current) => current || defaultTerms?.id || "");
     setPaymentTermsTemplateId((current) => current || defaultPayment?.id || "");
     setMessage(`Draft prepared as ${generated.jobType}. Review every quantity, allowance and exclusion before saving.`);
+    return true;
   }
 
   function updateItems(nextItems: PricingLineItem[], editedCostId?: string) {
@@ -266,7 +277,7 @@ export default function AiQuoteBuilderPage() {
       <PageHeader
         eyebrow="AI Command Centre"
         title="AI Quote Builder"
-        description="Create a local estimate from typed notes or a voice-note transcript using saved job packs, similar work, materials, labour rates and business defaults."
+        description="Turn job notes, site photos or a short video into a reviewed quote with labour and materials from your saved packs and rates."
         action={<Link href="/ai" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 text-sm font-semibold hover:bg-slate-800"><ArrowLeft className="size-4" />Command Centre</Link>}
       />
 
@@ -277,18 +288,18 @@ export default function AiQuoteBuilderPage() {
 
       <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="space-y-6">
-          <Card>
-            <div className="grid gap-2 rounded-xl bg-slate-950 p-2 sm:grid-cols-2">
-              {(["Typed notes", "Voice transcript"] as const).map((mode) => (
-                <button key={mode} type="button" onClick={() => setSourceMode(mode)} className={`min-h-11 rounded-lg px-4 text-sm font-semibold ${sourceMode === mode ? "bg-cyan-400 text-slate-950" : "text-slate-400 hover:bg-slate-800"}`}>
-                  {mode === "Voice transcript" ? <Mic2 className="mr-2 inline size-4" /> : <FilePenLine className="mr-2 inline size-4" />}{mode}
+          <Card className="flex flex-col">
+            <div className="order-0 grid grid-cols-3 gap-2 rounded-xl bg-slate-950 p-2">
+              {(["Typed notes", "Photos & video", "Voice transcript"] as const).map((mode) => (
+                <button key={mode} type="button" aria-pressed={sourceMode === mode} onClick={() => setSourceMode(mode)} className={`flex min-h-16 flex-col items-center justify-center gap-2 rounded-lg px-2 py-3 text-sm font-semibold ${sourceMode === mode ? "bg-cyan-400 text-slate-950" : "text-slate-400 hover:bg-slate-800"}`}>
+                  {mode === "Voice transcript" ? <Mic2 className="size-7" /> : mode === "Photos & video" ? <Camera className="size-7" /> : <FilePenLine className="size-7" />}{mode}
                 </button>
               ))}
             </div>
-            <div className="mt-5">
+            <div className={`mt-5 ${sourceMode === "Photos & video" ? "order-2" : "order-1"}`}>
               <TextareaField
                 label={sourceMode === "Voice transcript" ? "Voice transcript" : "Job notes"}
-                className="min-h-60"
+                className={sourceMode === "Photos & video" ? "min-h-36" : "min-h-60"}
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
                 placeholder={sourceMode === "Voice transcript"
@@ -297,19 +308,23 @@ export default function AiQuoteBuilderPage() {
               />
               {sourceMode === "Voice transcript" ? <p className="mt-2 text-xs text-slate-500">Use your phone&apos;s dictation or transcription, then paste the words here. Connected AI can review the pasted text; audio files are not uploaded by this form.</p> : null}
             </div>
-            <ConnectedQuoteAssistant
+            <div className={sourceMode === "Photos & video" ? "order-1" : "order-2"}><ConnectedQuoteAssistant
               notes={notes}
               contextKey={JSON.stringify([jobId, customerId, builderId, siteAddress])}
               jobEvidence={evidenceJob ? { jobId: evidenceJob.id, title: evidenceJob.title, documents: jobDocuments.items, ready: jobDocuments.isReady } : undefined}
               ready={ready && (!jobId || jobs.items.filter(item => item.id === jobId).length === 1)}
               onApply={(sourceNotes, reviewedNotes) => {
-                if (!ready || sourceNotes !== notes) return;
+                if (!currentSource() || sourceNotes !== notes || !estimateSave.enabled) return;
                 setNotes(current => current === sourceNotes ? reviewedNotes : current);
                 setDraft(null);
                 setMessage("Reviewed AI scope added to the notes. Create a priced draft and check each line before saving.");
               }}
-            />
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              onBuildDraft={(sourceNotes, reviewedNotes) => {
+                if (!currentSource() || sourceNotes !== notes) return;
+                if (generateDraft(reviewedNotes)) setNotes(reviewedNotes);
+              }}
+            /></div>
+            <div className="order-3 mt-5 grid gap-4 sm:grid-cols-2">
               <label className="grid gap-2 text-sm font-medium text-slate-300">
                 <span>Job type</span>
                 <select value={jobType} onChange={(event) => setJobType(event.target.value as "" | QuoteTemplateType)} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">
@@ -340,7 +355,7 @@ export default function AiQuoteBuilderPage() {
               <InputField label="Site address" value={siteAddress} onChange={(event) => setSiteAddress(event.target.value)} />
               <InputField label="Valid until" type="date" value={validUntil} onChange={(event) => setValidUntil(event.target.value)} />
             </div>
-            <Button className="mt-5 w-full" disabled={!estimateSave.enabled} onClick={generateDraft}><Sparkles className="mr-2 size-4" />Create priced draft from notes</Button>
+            <Button className="order-4 mt-5 w-full" disabled={!estimateSave.enabled} onClick={() => generateDraft(notes)}><Sparkles className="mr-2 size-4" />Create priced draft from notes</Button>
           </Card>
 
           {draft ? (
@@ -380,7 +395,13 @@ export default function AiQuoteBuilderPage() {
               <Card>
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Draft pricing lines</h2><p className="text-sm text-slate-500">Everything remains editable before it reaches Quotes.</p></div><span className="rounded-full bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300">{draft.items.length} lines</span></div>
                 <div className="mt-5 space-y-3">
-                  {draft.items.map((item) => (
+                  {(["Labour", "Materials", "Other"] as const).map(group => {
+                    const lines = draft.items.filter(item => group === "Other" ? item.category !== "Labour" && item.category !== "Materials" : item.category === group);
+                    if (group === "Other" && !lines.length) return null;
+                    return <section key={group} aria-label={`${group} pricing lines`} className="space-y-3">
+                    <h3 className="text-lg font-bold">{group} <span className="text-sm font-normal text-slate-400">· {lines.length} line{lines.length === 1 ? "" : "s"}</span></h3>
+                    {!lines.length ? <p className="rounded-xl border border-amber-500/20 p-3 text-sm text-amber-100">{group === "Labour" ? <>No priced labour line was created. Check the scope and <Link href="/labour-costs" className="inline-flex min-h-12 items-center font-semibold underline">saved labour rates</Link>.</> : <>No matching material lines were found. Review the scope, <Link href="/starter-library" className="inline-flex min-h-12 items-center font-semibold underline">browse job packs</Link> or add materials in the Quote Engine.</>}</p> : null}
+                    {lines.map((item) => (
                     <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
                       <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category}</p><p className="mt-1 font-medium">{item.description}</p></div><button type="button" onClick={() => updateItems(draft.items.filter((line) => line.id !== item.id))} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label={`Remove ${item.description}`}><Trash2 className="size-4" /></button></div>
                       <fieldset disabled={Boolean(estimateSave.saved)} className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -390,7 +411,8 @@ export default function AiQuoteBuilderPage() {
                       </fieldset>
                       <p className="mt-3 text-sm text-slate-400">Cost basis: {draft.costBasisByLineId[item.id] ?? "Saved labour rate"}. Check this allowance for the job.</p>
                     </div>
-                  ))}
+                    ))}</section>;
+                  })}
                 </div>
               </Card>
 

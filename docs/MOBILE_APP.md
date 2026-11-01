@@ -135,6 +135,16 @@ blocks a pending review; choosing another photo or recording replaces the saved
 selection. Video links remain links: only their saved text is included by the
 notes-only action. See [Connected AI](CONNECTED_AI.md) for sharing and activation.
 
+The **Photos & video** Quote Builder tab brings the media panel above the notes
+while retaining the same inputs. Add several camera/library photos, prepare and
+preview them locally, and combine them with a reviewed short recording. A maximum
+of six images includes any sampled video frames; invalid batches keep the previous
+selection. Each photo has a 48px Remove action. After checking the AI scope,
+**Build labour & materials draft** immediately uses that exact reviewed text with
+saved packs/rates. Separate labour/material lines remain editable, and missing
+sources offer setup links. This does not save/send a quote or retain original
+media. Hosted activation, funding and physical-phone acceptance remain pending.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
 These notes are labelled as user-entered. The separate Quote Builder can prepare

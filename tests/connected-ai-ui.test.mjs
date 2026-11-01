@@ -8,6 +8,8 @@ import * as scopeHelpers from "../lib/connectedQuoteScope.mjs";
 import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
 import { savedIdentityIndex } from "../lib/assistantIdentity.ts";
 import { privateBridgeHarness } from "./helpers/private-file-bridge-harness.mjs";
+import { loadLocalTs } from "./helpers/load-local-ts.mjs";
+const quotePhotos = loadLocalTs(new URL("../lib/quotePhotos.ts", import.meta.url));
 const evidenceHelpers = existsSync(new URL("../lib/jobPhotoEvidence.ts", import.meta.url)) ? await import("../lib/jobPhotoEvidence.ts") : {};
 const savedPhoto = { id: "doc-1", jobId: "job-1", category: "Photo", name: "Kitchen board", fileName: "board.jpg", mimeType: "image/jpeg", dataUrl: "data:image/jpeg;base64,/9j/2Q==", notes: "Customer requested six downlights.", uploadedAt: "2026-10-13T12:00:00Z", uploadedBy: "Jake", createdAt: "2026-10-13T12:00:00Z" };
 
@@ -22,20 +24,22 @@ const aiHelp = existsSync(new URL("../components/ai/AiConnectionHelp.tsx", impor
 const draft = { title: "Kitchen", summary: "Two sockets requested.", scope: ["Confirm two socket positions."], questions: ["Confirm cable route."], exclusions: ["Heating-controls wiring excluded."] };
 function harness() {
   let cursor = 0, epoch = 1, session = { access_token: "token", user: { id: "user-1" } }, fetcher = async () => new Response(JSON.stringify({ draft })), prepare = async () => ({ dataUrl: "data:image/jpeg;base64,/9j/2Q==" });
-  const slots = [], effects = [], calls = [], applies = [], savedReads = [];
+  const slots = [], effects = [], calls = [], applies = [], builds = [], savedReads = [], preparedFiles = [];
   let readSaved = async () => new File(["photo"], "board.jpg", { type: "image/jpeg" });
   const identity = { mode: "cloud", isReady: true, identity: { organisationId: "org-1", userId: "user-1", role: "owner" } };
-  const props = { notes: "Two kitchen sockets", contextKey: "job-1", ready: true, jobEvidence: { jobId: "job-1", title: "Kitchen", documents: [{ ...savedPhoto }], ready: true }, onApply: (...args) => applies.push(args) };
+  const props = { notes: "Two kitchen sockets", contextKey: "job-1", ready: true, jobEvidence: { jobId: "job-1", title: "Kitchen", documents: [{ ...savedPhoto }], ready: true }, onApply: (...args) => applies.push(args), onBuildDraft: (...args) => builds.push(args) };
   const useState = initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; };
   const changed = (old, deps) => !old || !deps || deps.some((value, i) => !Object.is(value, old.deps?.[i]));
   const dependencies = {
-    "react/jsx-runtime": { jsx: (type, props) => ({ type, props }), jsxs: (type, props) => ({ type, props }) },
+    "react/jsx-runtime": { jsx: (type, props, key) => ({ type, props, key }), jsxs: (type, props, key) => ({ type, props, key }) },
     react: { useState, useRef: value => useState({ current: value })[0], useMemo(fn, deps) { const i = cursor++; if (changed(slots[i], deps)) slots[i] = { value: fn(), deps }; return slots[i].value; }, useLayoutEffect(fn, deps) { const i = cursor++, old = slots[i]; if (changed(old, deps)) { const next = { deps, cleanup: old?.cleanup }; slots[i] = next; effects.push(() => { next.cleanup?.(); next.cleanup = fn(); }); } } },
     "../ui/Button": { Button: "Button" }, "../ui/FormField": { TextareaField: "TextareaField" },
     "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => identity },
     "../../lib/supabase/client": { captureSupabaseSessionOwnership: () => ({ session, epoch }), readSupabaseSession: () => session, readSupabaseSessionOwnershipEpoch: () => epoch },
     "../../lib/supabase/sessionOwnership-core.mjs": ownership,
     "../../lib/jobMediaCapture": { photoFileError: file => file.type === "image/jpeg" ? "" : "Choose a photo", prepareJobPhoto: file => prepare(file) },
+    "../../lib/quotePhotos": { ...quotePhotos, prepareQuotePhoto: (file, signal) => { preparedFiles.push({ file, signal }); return prepare(file); } },
+    "next/image": { default: "Image" },
     "../../lib/connectedQuoteScope.mjs": scopeHelpers,
     "../../lib/quoteClip": clipModule.exports,
     "./QuoteClipInput": { QuoteClipInput: "QuoteClipInput", ClipFrames: "ClipFrames" },
@@ -54,12 +58,14 @@ function harness() {
     const button = nodes(cards).find(node => node.type === "Button" && text(node) === (withPhoto ? "Use photo and notes" : "Use saved notes"));
     assert.ok(button, "Saved evidence action exists"); return button.props.onClick;
   }
-  return { props, identity, calls, applies, savedReads, render, button, evidenceAction,
+  function photos(files) { nodes(render()).find(node => node.type === "input" && node.props.type === "file" && !node.props.capture).props.onChange({ target: { files, value: "" } }); render(); }
+  return { props, identity, calls, applies, builds, preparedFiles, savedReads, render, button, evidenceAction, photos,
     saved(withPhoto = true) { evidenceAction(withPhoto)(); render(); }, readSaved(fn) { readSaved = fn; },
     fetch(fn) { fetcher = fn; }, prepare(fn) { prepare = fn; },
-    photo() { nodes(render()).find(node => node.type === "input" && node.props.type === "file").props.onChange({ target: { files: [{ name: "kitchen.jpg", type: "image/jpeg", size: 100 }], value: "" } }); render(); },
+    photo() { photos([{ name: "kitchen.jpg", type: "image/jpeg", size: 100 }]); },
     clipPanel() { const panel = nodes(render()).find(node => node.type === "QuoteClipInput"); assert.ok(panel, "clip panel exists"); return panel; },
-    async run() { await button("Review with AI").props.onClick(); render(); },
+    async preparePhotos() { await button("Prepare photos").props.onClick(); render(); },
+    async run() { const b = nodes(render()).find(node => node.type === "Button" && text(node).includes("Prepare photos")); if (b && !b.props.disabled) await b.props.onClick(); await button("Review with AI").props.onClick(); render(); },
     review() { nodes(render()).find(node => node.type === "input" && node.props.type === "checkbox").props.onChange({ target: { checked: true } }); render(); },
     account(patch) { Object.assign(identity.identity, patch); render(); },
     changeSession() { epoch++; session = { access_token: "new-token", user: { id: "other-user" } }; },
@@ -71,7 +77,7 @@ function harness() {
 test("connected scope requires an explicit send, review and apply without writing a quote", async () => {
   const h = harness(); h.render(); assert.equal(h.calls.length, 0); h.photo(); assert.equal(h.calls.length, 0);
   await h.run(); assert.equal(h.calls.length, 1); const body = JSON.parse(h.calls[0].init.body);
-  assert.deepEqual(body, { operation: "draft", notes: "Two kitchen sockets", consent: true, photo: "data:image/jpeg;base64,/9j/2Q==" });
+  assert.deepEqual(body, { operation: "draft", notes: "Two kitchen sockets", consent: true, photos: ["data:image/jpeg;base64,/9j/2Q=="] });
   assert.equal(h.button("Use reviewed scope").props.disabled, true); assert.equal(h.applies.length, 0);
   h.review(); const apply = h.button("Use reviewed scope").props.onClick; apply(); apply();
   assert.equal(h.applies.length, 1); assert.equal(h.applies[0][0], "Two kitchen sockets"); assert.match(h.applies[0][1], /Confirm cable route/);
@@ -83,7 +89,7 @@ test("roles, local mode and password recovery cannot call the AI service", async
 });
 test("photo preparation is discarded after account, notes, selection or readiness changes", async () => {
   for (const change of [h => h.account({ organisationId: "other" }), h => h.account({ role: "customer" }), h => { h.props.notes = "Changed source"; h.render(); }, h => { h.props.contextKey = "job-2"; h.render(); }, h => { h.props.ready = false; h.render(); }, h => h.changeSession(), h => h.unmount()]) {
-    const h = harness(); let done; h.prepare(() => new Promise(resolve => { done = resolve; })); h.photo(); const pending = h.run(); change(h); done({ dataUrl: "data:image/jpeg;base64,/9j/2Q==" }); await pending; assert.equal(h.calls.length, 0); assert.equal(h.applies.length, 0);
+    const h = harness(); let done; h.prepare(() => new Promise(resolve => { done = resolve; })); h.photo(); const pending = h.preparePhotos(); change(h); done({ dataUrl: "data:image/jpeg;base64,/9j/2Q==" }); await pending; assert.equal(h.calls.length, 0); assert.equal(h.applies.length, 0);
   }
 });
 test("stale responses and stale apply callbacks cannot replace newer notes", async () => {
@@ -134,6 +140,87 @@ test("stale billing failures cannot attach recovery actions to changed notes or 
 });
 
 const clipEvidence = { transcript: "Add a pendant by the window.", frames: [{ dataUrl: "data:image/jpeg;base64,/9j/2Q==", seconds: 3 }], duration: 30 };
+const photoFile = name => ({ name, type: "image/jpeg", size: 100 });
+test("gallery batches append, prepare locally, preview and remove exact photos before an explicit send", async () => {
+  const h = harness();
+  const picker = nodes(h.render()).find(node => node.type === "input" && node.props.type === "file" && !node.props.capture);
+  assert.equal(picker.props.multiple, true);
+  h.photos([photoFile("board.jpg"), photoFile("route.jpg")]); h.photos([photoFile("room.jpg")]);
+  assert.match(text(h.render()), /board.jpg/); assert.match(text(h.render()), /room.jpg/); assert.equal(h.calls.length, 0);
+  h.button("Remove photo 2").props.onClick(); await h.preparePhotos();
+  assert.deepEqual(h.preparedFiles.map(item => item.file.name), ["board.jpg", "room.jpg"]);
+  assert.equal(nodes(h.render()).filter(node => node.type === "Image").length, 2); assert.equal(h.calls.length, 0);
+  await h.button("Review with AI").props.onClick();
+  assert.equal(JSON.parse(h.calls[0].init.body).photos.length, 2); assert.equal(h.calls.length, 1);
+});
+test("invalid and excessive photo batches preserve the previous photos and recording", async () => {
+  for (const incoming of [[photoFile("bad.jpg"), { name: "bad.mp4", size: 50, type: "video/mp4" }], Array(6).fill(photoFile("extra.jpg"))]) {
+    const h = harness(); h.photo(); h.clipPanel().props.onUse(clipEvidence); h.render(); h.photos(incoming);
+    assert.ok(nodes(h.render()).some(node => node.props.role === "alert"));
+    await h.run(); const sent = JSON.parse(h.calls[0].init.body); assert.equal(sent.photos.length, 1); assert.deepEqual(sent.frames, clipEvidence.frames);
+  }
+});
+test("a recording handoff over the combined limit is rejected without consuming it or dropping photos", async () => {
+  const h = harness(); h.photos(Array.from({ length: 4 }, (_, i) => photoFile(`${i}.jpg`)));
+  const accepted = h.clipPanel().props.onUse({ ...clipEvidence, frames: [0, 1, 2].map(seconds => ({ ...clipEvidence.frames[0], seconds })) }); h.render();
+  assert.equal(accepted, false); assert.match(text(h.render()), /at most six/);
+  await h.run(); const body = JSON.parse(h.calls[0].init.body); assert.equal(body.photos.length, 4); assert.equal(body.frames, undefined);
+});
+test("removing a photo cancels pending preparation and its old review request cannot send", async () => {
+  const h = harness(); h.photos([photoFile("one.jpg"), photoFile("two.jpg")]);
+  let finish; h.prepare(() => new Promise(resolve => { finish = resolve; }));
+  const review = h.button("Review with AI").props.onClick, pending = h.preparePhotos();
+  h.button("Remove photo 1").props.onClick(); h.render();
+  assert.equal(h.preparedFiles[0].signal.aborted, true);
+  finish({ dataUrl: "data:image/jpeg;base64,/9j/2Q==" }); await pending; await review();
+  assert.equal(h.calls.length, 0); assert.equal(h.preparedFiles.length, 1); assert.doesNotMatch(text(h.render()), /one.jpg/);
+});
+test("an arriving photo cancels pending preparation and requires reviewing the complete new selection", async () => {
+  const h = harness(); h.photo(); let finish; h.prepare(() => new Promise(resolve => { finish = resolve; }));
+  const oldReview = h.button("Review with AI").props.onClick, pending = h.preparePhotos();
+  h.photos([photoFile("added.jpg")]); assert.equal(h.preparedFiles[0].signal.aborted, true); assert.match(text(h.render()), /added.jpg/);
+  finish({dataUrl:"data:image/jpeg;base64,/9j/2Q=="}); await pending; await oldReview(); assert.equal(h.calls.length,0);
+  h.prepare(async()=>({dataUrl:"data:image/jpeg;base64,/9j/2Q=="})); await h.run(); assert.equal(JSON.parse(h.calls[0].init.body).photos.length,2);
+});
+test("an arriving photo cancels a pending AI answer without applying the old evidence", async () => {
+  const h=harness();h.photo();await h.preparePhotos();let finish;h.fetch(()=>new Promise(resolve=>{finish=resolve;}));
+  const pending=h.button("Review with AI").props.onClick;const running=pending();h.photos([photoFile("added.jpg")]);
+  assert.equal(h.calls[0].init.signal.aborted,true);finish(new Response(JSON.stringify({draft})));await running;
+  assert.equal(h.applies.length,0);assert.equal(h.builds.length,0);assert.doesNotMatch(text(h.render()),/Confirm cable route/);assert.match(text(h.render()),/added.jpg/);
+});
+test("correcting a rejected combination preserves the recording component and accepts all six images", async()=>{
+  const h=harness();h.photos(Array.from({length:4},(_,i)=>photoFile(`${i}.jpg`)));
+  const before=h.clipPanel(), video={...clipEvidence,frames:[0,1,2].map(seconds=>({...clipEvidence.frames[0],seconds}))};
+  assert.equal(before.props.onUse(video),false);h.render();h.button("Remove photo 1").props.onClick();const after=h.clipPanel();
+  assert.equal(after.key,before.key);assert.equal(after.props.context,before.props.context);assert.equal(after.props.onUse(video),true);h.render();
+  await h.run();const body=JSON.parse(h.calls[0].init.body);assert.equal(body.photos.length,3);assert.equal(body.frames.length,3);
+});
+test("local photo preparation blocks clip actions while retaining the recording context", async()=>{
+  const h=harness();h.photo();const before=h.clipPanel();let finish;h.prepare(()=>new Promise(resolve=>{finish=resolve;}));const pending=h.preparePhotos();
+  const blocked=h.clipPanel();assert.equal(blocked.key,before.key);assert.equal(blocked.props.context,before.props.context);assert.equal(blocked.props.enabled,true);assert.equal(blocked.props.blocked,true);
+  finish({dataUrl:"data:image/jpeg;base64,/9j/2Q=="});await pending;assert.equal(h.clipPanel().props.blocked,false);
+});
+test("a broken later photo keeps the batch available without sending a partial review", async () => {
+  const h = harness(); h.photos([photoFile("one.jpg"), photoFile("two.jpg")]);
+  h.prepare(async file => { if (file.name === "two.jpg") throw new Error("Unreadable photo"); return { dataUrl: "data:image/jpeg;base64,/9j/2Q==" }; });
+  await h.preparePhotos(); await h.button("Review with AI").props.onClick(); assert.equal(h.calls.length, 0);
+  assert.match(text(h.render()), /two.jpg/); assert.ok(nodes(h.render()).some(node => node.props.role === "alert"));
+});
+test("checked scope builds exactly once from the edited review and never invokes notes-only apply", async () => {
+  const h = harness(); await h.run(); assert.equal(h.button("Build labour & materials draft").props.disabled, true);
+  nodes(h.render()).find(node => node.type === "TextareaField").props.onChange({ target: { value: "Proposed scope\n- Install six downlights" } }); h.render(); h.review();
+  const build = h.button("Build labour & materials draft").props.onClick; build(); build();
+  assert.deepEqual(h.builds, [["Two kitchen sockets", "Proposed scope\n- Install six downlights"]]); assert.equal(h.applies.length, 0);
+});
+test("old build callbacks cannot apply after changed sources, context, readiness or session", async () => {
+  for (const change of [h => { h.props.notes = "Other notes"; h.render(); }, h => h.photo(), h => { h.props.contextKey = "other"; h.render(); }, h => { h.props.ready = false; h.render(); }, h => h.changeSession(), h => h.unmount()]) {
+    const h = harness(); await h.run(); h.review(); const build = h.button("Build labour & materials draft").props.onClick; change(h); build(); assert.equal(h.builds.length, 0);
+  }
+});
+test("removing the reviewed recording preserves the chosen photographs", async () => {
+  const h = harness(); h.photo(); h.clipPanel().props.onUse(clipEvidence); h.render(); h.button("Remove recording").props.onClick();
+  await h.run(); const body = JSON.parse(h.calls[0].init.body); assert.equal(body.photos.length, 1); assert.equal(body.frames, undefined); assert.doesNotMatch(body.notes, /Reviewed speech/);
+});
 test("reviewed clip evidence joins typed notes and sampled frames only on the explicit scope request", async () => {
   const h = harness(); h.clipPanel().props.onUse(clipEvidence); h.render(); assert.equal(h.calls.length, 0); assert.equal(h.props.notes, "Two kitchen sockets");
   await h.run(); const body = JSON.parse(h.calls[0].init.body); assert.match(body.notes, /Two kitchen sockets/); assert.match(body.notes, /Reviewed speech from site recording/); assert.match(body.notes, /pendant/); assert.deepEqual(body.frames, clipEvidence.frames); assert.equal(body.photo, undefined);
@@ -144,8 +231,8 @@ test("old clip handoffs cannot change a new parent input or a running scope requ
   }
   const h = harness(), use = h.clipPanel().props.onUse; let done; h.fetch(() => new Promise(resolve => { done = resolve; })); const pending = h.run(); use(clipEvidence); done(new Response(JSON.stringify({ draft }))); await pending; assert.doesNotMatch(JSON.stringify(h.calls), /pendant/);
 });
-test("choosing a photo replaces clip evidence and oversized combined notes cannot be submitted", async () => {
-  const h = harness(); h.clipPanel().props.onUse(clipEvidence); h.render(); h.photo(); await h.run(); assert.equal(JSON.parse(h.calls[0].init.body).frames, undefined);
+test("chosen photos accompany clip evidence and oversized combined notes cannot be submitted", async () => {
+  const h = harness(); h.clipPanel().props.onUse(clipEvidence); h.render(); h.photo(); await h.run(); assert.deepEqual(JSON.parse(h.calls[0].init.body).frames, clipEvidence.frames); assert.equal(JSON.parse(h.calls[0].init.body).photos.length, 1);
   const long = harness(); long.clipPanel().props.onUse({ ...clipEvidence, transcript: "x".repeat(12000) }); long.render(); assert.match(text(long.render()), /12,000/); assert.equal(long.calls.length, 0);
 });
 
