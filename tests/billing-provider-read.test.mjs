@@ -35,3 +35,8 @@ test('wrong account, customer or mode is rejected before trusting subscription e
   const {gateway}=await fixture(t,change);await assert.rejects(gateway.readSubscriptionEvidence({customerId:'cus_A',subscriptionId:'sub_A'}),/billing_provider_unavailable/);
  }
 });
+
+test('subscription retirement checks current mode and customer before exposing an ended status',async t=>{
+ const {gateway}=await fixture(t,{'/v1/subscriptions/sub_A':s=>({...s,status:'canceled'})});assert.deepEqual(await gateway.readSubscriptionStatus({customerId:'cus_A',subscriptionId:'sub_A'}),{status:'canceled'});
+ const other=await fixture(t,{'/v1/subscriptions/sub_A':s=>({...s,customer:'cus_other'})});await assert.rejects(other.gateway.readSubscriptionStatus({customerId:'cus_A',subscriptionId:'sub_A'}),/billing_provider_unavailable/);
+});

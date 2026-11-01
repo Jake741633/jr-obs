@@ -18,7 +18,10 @@ async function fixture(t, overrides={}) {
     const path=new URL(req.url,'http://localhost').pathname;
     const record={path,method:req.method,headers:req.headers,body:new URLSearchParams(raw)};requests.push(record);
     let payload;
-    if(path==='/v1/account')payload={id:'acct_1UWyMhRxGUITlJWL',object:'account'};
+    if(path==='/v1/customers'&&req.method==='POST')payload={id:'cus_created',object:'customer',livemode:false};
+    else if(path==='/v1/subscriptions')payload={object:'list',data:[],has_more:false};
+    else if(path==='/v1/checkout/sessions/cs_test_session')payload={id:'cs_test_session',livemode:false,customer:'cus_businessA',mode:'subscription',status:'open',subscription:null,client_reference_id:'11111111-1111-4111-8111-111111111111',expires_at:1900000000,url:'https://checkout.stripe.com/c/pay/cs_test_session'};
+    else if(path==='/v1/account')payload={id:'acct_1UWyMhRxGUITlJWL',object:'account'};
     else if(path.startsWith('/v1/prices/'))payload=catalog(path.split('/').at(-1));
     else if(path==='/v1/customers/cus_businessA')payload={id:'cus_businessA',object:'customer',livemode:false};
     else if(path==='/v1/checkout/sessions')payload={id:'cs_test_session',object:'checkout.session',livemode:false,url:'https://checkout.stripe.com/c/pay/cs_test_session',customer:'cus_businessA',mode:'subscription'};
@@ -132,4 +135,21 @@ test('signed connected-account or context webhook deliveries cannot enter single
     const signature=stripe.webhooks.generateTestHeaderString({payload,secret:config.webhookSecret});
     assert.throws(()=>gateway.verifyWebhook(payload,signature),/billing_invalid_webhook/);
   }
+});
+
+
+test('customer creation retries use a stable operation key and no browser metadata',async t=>{
+ const {gateway,requests}=await fixture(t);const op={organisationId:'22222222-2222-4222-8222-222222222222',operationId:'11111111-1111-4111-8111-111111111111'};
+ assert.deepEqual(await gateway.createBillingCustomer(op),{customerId:'cus_created'});await gateway.createBillingCustomer(op);
+ const posts=requests.filter(r=>r.path==='/v1/customers');assert.equal(posts.length,2);assert.equal(posts[0].headers['idempotency-key'],posts[1].headers['idempotency-key']);assert.equal([...posts[0].body.keys()].length,0);
+});
+test('provider subscriptions prevent a second Checkout before a snapshot is reconciled',async t=>{
+ const {gateway,requests}=await fixture(t,{'/v1/subscriptions':()=>({data:[{id:'sub_A',customer:'cus_businessA',livemode:false,status:'active'}],has_more:false})});
+ await assert.rejects(gateway.createCheckout(operation()),/billing_already_subscribed/);assert.equal(requests.some(r=>r.method==='POST'),false);
+});
+test('Checkout pins operation reference and expiry and recovery checks the same customer/reference',async t=>{
+ const {gateway,requests}=await fixture(t);const op={...operation(),expiresAt:1900000000};await gateway.createCheckout(op);
+ const body=requests.find(r=>r.path==='/v1/checkout/sessions').body;assert.equal(body.get('expires_at'),'1900000000');assert.equal(body.get('client_reference_id'),'11111111-1111-4111-8111-111111111111');
+ const current=await gateway.readCheckoutSession({...op,sessionId:'cs_test_session'});assert.equal(current.status,'open');assert.equal(current.expiresAt,1900000000);
+ const other=await fixture(t,{'/v1/checkout/sessions/cs_test_session':s=>({...s,client_reference_id:'other'})});await assert.rejects(other.gateway.readCheckoutSession({...op,sessionId:'cs_test_session'}),/billing_provider_unavailable/);
 });

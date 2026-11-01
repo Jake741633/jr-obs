@@ -1,6 +1,6 @@
 # JR OS subscriptions — commercialisation foundation
 
-Status: server policy, Stripe adapter, unapplied persistence migration and disabled webhook receipt and unactivated reconciliation worker and owner billing-status screen implemented and locally tested; **not connected to runtime access, checkout, payment collection or live billing**. Existing JR access remains unchanged. Jake approved GBP 29/month, GBP 290/year and a founding offer of GBP 19/month for 12 months for the first 20 businesses. Sandbox catalog created; no public paid checkout or trial has been launched.
+Status: server policy, Stripe adapter, unapplied persistence migration and disabled webhook receipt and unactivated reconciliation worker and owner billing-status screen and unactivated durable Checkout engine implemented and locally tested; **not connected to runtime access, checkout, payment collection or live billing**. Existing JR access remains unchanged. Jake approved GBP 29/month, GBP 290/year and a founding offer of GBP 19/month for 12 months for the first 20 businesses. Sandbox catalog created; no public paid checkout or trial has been launched.
 
 ## Proposed product
 
