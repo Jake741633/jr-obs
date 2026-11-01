@@ -70,3 +70,42 @@ test("quote import preserves edited pack prices and costs and presents labour as
   assert.throws(() => helper.jobPackQuoteLines({ ...pack, labourRate: -1 }, [material], () => "bad"), /amounts/i);
   const unknown = helper.jobPackQuoteLines(pack, [], () => `line-${++sequence}`); assert.equal(unknown[1].unitCost, undefined);
 });
+
+test("other allowances remain separate from materials and restore their quote category and optional costs", () => {
+  const source = { ...pack, otherAllowances: [{ id: "parking", description: "Parking", quantity: 2, unitPrice: 7.5, unitCost: 0 }, { id: "permit", description: "Permit", quantity: 1, unitPrice: 12 }] };
+  const totals = helper.jobPackTotals(source, [material]);
+  assert.equal(totals.otherSell, 27); assert.equal(totals.materialsSell, 20); assert.equal(totals.materialsCost, 12.5); assert.equal(totals.total, 197);
+  const lines = helper.jobPackQuoteLines(source, [material], () => "new-line").filter(line => line.category === "Other");
+  assert.equal(lines.length, 2); assert.equal(lines[0].unitCost, 0); assert.equal(lines[1].unitCost, undefined); assert.equal(lines[0].materialId, undefined);
+  assert.equal(helper.jobPackTotals(pack, []).otherSell, 0);
+});
+
+test("invalid stored other allowances cannot be quoted as a valid pack", () => {
+  const allowance = { id: "parking", description: "Parking", quantity: 1, unitPrice: 15 };
+  for (const otherAllowances of [null, {}, [null], [{ ...allowance, id: "" }], [allowance, allowance], [{ ...allowance, description: " " }], [{ ...allowance, quantity: 0 }], [{ ...allowance, quantity: -1 }], [{ ...allowance, unitPrice: Infinity }], [{ ...allowance, unitCost: -1 }], [{ ...allowance, unitCost: NaN }]]) {
+    const source = { ...pack, otherAllowances };
+    assert.equal(helper.jobPackTotals(source, [material]).total, null, JSON.stringify(otherAllowances));
+    assert.throws(() => helper.jobPackQuoteLines(source, [material], () => "line"), /amounts/i);
+  }
+});
+
+test("saved allowance categories default compatibly and reject unsupported category data", () => {
+  const allowance = { id: "a", description: "Access", quantity: 1, unitPrice: 1 };
+  for (const category of [null, "Labour", "Materials", "Unknown", ""]) {
+    const source = { ...pack, otherAllowances: [{ ...allowance, category }] };
+    assert.equal(helper.jobPackTotals(source, []).total, null);
+    assert.throws(() => helper.jobPackQuoteLines(source, [], () => "line"));
+  }
+  assert.equal(helper.jobPackQuoteLines({ ...pack, otherAllowances: [allowance] }, [], () => "line").at(-1).category, "Other");
+});
+
+test("guide subtotal matches actual quote engine display for sub-penny material and allowance amounts", async () => {
+  const { calculateQuoteProfitability, defaultQuotePricingSettings } = await import("../lib/quoteEngine.ts");
+  for (const materials of [[], [{ id: "m1", description: "Screw", quantity: 1, unitPrice: 0.004 }, { id: "m2", description: "Clip", quantity: 1, unitPrice: 0.004 }]]) {
+    const source = { ...pack, labourHours: 0, materials, otherAllowances: [{ id: "a", description: "Charge A", quantity: 1, unitPrice: 0.004 }, { id: "b", description: "Charge B", quantity: 1, unitPrice: 0.004 }] };
+    const totals = helper.jobPackTotals(source, []), lines = helper.jobPackQuoteLines(source, [], () => "line");
+    const actual = calculateQuoteProfitability(lines, defaultQuotePricingSettings, [], { workingDaysPerYear: 0, billableHoursPerDay: 0 }).sellingPrice;
+    assert.equal(totals.total, materials.length ? 0.02 : 0.01);
+    assert.equal(new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(totals.total), new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(actual));
+  }
+});
