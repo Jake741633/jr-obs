@@ -18,6 +18,10 @@ import type {
 import { bankDetailsText, paymentTermsFromTemplate, paymentTermsText } from "./businessSettings";
 import { isAcceptedVariationStatus, variationInvoiceLine } from "./jobManagement-core.mjs";
 
+import { finalInvoiceItems, linkedBillingInvoices, payablePence } from "./depositBilling-core.mjs";
+import type { DepositRequirement } from "./payments";
+export { finalInvoiceItems, linkedBillingInvoices } from "./depositBilling-core.mjs";
+
 interface CreateJobFromQuoteInput {
   document: PricingDocument;
   customerAddress?: string;
@@ -99,6 +103,44 @@ export function nextInvoiceNumber(invoices: Invoice[]) {
     return match ? Math.max(max, Number(match[1])) : max;
   }, 0);
   return `INV-${String(highest + 1).padStart(4, "0")}`;
+}
+
+export function createDepositInvoiceFromQuote({ document, requirement, grossAmount, invoices, invoiceId, now, createId }: {
+  document: PricingDocument; requirement: DepositRequirement; grossAmount: number; invoices: Invoice[];
+  invoiceId: string; now: string; createId: (prefix: string) => string;
+}): Invoice {
+  const grossTotal = pricingDocumentTotal(document);
+  const dueDateValue = requirement.dueDate ?? "";
+  const parsedDueDate = new Date(`${dueDateValue}T12:00:00Z`);
+  const validSpecifiedDate = /^\d{4}-\d{2}-\d{2}$/.test(dueDateValue) && Number.isFinite(parsedDueDate.getTime())
+    && parsedDueDate.toISOString().slice(0, 10) === dueDateValue;
+  const divisor = document.vatEnabled ? 1 + document.vatRate / 100 : 1;
+  if (document.status !== "Accepted" || typeof document.id !== "string" || !document.id.trim()
+    || typeof requirement.id !== "string" || !requirement.id.trim() || typeof invoiceId !== "string" || !invoiceId.trim()
+    || requirement.pricingDocumentId !== document.id
+    || !["Fixed", "Percentage"].includes(requirement.mode) || !Number.isFinite(requirement.value) || requirement.value <= 0
+    || (requirement.mode === "Percentage" && requirement.value > 100)
+    || !Number.isFinite(grossAmount) || grossAmount <= 0 || !Number.isFinite(grossTotal)
+    || !Number.isFinite(divisor) || divisor < 1 || !Number.isFinite(document.vatRate) || document.vatRate < 0
+    || !["On acceptance", "Specified date"].includes(requirement.dueRule)
+    || (requirement.dueRule === "Specified date" && !validSpecifiedDate)) {
+    throw new Error("Review the accepted quote and deposit requirement amount, due date and VAT.");
+  }
+  const grossPence = payablePence(grossAmount);
+  if (grossPence <= 0 || grossPence > payablePence(grossTotal)) {
+    throw new Error("Review the deposit source identities and payable amount before billing.");
+  }
+  const existing = linkedBillingInvoices({ invoices, quoteId: document.id, jobId: document.jobId, customerId: document.customerId, builderId: document.builderId });
+  if (existing.length) throw new Error("Review the existing linked invoice before creating another deposit invoice.");
+  return {
+    id: invoiceId, number: nextInvoiceNumber(invoices), status: "Draft", purpose: "Deposit", depositRequirementId: requirement.id,
+    customerId: document.customerId, builderId: document.builderId, jobId: document.jobId, quoteId: document.id,
+    title: `Deposit - ${document.title}`, issueDate: now.slice(0, 10),
+    dueDate: requirement.dueRule === "Specified date" ? requirement.dueDate! : now.slice(0, 10),
+    vatEnabled: document.vatEnabled, vatRate: document.vatRate,
+    items: [{ id: createId("invoice-line"), description: `Deposit for ${document.number}`, category: "Other", quantity: 1, unitPrice: grossPence / 100 / divisor }],
+    amountPaid: 0, notes: "Created from accepted quote or estimate deposit requirement.", paymentDetails: "", createdAt: now, updatedAt: now,
+  };
 }
 
 export function nextPricingDocumentNumber(documents: PricingDocument[], type: PricingDocumentType) {
@@ -272,7 +314,10 @@ export function createInvoiceFromCompletedJob({
     .filter((variation) => !sourceVariationIds.has(variation.id))
     .forEach((variation) => invoiceItems.push(variationInvoiceLine(variation, createId("invoice-line"))));
 
+  const billing = finalInvoiceItems({ items: invoiceItems, quoteId, jobId: job.id, customerId: job.customerId, builderId: job.builderId, vatEnabled, vatRate, invoices, createId });
   const invoice: Invoice = {
+    purpose: "Final",
+    appliedDepositInvoiceIds: billing.appliedDepositInvoiceIds,
     id: invoiceId,
     number: nextInvoiceNumber(invoices),
     status: "Draft",
@@ -288,7 +333,7 @@ export function createInvoiceFromCompletedJob({
     dueDate,
     vatEnabled,
     vatRate,
-    items: invoiceItems,
+    items: billing.items,
     amountPaid: 0,
     notes: [
       `Generated from completed job ${job.title}.`,

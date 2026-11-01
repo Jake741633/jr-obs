@@ -717,7 +717,7 @@ export function buildSmartRecommendations({
   }
 
   const completedWithoutInvoice = jobs.filter((job) =>
-    job.status === "Complete" && !invoices.some((invoice) => invoice.jobId === job.id && invoice.status !== "Cancelled"),
+    job.status === "Complete" && !invoices.some((invoice) => (invoice.jobId === job.id || Boolean(job.sourceQuoteId && invoice.quoteId === job.sourceQuoteId)) && invoice.status !== "Cancelled" && invoice.purpose !== "Deposit"),
   );
   if (completedWithoutInvoice.length) {
     recommendations.push({
@@ -725,7 +725,7 @@ export function buildSmartRecommendations({
       kind: "Workflow",
       severity: "Urgent",
       title: `${completedWithoutInvoice.length} completed job${completedWithoutInvoice.length === 1 ? "" : "s"} not invoiced`,
-      detail: `${completedWithoutInvoice[0].title} can be turned into a linked draft invoice now.`,
+      detail: `Review ${completedWithoutInvoice[0].title} and its deposit invoices before creating the linked final draft.`,
       href: "/ai#action-centre",
       recordId: completedWithoutInvoice[0].id,
     });

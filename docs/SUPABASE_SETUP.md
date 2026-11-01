@@ -47,6 +47,12 @@ preserving quote and approval versions. Until the target database supplies that
 subtotal, the updated signed-in portal withholds the price, deposit and approval.
 A web preview deployment alone does not apply the database migration.
 
+The dedicated hosted test project `tjfyneafvdgwrfdkpnlr` applied this
+migration on 1 November 2026. Its migration history, deployed marker, projection
+functions and access permissions were checked afterwards. The pricing tables
+were empty before and after the upgrade. The development preview still uses
+the main project and requires a separate rollout there.
+
 Do not run only a hand-picked subset of `supabase/migrations`, do not continue
 after an error, and do not use the Supabase SQL editor for the recovery file:
 the script relies on `psql` `\ir` includes to install the entire chain.
