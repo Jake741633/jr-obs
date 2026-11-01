@@ -6,7 +6,8 @@ import { Card } from "./ui/Card";
 import { useLocalStorageCollection } from "../lib/storage";
 import type { BusinessExpense, Invoice, Job, PlannerEntry, PricingDocument } from "../lib/models";
 import type { DepositRequirement, PaymentRecord, ScheduledCashFlow } from "../lib/payments";
-import { allocatedPaid, calculatedInvoiceState, depositAmount, forecastWindow } from "../lib/payments";
+import { roundedPence } from "../lib/depositBilling-core.mjs";
+import { effectiveInvoicePaid, calculatedInvoiceState, depositAmount, forecastWindow } from "../lib/payments";
 
 export function PaymentControlDashboard() {
   const payments = useLocalStorageCollection<PaymentRecord>("jr-os-payments");
@@ -27,14 +28,14 @@ export function PaymentControlDashboard() {
   const sevenDay = forecastWindow(7, invoices.items, payments.items, schedules.items, expenses.items);
   const missingDeposits = documents.items.filter((document) => document.status === "Accepted").filter((document) => {
     const requirement = deposits.items.find((item) => item.pricingDocumentId === document.id);
-    if (!requirement) return false;
+    if (!requirement || !document.jobId) return false;
     const job = jobs.items.find((item) => item.id === document.jobId);
     const firstVisit = planner.items.filter((item) => item.jobId === document.jobId && item.status !== "Cancelled").sort((a, b) => a.date.localeCompare(b.date))[0];
     const workDate = firstVisit?.date || job?.startDate;
     if (!workDate || workDate < today) return false;
-    const depositInvoices = invoices.items.filter((invoice) => invoice.quoteId === document.id && invoice.title.toLowerCase().includes("deposit"));
-    const received = depositInvoices.reduce((sum, invoice) => sum + allocatedPaid(invoice.id, payments.items), 0);
-    return received < depositAmount(document, requirement);
+    const depositInvoices = invoices.items.filter((invoice) => invoice.status !== "Cancelled" && invoice.purpose === "Deposit" && invoice.quoteId === document.id && invoice.customerId === document.customerId && invoice.builderId === document.builderId && (!invoice.jobId || invoice.jobId === document.jobId) && invoice.depositRequirementId === requirement.id && invoices.items.filter((record) => record.id === invoice.id).length === 1);
+    const received = depositInvoices.reduce((sum, invoice) => sum + effectiveInvoicePaid(invoice, payments.items), 0);
+    return roundedPence(received) < roundedPence(depositAmount(document, requirement));
   });
 
   const warnings = [

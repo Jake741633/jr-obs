@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   Brain,
@@ -119,6 +119,11 @@ export default function AiPage() {
     jobs, customers, builders, pricing, invoices, payments, planner, profiles, interactions, reminders, certificates,
     surveys, timeline, jobDocuments, materials, purchaseLists, variations, labourSettingsStore, bankStore, paymentTermsStore,
   ].every((store) => store.isReady) && learning.isReady;
+  const finalCreationState = useRef({ invoices, jobs: jobs.items, quotes: pricing.items, variations: variations.items, ready: false });
+  useLayoutEffect(() => {
+    finalCreationState.current = { invoices, jobs: jobs.items, quotes: pricing.items, variations: variations.items, ready };
+    return () => { finalCreationState.current.ready = false; };
+  }, [invoices, jobs.items, pricing.items, variations.items, ready]);
 
   const recommendations = useMemo(
     () => buildSmartRecommendations({
@@ -185,7 +190,7 @@ export default function AiPage() {
 
   const acceptedQuotes = pricing.items.filter((document) => document.type === "Quote" && document.status === "Accepted" && !document.jobId);
   const completedJobs = jobs.items.filter((job) =>
-    job.status === "Complete" && !invoices.items.some((invoice) => invoice.jobId === job.id && invoice.status !== "Cancelled"),
+    job.status === "Complete" && !invoices.items.some((invoice) => (invoice.jobId === job.id || Boolean(job.sourceQuoteId && invoice.quoteId === job.sourceQuoteId)) && invoice.status !== "Cancelled" && invoice.purpose !== "Deposit"),
   );
   const orderDocuments = pricing.items.filter((document) =>
     (document.status === "Accepted" || Boolean(document.jobId))
@@ -262,8 +267,13 @@ export default function AiPage() {
   }
 
   function generateInvoice(jobId: string) {
+    const current = finalCreationState.current;
+    if (!current.ready || current.invoices.createItem !== invoices.createItem
+      || current.jobs !== jobs.items || current.quotes !== pricing.items || current.variations !== variations.items) {
+      setMessage("The account or saved job records changed. Review the current job before creating its final invoice."); return;
+    }
     const job = jobs.items.find((item) => item.id === jobId);
-    if (!job || job.status !== "Complete" || invoices.items.some((invoice) => invoice.jobId === jobId && invoice.status !== "Cancelled")) {
+    if (!job || job.status !== "Complete") {
       setMessage("That job is no longer ready for a new final invoice.");
       return;
     }
@@ -279,18 +289,19 @@ export default function AiPage() {
         job,
         quote,
         variations: linkedVariations,
-        invoices: invoices.items,
+        invoices: current.invoices.items,
         invoiceId: makeId("invoice"),
         now,
         createId: makeId,
         bankDetails: bankStore.items[0] ?? defaultBankDetails,
         defaultPaymentTerms,
       });
+      current.invoices.createItem(generated.invoice);
+      current.invoices = { ...current.invoices, items: [generated.invoice, ...current.invoices.items] };
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Review the agreed job value before creating an invoice.");
       return;
     }
-    invoices.setItems((current) => [generated.invoice, ...current]);
     const includedVariationIds = new Set(generated.invoice.variationIds ?? []);
     const includedVariations = linkedVariations.filter((variation) => includedVariationIds.has(variation.id) && isAcceptedVariationStatus(variation.status));
     variations.setItems((current) => current.map((variation) => includedVariationIds.has(variation.id)

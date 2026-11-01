@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
+import * as depositBilling from "../lib/depositBilling-core.mjs";
 import * as links from "../lib/invoiceLink.ts";
 import * as settings from "../lib/businessSettings.ts";
+import { loadLocalTs } from "./helpers/load-local-ts.mjs";
+const billingPayments = loadLocalTs(new URL("../lib/payments.ts", import.meta.url));
 
 const jsx = (type, props) => ({ type, props });
 const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
@@ -12,7 +15,7 @@ const text = (tree) => Array.isArray(tree) ? tree.map(text).join("") : tree == n
 const invoice = (patch = {}) => ({ id: "i1", number: "INV-1", title: "Workshop lights", status: "Sent", customerId: "c1", dueDate: "2026-10-09", items: [{ id: "line", quantity: 2, unitPrice: 100 }], vatEnabled: true, vatRate: 20, amountPaid: 40, ...patch });
 const cards = (view) => nodes(nodes(view).find((node) => node.props["aria-label"] === "Invoice records")).filter((node) => node.type === "Card");
 
-function harness({ search = "", invoices: initial = [], ready: initialReady = true, prompt = null } = {}) {
+function harness({ search = "", invoices: initial = [], payments = [], ready: initialReady = true, prompt = null } = {}) {
   const slots = [], effects = [], layouts = [], frames = [], writes = [], prompts = [], alerts = [];
   let cursor = 0, invoices = initial, ready = initialReady, blurred = 0, promptEffect;
   const store = (items = []) => ({ items, isReady: ready, setItems() { throw new Error("Review navigation must not write related records"); } });
@@ -34,9 +37,9 @@ function harness({ search = "", invoices: initial = [], ready: initialReady = tr
     },
     "lucide-react": {}, "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" },
     "../../components/invoices/InvoicePreview": { InvoicePreview: "InvoicePreview" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/crm/EntityEmptyState": { EntityEmptyState: "Empty" },
-    "../../lib/businessSettings": settings, "../../lib/invoiceLink": links,
+    "../../lib/depositBilling-core.mjs": depositBilling, "../../lib/payments": billingPayments, "../../lib/businessSettings": settings, "../../lib/invoiceLink": links,
     "../../lib/cloud/coreBusinessCollections": { useInvoicesCollection: () => ({ ...store(invoices), setItems(update) { invoices = update(invoices); writes.push(invoices); } }) },
-    "../../lib/storage": { useCloudLocalCollection: (key, initial = []) => store(key === "jr-os-customers" ? customers : key === "jr-os-builders" ? builders : initial), makeId() { throw new Error("Review must not create an identity"); } },
+    "../../lib/storage": { useCloudLocalCollection: (key, initial = []) => store(key === "jr-os-payments" ? payments : key === "jr-os-customers" ? customers : key === "jr-os-builders" ? builders : initial), makeId() { throw new Error("Review must not create an identity"); } },
     "../../lib/workflow": { nextInvoiceNumber() { throw new Error("Review must not create an invoice"); } },
   };
   const mod = { exports: {} };
@@ -146,7 +149,7 @@ test("phone invoice browsing controls are labelled 48px and Enter dismisses the 
   for (const select of nodes(h.render()).filter((node) => node.type === "select")) assert.match(select.props.className, /min-h-12.*text-base/);
   h.enterSearch(); assert.equal(h.blurCount(), 1);
   for (const button of nodes(cards(h.render())).filter((node) => node.type === "Button")) assert.match(button.props.className, /min-h-12/);
-  assert.match(text(h.render()), /saved invoice paid amounts, not the payment ledger/); assert.match(text(cards(h.render())), /Saved invoice balance/);
+  assert.match(text(h.render()), /Balances include recorded payments/); assert.match(text(cards(h.render())), /Balance remaining/);
 });
 
 test("browsing and filter changes retain an unsaved creation form", () => {
@@ -208,4 +211,59 @@ test("unknown historical statuses remain visible without being changed by viewin
   const h = harness({ invoices: [invoice({ status: "Imported" })] }); h.flush();
   assert.match(text(cards(h.render())), /Imported · review/); h.filter("Sent"); assert.equal(cards(h.render()).length, 0);
   h.click("Clear invoice filters"); assert.equal(cards(h.render()).length, 1); assert.equal(h.writes.length, 0);
+});
+
+test("invoice card shows a settled ledger deposit without double counting its saved payment", () => {
+  const deposit = invoice({ purpose: "Deposit", amountPaid: 40, status: "Sent" });
+  const payment = { id: "pay1", invoiceId: deposit.id, customerId: deposit.customerId, type: "Deposit", reconciliationStatus: "Reconciled", amount: 240 };
+  const h = harness({ invoices: [deposit], payments: [payment] }); h.flush();
+  assert.match(text(cards(h.render())), /Payment statusPaid/);
+  assert.match(text(cards(h.render())), /Balance remaining£0.00/);
+  assert.equal(h.saved()[0].status, "Sent");
+  assert.equal(h.writes.length, 0);
+});
+
+test("a deposit on an active final cannot be returned to Draft or Cancelled", () => {
+  for (const status of ["Draft", "Cancelled"]) {
+    const deposit = invoice({ purpose: "Deposit" });
+    const final = invoice({ id: "final", purpose: "Final", appliedDepositInvoiceIds: [deposit.id] });
+    const h = harness({ invoices: [deposit, final] }); h.flush();
+    h.statusHandler()({ target: { value: status } });
+    assert.equal(h.writes.length, 0);
+    assert.match(text(h.render()), /final invoice/i);
+  }
+});
+
+test("ambiguous or unreviewed allocations cannot mark a deposit as settled", () => {
+  const deposit = invoice({ purpose: "Deposit", amountPaid: 0 });
+  const payment = { id: "pay1", invoiceId: deposit.id, customerId: deposit.customerId, type: "Deposit", reconciliationStatus: "Reconciled", amount: 240 };
+  for (const payments of [[payment, payment], [{ ...payment, customerId: "other" }], [{ ...payment, reconciliationStatus: "Needs review" }]]) {
+    const h = harness({ invoices: [deposit], payments }); h.flush();
+    assert.match(text(cards(h.render())), /Review payment records/);
+    assert.doesNotMatch(text(cards(h.render())), /Balance remaining£0.00/);
+  }
+});
+
+test("ledger receipt of the printed total settles a VAT invoice with subpenny arithmetic", () => {
+  const target = invoice({ amountPaid: 0, items: [{ id: "fraction", quantity: 1, unitPrice: 2.01 }] });
+  const payment = { id: "pay1", invoiceId: target.id, customerId: target.customerId, type: "Payment", reconciliationStatus: "Allocated", amount: 2.41 };
+  assert.equal(billingPayments.invoiceBalance(target, [payment]), 0);
+  assert.equal(billingPayments.calculatedInvoiceState(target, [payment]), "Paid");
+  assert.equal(billingPayments.invoiceHasOutstandingBalance(target, [payment]), false);
+});
+
+test("manually recording the printed VAT-inclusive amount settles an invoice", () => {
+  const target = invoice({ amountPaid: 0, items: [{ id: "fraction", quantity: 1, unitPrice: 2.03 }] });
+  const h = harness({ invoices: [target], prompt: "2.44" }); h.flush();
+  h.paymentHandler()();
+  assert.equal(h.saved()[0].status, "Paid");
+  assert.equal(h.saved()[0].amountPaid, 2.44);
+});
+
+test("a cancelled deposit and its replacement appear only once in expected cash", () => {
+  const original = invoice({ status: "Cancelled", purpose: "Deposit", amountPaid: 0 });
+  const replacement = { ...original, id: "replacement", status: "Sent" };
+  assert.equal(billingPayments.calculatedInvoiceState(original, [], "2026-10-10"), "Cancelled");
+  const cash = billingPayments.forecastWindow(7, [original, replacement], [], [], [], "2026-10-06");
+  assert.equal(cash.cashIn, 240);
 });

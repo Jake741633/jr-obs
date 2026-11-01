@@ -42,7 +42,7 @@ test("cloud roles without finance authority fail closed before every invoice sid
 
   for (const sideEffect of [
     "createInvoiceFromCompletedJob",
-    "invoices.setItems",
+    "invoices.createItem",
     "variations.setItems",
     "timeline.setItems",
   ]) {
@@ -61,16 +61,17 @@ test("field job detail shows an office handoff instead of an invoice action", ()
   );
   assert.match(
     jobPage,
-    /financeRestricted \? <p[^>]*>\{financeHandoffMessage\}<\/p> : linkedInvoices\.length \? <Link[^>]*href="\/invoices"[\s\S]*: <Button[^>]*onClick=\{generateInvoice\}>/,
+    /financeRestricted \? <p[^>]*>\{financeHandoffMessage\}<\/p> : finalInvoices\.length \? <Link[^>]*href="\/invoices"[\s\S]*: <Button[^>]*onClick=\{generateInvoice\}>/,
   );
   assert.match(jobPage, /!financeRestricted && job\.status !== "Complete"/);
 });
 
 test("office and local job workflows retain canonical invoice generation", () => {
   assert.match(jobPage, /identityState\.mode !== "local"/);
-  assert.match(jobPage, /invoices\.setItems\(\(current\) => \[generated\.invoice, \.\.\.current\]\)/);
+  assert.match(jobPage, /current\.invoices\.createItem\(generated\.invoice\)/);
   assert.match(jobPage, /variations\.setItems\(\(current\) => current\.map/);
   assert.match(jobPage, /timeline\.setItems\(\(current\) =>/);
   assert.match(jobPage, /Generate invoice/);
   assert.match(jobPage, /created as a draft and linked to this job and its source quote/);
+  assert.match(jobPage, /Review historical linked invoices with the office before creating the final balance/);
 });

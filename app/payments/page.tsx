@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useLayoutEffect, useRef, useState } from "react";
 import { AlertTriangle, Banknote, CheckCircle2, CircleDollarSign, CreditCard, Plus, WalletCards } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
@@ -8,9 +8,11 @@ import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { usePaymentsCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
-import type { BusinessExpense, Customer, Invoice, PricingDocument } from "../../lib/models";
+import type { Builder, BusinessExpense, Customer, Invoice, Job, PricingDocument } from "../../lib/models";
 import type { DepositRequirement, PaymentEntryType, PaymentMethod, PaymentRecord, PortalPaymentLink, ReconciliationStatus, ScheduledCashFlow } from "../../lib/payments";
 import { allocatedPaid, calculatedInvoiceState, depositAmount, forecastWindow, invoiceBalance, invoiceGross, invoiceHasOutstandingBalance, paymentTargetForInvoice } from "../../lib/payments";
+
+import { createDepositInvoiceFromQuote } from "../../lib/workflow";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const methods: PaymentMethod[] = ["Bank transfer", "Card", "Cash", "Cheque", "Direct debit", "Other"];
@@ -24,7 +26,9 @@ export default function PaymentsPage() {
   const links = useCloudLocalCollection<PortalPaymentLink>("jr-os-portal-payment-links");
   const invoices = useCloudLocalCollection<Invoice>("jr-os-invoices");
   const customers = useCloudLocalCollection<Customer>("jr-os-customers");
+  const builders = useCloudLocalCollection<Builder>("jr-os-builders");
   const documents = useCloudLocalCollection<PricingDocument>("jr-os-pricing-documents");
+  const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
   const expenses = useCloudLocalCollection<BusinessExpense>("jr-os-expenses");
   const [form, setForm] = useState(blankPayment);
   const [depositDocId, setDepositDocId] = useState("");
@@ -34,7 +38,11 @@ export default function PaymentsPage() {
   const [depositDueDate, setDepositDueDate] = useState("");
   const [message, setMessage] = useState("");
 
-  const ready = [payments, deposits, schedules, links, invoices, customers, documents, expenses].every((store) => store.isReady);
+  const ready = [payments, deposits, schedules, links, invoices, customers, builders, documents, jobs, expenses].every((store) => store.isReady);
+  const latestBilling = useRef({ ready, invoices, documents, deposits, customers, builders, jobs });
+  useLayoutEffect(() => {
+    latestBilling.current = { ready, invoices, documents, deposits, customers, builders, jobs };
+  });
   const customerName = (id?: string) => customers.items.find((item) => item.id === id)?.name || "Unassigned";
   const invoiceName = (id?: string) => invoices.items.find((item) => item.id === id)?.number || "Unallocated";
   const forecasts = [7, 30, 90].map((days) => ({ days, ...forecastWindow(days, invoices.items, payments.items, schedules.items, expenses.items) }));
@@ -79,7 +87,9 @@ export default function PaymentsPage() {
   function saveDeposit(event: FormEvent) {
     event.preventDefault();
     const value = Number(depositValue);
-    if (!depositDocId || !Number.isFinite(value) || value <= 0) return setMessage("Choose an accepted quote or estimate and enter a deposit value.");
+    const accepted = documents.items.filter((item) => item.id === depositDocId && item.status === "Accepted");
+    if (!ready || accepted.length !== 1 || !Number.isFinite(value) || value <= 0 || (depositMode === "Percentage" && value > 100)) return setMessage("Choose an accepted quote or estimate and enter a valid deposit value. Percentages must be at most 100.");
+    if (depositDueRule === "Specified date" && (!/^\d{4}-\d{2}-\d{2}$/.test(depositDueDate) || !Number.isFinite(Date.parse(`${depositDueDate}T00:00:00Z`)) || new Date(`${depositDueDate}T00:00:00Z`).toISOString().slice(0, 10) !== depositDueDate)) return setMessage("Choose a valid deposit due date.");
     const now = new Date().toISOString();
     deposits.setItems((current) => {
       const existing = current.find((item) => item.pricingDocumentId === depositDocId);
@@ -89,16 +99,26 @@ export default function PaymentsPage() {
   }
 
   function createDepositInvoice(document: PricingDocument) {
-    const existing = invoices.items.find((invoice) => invoice.quoteId === document.id && invoice.title.toLowerCase().includes("deposit"));
-    if (existing) return setMessage(`${existing.number} is already the deposit invoice for this document.`);
-    const requirement = deposits.items.find((item) => item.pricingDocumentId === document.id);
-    const amount = depositAmount(document, requirement);
-    if (!requirement || amount <= 0) return setMessage("Add a deposit requirement first.");
-    const now = new Date().toISOString();
-    const number = `INV-${String(invoices.items.length + 1).padStart(4, "0")}`;
-    const dueDate = requirement.dueRule === "Specified date" ? requirement.dueDate || now.slice(0, 10) : now.slice(0, 10);
-    invoices.setItems((current) => [{ id: makeId("invoice"), number, status: "Draft", customerId: document.customerId, builderId: document.builderId, jobId: document.jobId, quoteId: document.id, title: `Deposit - ${document.title}`, issueDate: now.slice(0, 10), dueDate, vatEnabled: false, vatRate: 0, items: [{ id: makeId("invoice-line"), description: `Deposit for ${document.number}`, category: "Other", quantity: 1, unitPrice: amount }], amountPaid: 0, notes: "Created from accepted quote or estimate deposit requirement.", paymentDetails: "", createdAt: now, updatedAt: now }, ...current]);
-    setMessage(`${number} created without duplicating an existing deposit invoice.`);
+    const current = latestBilling.current;
+    if (!current.ready) return setMessage("Wait for billing records to finish loading.");
+    const matches = current.documents.items.filter((item) => item.id === document.id);
+    const source = matches[0];
+    if (matches.length !== 1 || source.status !== "Accepted") return setMessage("Review the current accepted quote or estimate before issuing a deposit.");
+    const customerMatches = current.customers.items.filter((item) => item.id === source.customerId);
+    const builderMatches = current.builders.items.filter((item) => item.id === source.builderId);
+    const jobMatches = source.jobId ? current.jobs.items.filter((item) => item.id === source.jobId) : [];
+    if ((!source.customerId && !source.builderId) || (source.customerId && customerMatches.length !== 1) || (source.builderId && builderMatches.length !== 1) || (source.jobId && (jobMatches.length !== 1 || (jobMatches[0].customerId ?? null) !== (source.customerId ?? null) || (jobMatches[0].builderId ?? null) !== (source.builderId ?? null)))) return setMessage("Review the quote customer, builder and job before issuing a deposit.");
+    const requirements = current.deposits.items.filter((item) => item.pricingDocumentId === source.id);
+    if (requirements.length !== 1) return setMessage("Review and save one deposit requirement for this document first.");
+    const requirement = requirements[0];
+    try {
+      const invoice = createDepositInvoiceFromQuote({ document: source, requirement, grossAmount: depositAmount(source, requirement), invoices: current.invoices.items, invoiceId: makeId("invoice"), now: new Date().toISOString(), createId: makeId });
+      current.invoices.createItem(invoice);
+      latestBilling.current = { ...current, invoices: { ...current.invoices, items: [invoice, ...current.invoices.items] } };
+      setMessage(`${invoice.number} deposit invoice created.`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The deposit invoice could not be saved. Review the billing records and try again.");
+    }
   }
 
   function saveLink(invoice: Invoice, url: string, providerName: string, providerConfigured: boolean) {

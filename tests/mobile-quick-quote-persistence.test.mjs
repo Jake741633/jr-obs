@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import * as priceBook from "../lib/priceBook-core.mjs";
+import * as billing from "../lib/depositBilling-core.mjs";
 
 function loadModule(path, dependencies) {
   const output = ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
@@ -23,6 +24,7 @@ function loadModule(path, dependencies) {
 
 const workflow = loadModule("../lib/workflow.ts", {
   "./businessSettings": {},
+  "./depositBilling-core.mjs": billing,
   "./jobManagement-core.mjs": {},
 });
 

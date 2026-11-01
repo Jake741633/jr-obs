@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import * as variations from "../lib/jobManagement-core.mjs";
+import * as billing from "../lib/depositBilling-core.mjs";
 
 function loadModule(path, dependencies = {}) {
   const commonJsModule = { exports: {} };
@@ -14,7 +15,7 @@ function loadModule(path, dependencies = {}) {
   return commonJsModule.exports;
 }
 const business = loadModule("../lib/businessSettings.ts");
-const workflow = loadModule("../lib/workflow.ts", { "./businessSettings": business, "./jobManagement-core.mjs": variations });
+const workflow = loadModule("../lib/workflow.ts", { "./businessSettings": business, "./jobManagement-core.mjs": variations, "./depositBilling-core.mjs": billing });
 const now = "2026-11-01T12:00:00.000Z";
 let sequence = 0;
 const createId = (prefix) => `${prefix}-${++sequence}`;
@@ -47,7 +48,7 @@ function importedInvoiceState(document) {
   const state = { form: { issueDate: "2026-11-01" }, items: [], error: "" };
   const code = ts.transpileModule(importAction.getText(page), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
   vm.runInNewContext(`${code}\nimportQuote("quote");`, {
-    ...workflow, quotes: { items: [document] }, makeId: createId, paymentTermsText: business.paymentTermsText,
+    ...workflow, quotes: { items: [document] }, invoices: { items: [] }, latestInvoices: { current: { items: [], ready: true } }, setImportedQuote() {}, makeId: createId, paymentTermsText: business.paymentTermsText,
     addDays: () => "2026-11-08", setForm: (update) => state.form = update(state.form),
     setItems: (items) => state.items = items, setError: (error) => state.error = error,
   });
@@ -179,11 +180,12 @@ test("office and AI job actions report invalid agreed prices before writing an i
     const context = {
       ...workflow, job, jobs: { items: [job] }, sourceQuote: undefined,
       financeRestricted: false, linkedInvoices: [], linkedVariations: [],
-      pricing: { items: [] }, variations: { items: [] },
-      invoices: { items: [], setItems() { assert.fail("Invalid prices must not write an invoice"); } },
+      quotes: { items: [] }, pricing: { items: [] }, variations: { items: [] },
+      invoices: { items: [], createItem() { assert.fail("Invalid prices must not write an invoice"); } },
       paymentTermsStore: { items: [] }, bankStore: { items: [] }, bankDetailsStore: { items: [] },
       defaultBankDetails: business.defaultBankDetails, makeId: createId, setMessage: report, setInvoiceMessage: report,
     };
+    context.finalCreationState = { current: { invoices: context.invoices, jobs: context.jobs.items, quotes: path.includes("/ai/") ? context.pricing.items : context.quotes.items, variations: context.variations.items, ready: true } };
     assert.doesNotThrow(() => vm.runInNewContext(`${code}\ngenerateInvoice("job");`, context));
     assert.match(message, /review/i);
   }
