@@ -239,6 +239,46 @@ revoke execute on function public.jr_billing_begin_reconciliation(text,uuid,text
 grant execute on function public.jr_billing_begin_reconciliation(text,uuid,text),public.jr_billing_complete_reconciliation(text,uuid,uuid,jsonb,text)
   to service_role;
 
+-- Private definer is necessary to read service-owned billing tables. Every
+-- invocation checks the existing live membership/session helpers first.
+create schema if not exists private;
+grant usage on schema private to authenticated;
+create function private.jr_billing_owner_status()
+returns jsonb language plpgsql stable security definer set search_path='' as $$
+declare actor uuid; business uuid; current_subscription public.jr_billing_subscriptions%rowtype;
+begin
+  actor:=auth.uid();business:=private.current_organisation_id();
+  if actor is null or business is null or private.current_jr_role() is distinct from 'owner'
+    or not coalesce(private.is_organisation_member(business),false)
+    or coalesce(auth.jwt()->'is_anonymous','false'::jsonb) is distinct from 'false'::jsonb then
+    raise exception 'billing_access_denied' using errcode='42501';
+  end if;
+  -- AMR is signed Auth provenance, never client-editable user metadata.
+  if auth.jwt()->'amr' is not null then
+    if pg_catalog.jsonb_typeof(auth.jwt()->'amr') is distinct from 'array' then
+      raise exception 'billing_access_denied' using errcode='42501';
+    end if;
+    if exists(select 1 from pg_catalog.jsonb_array_elements(auth.jwt()->'amr') method where method->>'method' in ('recovery','anonymous')) then
+      raise exception 'billing_access_denied' using errcode='42501';
+    end if;
+  end if;
+  select * into current_subscription from public.jr_billing_subscriptions
+    where organisation_id=business and mode='test' and account_id='acct_1UWyMhRxGUITlJWL'
+    order by case when status in ('canceled','incomplete_expired') then 1 else 0 end,reconciled_at desc,subscription_id limit 1;
+  return pg_catalog.jsonb_build_object('actorUserId',actor,'organisationId',business,'role','owner','mode','test',
+    'subscription',case when current_subscription.subscription_id is null then null else pg_catalog.jsonb_build_object(
+      'plan',case current_subscription.price_id when 'price_1UX0fdRxGUITlJWLXoEGdcBE' then 'monthly' when 'price_1UX0fpRxGUITlJWLs2gwl34S' then 'annual' else null end,
+      'status',current_subscription.status,'paidThroughMs',floor(extract(epoch from current_subscription.paid_through)*1000),
+      'trialEndsAtMs',floor(extract(epoch from current_subscription.trial_ends_at)*1000),'cancelAtPeriodEnd',current_subscription.cancel_at_period_end,
+      'reconciledAtMs',floor(extract(epoch from current_subscription.reconciled_at)*1000)) end);
+end $$;
+revoke execute on function private.jr_billing_owner_status() from public,anon,authenticated,service_role;
+grant execute on function private.jr_billing_owner_status() to authenticated;
+create function public.jr_billing_owner_status()
+returns jsonb language sql stable security invoker set search_path='' as $$ select private.jr_billing_owner_status() $$;
+revoke execute on function public.jr_billing_owner_status() from public,anon,authenticated,service_role;
+grant execute on function public.jr_billing_owner_status() to authenticated;
+
 create or replace function public.jr_os_deployed_migration()
 returns jsonb language sql immutable parallel safe security invoker set search_path='' as $$
   select pg_catalog.jsonb_build_object('migration','20261101154212_subscription_billing_store.sql')
