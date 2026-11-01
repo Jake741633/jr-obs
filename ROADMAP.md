@@ -18,6 +18,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] In-draft saved/blank material additions, editable descriptions, stable missing-field review lists and current hourly labour time/overhead calculations
 - [x] In-draft saved/blank labour and reviewed whole job packs, with explicit non-hour time allowances and editable public quote scope separated from private pack notes
 - [x] In-draft material/pack search across public catalogue details and saved wholesaler codes/links, with quote-only alternate supplier selection and unchanged price allowances
+- [x] Phone quote section jumps and complete net/VAT/total review, with quote-only contingency/travel/parking edits and fresh validated overhead/profitability before saving
 - [x] AI suggestions retain pack allowances, distinguish missing costs from zero, and require complete cost review before saving quotes or purchase lists; historical cost samples use recorded quote allowances
 - [x] AI quote/list saves prevent repeated-tap duplicates, retain retry identities, recover exact saved versions and link directly to the saved record
 - [x] Durable Materials Library forms and price updates with retained failed drafts, exact retry recovery, changed-record review and account/sync guards
