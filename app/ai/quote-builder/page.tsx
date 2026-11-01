@@ -34,6 +34,7 @@ import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { nextPricingDocumentNumber } from "../../../lib/workflow";
 import { savedIdentityIndex } from "../../../lib/assistantIdentity";
 import { editQuoteDraftLine, materialQuoteDraftLine, reviewQuoteDraftLines, type QuoteLineReviewField } from "../../../lib/quoteDraftLines";
+import { jobPackQuoteDraftAddition, labourQuoteDraftAddition, type QuoteDraftAddition } from "../../../lib/quoteDraftAdditions";
 import { useEstimateSave } from "../../../lib/useEstimateSave";
 import type {
   Builder,
@@ -104,11 +105,23 @@ export default function AiQuoteBuilderPage() {
   const [draft, setDraft] = useState<AiQuoteDraft | null>(null);
   const [message, setMessage] = useState("");
   const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [selectedLabourId, setSelectedLabourId] = useState("");
+  const [selectedJobPackId, setSelectedJobPackId] = useState("");
   const [reviewOnly, setReviewOnly] = useState(false);
   const [reviewIds, setReviewIds] = useState<string[]>([]);
-  const lastMaterialAddition = useRef<object | null>(null);
+  const lastLineAddition = useRef<object | null>(null);
   const draftReview = reviewQuoteDraftLines(draft?.items ?? []);
   const materialChoices = [...savedIdentityIndex(materials.items).unique.values()].filter(item => typeof item.name === "string" && item.name.trim()).sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
+  const labourChoices = savedIdentityIndex(labourRates.items).selectable.filter(item => item.active === true && typeof item.name === "string" && item.name.trim()).sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
+  const packChoices = savedIdentityIndex(jobPacks.items).selectable.filter(item => typeof item.name === "string" && item.name.trim()).sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
+  const packPreview = useMemo(() => {
+    const selectedPack = savedIdentityIndex(jobPacks.items).unique.get(selectedJobPackId);
+    if (!selectedPack) return { addition: null, error: "Choose a current uniquely identified job pack." };
+    try {
+      let next = 0;
+      return { addition: jobPackQuoteDraftAddition(selectedPack, materials.items, () => `preview-${++next}`), error: "" };
+    } catch (error) { return { addition: null, error: error instanceof Error ? error.message : "Review this job pack before adding it." }; }
+  }, [selectedJobPackId, jobPacks.items, materials.items]);
 
   const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
   const quoteSettings = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
@@ -127,9 +140,9 @@ export default function AiQuoteBuilderPage() {
   const estimateSave = useEstimateSave<PricingDocument>(ready, saveContext);
   const sourceContext = useMemo(() => ({ notes, jobType, ready, saveContext, materials: materials.items, jobPacks: jobPacks.items, labourRates: labourRates.items, invoices: invoices.items, quoteSettings }),
     [notes, jobType, ready, saveContext, materials.items, jobPacks.items, labourRates.items, invoices.items, quoteSettings]);
-  const latestSource = useRef({ active: false, context: sourceContext, selectedMaterialId });
+  const latestSource = useRef({ active: false, context: sourceContext, selectedMaterialId, selectedLabourId, selectedJobPackId });
   useLayoutEffect(() => {
-    latestSource.current = { active: true, context: sourceContext, selectedMaterialId };
+    latestSource.current = { active: true, context: sourceContext, selectedMaterialId, selectedLabourId, selectedJobPackId };
     return () => { latestSource.current.active = false; };
   });
   const currentSource = () => ready && latestSource.current.active && latestSource.current.context === sourceContext;
@@ -180,7 +193,7 @@ export default function AiQuoteBuilderPage() {
       createId: makeId,
     });
     setDraft({ ...generated, profitability: reviewQuoteDraftLines(generated.items).complete ? generated.profitability : null });
-    setReviewOnly(false); setReviewIds([]); setSelectedMaterialId("");
+    setReviewOnly(false); setReviewIds([]); setSelectedMaterialId(""); setSelectedLabourId(""); setSelectedJobPackId("");
     setJobType(generated.jobType);
     setValidUntil((current) => current || addDays(30));
     const defaultTerms = termsStore.items.find((template) => template.active && template.name.toLowerCase().includes(generated.jobType.toLowerCase()))
@@ -193,17 +206,28 @@ export default function AiQuoteBuilderPage() {
     return true;
   }
 
-  function updateItems(nextItems: PricingLineItem[], editedCostId?: string, addedBasis?: { id: string; costBasis: string }) {
+  function updateItems(nextItems: PricingLineItem[], editedCostId?: string, addition?: QuoteDraftAddition) {
     if (!currentSource() || !draft || !estimateSave.canSave()) return false;
-    const costBasisByLineId = { ...draft.costBasisByLineId };
+    const costBasisByLineId = { ...draft.costBasisByLineId, ...addition?.costBasisByLineId };
     if (editedCostId) costBasisByLineId[editedCostId] = nextItems.find(item => item.id === editedCostId)?.unitCost === undefined ? "Not recorded" : "Entered for this estimate";
-    if (addedBasis) costBasisByLineId[addedBasis.id] = addedBasis.costBasis;
     setDraft({
       ...draft,
       items: nextItems,
+      notes: addition?.customerNotes ? [draft.notes, addition.customerNotes].filter(Boolean).join("\n\n") : draft.notes,
+      scopeItems: addition?.scopeItem ? [...draft.scopeItems, addition.scopeItem] : draft.scopeItems,
       costBasisByLineId,
       profitability: reviewQuoteDraftLines(nextItems).complete ? calculateQuoteProfitability(nextItems, draft.pricingSettings, overheads.items, labourSettings) : null,
     });
+    return true;
+  }
+
+  function appendAddition(addition: QuoteDraftAddition) {
+    if (!currentSource() || !draft || !estimateSave.canSave() || lastLineAddition.current === sourceContext) return false;
+    const nextItems = [...draft.items, ...addition.lines];
+    if (!addition.lines.length || savedIdentityIndex(nextItems).unusableCount) throw new Error("Quote line identities are missing or duplicated. Regenerate the draft before adding lines.");
+    if (!updateItems(nextItems, undefined, addition)) return false;
+    lastLineAddition.current = sourceContext;
+    if (reviewOnly) setReviewIds(current => [...current, ...addition.lines.map(line => line.id)]);
     return true;
   }
 
@@ -213,7 +237,7 @@ export default function AiQuoteBuilderPage() {
   }
 
   function addMaterial(id?: string) {
-    if (!currentSource() || !draft || !estimateSave.canSave() || lastMaterialAddition.current === sourceContext
+    if (!currentSource() || !draft || !estimateSave.canSave() || lastLineAddition.current === sourceContext
       || (id !== undefined && id !== latestSource.current.selectedMaterialId)) return;
     const material = id ? savedIdentityIndex(materials.items).unique.get(id) : null;
     if (id !== undefined && !material) { setMessage("The saved material is missing or duplicated. Choose a current material again."); return; }
@@ -221,11 +245,31 @@ export default function AiQuoteBuilderPage() {
       const nextId = makeId("ai-line");
       if (draft.items.some(item => item.id === nextId)) throw new Error("A line identity was repeated. Try adding the material again.");
       const added = materialQuoteDraftLine(material ?? null, nextId);
-      if (!updateItems([...draft.items, added.line], undefined, { id: nextId, costBasis: added.costBasis })) return;
-      lastMaterialAddition.current = sourceContext; setSelectedMaterialId("");
-      if (reviewOnly) setReviewIds(current => [...current, nextId]);
+      if (!appendAddition({ lines: [added.line], costBasisByLineId: { [nextId]: added.costBasis } })) return;
+      setSelectedMaterialId("");
       setMessage("Material line added to this draft. Check its description, quantity and buying/selling allowances before saving.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "This material could not be added. Your draft is unchanged."); }
+  }
+
+  function addLabour(id?: string) {
+    if (!currentSource() || !draft || !estimateSave.canSave() || lastLineAddition.current === sourceContext
+      || (id !== undefined && id !== latestSource.current.selectedLabourId)) return;
+    const rate = id ? savedIdentityIndex(labourRates.items).unique.get(id) : null;
+    if (id !== undefined && !rate) { setMessage("Choose a current uniquely identified active labour rate."); return; }
+    try {
+      if (!appendAddition(labourQuoteDraftAddition(rate ?? null, makeId("ai-line")))) return;
+      setSelectedLabourId(""); setMessage("Labour line added. Review its quantity, cost, selling price and time allowance before saving.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Labour could not be added. Your draft is unchanged."); }
+  }
+
+  function addJobPack(id: string) {
+    if (!currentSource() || !draft || !estimateSave.canSave() || lastLineAddition.current === sourceContext || id !== latestSource.current.selectedJobPackId) return;
+    const pack = savedIdentityIndex(jobPacks.items).unique.get(id);
+    if (!pack) { setMessage("Choose a current uniquely identified job pack."); return; }
+    try {
+      if (!appendAddition(jobPackQuoteDraftAddition(pack, materials.items, () => makeId("ai-line")))) return;
+      setSelectedJobPackId(""); setMessage("Job pack lines and public scope notes added. Check for overlapping allowances and complete missing buying costs before saving.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "The job pack could not be added. Your draft is unchanged."); }
   }
 
   function saveDraft() {
@@ -395,6 +439,7 @@ export default function AiQuoteBuilderPage() {
               <div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-emerald-300" /><div><h2 className="text-xl font-bold">Detected scope</h2><p className="text-sm text-slate-500">Local estimate · {draft.jobType} · {draft.pricing.evidenceCount} matching saved record{draft.pricing.evidenceCount === 1 ? "" : "s"}</p></div></div>
               <p className="mt-3 text-sm text-slate-400">The priced draft uses saved records and defaults; no API credit is required. Check each allowance against the site.</p>
               <InputField className="mt-5" disabled={Boolean(estimateSave.saved)} label="Quote title" value={draft.title} onChange={(event) => { if (estimateSave.canSave()) setDraft({ ...draft, title: event.target.value }); }} />
+              <TextareaField className="mt-4" disabled={!estimateSave.enabled || Boolean(estimateSave.saved)} label="Quote notes & exclusions" value={draft.notes} onChange={event => { if (currentSource() && estimateSave.canSave()) setDraft({ ...draft, notes: event.target.value }); }} />
               <section aria-label="Included work" className="mt-4 space-y-2">
                 <h3 className="font-semibold">Included work</h3>
                 {draft.scopeItems.length ? draft.scopeItems.map((item, index) => <p key={`${item}-${index}`} className="rounded-lg bg-slate-950 px-3 py-2 text-sm text-slate-300">{item}</p>) : <p className="text-sm text-slate-500">No separate scope items were detected. Add more detail before sending.</p>}
@@ -426,6 +471,38 @@ export default function AiQuoteBuilderPage() {
             <>
               <Card>
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Draft pricing lines</h2><p className="text-sm text-slate-500">Everything remains editable before it reaches Quotes.</p></div><span className="rounded-full bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300">{draft.items.length} lines</span></div>
+                <p className="mt-4 text-sm text-amber-200">Every addition appends separate lines. Check for overlapping labour, materials and other charges already in this draft.</p>
+                <details className="mt-5 rounded-xl border border-slate-700 p-3">
+                  <summary className="min-h-12 cursor-pointer py-3 font-semibold">Add labour to this draft</summary>
+                  <p className="my-3 text-sm text-slate-400">Saved prices are per billing unit. Hourly labour starts at one hour; enter the time allowance for every other billing unit.</p>
+                  <fieldset disabled={!estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} className="space-y-3">
+                    <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Saved labour rate</span>
+                      <select value={selectedLabourId} onChange={event => setSelectedLabourId(event.target.value)} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
+                        <option value="">Choose an active saved labour rate</option>
+                        {labourChoices.map(rate => <option key={rate.id} value={rate.id}>{rate.name} · {typeof rate.unit === "string" ? rate.unit : "Review unit"}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex flex-wrap gap-3"><Button className="min-h-12" disabled={!selectedLabourId} onClick={() => addLabour(selectedLabourId)}>Add saved labour</Button><Button className="min-h-12" variant="secondary" onClick={() => addLabour()}>Add blank labour allowance</Button></div>
+                  </fieldset>
+                </details>
+                <details className="mt-4 rounded-xl border border-slate-700 p-3">
+                  <summary className="min-h-12 cursor-pointer py-3 font-semibold">Add a reviewed job pack</summary>
+                  <fieldset disabled={!estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} className="mt-3 space-y-3">
+                    <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Saved job pack</span>
+                      <select value={selectedJobPackId} onChange={event => setSelectedJobPackId(event.target.value)} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
+                        <option value="">Choose a saved job pack to review</option>
+                        {packChoices.map(pack => <option key={pack.id} value={pack.id}>{pack.name}</option>)}
+                      </select>
+                    </label>
+                    {selectedJobPackId ? packPreview.addition ? <section aria-label="Selected job pack preview" className="space-y-3 rounded-xl bg-slate-950 p-3 text-sm">
+                      <p className="font-semibold">Review all {packPreview.addition.lines.length} lines before adding</p>
+                      <ul className="space-y-3">{packPreview.addition.lines.map(line => <li key={line.id} className="break-words"><p className="font-medium">{line.category} · {line.description}</p><p>{line.quantity} × {money.format(line.unitPrice)} selling · {line.unitCost === undefined ? "Buying cost needs review" : `${money.format(line.unitCost)} buying each`}</p>{line.category === "Labour" ? <p>Time allowance: {line.labourHours} hours</p> : null}</li>)}</ul>
+                      <p className="whitespace-pre-wrap break-words">{packPreview.addition.customerNotes}</p>
+                      <p className="text-amber-200">These public scope notes will be added to Quote notes & exclusions. Internal pricing notes are not copied. Line allowances exclude quote-level contingency, travel, parking and VAT; check for overlap.</p>
+                    </section> : <p role="alert" className="text-sm text-amber-200">{packPreview.error}</p> : null}
+                    <Button className="min-h-12" disabled={!selectedJobPackId || !packPreview.addition} onClick={() => addJobPack(selectedJobPackId)}>Add reviewed job pack</Button>
+                  </fieldset>
+                </details>
                 <details className="mt-5 rounded-xl border border-slate-700 p-3">
                   <summary className="min-h-12 cursor-pointer py-3 font-semibold">Add a material to this draft</summary>
                   <p className="my-3 text-sm text-slate-400">Use a saved material or add a blank allowance without leaving the quote. Each addition is a separate line.</p>
@@ -456,8 +533,9 @@ export default function AiQuoteBuilderPage() {
                     {!allLines.length ? <p className="rounded-xl border border-amber-500/20 p-3 text-sm text-amber-100">{group === "Labour" ? <>No priced labour line was created. Check the scope and <Link href="/labour-costs" className="inline-flex min-h-12 items-center font-semibold underline">saved labour rates</Link>.</> : <>No matching material lines were found. Review the scope, <Link href="/starter-library" className="inline-flex min-h-12 items-center font-semibold underline">browse job packs</Link> or add a material allowance above.</>}</p> : !lines.length ? <p className="text-sm text-slate-400">No {group.toLowerCase()} lines in the current review list. Show all lines to edit them.</p> : null}
                     {lines.map(({ item, index }) => {
                       const lineReview = draftReview.lines[index];
+                      const fallbackDescription = item.category === "Labour" ? "New labour allowance" : item.category === "Materials" ? "New material allowance" : "New pricing allowance";
                       return <article key={`${item.id}-${index}`} aria-label={`Pricing line ${index + 1}`} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                        <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category}</p><p className="mt-1 font-medium">{item.description || "New material allowance"}</p></div><button type="button" disabled={!lineReview.editable || !estimateSave.enabled || Boolean(estimateSave.saved)} onClick={() => { if (lineReview.editable) updateItems(draft.items.filter(line => line.id !== item.id)); }} className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-lg text-slate-400 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40" aria-label={`Remove ${item.description || "new material allowance"}`}><Trash2 className="size-5" /></button></div>
+                        <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category}</p><p className="mt-1 font-medium">{item.description || fallbackDescription}</p></div><button type="button" disabled={!lineReview.editable || !estimateSave.enabled || Boolean(estimateSave.saved)} onClick={() => { if (lineReview.editable) updateItems(draft.items.filter(line => line.id !== item.id)); }} className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-lg text-slate-400 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40" aria-label={`Remove ${item.description || fallbackDescription.toLowerCase()}`}><Trash2 className="size-5" /></button></div>
                         {lineReview.fields.length ? <p className="mt-3 text-sm text-amber-200">Needs review: {lineReview.fields.map(field => reviewFieldLabels[field]).join(", ")}.{!lineReview.editable ? " Regenerate the draft to resolve the line identity before editing." : ""}</p> : null}
                         <fieldset disabled={!lineReview.editable || !estimateSave.enabled || Boolean(estimateSave.saved)} className="mt-3 space-y-3">
                           <InputField label="Description" value={item.description ?? ""} maxLength={500} onChange={event => updateLine(item.id, { description: event.target.value })} />

@@ -16,6 +16,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Multiple site photos with local preparation/previews, combined reviewed video frames and one-step checked scope to editable labour/materials quote draft
 - [x] Same-session phone picker/focus recovery for local quote media, with hidden/inert account checks and stale AI-request cancellation
 - [x] In-draft saved/blank material additions, editable descriptions, stable missing-field review lists and current hourly labour time/overhead calculations
+- [x] In-draft saved/blank labour and reviewed whole job packs, with explicit non-hour time allowances and editable public quote scope separated from private pack notes
 - [x] AI suggestions retain pack allowances, distinguish missing costs from zero, and require complete cost review before saving quotes or purchase lists; historical cost samples use recorded quote allowances
 - [x] AI quote/list saves prevent repeated-tap duplicates, retain retry identities, recover exact saved versions and link directly to the saved record
 - [x] Durable Materials Library forms and price updates with retained failed drafts, exact retry recovery, changed-record review and account/sync guards

@@ -8,9 +8,9 @@ import * as ownership from "../lib/supabase/sessionOwnership-core.mjs";
 const nodes = tree => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
 const text = tree => Array.isArray(tree) ? tree.map(text).join("") : tree == null || typeof tree === "boolean" ? "" : typeof tree === "object" ? text(tree.props?.children) : String(tree);
 const reorderProperties = value => Array.isArray(value) ? value.map(reorderProperties) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reorderProperties(item)])) : value;
-const pure = Object.fromEntries(["aiCommandCentre", "assistantIdentity", "estimateCostReview", "quoteDraftLines", "quoteEngine", "workflow", "businessSettings", "quoteTemplates", "purchaseListLink"].map(name => [name, loadLocalTs(new URL(`../lib/${name}.ts`, import.meta.url))]));
+const pure = Object.fromEntries(["aiCommandCentre", "assistantIdentity", "estimateCostReview", "quoteDraftLines", "quoteDraftAdditions", "quoteEngine", "workflow", "businessSettings", "quoteTemplates", "purchaseListLink"].map(name => [name, loadLocalTs(new URL(`../lib/${name}.ts`, import.meta.url))]));
 function harness(page, initialReady = true) {
-  const slots = [], stores = {}, writes = [], attempts = [], effects = []; let cursor = 0, seq = 0, fail = false, failAfterWrite = false, epoch = 1, session = {access_token:"test-session",user:{id:"u1"}};
+  const slots = [], stores = {}, writes = [], attempts = [], effects = []; let cursor = 0, seq = 0, fixedLineId, fail = false, failAfterWrite = false, epoch = 1, session = {access_token:"test-session",user:{id:"u1"}};
   const identity = {mode:"local",isReady:true,identity:{userId:"u1",organisationId:"o1",role:"owner"}};
   const pack = { id:"p1", name:"Domestic socket", category:"Domestic", description:"Fit socket", notes:"", labourHours:2, labourRate:50, createdAt:"2026-01-01", updatedAt:"2026-01-01", materials:[{id:"l1", description:"Socket", quantity:2.333, unitPrice:9.875}] };
   function collection(key, defaults = []) {
@@ -20,7 +20,7 @@ function harness(page, initialReady = true) {
   }
   const useState = initial => { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial; return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; };
   const react = {useState,useRef:value=>useState({current:value})[0],useMemo(fn,deps){const i=cursor++;if(!slots[i]||deps.some((value,j)=>!Object.is(value,slots[i].deps[j])))slots[i]={deps,value:fn()};return slots[i].value;},useLayoutEffect(fn){const i=cursor++;effects.push(()=>{slots[i]?.cleanup?.();slots[i]={cleanup:fn()};});}};
-  const storage = {useLocalStorageCollection:collection,makeId:prefix=>`${prefix}-${++seq}`};
+  const storage = {useLocalStorageCollection:collection,makeId:prefix=>prefix==="ai-line"&&fixedLineId?fixedLineId:`${prefix}-${++seq}`};
   const deps = { react, "react/jsx-runtime":{jsx:(type,props)=>({type,props}),jsxs:(type,props)=>({type,props})}, "lucide-react":new Proxy({}, {get:(_,name)=>name}), "next/link":{default:"Link"}, "../../../lib/storage":storage };
   const guardPath = new URL("../lib/useEstimateSave.ts", import.meta.url);
   if (existsSync(guardPath)) deps["../../../lib/useEstimateSave"] = loadLocalTs(guardPath, {react,"./storage":storage,"./cloud/useCloudIdentity":{useCloudIdentity:()=>identity},"./supabase/client":{captureSupabaseSessionOwnership:()=>({session,epoch}),readSupabaseSession:()=>session,readSupabaseSessionOwnershipEpoch:()=>epoch},"./supabase/sessionOwnership-core.mjs":ownership});
@@ -36,10 +36,73 @@ function harness(page, initialReady = true) {
   const render = () => { cursor = 0; const tree=mod.exports.default();effects.splice(0).forEach(fn=>fn());return tree; };
   const button = label => { const found = nodes(render()).find(n => n.type === "Button" && text(n).includes(label)); assert.ok(found,label); return found; };
   const field = (label, value) => { const found = nodes(render()).find(n => n.props.label === label) ?? nodes(render()).find(n => n.type === "label" && text(n).startsWith(label))?.props.children?.find?.(n => n?.type === "input" || n?.type === "select"); assert.ok(found,label); if (value !== undefined) found.props.onChange({target:{value}}); return found; };
-  return {render,button,field,writes,attempts,stores,pack,identity,assistant(){const found=nodes(render()).find(n=>n.type==="ConnectedQuoteAssistant");assert.ok(found);return found;},notes(value){nodes(render()).find(n=>n.type==="TextareaField").props.onChange({target:{value}});render();},fail(value=true){fail=value;},failAfterWrite(){failAfterWrite=true;},session(){epoch++;session=null;},unmount(){slots.forEach(slot=>slot?.cleanup?.());},generate(notes="Domestic socket installation"){render();const input=nodes(render()).find(n=>n.type==="TextareaField");input.props.onChange({target:{value:notes}});button(page==="materials"?"Suggest materials":"Create priced draft").props.onClick();render();},chooseCustomer(){const select=nodes(render()).find(n=>n.type==="select"&&nodes(n).some(o=>o.type==="option"&&o.props.value==="c1"));assert.ok(select);select.props.onChange({target:{value:"c1"}});render();}};
+  return {render,button,field,writes,attempts,stores,pack,identity,lineIdentity(value){fixedLineId=value;},assistant(){const found=nodes(render()).find(n=>n.type==="ConnectedQuoteAssistant");assert.ok(found);return found;},notes(value){nodes(render()).find(n=>n.type==="TextareaField").props.onChange({target:{value}});render();},fail(value=true){fail=value;},failAfterWrite(){failAfterWrite=true;},session(){epoch++;session=null;},unmount(){slots.forEach(slot=>slot?.cleanup?.());},generate(notes="Domestic socket installation"){render();const input=nodes(render()).find(n=>n.type==="TextareaField");input.props.onChange({target:{value:notes}});button(page==="materials"?"Suggest materials":"Create priced draft").props.onClick();render();},chooseCustomer(){const select=nodes(render()).find(n=>n.type==="select"&&nodes(n).some(o=>o.type==="option"&&o.props.value==="c1"));assert.ok(select);select.props.onChange({target:{value:"c1"}});render();}};
 }
 function lineField(h,index,label,value){const card=nodes(h.render()).find(n=>n.type==="article"&&n.props["aria-label"]===`Pricing line ${index}`);assert.ok(card,`line ${index}`);const field=nodes(card).find(n=>n.props.label===label);assert.ok(field,label);if(value!==undefined){field.props.onChange({target:{value}});h.render();}return field;}
 const savedMaterial={id:"material-1",name:"Double socket",unit:"Each",tradeCost:4.123,sellPrice:9.875,supplier:"Wholesaler",stockCode:"001234",notes:"Private buying note"};
+const savedRate={id:"extra-rate",name:"Additional electrician",unit:"Hour",costRate:21.123,chargeRate:76.875,active:true};
+const extraPack={id:"extra-pack",name:"Garden light addition",category:"Domestic",description:"Fit garden light",labourDescription:"Light installation",labourHours:1.5,labourRate:55.555,materials:[{id:"extra-material",materialId:"material-1",description:"Light fixing",quantity:2.333,unitPrice:9.875}],otherAllowances:[{id:"parking",category:"Parking",description:"Parking",quantity:2,unitPrice:7.125,unitCost:4.125}],testingRequirements:"Test affected circuit",certificatesRequired:"Minor Works",notes:"Making good excluded",internalNotes:"Private benchmark"};
+function additionsDraft(){const h=harness("quote-builder");h.render();h.pack.materials[0].unitCost=4.123;h.generate();h.chooseCustomer();return h;}
+test("saved labour adds exact rate and hourly time to an existing draft without changing the source",()=>{
+ const h=additionsDraft();h.stores["jr-os-labour-rates"].items=[savedRate];const before=structuredClone(savedRate);h.field("Saved labour rate","extra-rate");h.button("Add saved labour").props.onClick();h.render();
+ assert.equal(lineField(h,2,"Unit cost (£)").props.value,21.123);assert.equal(lineField(h,2,"Unit price (£)").props.value,76.875);assert.equal(h.field("Saved labour rate").props.value,"");assert.equal(h.writes.length,0);
+ h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes[0].items.length,2);assert.equal(h.writes[0].items[1].labourHours,1);assert.equal(h.writes[0].items[1].labourRateId,"extra-rate");assert.deepEqual(savedRate,before);
+});
+test("blank labour needs explicit description, cost, price and time while day billing keeps its own hours",()=>{
+ for(const useSavedDay of [false,true]){
+  const h=additionsDraft();h.stores["jr-os-labour-rates"].items=[{...savedRate,unit:"Day"}];
+  if(useSavedDay){h.field("Saved labour rate","extra-rate");h.button("Add saved labour").props.onClick();}else h.button("Add blank labour").props.onClick();h.render();
+  assert.equal(h.button("Save draft to Quotes").props.disabled,true);assert.equal(lineField(h,2,"Time allowance (hours)").props.value,"");
+  if(!useSavedDay){lineField(h,2,"Description","Extra labour");lineField(h,2,"Unit cost (£)","0");lineField(h,2,"Unit price (£)","125.875");}
+  lineField(h,2,"Quantity","2");lineField(h,2,"Time allowance (hours)","3.5");h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes[0].items[1].labourHours,3.5);assert.equal(h.writes[0].items[1].quantity,2);assert.equal(h.writes[0].items[1].unitPrice,useSavedDay?76.875:125.875);
+ }
+});
+test("pack preview and atomic addition keep complete lines in a held review list and save public scope only",()=>{
+ const h=additionsDraft();h.stores["jr-os-job-packs"].items=[h.pack,extraPack];h.stores["jr-os-materials"].items=[savedMaterial];h.field("Quote notes & exclusions","Existing reviewed note");
+ const filter=nodes(h.render()).find(n=>n.props["aria-label"]==="Show lines needing review");filter.props.onChange({target:{checked:true}});h.render();h.field("Saved job pack","extra-pack");
+ const preview=nodes(h.render()).find(n=>n.props["aria-label"]==="Selected job pack preview");assert.ok(preview);assert.match(text(preview),/83.33/);assert.match(text(preview),/Making good excluded/);assert.match(text(preview),/Test affected circuit/);assert.doesNotMatch(text(preview),/Private benchmark/);assert.equal(h.writes.length,0);
+ h.button("Add reviewed job pack").props.onClick();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,3);assert.equal(h.field("Saved job pack").props.value,"");assert.equal(lineField(h,2,"Unit price (£)").props.value,83.33);assert.equal(lineField(h,3,"Quantity").props.value,2.333);assert.equal(lineField(h,3,"Unit cost (£)").props.value,4.123);
+ assert.equal(h.button("Save draft to Quotes").props.disabled,true);lineField(h,2,"Unit cost (£)","21.123");h.button("Save draft to Quotes").props.onClick();const saved=h.writes[0];assert.equal(saved.items.length,4);assert.equal(saved.items[0].description,"Socket");assert.equal(saved.items[2].stockCode,"001234");assert.equal(saved.items[3].unitPrice,7.125);assert.equal(saved.items[3].unitCost,4.125);
+ for(const value of ["Existing reviewed note","Garden light addition","Making good excluded","Minor Works","Test affected circuit"])assert.ok(saved.notes.includes(value));assert.doesNotMatch(JSON.stringify(saved),/Private benchmark|Private buying note/);
+});
+test("edited customer-facing draft notes are preserved and stale note callbacks cannot replace current changes",()=>{
+ const h=additionsDraft(),old=h.field("Quote notes & exclusions").props.onChange;h.field("Quote notes & exclusions","Reviewed public scope");h.render();old({target:{value:"Old scope"}});h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes[0].notes,"Reviewed public scope");
+});
+test("pack preview refreshes when the source collection refreshes even if it retains a pack object",()=>{
+ const h=additionsDraft(),pack={...extraPack};h.stores["jr-os-job-packs"].items=[pack];h.field("Saved job pack","extra-pack");h.render();pack.notes="Updated public exclusion";h.stores["jr-os-job-packs"].items=[pack];
+ const preview=nodes(h.render()).find(n=>n.props["aria-label"]==="Selected job pack preview");assert.match(text(preview),/Updated public exclusion/);assert.doesNotMatch(text(preview),/Making good excluded/);
+});
+test("new line identities that collide with the draft cannot append or replace any existing line",()=>{
+ const h=harness("quote-builder");h.render();h.lineIdentity("existing-line");h.pack.materials[0].unitCost=4.123;h.generate();h.chooseCustomer();h.field("Quote notes & exclusions","Keep reviewed note");h.button("Add blank labour").props.onClick();h.render();
+ assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.field("Quote notes & exclusions").props.value,"Keep reviewed note");assert.match(text(h.render()),/identit.*duplicated/i);assert.equal(h.writes.length,0);
+});
+test("blank labour and material removal actions identify their category and remove only the requested allowance",()=>{
+ const h=additionsDraft();h.button("Add blank labour").props.onClick();h.render();h.button("Add blank material").props.onClick();const tree=h.render();
+ const labour=nodes(tree).find(n=>n.type==="article"&&n.props["aria-label"]==="Pricing line 2");assert.match(text(labour),/New labour allowance/);assert.doesNotMatch(text(labour),/New material allowance/);
+ const remove=nodes(tree).find(n=>n.type==="button"&&n.props["aria-label"]==="Remove new labour allowance");assert.ok(remove,"screen readers must identify the labour removal action");remove.props.onClick();
+ const remaining=nodes(h.render()).filter(n=>n.type==="article");assert.equal(remaining.length,2);assert.ok(nodes(remaining).some(n=>n.type==="button"&&n.props["aria-label"]==="Remove new material allowance"));assert.equal(h.writes.length,0);
+});
+for(const kind of ["labour","pack"]){
+ const key=kind==="labour"?"jr-os-labour-rates":"jr-os-job-packs",label=kind==="labour"?"Saved labour rate":"Saved job pack",button=kind==="labour"?"Add saved labour":"Add reviewed job pack",source=kind==="labour"?savedRate:extraPack;
+ test(`${kind} additions reject retained callbacks after source, selection, account or readiness changes`,()=>{
+  for(const change of [h=>{h.stores[key].items=[{...source,name:"Refreshed source"}];h.render();},h=>{h.field(label,"");h.render();},h=>{h.stores[key].items=[];h.render();},h=>{h.stores[key].items=[source,{...source}];h.render();},h=>{h.stores[key].isReady=false;h.render();},h=>{h.identity.identity={...h.identity.identity,organisationId:"other"};h.render();},h=>{h.identity.isReady=false;h.render();},h=>h.session(),h=>h.unmount()]){
+   const h=additionsDraft();h.identity.mode="cloud";h.render();h.stores[key].items=[source];h.field(label,source.id);const add=h.button(button).props.onClick;change(h);add();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.writes.length,0);
+  }
+ });
+ test(`${kind} additions reject synchronous repeats but permit a later deliberate addition`,()=>{
+  const h=additionsDraft();h.stores[key].items=[source];h.field(label,source.id);const add=h.button(button).props.onClick;add();add();h.render();const added=kind==="labour"?1:3;assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1+added);
+  h.field(label,source.id);h.button(button).props.onClick();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1+added*2);assert.equal(h.writes.length,0);
+ });
+ test(`${kind} cannot append through an action retained after this draft is saved`,()=>{
+  const h=additionsDraft();h.stores[key].items=[source];h.field(label,source.id);const add=h.button(button).props.onClick;h.button("Save draft to Quotes").props.onClick();assert.equal(h.writes.length,1);add();h.render();assert.equal(h.writes.length,1);assert.equal(h.writes[0].items.length,1);assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,0);
+ });
+}
+test("ambiguous sources and malformed packs never append a partial draft or discard edited notes",()=>{
+ for(const pack of [{...extraPack,materials:[null]},{...extraPack,notes:"Other allowances from original quote:\nParking £30"},{...extraPack,materials:[...extraPack.materials,...extraPack.materials]},{...extraPack,labourHours:0,materials:[],otherAllowances:[]}]){
+  const h=additionsDraft();h.field("Quote notes & exclusions","Keep me");h.stores["jr-os-job-packs"].items=[pack];h.field("Saved job pack","extra-pack");const button=h.button("Add reviewed job pack");assert.equal(button.props.disabled,true);button.props.onClick();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);assert.equal(h.field("Quote notes & exclusions").props.value,"Keep me");assert.equal(h.writes.length,0);
+ }
+ const h=additionsDraft();h.stores["jr-os-labour-rates"].items=[savedRate,{...savedRate}];h.field("Saved labour rate","extra-rate");h.button("Add saved labour").props.onClick();h.render();assert.equal(nodes(h.render()).filter(n=>n.type==="article").length,1);
+});
 test("saved materials can be added to an open quote with exact prices and no source or record mutation",()=>{
  const h=harness("quote-builder");h.render();h.stores["jr-os-materials"].items=[savedMaterial];h.generate();const before=structuredClone(savedMaterial);
  h.field("Saved material","material-1");h.button("Add saved material").props.onClick();h.render();
