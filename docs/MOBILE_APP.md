@@ -164,6 +164,23 @@ labour billing modes have a separate hours field used for overheads. Remove/save
 and review controls have phone-sized targets. This does not save catalogue edits
 or activate paid AI, and the open draft remains transient until explicitly saved.
 
+The draft also accepts a saved active labour rate or blank fixed labour allowance.
+Saved per-unit buying and selling rates keep their exact numeric values. Hourly
+additions start at one hour; day, half-day, call-out and minimum-charge additions
+require a separate positive time allowance before profit/save. Unknown costs and
+prices stay blank. These choices do not change the saved rate.
+
+A selected job pack is previewed before adding all its labour, materials and
+other charges together. Saved pack quantities/prices remain unchanged, including
+the existing fixed-labour selling total; uniquely linked library buying costs are
+used only where the pack has no saved cost. Missing labour buying costs need
+review. The preview's public scope, testing, certification and exclusions append
+to editable Quote notes & exclusions; internal pricing notes are not copied.
+Every addition creates separate lines: review overlap with the generated draft
+and quote-level travel/parking/contingency. New lines stay visible in an open
+review-only list. Refreshed, changed-selection, revoked, ambiguous or saved-draft
+callbacks cannot append old choices; malformed/empty packs cannot append partly.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
 These notes are labelled as user-entered. The separate Quote Builder can prepare
