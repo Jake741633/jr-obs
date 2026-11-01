@@ -148,6 +148,7 @@ test("assistant payment evidence follows existing credit/refund rules and leaves
 
 const commandCentre = compile("../lib/aiCommandCentre.ts", {
   "./assistantIdentity": assistantIdentity,
+  "./estimateScope": loadLocalTs(new URL("../lib/estimateScope.ts", import.meta.url)),
   "./jobPackCatalogue": loadLocalTs(new URL("../lib/jobPackCatalogue.ts", import.meta.url)),
   "./estimateCostReview": loadLocalTs(new URL("../lib/estimateCostReview.ts", import.meta.url)),
   "./quoteEngine": {}, "./workflow": {}, "./aiLearning": {}, "./scheduling": scheduling,

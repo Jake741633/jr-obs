@@ -126,7 +126,8 @@ export type MaterialCategory = "Cable" | "Protection" | "Accessories" | "Lightin
 export type MaterialUnit = "Each" | "Metre" | "Drum" | "Box" | "Pack";
 export type MaterialPriceSource = "Manual" | "Supplier link" | "Imported";
 export interface MaterialPriceHistory { id: EntityId; tradeCost: number; sellPrice: number; source: MaterialPriceSource; recordedAt: string; }
-export interface Material { id: EntityId; name: string; category: MaterialCategory; manufacturer: string; supplier: string; supplierUrl: string; stockCode: string; unit: MaterialUnit; tradeCost: number; sellPrice: number; favourite: boolean; notes: string; lastPriceCheckedAt?: string; priceSource?: MaterialPriceSource; priceHistory?: MaterialPriceHistory[]; createdAt: string; updatedAt: string; }
+export interface MaterialSupplierOption { id: EntityId; supplier: string; stockCode: string; supplierUrl: string; }
+export interface Material { id: EntityId; name: string; category: MaterialCategory; manufacturer: string; supplier: string; supplierUrl: string; stockCode: string; supplierOptions?: MaterialSupplierOption[]; unit: MaterialUnit; tradeCost: number; sellPrice: number; favourite: boolean; notes: string; lastPriceCheckedAt?: string; priceSource?: MaterialPriceSource; priceHistory?: MaterialPriceHistory[]; createdAt: string; updatedAt: string; }
 export type StockLocationType = "Van" | "Store" | "Site" | "Other";
 export interface StockLocation { id: EntityId; name: string; type: StockLocationType; vehicleId?: EntityId; notes: string; createdAt: string; updatedAt: string; }
 export interface StockItem { id: EntityId; materialId?: EntityId; description: string; locationId: EntityId; quantity: number; minimumQuantity: number; unitCost: number; unit: MaterialUnit; stockCode: string; supplier: string; notes: string; createdAt: string; updatedAt: string; }

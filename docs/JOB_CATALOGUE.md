@@ -2,7 +2,7 @@
 
 ## Approved scope
 
-The catalogue contains 40 editable electrical job packs and 101 generic materials,
+The catalogue contains 64 editable electrical job packs and 129 generic materials,
 from small socket and lighting jobs through five rewire examples. Heating-controls
 wiring is excluded. Templates are estimating aids, not verified circuit designs,
 live supplier quotes or reconstructed actual bills of materials.
@@ -20,16 +20,42 @@ quantities, routes, access, protection, testing and notification require review.
    job packs & materials, or materials only.
 3. Edit your saved pack's scope, hours, buying costs and selling allowances.
 4. In Materials, paste verified supplier codes and product links into their
-   fields. Generic starters intentionally have no fabricated codes or URLs.
+   fields. Use Other wholesalers → Add wholesaler for other references to the
+   same product; each row can have a stock code, a product link, or both. Generic
+   starters intentionally have no fabricated codes or URLs.
 5. Add the pack in Quotes, review the actual job and costs, and check VAT settings
    before sending. Importing the catalogue never sends quotes or places orders.
 
 Imports are optional and add missing IDs only. Existing starter records and user
-edits are preserved, including the original 70 materials and 20 packs. Importing
+edits are preserved, including the previous 101 materials and 40 packs. Importing
 does not upgrade an existing starter with newer template values. Edit that saved
 record manually when you want to change it. Material records save before packs.
 If saving fails partway, completed records remain and a retry adds only missing
 records. Local persistence/queued sync is not claimed as confirmed cloud sync.
+
+## Multiple wholesaler references
+
+The existing Supplier, Stock code and Supplier link remain the preferred source
+used by quotes and purchase lists. A material can also store up to ten additional
+wholesalers. Each row needs a supplier name and a stock code or valid HTTP(S)
+product link; empty rows are omitted. Codes are preserved as entered after
+trimming spaces. Unsafe links, duplicate identities/codes and oversized inputs
+require review before saving. Pasting a link never downloads the product page or
+reads an account price.
+
+Use as preferred swaps the chosen reference with the current preferred one,
+keeping the old code/link available. Buying and selling allowances remain unchanged
+and need review for the chosen supplier, VAT and pack size. Saving an edit uses the
+existing durable write/retry workflow. Removing a row in an open form changes only
+the draft until Save.
+
+Search and the supplier filter include additional references. Each saved product
+card has Other wholesalers with per-reference Open product, Copy code, Copy link
+and Share actions. Every share contains product identity only, with current
+account/record checks. Existing saved quote and purchase-list snapshots are not
+rewritten when a preferred supplier changes. These optional product fields use
+the existing record payload; hosted role projections may expose only the existing
+preferred fields to field accounts until their separate projection is upgraded.
 
 ## Price and privacy rules
 
@@ -73,8 +99,26 @@ authorized electricians without exposing the office price branches.
 ## AI-assisted estimates
 
 Suggestions prefer relevant recorded work, then ranked packs, then library
-matches. Each material keeps one source allowance. To use a pack's complete
-schedule directly, add that pack in Quotes.
+matches. Broad categories such as Domestic are not enough to match a pack or
+successful historical job. Included work is separated from Questions to confirm
+and Exclusions, including the headings produced by the reviewed connected-AI
+scope. Common electrical wording such as fusebox can match consumer-unit work;
+diagnostic symptoms remain separate from confirmed installation work.
+
+Labour calculations follow the saved rate's unit, including Hour, Day, Half day,
+Call-out and Minimum charge, rather than guessing the unit from its name. A saved
+hourly rate stays hourly even when a longer estimate would otherwise use days.
+These calculations apply only to a new draft; saved rates and quotes are retained.
+
+The local Quote Builder shows included work, questions, exclusions and saved-pack
+match reasons separately. Point counts are review prompts: a different requested
+quantity does not silently rescale a saved bill of materials. This uses saved
+records and defaults without API credit. The separate live photo/recording scope
+workflow still needs its configured funded connection; no additional saved
+supplier/price/customer data is sent to that service by these improvements.
+
+Each material keeps one source allowance. To use a pack's complete schedule
+directly, add that pack in Quotes.
 
 AI Materials Assistant and the local priced-draft builder preserve a suggested
 pack line's exact quantity and saved buying/selling allowances. Library fallback

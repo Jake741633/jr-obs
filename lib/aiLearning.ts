@@ -21,6 +21,7 @@ import type {
 import { invoiceTotal, pricingDocumentNetTotal } from "./workflow";
 import { savedIdentityIndex } from "./assistantIdentity";
 import { validEstimateAmount } from "./estimateCostReview";
+import { analyseEstimateScope, matchEstimateScope, type EstimateScope } from "./estimateScope";
 
 export const AI_LEARNING_MEMORY_KEY = "jr-os-ai-learning-memory";
 
@@ -116,27 +117,8 @@ const jobTypeKeywords: Array<[QuoteTemplateType, string[]]> = [
   ["Domestic", ["domestic", "house", "flat", "socket", "light", "bathroom", "kitchen"]],
 ];
 
-const stopWords = new Set([
-  "and", "the", "for", "with", "from", "this", "that", "then", "into", "onto", "will", "need", "needs",
-  "quote", "price", "estimate", "customer", "builder", "job", "work", "works", "supply", "install", "replace",
-  "move", "add", "new", "electrical",
-]);
-
 function normalise(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-function tokens(value: string) {
-  return new Set(normalise(value).split(/\s+/).filter((token) => token.length > 2 && !stopWords.has(token)));
-}
-
-function overlapScore(left: Set<string>, right: Set<string>) {
-  if (!left.size || !right.size) return 0;
-  let matches = 0;
-  left.forEach((token) => {
-    if (right.has(token)) matches += 1;
-  });
-  return matches / Math.max(1, Math.min(left.size, right.size));
 }
 
 function round(value: number, places = 2) {
@@ -181,12 +163,7 @@ function buildConfidence(
 }
 
 function inferType(value: string, selected?: QuoteTemplateType): QuoteTemplateType {
-  if (selected) return selected;
-  const source = normalise(value);
-  for (const [type, keywords] of jobTypeKeywords) {
-    if (keywords.some((keyword) => source.includes(normalise(keyword)))) return type;
-  }
-  return "Domestic";
+  return analyseEstimateScope(value, selected).jobType;
 }
 
 function labourHours(items: PricingLineItem[], settings: LabourCostSettings) {
@@ -238,19 +215,21 @@ function sourceRows(sources: AiLearningSources) {
 }
 
 export function learningSourceSignature(sources: AiLearningSources) {
-  return `v1-recorded-costs-${hash(sourceRows(sources).join("|"))}`;
+  return `v2-scope-recorded-costs-${hash(sourceRows(sources).join("|"))}`;
 }
 
 function successfulWork(sources: Pick<AiLearningSources, "documents" | "jobs" | "invoices">): SuccessfulWork[] {
-  const quotes = sources.documents.filter((document) => document.type === "Quote");
+  const quotes = savedIdentityIndex(sources.documents).selectable.filter((document) => document.type === "Quote");
+  const jobs = savedIdentityIndex(sources.jobs).selectable;
+  const invoices = savedIdentityIndex(sources.invoices).selectable;
   const jobsByQuote = new Map<string, Job>();
-  const jobsById = new Map(sources.jobs.map((job) => [job.id, job]));
-  sources.jobs.forEach((job) => {
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+  jobs.forEach((job) => {
     if (job.sourceQuoteId) jobsByQuote.set(job.sourceQuoteId, job);
   });
   const invoicesByQuote = new Map<string, Invoice[]>();
   const invoicesByJob = new Map<string, Invoice[]>();
-  sources.invoices.forEach((invoice) => {
+  invoices.forEach((invoice) => {
     if (invoice.quoteId) invoicesByQuote.set(invoice.quoteId, [...(invoicesByQuote.get(invoice.quoteId) ?? []), invoice]);
     if (invoice.jobId) invoicesByJob.set(invoice.jobId, [...(invoicesByJob.get(invoice.jobId) ?? []), invoice]);
   });
@@ -287,7 +266,7 @@ function successfulWork(sources: Pick<AiLearningSources, "documents" | "jobs" | 
     }];
   });
 
-  sources.jobs
+  jobs
     .filter((job) => job.status === "Complete" && !linkedJobs.has(job.id))
     .forEach((job) => {
       const linkedInvoices = invoicesByJob.get(job.id) ?? [];
@@ -344,9 +323,11 @@ function evidenceFromWork(work: SuccessfulWork, relevance: number): AiLearningEv
   };
 }
 
-function relevanceForWork(work: SuccessfulWork, context: Set<string>, jobType: QuoteTemplateType) {
-  const typeScore = work.jobType === jobType ? 45 : 0;
-  const textScore = overlapScore(context, tokens(`${work.title} ${work.notes}`)) * 40;
+function relevanceForWork(work: SuccessfulWork, scope: EstimateScope) {
+  const match = matchEstimateScope(scope, work.notes, `${work.title}\n${work.document?.title || ""}`);
+  if (!match.score) return 0;
+  const typeScore = work.jobType === scope.jobType ? 25 : 0;
+  const textScore = match.score * 60;
   const outcomeScore = (work.completed ? 8 : 0) + (work.paid ? 7 : 0);
   return clampScore(typeScore + textScore + outcomeScore);
 }
@@ -366,12 +347,12 @@ export function buildQuoteLearningSuggestion({
   invoices: Invoice[];
   labourSettings: LabourCostSettings;
 }): AiQuoteLearningSuggestion {
-  const jobType = inferType(notes, selectedJobType || undefined);
-  const context = tokens(`${jobType} ${notes}`);
+  const scope = analyseEstimateScope(notes, selectedJobType);
+  const jobType = scope.jobType;
   const matches = successfulWork({ documents, jobs, invoices })
-    .map((work) => ({ work, relevance: relevanceForWork(work, context, jobType) }))
+    .map((work) => ({ work, relevance: relevanceForWork(work, scope) }))
     .filter(({ relevance }) => relevance >= 35)
-    .toSorted((left, right) => right.relevance - left.relevance || right.work.occurredAt.localeCompare(left.work.occurredAt))
+    .toSorted((left, right) => right.relevance - left.relevance || right.work.occurredAt.localeCompare(left.work.occurredAt) || left.work.key.localeCompare(right.work.key))
     .slice(0, 10);
   const weighted = matches.map(({ work, relevance }) => ({ work, weight: Math.max(0.25, relevance / 100) }));
   const labourSamples = weighted.filter(({ work }) => labourHours(work.items, labourSettings) > 0);
@@ -412,7 +393,7 @@ export function buildQuoteLearningSuggestion({
   };
 }
 
-function buildMaterialPatterns(sources: AiLearningSources) {
+function buildMaterialPatterns(sources: AiLearningSources, scope?: EstimateScope) {
   const library = savedIdentityIndex(sources.materials).unique;
   const patterns = new Map<string, {
     key: string;
@@ -427,7 +408,9 @@ function buildMaterialPatterns(sources: AiLearningSources) {
   }>();
 
   successfulWork(sources).forEach((work) => {
-    const evidence = evidenceFromWork(work, 100);
+    const relevance = scope ? relevanceForWork(work, scope) : 100;
+    if (relevance < 35) return;
+    const evidence = evidenceFromWork(work, relevance);
     work.items.filter((item) => item.category === "Materials").forEach((item) => {
       const key = materialKey(item);
       if (!key) return;
@@ -474,7 +457,7 @@ function buildMaterialPatterns(sources: AiLearningSources) {
           .slice(0, 5),
       };
     })
-    .toSorted((left, right) => right.confidenceScore - left.confidenceScore || right.uses - left.uses);
+    .toSorted((left, right) => right.confidenceScore - left.confidenceScore || right.uses - left.uses || left.key.localeCompare(right.key));
 }
 
 export function buildMaterialLearningPatterns({
@@ -482,7 +465,8 @@ export function buildMaterialLearningPatterns({
   jobs,
   invoices,
   materials,
-}: Pick<AiLearningSources, "documents" | "jobs" | "invoices" | "materials">) {
+  scope,
+}: Pick<AiLearningSources, "documents" | "jobs" | "invoices" | "materials"> & { scope?: EstimateScope }) {
   return buildMaterialPatterns({
     documents,
     jobs,
@@ -492,7 +476,7 @@ export function buildMaterialLearningPatterns({
     builders: [],
     profiles: [],
     interactions: [],
-  });
+  }, scope);
 }
 
 function buildJobPatterns(sources: AiLearningSources, settings: LabourCostSettings) {

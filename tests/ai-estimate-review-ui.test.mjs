@@ -36,8 +36,36 @@ function harness(page) {
   const render = () => { cursor = 0; const tree=mod.exports.default();effects.splice(0).forEach(fn=>fn());return tree; };
   const button = label => { const found = nodes(render()).find(n => n.type === "Button" && text(n).includes(label)); assert.ok(found,label); return found; };
   const field = (label, value) => { const found = nodes(render()).find(n => n.props.label === label) ?? nodes(render()).find(n => n.type === "label" && text(n).startsWith(label))?.props.children?.find?.(n => n?.type === "input" || n?.type === "select"); assert.ok(found,label); if (value !== undefined) found.props.onChange({target:{value}}); return found; };
-  return {render,button,field,writes,attempts,stores,pack,identity,fail(value=true){fail=value;},failAfterWrite(){failAfterWrite=true;},session(){epoch++;session=null;},unmount(){slots.forEach(slot=>slot?.cleanup?.());},generate(){render();const input=nodes(render()).find(n=>n.type==="TextareaField");input.props.onChange({target:{value:"Domestic socket installation"}});button(page==="materials"?"Suggest materials":"Create priced draft").props.onClick();render();},chooseCustomer(){const select=nodes(render()).find(n=>n.type==="select"&&nodes(n).some(o=>o.type==="option"&&o.props.value==="c1"));assert.ok(select);select.props.onChange({target:{value:"c1"}});render();}};
+  return {render,button,field,writes,attempts,stores,pack,identity,fail(value=true){fail=value;},failAfterWrite(){failAfterWrite=true;},session(){epoch++;session=null;},unmount(){slots.forEach(slot=>slot?.cleanup?.());},generate(notes="Domestic socket installation"){render();const input=nodes(render()).find(n=>n.type==="TextareaField");input.props.onChange({target:{value:notes}});button(page==="materials"?"Suggest materials":"Create priced draft").props.onClick();render();},chooseCustomer(){const select=nodes(render()).find(n=>n.type==="select"&&nodes(n).some(o=>o.type==="option"&&o.props.value==="c1"));assert.ok(select);select.props.onChange({target:{value:"c1"}});render();}};
 }
+
+test("local quote review separates included work, survey questions and exclusions without creating records", () => {
+  const h = harness("quote-builder");
+  h.generate("Hallway\nReplacement faceplate\nProposed scope\n- Replace one double socket\nQuestions to confirm\n- Is an EICR needed?\nExclusions\n- Full rewire excluded");
+  const region = label => { const found = nodes(h.render()).find(node => node.props["aria-label"] === label); assert.ok(found, label); return text(found); };
+  assert.match(region("Included work"), /Replace one double socket/);
+  assert.doesNotMatch(region("Included work"), /EICR|rewire|Questions|Exclusions/);
+  assert.match(region("Questions to confirm"), /Is an EICR needed\?/);
+  assert.match(region("Exclusions"), /Full rewire excluded/);
+  assert.match(region("Saved pack matches"), /Domestic socket/);
+  assert.match(region("Saved pack matches"), /socket.*supplied work/);
+  assert.match(text(h.render()), /Local estimate/);
+  assert.equal(h.writes.length, 0);
+  assert.equal(h.field("Unit cost (£)").props.value, "");
+  assert.equal(h.button("Save draft to Quotes").props.disabled, true);
+});
+
+test("local quote review makes mismatched saved point quantities visible without scaling prices", () => {
+  const h = harness("quote-builder");
+  Object.assign(h.pack, { name: "Install four LED downlights", description: "Install four downlights", materials: [{ id: "lights", description: "LED downlight", quantity: 4, unitCost: 5, unitPrice: 9.875 }] });
+  h.generate("Install six LED downlights");
+  const questions = nodes(h.render()).find(node => node.props["aria-label"] === "Questions to confirm");
+  assert.ok(questions, "quantity review must be visible");
+  assert.match(text(questions), /6 downlights.*allows 4/);
+  assert.equal(h.field("Quantity").props.value, 4);
+  assert.equal(h.field("Unit price (£)").props.value, 9.875);
+  assert.equal(h.writes.length, 0);
+});
 
 test("materials page keeps unknown cost blank, blocks save, and accepts an explicit reviewed zero", () => {
   const h=harness("materials");h.generate();assert.equal(h.field("Buying cost each (£)").props.value,"");assert.match(text(h.render()),/cost.*review/i);
