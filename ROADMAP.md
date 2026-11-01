@@ -19,6 +19,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [ ] Physical-phone acceptance of catalogue import/sync, real supplier sharing and real-job pricing comparison before everyday live use
 - [x] Saved calculation evidence linked to jobs, quotes, estimates and surveys
 - [x] Home-screen web app foundation with role-aware launch and installation help
+- [x] Large-icon phone home, on-demand business overview, clearer bottom tabs and collapsible tool menu
 - [x] Phone quick actions and direct JR AI navigation
 - [x] Evidence-backed daily priorities connecting money, quotes, site readiness and diary clashes
 - [x] Correct draft-invoice and scheduled-follow-up false alerts
