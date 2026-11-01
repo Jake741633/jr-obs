@@ -28,7 +28,7 @@ import {
   defaultVatSettings,
   paymentTermsFromTemplate,
 } from "../../../lib/businessSettings";
-import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../../lib/quoteEngine";
+import { defaultQuotePricingSettings } from "../../../lib/quoteEngine";
 import { defaultBusinessTermsTemplates } from "../../../lib/quoteTemplates";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { nextPricingDocumentNumber } from "../../../lib/workflow";
@@ -38,6 +38,7 @@ import { jobPackQuoteDraftAddition, labourQuoteDraftAddition, type QuoteDraftAdd
 import { quoteDraftMaterialChoices, quoteDraftMaterialProduct, quoteDraftPackChoices } from "../../../lib/quoteDraftCatalogue";
 import { materialSupplierReferences } from "../../../lib/materialSuppliers";
 import { validEstimateAmount } from "../../../lib/estimateCostReview";
+import { reviewQuoteDraftPricing, type QuoteDraftPricingIssue } from "../../../lib/quoteDraftPricingReview";
 import { useEstimateSave } from "../../../lib/useEstimateSave";
 import type {
   Builder,
@@ -72,6 +73,7 @@ const defaultLabourSettings: LabourCostSettings = {
 };
 const startingNotes = "";
 const reviewFieldLabels: Record<QuoteLineReviewField, string> = { identity: "line identity", description: "description", quantity: "quantity", unitCost: "buying cost", unitPrice: "selling price", labourHours: "labour time", amount: "amounts or combined totals" };
+const pricingIssueLabels: Record<QuoteDraftPricingIssue, string> = { lines: "Complete the pricing-line review.", contingencyPercent: "Enter a valid quote contingency percentage.", travelCost: "Review travel buying cost; enter zero only when intentional.", travelPrice: "Review travel selling price; enter zero only when intentional.", parkingCost: "Review parking buying cost; enter zero only when intentional.", parkingPrice: "Review parking selling price; enter zero only when intentional.", labourSettings: "Review billable days/hours and target margin in Labour & Costs.", overheads: "Review saved active business overheads and their identities.", vat: "Review the business VAT status and rate.", totals: "Combined amounts exceed the supported limit or cannot be calculated." };
 
 function addDays(days: number) {
   const date = new Date();
@@ -141,6 +143,12 @@ export default function AiQuoteBuilderPage() {
   const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
   const quoteSettings = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
   const vatSettings = vatStore.items[0] ?? defaultVatSettings;
+  function reviewPricing(items: readonly PricingLineItem[], pricing: QuotePricingSettings) {
+    return reviewQuoteDraftPricing({ items, pricing, overheads: overheads.items, labourSettings, vatSettings });
+  }
+  const pricingReview = draft ? reviewPricing(draft.items, draft.pricingSettings) : null;
+  const liveProfitability = pricingReview?.profitability ?? null;
+  const quoteTotals = pricingReview?.totals ?? null;
   const evidenceJob = savedIdentityIndex(jobs.items).unique.get(jobId);
   const ready = [
     documents, customers, builders, jobs, invoices, materials, jobPacks, labourRates, overheads,
@@ -239,7 +247,7 @@ export default function AiQuoteBuilderPage() {
       quoteSettings,
       createId: makeId,
     });
-    setDraft({ ...generated, profitability: reviewQuoteDraftLines(generated.items).complete ? generated.profitability : null });
+    setDraft({ ...generated, profitability: reviewPricing(generated.items, generated.pricingSettings).profitability });
     setReviewOnly(false); setReviewIds([]); setSelectedMaterialId(""); setSelectedLabourId(""); setSelectedJobPackId("");
     setMaterialSearch(""); setPackSearch(""); setSelectedMaterialSupplierId("preferred");
     setJobType(generated.jobType);
@@ -264,9 +272,18 @@ export default function AiQuoteBuilderPage() {
       notes: addition?.customerNotes ? [draft.notes, addition.customerNotes].filter(Boolean).join("\n\n") : draft.notes,
       scopeItems: addition?.scopeItem ? [...draft.scopeItems, addition.scopeItem] : draft.scopeItems,
       costBasisByLineId,
-      profitability: reviewQuoteDraftLines(nextItems).complete ? calculateQuoteProfitability(nextItems, draft.pricingSettings, overheads.items, labourSettings) : null,
+      profitability: reviewPricing(nextItems, draft.pricingSettings).profitability,
     });
     return true;
+  }
+
+  function updateQuotePricing(patch: Partial<Pick<QuotePricingSettings, "contingencyPercent" | "travelCost" | "travelPrice" | "parkingCost" | "parkingPrice">>) {
+    if (!currentSource() || !draft || !estimateSave.canSave()) return;
+    setDraft(current => {
+      if (!current) return current;
+      const pricingSettings = { ...current.pricingSettings, ...patch };
+      return { ...current, pricingSettings, profitability: reviewPricing(current.items, pricingSettings).profitability };
+    });
   }
 
   function appendAddition(addition: QuoteDraftAddition) {
@@ -340,6 +357,12 @@ export default function AiQuoteBuilderPage() {
       setMessage("Review every description, quantity, buying cost, selling price and labour time before saving. Enter zero only when intentional.");
       return;
     }
+    const reviewedPricing = reviewPricing(draft.items, draft.pricingSettings);
+    if (!reviewedPricing.complete || !reviewedPricing.profitability || !reviewedPricing.totals) {
+      setMessage(reviewedPricing.issues.map(issue => pricingIssueLabels[issue]).join(" "));
+      return;
+    }
+    const profitability = reviewedPricing.profitability, reviewedTotals = reviewedPricing.totals;
     if ((customerId && !savedIdentityIndex(customers.items).unique.has(customerId))
       || (builderId && !savedIdentityIndex(builders.items).unique.has(builderId))
       || (jobId && !savedIdentityIndex(jobs.items).unique.has(jobId))) {
@@ -351,7 +374,6 @@ export default function AiQuoteBuilderPage() {
     try {
       const document = estimateSave.save(id => {
         const now = new Date().toISOString();
-        const profitability = calculateQuoteProfitability(draft.items, draft.pricingSettings, overheads.items, labourSettings);
         return {
           id,
           number: nextPricingDocumentNumber(documents.items, "Quote"),
@@ -363,8 +385,8 @@ export default function AiQuoteBuilderPage() {
           title: draft.title.trim(),
           siteAddress: siteAddress.trim() || undefined,
           validUntil: validUntil || addDays(30),
-          vatEnabled: vatSettings.registrationStatus === "VAT registered",
-          vatRate: vatSettings.defaultRate,
+          vatEnabled: reviewedTotals.vatEnabled,
+          vatRate: reviewedTotals.vatRate,
           items: draft.items,
           pricingSettings: draft.pricingSettings,
           profitability: {
@@ -411,6 +433,12 @@ export default function AiQuoteBuilderPage() {
 
       {message ? <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
       {estimateSave.saved ? <Card><p className="mb-3 text-sm text-emerald-200">{estimateSave.saved.number} is saved. Use Quotes for changes, or generate a priced draft again to start another quote.</p>{estimateSave.saved.recovered ? <p className="mb-3 text-sm text-amber-200">Recovered the previously saved version. Any later draft edits were not saved; open the saved quote to review it.</p> : null}<Link href={`/quotes/${encodeURIComponent(estimateSave.saved.id)}`} className="inline-flex min-h-12 items-center rounded-xl bg-cyan-400 px-4 font-semibold text-slate-950">Open saved quote · {estimateSave.saved.number}</Link></Card> : null}
+
+      {draft ? <nav aria-label="Quote draft sections" className="grid grid-cols-3 gap-2 rounded-xl border border-slate-700 bg-slate-900 p-2 text-sm font-semibold">
+        <a href="#quote-draft-scope" className="flex min-h-12 items-center justify-center rounded-lg px-2 text-center hover:bg-slate-800">Scope</a>
+        <a href="#quote-draft-lines" className="flex min-h-12 items-center justify-center rounded-lg px-2 text-center hover:bg-slate-800">Pricing lines</a>
+        <a href="#quote-draft-review" className="flex min-h-12 items-center justify-center rounded-lg bg-cyan-400/10 px-2 text-center text-cyan-200">Review total</a>
+      </nav> : null}
 
       <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
         <div className="space-y-6">
@@ -485,7 +513,7 @@ export default function AiQuoteBuilderPage() {
           </Card>
 
           {draft ? (
-            <Card>
+            <Card id="quote-draft-scope" role="region" aria-label="Quote draft scope" tabIndex={-1} className="scroll-mt-4">
               <div className="flex items-center gap-3"><CheckCircle2 className="size-6 text-emerald-300" /><div><h2 className="text-xl font-bold">Detected scope</h2><p className="text-sm text-slate-500">Local estimate · {draft.jobType} · {draft.pricing.evidenceCount} matching saved record{draft.pricing.evidenceCount === 1 ? "" : "s"}</p></div></div>
               <p className="mt-3 text-sm text-slate-400">The priced draft uses saved records and defaults; no API credit is required. Check each allowance against the site.</p>
               <InputField className="mt-5" disabled={Boolean(estimateSave.saved)} label="Quote title" value={draft.title} onChange={(event) => { if (estimateSave.canSave()) setDraft({ ...draft, title: event.target.value }); }} />
@@ -519,7 +547,7 @@ export default function AiQuoteBuilderPage() {
             </Card>
           ) : (
             <>
-              <Card>
+              <Card id="quote-draft-lines" role="region" aria-label="Quote draft pricing lines" tabIndex={-1} className="scroll-mt-4">
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Draft pricing lines</h2><p className="text-sm text-slate-500">Everything remains editable before it reaches Quotes.</p></div><span className="rounded-full bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300">{draft.items.length} lines</span></div>
                 <p className="mt-4 text-sm text-amber-200">Every addition appends separate lines. Check for overlapping labour, materials and other charges already in this draft.</p>
                 <details className="mt-5 rounded-xl border border-slate-700 p-3">
@@ -628,21 +656,43 @@ export default function AiQuoteBuilderPage() {
 
               <Card>
                 <h2 className="text-xl font-bold">Pre-send profitability</h2>
-                {draftReview.complete && draft.profitability ? <>
+                {draftReview.complete && liveProfitability ? <>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Cost price</p><p className="mt-1 text-xl font-bold">{money.format(draft.profitability.costPrice)}</p></div>
-                  <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Selling price</p><p className="mt-1 text-xl font-bold">{money.format(draft.profitability.sellingPrice)}</p></div>
-                  <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Expected profit</p><p className={`mt-1 text-xl font-bold ${draft.profitability.expectedProfit >= 0 ? "text-emerald-300" : "text-red-300"}`}>{money.format(draft.profitability.expectedProfit)}</p></div>
-                  <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Net margin</p><p className={`mt-1 text-xl font-bold ${draft.profitability.netMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}`}>{draft.profitability.netMargin.toFixed(1)}%</p></div>
+                  <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Cost price</p><p className="mt-1 text-xl font-bold">{money.format(liveProfitability.costPrice)}</p></div>
+                  <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Selling price before VAT</p><p className="mt-1 text-xl font-bold">{money.format(liveProfitability.sellingPrice)}</p></div>
+                  <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Expected profit</p><p className={`mt-1 text-xl font-bold ${liveProfitability.expectedProfit >= 0 ? "text-emerald-300" : "text-red-300"}`}>{money.format(liveProfitability.expectedProfit)}</p></div>
+                  <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Net margin</p><p className={`mt-1 text-xl font-bold ${liveProfitability.netMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}`}>{liveProfitability.netMargin.toFixed(1)}%</p></div>
                 </div>
-                <p className="mt-4 text-sm text-slate-500">Includes {money.format(draft.profitability.overheadCost)} allocated business overhead and {draft.pricingSettings.contingencyPercent.toFixed(1)}% contingency.</p>
+                <p className="mt-4 text-sm text-slate-500">Includes {money.format(liveProfitability.overheadCost)} allocated business overhead and {draft.pricingSettings.contingencyPercent.toFixed(1)}% contingency.</p>
                 </> : <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100">Costs need review before profit can be estimated or this quote saved. Check descriptions, quantities, buying costs, selling prices and labour time. Enter £0 only when intentional.</p>}
                 {draft.pricing.learnedSellingPrice > 0 ? <p className="mt-2 text-xs text-slate-500">Closest successful records averaged {money.format(draft.pricing.learnedSellingPrice)} before VAT. This is context, not a price cap.</p> : null}
               </Card>
 
               <Card><WhyRecommendation evidence={draft.pricing.evidence} /></Card>
 
-              <Card>
+              <Card id="quote-draft-review" role="region" aria-label="Quote total review" tabIndex={-1} className="scroll-mt-4">
+                <h2 className="text-xl font-bold">Review quote total</h2>
+                <p className="mt-2 text-sm text-slate-400">Includes all {draft.items.length} pricing lines, including hidden review rows. These allowances belong to this quote only.</p>
+                <details className="my-4 rounded-xl border border-slate-700 p-3">
+                  <summary className="min-h-12 cursor-pointer py-3 font-semibold">Adjust quote allowances</summary>
+                  <fieldset disabled={!estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} className="mt-3 grid gap-3 sm:grid-cols-2">
+                    {([['contingencyPercent', 'Quote contingency (%)'], ['travelCost', 'Quote travel cost (£)'], ['travelPrice', 'Quote travel price (£)'], ['parkingCost', 'Quote parking cost (£)'], ['parkingPrice', 'Quote parking price (£)']] as const).map(([field, label]) => <InputField key={field} label={label} type="number" min="0" step="any" value={Number.isFinite(draft.pricingSettings[field]) ? draft.pricingSettings[field] : ""} placeholder="Enter zero if none" onChange={event => updateQuotePricing({ [field]: event.target.value.trim() === "" ? NaN : Number(event.target.value) })} />)}
+                  </fieldset>
+                  <p className="mt-3 text-xs text-slate-400">Check for travel, parking or contingency already included as pricing lines. These changes preserve your unit prices and saved defaults. Clear means unknown; enter zero when intentional.</p>
+                </details>
+                {quoteTotals ? <dl className="mb-5 space-y-3 rounded-xl bg-slate-950 p-4 text-sm">
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1"><dt>Pricing lines</dt><dd>{money.format(quoteTotals.lineSubtotal)}</dd></div>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1"><dt>Contingency ({draft.pricingSettings.contingencyPercent}%)</dt><dd>{money.format(quoteTotals.contingency)}</dd></div>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1"><dt>Travel selling allowance</dt><dd>{money.format(quoteTotals.travelPrice)}</dd></div>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1"><dt>Parking selling allowance</dt><dd>{money.format(quoteTotals.parkingPrice)}</dd></div>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 border-t border-slate-700 pt-3 font-semibold"><dt>Before VAT</dt><dd>{money.format(quoteTotals.net)}</dd></div>
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1"><dt>{quoteTotals.vatEnabled ? `VAT (${quoteTotals.vatRate}%)` : "VAT not charged"}</dt><dd>{money.format(quoteTotals.vat)}</dd></div>
+                  {!quoteTotals.vatEnabled ? <div><dt className="inline">Saved business VAT status: </dt><dd className="inline">{vatSettings.registrationStatus}</dd></div> : null}
+                  <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 border-t border-slate-700 pt-3 text-xl font-bold text-cyan-200"><dt>Quote total</dt><dd>{money.format(quoteTotals.total)}</dd></div>
+                </dl> : <div role="alert" className="mb-5 rounded-xl border border-amber-500/20 p-4 text-sm text-amber-200"><p className="font-semibold">Review required before totals or saving</p><ul className="mt-2 list-disc space-y-2 pl-5">{pricingReview?.issues.map(issue => <li key={issue}>{pricingIssueLabels[issue]}</li>)}</ul></div>}
+                {pricingReview?.issues.some(issue => issue === "overheads" || issue === "labourSettings") ? <Link href="/labour-costs" target="_blank" rel="noopener noreferrer" className="mb-3 inline-flex min-h-12 items-center text-sm font-semibold text-cyan-300 underline">Review Labour & Costs in a new tab</Link> : null}
+                {pricingReview?.issues.includes("vat") ? <Link href="/business" target="_blank" rel="noopener noreferrer" className="mb-3 inline-flex min-h-12 items-center text-sm font-semibold text-cyan-300 underline">Review business VAT settings in a new tab</Link> : null}
+                <p className="mb-4 text-xs text-slate-400">Calculated at full precision; displayed amounts are rounded. VAT follows the saved business status/rate and the existing before-VAT quote allowances. Save as a draft, then review the saved quote before sending.</p>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="grid gap-2 text-sm font-medium text-slate-300">
                     <span>Terms & Conditions</span>
@@ -659,7 +709,8 @@ export default function AiQuoteBuilderPage() {
                     </select>
                   </label>
                 </div>
-                <Button className="mt-5 min-h-12 w-full" disabled={!draftReview.complete || !estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} onClick={saveDraft}><Save className="mr-2 size-4" />Save draft to Quotes</Button>
+                <Button className="mt-5 min-h-12 w-full" disabled={!pricingReview?.complete || !estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} onClick={saveDraft}><Save className="mr-2 size-4" />Save draft to Quotes</Button>
+                <a href="#quote-draft-lines" className="mt-3 flex min-h-12 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold text-slate-200">Back to pricing lines</a>
                 <Link href="/quotes" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold text-slate-200 hover:bg-slate-800">Open Quote Engine 2.0</Link>
               </Card>
             </>

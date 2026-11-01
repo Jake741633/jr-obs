@@ -199,6 +199,25 @@ Search/Clear resets picker choices while retaining all draft edits, notes,
 review-filter identities and totals. Browsing does not invalidate unrelated
 checked-media work. Search results describe saved items, not supplier availability.
 
+Draft section links jump between Scope, Pricing lines and Review total without
+leaving the page. The total review includes every line, quote contingency,
+travel/parking selling allowances, net amount, saved VAT status/rate and full
+total. Adjust quote allowances edits only this draft's contingency and separate
+travel/parking buying/selling values. It does not update Quote Engine defaults or
+reprice material lines. Clearing leaves an unknown value; enter zero explicitly
+when there is no allowance. Check for amounts already included in pack lines.
+
+Profitability and save use a fresh validation/calculation against current business
+overheads, billable settings and VAT inputs. Unknown/invalid financial fields,
+ambiguous active overheads or unsupported totals withhold clean profit/totals and
+block saving; valid losses remain visible. Inactive overheads are ignored only
+when explicitly inactive. Business-setting recovery links open a new tab to keep
+the current unsaved draft. VAT is added only for the saved VAT registered status;
+Registration pending stays explicitly uncharged. Calculations retain the existing
+net-price document semantics and raw precision; currency display is rounded.
+Save still creates a draft for review in Quotes before sending, without any
+automatic customer messaging or provider calls.
+
 Video support in this batch means a validated HTTPS link to a video the user
 already stores elsewhere, with manually entered site notes or spoken details.
 These notes are labelled as user-entered. The separate Quote Builder can prepare
