@@ -33,7 +33,7 @@ import { defaultBusinessTermsTemplates } from "../../../lib/quoteTemplates";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
 import { nextPricingDocumentNumber } from "../../../lib/workflow";
 import { savedIdentityIndex } from "../../../lib/assistantIdentity";
-import { reviewEstimateCosts } from "../../../lib/estimateCostReview";
+import { editQuoteDraftLine, materialQuoteDraftLine, reviewQuoteDraftLines, type QuoteLineReviewField } from "../../../lib/quoteDraftLines";
 import { useEstimateSave } from "../../../lib/useEstimateSave";
 import type {
   Builder,
@@ -67,6 +67,7 @@ const defaultLabourSettings: LabourCostSettings = {
   updatedAt: new Date(0).toISOString(),
 };
 const startingNotes = "";
+const reviewFieldLabels: Record<QuoteLineReviewField, string> = { identity: "line identity", description: "description", quantity: "quantity", unitCost: "buying cost", unitPrice: "selling price", labourHours: "labour time", amount: "amounts or combined totals" };
 
 function addDays(days: number) {
   const date = new Date();
@@ -102,6 +103,12 @@ export default function AiQuoteBuilderPage() {
   const [paymentTermsTemplateId, setPaymentTermsTemplateId] = useState("");
   const [draft, setDraft] = useState<AiQuoteDraft | null>(null);
   const [message, setMessage] = useState("");
+  const [selectedMaterialId, setSelectedMaterialId] = useState("");
+  const [reviewOnly, setReviewOnly] = useState(false);
+  const [reviewIds, setReviewIds] = useState<string[]>([]);
+  const lastMaterialAddition = useRef<object | null>(null);
+  const draftReview = reviewQuoteDraftLines(draft?.items ?? []);
+  const materialChoices = [...savedIdentityIndex(materials.items).unique.values()].filter(item => typeof item.name === "string" && item.name.trim()).sort((a, b) => a.name.localeCompare(b.name, "en-GB"));
 
   const labourSettings = labourSettingsStore.items[0] ?? defaultLabourSettings;
   const quoteSettings = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
@@ -120,9 +127,9 @@ export default function AiQuoteBuilderPage() {
   const estimateSave = useEstimateSave<PricingDocument>(ready, saveContext);
   const sourceContext = useMemo(() => ({ notes, jobType, ready, saveContext, materials: materials.items, jobPacks: jobPacks.items, labourRates: labourRates.items, invoices: invoices.items, quoteSettings }),
     [notes, jobType, ready, saveContext, materials.items, jobPacks.items, labourRates.items, invoices.items, quoteSettings]);
-  const latestSource = useRef({ active: false, context: sourceContext });
+  const latestSource = useRef({ active: false, context: sourceContext, selectedMaterialId });
   useLayoutEffect(() => {
-    latestSource.current = { active: true, context: sourceContext };
+    latestSource.current = { active: true, context: sourceContext, selectedMaterialId };
     return () => { latestSource.current.active = false; };
   });
   const currentSource = () => ready && latestSource.current.active && latestSource.current.context === sourceContext;
@@ -172,7 +179,8 @@ export default function AiQuoteBuilderPage() {
       quoteSettings,
       createId: makeId,
     });
-    setDraft(generated);
+    setDraft({ ...generated, profitability: reviewQuoteDraftLines(generated.items).complete ? generated.profitability : null });
+    setReviewOnly(false); setReviewIds([]); setSelectedMaterialId("");
     setJobType(generated.jobType);
     setValidUntil((current) => current || addDays(30));
     const defaultTerms = termsStore.items.find((template) => template.active && template.name.toLowerCase().includes(generated.jobType.toLowerCase()))
@@ -185,19 +193,39 @@ export default function AiQuoteBuilderPage() {
     return true;
   }
 
-  function updateItems(nextItems: PricingLineItem[], editedCostId?: string) {
-    if (!draft || !estimateSave.canSave()) return;
+  function updateItems(nextItems: PricingLineItem[], editedCostId?: string, addedBasis?: { id: string; costBasis: string }) {
+    if (!currentSource() || !draft || !estimateSave.canSave()) return false;
+    const costBasisByLineId = { ...draft.costBasisByLineId };
+    if (editedCostId) costBasisByLineId[editedCostId] = nextItems.find(item => item.id === editedCostId)?.unitCost === undefined ? "Not recorded" : "Entered for this estimate";
+    if (addedBasis) costBasisByLineId[addedBasis.id] = addedBasis.costBasis;
     setDraft({
       ...draft,
       items: nextItems,
-      costBasisByLineId: editedCostId ? { ...draft.costBasisByLineId, [editedCostId]: nextItems.find(item => item.id === editedCostId)?.unitCost === undefined ? "Not recorded" : "Entered for this estimate" } : draft.costBasisByLineId,
-      profitability: reviewEstimateCosts(nextItems).complete ? calculateQuoteProfitability(nextItems, draft.pricingSettings, overheads.items, labourSettings) : null,
+      costBasisByLineId,
+      profitability: reviewQuoteDraftLines(nextItems).complete ? calculateQuoteProfitability(nextItems, draft.pricingSettings, overheads.items, labourSettings) : null,
     });
+    return true;
   }
 
   function updateLine(id: string, patch: Partial<PricingLineItem>) {
-    if (!draft) return;
-    updateItems(draft.items.map((item) => item.id === id ? { ...item, ...patch } : item), "unitCost" in patch ? id : undefined);
+    if (!draft || !savedIdentityIndex(draft.items).unique.has(id)) return;
+    updateItems(draft.items.map((item) => item.id === id ? editQuoteDraftLine(item, patch) : item), "unitCost" in patch ? id : undefined);
+  }
+
+  function addMaterial(id?: string) {
+    if (!currentSource() || !draft || !estimateSave.canSave() || lastMaterialAddition.current === sourceContext
+      || (id !== undefined && id !== latestSource.current.selectedMaterialId)) return;
+    const material = id ? savedIdentityIndex(materials.items).unique.get(id) : null;
+    if (id !== undefined && !material) { setMessage("The saved material is missing or duplicated. Choose a current material again."); return; }
+    try {
+      const nextId = makeId("ai-line");
+      if (draft.items.some(item => item.id === nextId)) throw new Error("A line identity was repeated. Try adding the material again.");
+      const added = materialQuoteDraftLine(material ?? null, nextId);
+      if (!updateItems([...draft.items, added.line], undefined, { id: nextId, costBasis: added.costBasis })) return;
+      lastMaterialAddition.current = sourceContext; setSelectedMaterialId("");
+      if (reviewOnly) setReviewIds(current => [...current, nextId]);
+      setMessage("Material line added to this draft. Check its description, quantity and buying/selling allowances before saving.");
+    } catch (error) { setMessage(error instanceof Error ? error.message : "This material could not be added. Your draft is unchanged."); }
   }
 
   function saveDraft() {
@@ -214,8 +242,8 @@ export default function AiQuoteBuilderPage() {
       setMessage("The quote needs a title and at least one priced line.");
       return;
     }
-    if (!reviewEstimateCosts(draft.items).complete) {
-      setMessage("Review every quantity, buying cost and selling price before saving. Enter zero only when intentional.");
+    if (!reviewQuoteDraftLines(draft.items).complete) {
+      setMessage("Review every description, quantity, buying cost, selling price and labour time before saving. Enter zero only when intentional.");
       return;
     }
     if ((customerId && !savedIdentityIndex(customers.items).unique.has(customerId))
@@ -398,31 +426,62 @@ export default function AiQuoteBuilderPage() {
             <>
               <Card>
                 <div className="flex items-center justify-between gap-3"><div><h2 className="text-xl font-bold">Draft pricing lines</h2><p className="text-sm text-slate-500">Everything remains editable before it reaches Quotes.</p></div><span className="rounded-full bg-violet-500/10 px-3 py-1 text-xs font-semibold text-violet-300">{draft.items.length} lines</span></div>
+                <details className="mt-5 rounded-xl border border-slate-700 p-3">
+                  <summary className="min-h-12 cursor-pointer py-3 font-semibold">Add a material to this draft</summary>
+                  <p className="my-3 text-sm text-slate-400">Use a saved material or add a blank allowance without leaving the quote. Each addition is a separate line.</p>
+                  <fieldset disabled={!estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} className="space-y-3">
+                    <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Saved material</span>
+                      <select value={selectedMaterialId} onChange={event => setSelectedMaterialId(event.target.value)} className="min-h-12 min-w-0 max-w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-base">
+                        <option value="">Choose a saved material</option>
+                        {materialChoices.map(material => <option key={material.id} value={material.id}>{material.name}{typeof material.stockCode === "string" && material.stockCode ? ` · ${material.stockCode}` : ""}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex flex-wrap gap-3"><Button className="min-h-12" disabled={!selectedMaterialId} onClick={() => addMaterial(selectedMaterialId)}>Add saved material</Button><Button className="min-h-12" variant="secondary" onClick={() => addMaterial()}>Add blank material allowance</Button></div>
+                  </fieldset>
+                </details>
+                <section aria-label="Pricing review" className="mt-5 space-y-3 rounded-xl border border-cyan-500/20 p-3">
+                  <p role="status" className="font-semibold">{draftReview.needsReviewCount} {draftReview.needsReviewCount === 1 ? "line needs" : "lines need"} review</p>
+                  <p className="text-sm text-slate-400">Calculations and saving always include all {draft.items.length} lines, including any hidden by this review list.</p>
+                  {!draftReview.costs.totalsValid ? <p className="text-sm text-amber-200">Combined amounts exceed the supported limit. Review the quantities and allowances before saving.</p> : null}
+                  <label className="flex min-h-12 items-center gap-3 text-sm"><input type="checkbox" aria-label="Show lines needing review" checked={reviewOnly} onChange={event => { setReviewOnly(event.target.checked); setReviewIds(event.target.checked ? draftReview.lines.filter(line => line.fields.length).map(line => line.id) : []); }} />Show lines needing review</label>
+                  {reviewOnly ? <><p className="text-xs text-slate-400">Lines stay visible while you edit. Refresh this list when you are ready to hide completed lines.</p><Button className="min-h-12" variant="secondary" onClick={() => setReviewIds(draftReview.lines.filter(line => line.fields.length).map(line => line.id))}>Refresh review list</Button></> : null}
+                </section>
                 <div className="mt-5 space-y-3">
                   {(["Labour", "Materials", "Other"] as const).map(group => {
-                    const lines = draft.items.filter(item => group === "Other" ? item.category !== "Labour" && item.category !== "Materials" : item.category === group);
-                    if (group === "Other" && !lines.length) return null;
+                    const allLines = draft.items.map((item, index) => ({ item, index })).filter(({ item }) => group === "Other" ? item.category !== "Labour" && item.category !== "Materials" : item.category === group);
+                    const lines = allLines.filter(({ item }) => !reviewOnly || reviewIds.includes(item.id));
+                    if (group === "Other" && !allLines.length) return null;
                     return <section key={group} aria-label={`${group} pricing lines`} className="space-y-3">
-                    <h3 className="text-lg font-bold">{group} <span className="text-sm font-normal text-slate-400">· {lines.length} line{lines.length === 1 ? "" : "s"}</span></h3>
-                    {!lines.length ? <p className="rounded-xl border border-amber-500/20 p-3 text-sm text-amber-100">{group === "Labour" ? <>No priced labour line was created. Check the scope and <Link href="/labour-costs" className="inline-flex min-h-12 items-center font-semibold underline">saved labour rates</Link>.</> : <>No matching material lines were found. Review the scope, <Link href="/starter-library" className="inline-flex min-h-12 items-center font-semibold underline">browse job packs</Link> or add materials in the Quote Engine.</>}</p> : null}
-                    {lines.map((item) => (
-                    <div key={item.id} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
-                      <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category}</p><p className="mt-1 font-medium">{item.description}</p></div><button type="button" onClick={() => updateItems(draft.items.filter((line) => line.id !== item.id))} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300" aria-label={`Remove ${item.description}`}><Trash2 className="size-4" /></button></div>
-                      <fieldset disabled={Boolean(estimateSave.saved)} className="mt-3 grid gap-3 sm:grid-cols-3">
-                        <InputField label="Quantity" type="number" min="0" step="any" value={item.quantity} onChange={(event) => updateLine(item.id, { quantity: Number(event.target.value || 0) })} />
-                        <InputField label="Unit cost (£)" type="number" min="0" step="any" value={item.unitCost ?? ""} placeholder="Not recorded" onChange={(event) => updateLine(item.id, { unitCost: event.target.value.trim() === "" ? undefined : Number(event.target.value) })} />
-                        <InputField label="Unit price (£)" type="number" min="0" step="any" value={Number.isFinite(item.unitPrice) ? item.unitPrice : ""} onChange={(event) => updateLine(item.id, { unitPrice: event.target.value.trim() === "" ? NaN : Number(event.target.value) })} />
-                      </fieldset>
-                      <p className="mt-3 text-sm text-slate-400">Cost basis: {draft.costBasisByLineId[item.id] ?? "Saved labour rate"}. Check this allowance for the job.</p>
-                    </div>
-                    ))}</section>;
+                    <h3 className="text-lg font-bold">{group} <span className="text-sm font-normal text-slate-400">· {allLines.length} line{allLines.length === 1 ? "" : "s"}{reviewOnly ? ` · ${lines.length} shown` : ""}</span></h3>
+                    {!allLines.length ? <p className="rounded-xl border border-amber-500/20 p-3 text-sm text-amber-100">{group === "Labour" ? <>No priced labour line was created. Check the scope and <Link href="/labour-costs" className="inline-flex min-h-12 items-center font-semibold underline">saved labour rates</Link>.</> : <>No matching material lines were found. Review the scope, <Link href="/starter-library" className="inline-flex min-h-12 items-center font-semibold underline">browse job packs</Link> or add a material allowance above.</>}</p> : !lines.length ? <p className="text-sm text-slate-400">No {group.toLowerCase()} lines in the current review list. Show all lines to edit them.</p> : null}
+                    {lines.map(({ item, index }) => {
+                      const lineReview = draftReview.lines[index];
+                      return <article key={`${item.id}-${index}`} aria-label={`Pricing line ${index + 1}`} className="rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+                        <div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{item.category}</p><p className="mt-1 font-medium">{item.description || "New material allowance"}</p></div><button type="button" disabled={!lineReview.editable || !estimateSave.enabled || Boolean(estimateSave.saved)} onClick={() => { if (lineReview.editable) updateItems(draft.items.filter(line => line.id !== item.id)); }} className="inline-flex min-h-12 min-w-12 items-center justify-center rounded-lg text-slate-400 hover:bg-red-500/10 hover:text-red-300 disabled:opacity-40" aria-label={`Remove ${item.description || "new material allowance"}`}><Trash2 className="size-5" /></button></div>
+                        {lineReview.fields.length ? <p className="mt-3 text-sm text-amber-200">Needs review: {lineReview.fields.map(field => reviewFieldLabels[field]).join(", ")}.{!lineReview.editable ? " Regenerate the draft to resolve the line identity before editing." : ""}</p> : null}
+                        <fieldset disabled={!lineReview.editable || !estimateSave.enabled || Boolean(estimateSave.saved)} className="mt-3 space-y-3">
+                          <InputField label="Description" value={item.description ?? ""} maxLength={500} onChange={event => updateLine(item.id, { description: event.target.value })} />
+                          <div className="grid gap-3 sm:grid-cols-3">
+                            <InputField label="Quantity" type="number" min="0" step="any" value={Number.isFinite(item.quantity) ? item.quantity : ""} onChange={event => updateLine(item.id, { quantity: Number(event.target.value || 0) })} />
+                            <InputField label="Unit cost (£)" type="number" min="0" step="any" value={Number.isFinite(item.unitCost) ? item.unitCost : ""} placeholder="Not recorded" onChange={event => updateLine(item.id, { unitCost: event.target.value.trim() === "" ? undefined : Number(event.target.value) })} />
+                            <InputField label="Unit price (£)" type="number" min="0" step="any" value={Number.isFinite(item.unitPrice) ? item.unitPrice : ""} onChange={event => updateLine(item.id, { unitPrice: event.target.value.trim() === "" ? NaN : Number(event.target.value) })} />
+                          </div>
+                          {item.category === "Labour" && item.labourMode !== "Hours" ? <InputField label="Time allowance (hours)" type="number" min="0" step="any" value={Number.isFinite(item.labourHours) ? item.labourHours : ""} onChange={event => updateLine(item.id, { labourHours: event.target.value.trim() === "" ? undefined : Number(event.target.value) })} /> : null}
+                        </fieldset>
+                        {item.category === "Labour" ? <p className="mt-3 text-xs text-slate-400">{item.labourMode === "Hours" ? "Hourly time follows Quantity. Re-enter Quantity if its time allowance needs correcting." : "Billing quantity and time allowance are separate. Check the hours used for overheads."}</p> : null}
+                        <p className="mt-3 text-sm font-semibold">Line selling amount: {lineReview.sellingAmount === undefined ? "Needs review" : money.format(lineReview.sellingAmount)}</p>
+                        <p className="mt-1 text-sm text-slate-400">Buying allowance: {lineReview.buyingAmount === undefined ? "Needs review" : money.format(lineReview.buyingAmount)}</p>
+                        <p className="mt-3 text-sm text-slate-400">Cost basis: {draft.costBasisByLineId[item.id] ?? "Saved labour rate"}. Check this allowance for the job.</p>
+                      </article>;
+                    })}</section>;
                   })}
                 </div>
+                <p className="mt-4 text-xs text-slate-400">Line amounts exclude contingency, travel, parking and VAT. The complete quote calculation applies those settings.</p>
               </Card>
 
               <Card>
                 <h2 className="text-xl font-bold">Pre-send profitability</h2>
-                {draft.profitability ? <>
+                {draftReview.complete && draft.profitability ? <>
                 <div className="mt-4 grid gap-3 sm:grid-cols-2">
                   <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Cost price</p><p className="mt-1 text-xl font-bold">{money.format(draft.profitability.costPrice)}</p></div>
                   <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Selling price</p><p className="mt-1 text-xl font-bold">{money.format(draft.profitability.sellingPrice)}</p></div>
@@ -430,7 +489,7 @@ export default function AiQuoteBuilderPage() {
                   <div className="rounded-xl bg-slate-950 p-4"><p className="text-sm text-slate-500">Net margin</p><p className={`mt-1 text-xl font-bold ${draft.profitability.netMargin >= labourSettings.targetNetMargin ? "text-emerald-300" : "text-amber-300"}`}>{draft.profitability.netMargin.toFixed(1)}%</p></div>
                 </div>
                 <p className="mt-4 text-sm text-slate-500">Includes {money.format(draft.profitability.overheadCost)} allocated business overhead and {draft.pricingSettings.contingencyPercent.toFixed(1)}% contingency.</p>
-                </> : <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100">Costs need review before profit can be estimated or this quote saved. Fill every buying cost and check quantities and selling prices. Enter £0 only when intentional.</p>}
+                </> : <p className="mt-4 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 text-sm text-amber-100">Costs need review before profit can be estimated or this quote saved. Check descriptions, quantities, buying costs, selling prices and labour time. Enter £0 only when intentional.</p>}
                 {draft.pricing.learnedSellingPrice > 0 ? <p className="mt-2 text-xs text-slate-500">Closest successful records averaged {money.format(draft.pricing.learnedSellingPrice)} before VAT. This is context, not a price cap.</p> : null}
               </Card>
 
@@ -453,7 +512,7 @@ export default function AiQuoteBuilderPage() {
                     </select>
                   </label>
                 </div>
-                <Button className="mt-5 w-full" disabled={!reviewEstimateCosts(draft.items).complete || !estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} onClick={saveDraft}><Save className="mr-2 size-4" />Save draft to Quotes</Button>
+                <Button className="mt-5 min-h-12 w-full" disabled={!draftReview.complete || !estimateSave.enabled || !estimateSave.hasDraft || Boolean(estimateSave.saved)} onClick={saveDraft}><Save className="mr-2 size-4" />Save draft to Quotes</Button>
                 <Link href="/quotes" className="mt-3 flex min-h-11 items-center justify-center rounded-xl border border-slate-700 text-sm font-semibold text-slate-200 hover:bg-slate-800">Open Quote Engine 2.0</Link>
               </Card>
             </>

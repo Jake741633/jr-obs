@@ -4,7 +4,7 @@ export function hasSavedIdentity(id: unknown): id is string {
   return typeof id === "string" && Boolean(id.trim());
 }
 
-export function savedIdentityIndex<T extends { id: string }>(records: T[]) {
+export function savedIdentityIndex<T extends { id: string }>(records: readonly T[]) {
   const counts = new Map<string, number>();
   for (const record of records) if (hasSavedIdentity(record.id)) counts.set(record.id, (counts.get(record.id) || 0) + 1);
   const selectable = records.filter((record) => hasSavedIdentity(record.id) && counts.get(record.id) === 1);
