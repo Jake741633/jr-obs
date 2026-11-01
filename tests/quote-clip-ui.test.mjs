@@ -47,6 +47,30 @@ test('a parent rejected recording remains available for a corrected handoff', as
  h.props.onUse=value=>h.uses.push(value); h.render(); h.button('Use video frames without speech').props.onClick();
  assert.equal(h.uses.length,1);
 });
+test('a native recording result arriving during identity loading is held without requesting AI',async()=>{
+ const h=harness();h.props.mediaContext={owner:"same"};h.props.canSelectLocal=()=>true;
+ const choose=nodes(h.render()).find(n=>n.type==='input'&&n.props.type==='file').props.onChange;
+ h.props.enabled=false;h.props.context={loading:true};h.render();choose({target:{files:[{name:'camera-return.mov',type:'video/quicktime',size:50000}],value:''}});h.render();
+ assert.equal(h.calls.length,0);assert.equal(h.prepares.length,0);assert.doesNotMatch(text(h.render()),/camera-return.mov/);
+ h.props.enabled=true;h.props.context={verified:true};h.render();assert.match(text(h.render()),/camera-return.mov/);await h.button('Prepare sound and frames').props.onClick();assert.equal(h.prepares.length,1);
+});
+test('completed recording preparation and checked speech survive same-owner loading and updated notes',async()=>{
+ const h=harness();h.props.mediaContext={owner:'same'};h.props.canSelectLocal=()=>true;await h.ready();await h.transcribe();h.review();const oldUse=h.button('Use checked transcript').props.onClick;
+ h.props.enabled=false;h.props.context={loading:true};h.render();oldUse();assert.equal(h.uses.length,0);assert.doesNotMatch(text(h.render()),/Use checked transcript/);
+ h.props.enabled=true;h.props.context={verified:true};h.props.notes='Updated kitchen notes';h.render();assert.equal(h.button('Use checked transcript').props.disabled,false);h.button('Use checked transcript').props.onClick();
+ assert.equal(h.uses.length,1);assert.equal(h.prepares.length,1);assert.equal(h.calls.length,1);
+});
+test('delayed recording events reject a changed target or session and cannot collect files on initial unverified load',()=>{
+ for(const change of [h=>{h.props.mediaContext={owner:'changed'};h.render();},h=>h.session(),h=>{h.props.canSelectLocal=()=>false;h.props.enabled=false;h.render();}]){
+  const h=harness();h.props.mediaContext={owner:'same'};h.props.canSelectLocal=()=>true;const choose=nodes(h.render()).find(n=>n.type==='input'&&n.props.type==='file').props.onChange;change(h);
+  choose({target:{files:[{name:'late.mov',type:'video/quicktime',size:50000}],value:''}});h.render();assert.doesNotMatch(text(h.render()),/late.mov/);assert.equal(h.calls.length,0);
+ }
+});
+test('a new recording selection cancels obsolete local preparation before replacing its source',async()=>{
+ const h=harness();h.choose();let finish;h.prepare(()=>new Promise(resolve=>{finish=resolve;}));const pending=h.button('Prepare sound and frames').props.onClick();
+ nodes(h.render()).find(n=>n.type==='input'&&n.props.type==='file').props.onChange({target:{files:[{name:'replacement.mov',type:'video/quicktime',size:50000}],value:''}});h.render();
+ assert.equal(h.prepares[0][1].signal.aborted,true);finish(prepared);await pending;assert.match(text(h.render()),/replacement.mov/);assert.doesNotMatch(text(h.render()),/Use video frames without speech/);assert.equal(h.calls.length,0);
+});
 test('temporary parent activity preserves prepared frames and a checked transcript without another paid request',async()=>{
  const h=harness();await h.ready();await h.transcribe();h.review();h.props.blocked=true;h.render();
  assert.equal(h.button('Use checked transcript').props.disabled,true);assert.equal(h.button('Transcribe speech').props.disabled,true);

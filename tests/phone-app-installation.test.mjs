@@ -93,6 +93,7 @@ test("the neutral app launcher does not open a route-prefix authorization bypass
     "lucide-react": {},
     "../lib/cloud/permissions": permissions,
     "../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: null, isReady: true, mode: "cloud" }) },
+    "../lib/useQuoteMediaIdentity": { useQuoteMediaIdentity: () => null },
   });
   const child = { type: "business-records" };
   assert.equal(CloudAccessGuard({ children: child }), child);

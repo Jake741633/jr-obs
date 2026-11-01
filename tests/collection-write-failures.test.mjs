@@ -27,7 +27,7 @@ function harness({ mode = "cloud", initial = [oldRecord] } = {}) {
     removeItem(key) { if (blocked.has(key)) throw new Error(`Storage blocked: ${key}`); values.delete(key); },
   };
   const navigator = { onLine: false };
-  const window = { localStorage: storage, addEventListener() {}, dispatchEvent: (event) => events.push(event) };
+  const window = { localStorage: storage, addEventListener() {}, removeEventListener() {}, dispatchEvent: (event) => events.push(event) };
   function compile(path, dependencies) {
     const mod = { exports: {} };
     vm.runInNewContext(ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
@@ -76,13 +76,31 @@ async function mountedCollection(h, sanitize = (_key, item) => item, { networkOn
   const hookModule = h.compile("../lib/storage.ts", {
     react, "./cloud/adapter": h.adapter, "./cloud/collections": h.collections, "./cloud/roleProjectionCache-core.mjs": networkOnly ? { ...cachePolicy, roleProjectionCachePolicy: () => "network-only" } : cachePolicy,
     "./cloud/privateFiles": { cloudSafeFileRecord: sanitize, usePrivateFileCollectionBridge: ({ items }) => ({ items }) },
-    "./cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: { organisationId: owner.organisationId, userId: owner.userId, role: owner.cacheRole }, isReady: true, mode: h.mode }) },
+    "./cloud/useCloudIdentity": { useCloudIdentity: () => h.identitySnapshot ?? ({ identity: { organisationId: owner.organisationId, userId: owner.userId, role: owner.cacheRole }, isReady: true, mode: h.mode }) },
   });
   function render() { cursor = 0; const result = hookModule.useCloudLocalCollection(owner.storageKey); effects.splice(0).forEach((effect) => effect()); return result; }
   const initialHook = render(); beforeReady?.(initialHook); await new Promise((resolve) => setImmediate(resolve));
   let hook = render(); assert.equal(hook.isReady, true);
   return { current: () => hook, refresh() { hook = render(); return hook; }, update(change) { hook.setItems(change); hook = render(); return hook; } };
 }
+
+test("retained collection refresh never copies account records to bare legacy keys while identity is pending",async()=>{
+ for(const legacy of [null,JSON.stringify([{id:"legacy",title:"Untouched local work"}])]){
+  const h=harness();h.identitySnapshot={identity:{organisationId:owner.organisationId,userId:owner.userId,role:owner.cacheRole},isReady:true,mode:"cloud"};
+  const mounted=await mountedCollection(h);if(legacy!==null)h.storage.setItem(owner.storageKey,legacy);
+  const beforeScoped=h.raw(),beforeQueue=h.storage.getItem(queueKey);
+  h.identitySnapshot={identity:null,isReady:false,mode:"cloud"};mounted.refresh();
+  assert.equal(h.storage.getItem(owner.storageKey),legacy);assert.equal(h.raw(),beforeScoped);assert.equal(h.storage.getItem(queueKey),beforeQueue);
+  mounted.refresh();assert.equal(h.storage.getItem(owner.storageKey),legacy);
+  h.identitySnapshot={identity:{organisationId:owner.organisationId,userId:owner.userId,role:owner.cacheRole},isReady:true,mode:"cloud"};mounted.refresh();await new Promise(resolve=>setImmediate(resolve));mounted.refresh();
+  assert.equal(h.storage.getItem(owner.storageKey),legacy);assert.equal(mounted.current().items[0].title,"Original evidence");
+ }
+});
+test("a loading collection that stays unverified cannot overwrite earlier legacy data during repeated renders",async()=>{
+ const h=harness(),mounted=await mountedCollection(h),legacy=JSON.stringify([{id:"legacy",title:"Retain this draft"}]);h.storage.setItem(owner.storageKey,legacy);
+ h.identitySnapshot={identity:null,isReady:false,mode:"cloud"};mounted.refresh();mounted.refresh();
+ assert.equal(h.storage.getItem(owner.storageKey),legacy);assert.equal(h.queue().length,1);assert.equal(h.queue()[0].sourceId,"other");
+});
 
 for (const operation of ["update", "remove"]) test(`durable ${operation} reports an enqueue failure before changing hook state and permits retry`, async () => {
   const h = harness(); const hook = await mountedCollection(h); const before = new Map(h.values);

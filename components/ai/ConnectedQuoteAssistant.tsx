@@ -9,6 +9,7 @@ import { captureSupabaseSessionOwnership, readSupabaseSession, readSupabaseSessi
 import { sameSupabaseSessionOwnership, supabaseSessionUserId } from "../../lib/supabase/sessionOwnership-core.mjs";
 import { prepareJobPhoto } from "../../lib/jobMediaCapture";
 import { prepareQuotePhoto, quotePhotoSelectionError } from "../../lib/quotePhotos";
+import { useQuoteMediaIdentity, type QuoteMediaOwner } from "../../lib/useQuoteMediaIdentity";
 import { parseQuoteScope, quoteScopeNotes } from "../../lib/connectedQuoteScope.mjs";
 import { clipNotes, type ReviewedClip } from "../../lib/quoteClip";
 import { QuoteClipInput, ClipFrames } from "./QuoteClipInput";
@@ -20,7 +21,7 @@ import { photoPreviewSource, readSavedJobPhoto, sameSavedJobEvidence, savedJobEv
 type Ownership = ReturnType<typeof captureSupabaseSessionOwnership>;
 type Review = { scope: object; text: string; reviewed: boolean; ownership: Ownership };
 type SavedSelection = { record: SavedJobDocument; photo: boolean };
-type PreparedPhotos = { scope: object; images: Array<{ dataUrl: string; fileName: string; mimeType: string }>; ownership: Ownership };
+type PreparedPhotos = { evidence: object; images: Array<{ dataUrl: string; fileName: string; mimeType: string }>; ownership: Ownership };
 const noPhotos: File[] = [];
 type Props = { notes: string; contextKey: string; ready: boolean; jobEvidence?: { jobId: string; title: string; documents: SavedJobDocument[]; ready: boolean }; onApply: (sourceNotes: string, reviewedNotes: string) => void; onBuildDraft?: (sourceNotes: string, reviewedNotes: string) => void };
 
@@ -29,12 +30,16 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
   const member = identity.identity;
   const allowed = Boolean(member && ["owner", "admin", "office"].includes(member.role));
   const canManageAi = identity.isReady && Boolean(member && ["owner", "admin"].includes(member.role));
-  const enabled = ready && identity.isReady && identity.mode !== "local" && allowed;
+  const mediaOwner = useQuoteMediaIdentity(identity, contextKey);
+  const enabled = ready && identity.isReady && identity.mode !== "local" && allowed && Boolean(mediaOwner);
   const accountKey = JSON.stringify([identity.mode, member?.organisationId, member?.userId, member?.role, member?.customerSourceId, contextKey]);
   const base = useMemo(() => ({ accountKey, enabled }), [accountKey, enabled]);
-  const [selection, setSelection] = useState<{ base: object; files?: File[]; clip?: ReviewedClip; saved?: SavedSelection } | null>(null);
-  const selected = selection?.base === base ? selection : null;
+  const [selection, setSelection] = useState<{ base: object; owner?: QuoteMediaOwner | null; files?: File[]; clip?: ReviewedClip; saved?: SavedSelection } | null>(null);
+  const held = mediaOwner && selection?.owner === mediaOwner ? selection : null;
+  const selected = selection?.saved ? (selection.base === base ? selection : null) : enabled ? held : null;
   const photos = selected?.files ?? noPhotos, clip = selected?.clip || null, saved = selected?.saved || null;
+  const heldPhotos = held?.files ?? noPhotos;
+  const photoContext = useMemo(() => ({ owner: mediaOwner, files: heldPhotos }), [mediaOwner, heldPhotos]);
   const origin = typeof window === "undefined" ? "" : window.location.origin;
   const savedIndex = savedIdentityIndex(jobEvidence?.documents ?? []);
   const savedCurrent = !saved || Boolean(jobEvidence?.ready && saved.record.jobId === jobEvidence.jobId && sameSavedJobEvidence(saved.record, savedIndex.unique.get(saved.record.id), saved.photo, origin));
@@ -49,20 +54,21 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
   const [busyScope, setBusyScope] = useState<object | null>(null);
   const operation = useRef<{ controller: AbortController } | null>(null);
   const applied = useRef<Review | null>(null);
-  const latest = useRef({ active: false, scope, enabled, review, jobEvidence });
+  const latest = useRef({ active: false, scope, enabled, review, jobEvidence, mediaOwner, held });
   const busy = busyScope === scope;
   const currentReview = review?.scope === scope ? review : null;
   const currentNotice = notice?.scope === scope ? notice : null;
-  const currentPhotos = preparedPhotos?.scope === scope ? preparedPhotos : null;
+  const currentPhotos = enabled && preparedPhotos?.evidence === photoContext ? preparedPhotos : null;
 
   useLayoutEffect(() => {
-    latest.current = { active: true, scope, enabled, review, jobEvidence };
+    latest.current = { active: true, scope, enabled, review, jobEvidence, mediaOwner, held };
     return () => { latest.current.active = false; };
   });
   useLayoutEffect(() => () => { operation.current?.controller.abort(); operation.current = null; }, [scope]);
 
   const active = () => latest.current.active && latest.current.scope === scope && latest.current.enabled;
   const ownsSession = (ownership: Ownership) => sameSupabaseSessionOwnership(readSupabaseSession(), readSupabaseSessionOwnershipEpoch(), ownership.session, ownership.epoch);
+  const canSelectLocal = () => Boolean(latest.current.active && mediaOwner && latest.current.mediaOwner === mediaOwner && ownsSession(mediaOwner.ownership));
 
   const canUseClip = () => active() && !operation.current && clipVersionRef.current === clipVersion;
   function invalidateClipInput() { clipVersionRef.current += 1; setClipVersion(clipVersionRef.current); }
@@ -71,17 +77,19 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
     const error = quotePhotoSelectionError(photos, evidence.frames.length);
     if (error) { setNotice({ scope, text: error, error: true }); return false; }
     try { clipNotes(notes, evidence.transcript); } catch (error) { setNotice({ scope, text: (error as Error).message, error: true }); return false; }
-    invalidateClipInput(); setSelection({ base, files: photos, clip: evidence }); setReview(null); setNotice(null); return true;
+    invalidateClipInput(); setSelection({ base, owner: mediaOwner, files: photos, clip: evidence }); setReview(null); setNotice(null); return true;
   }
 
   function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
     const incoming = Array.from(event.target.files ?? []); event.target.value = "";
-    if (!incoming.length || !active()) return;
-    const next = [...photos, ...incoming], error = quotePhotoSelectionError(next, clip?.frames.length ?? 0);
+    if (!incoming.length || !canSelectLocal()) return;
+    const currentHeld = latest.current.held;
+    const next = [...(currentHeld?.files ?? noPhotos), ...incoming], currentClip = currentHeld?.clip;
+    const error = quotePhotoSelectionError(next, currentClip?.frames.length ?? 0);
     if (error) { setNotice({ scope, text: error, error: true }); return; }
     operation.current?.controller.abort(); operation.current = null;
     setBusyScope(null); setPreparedPhotos(null);
-    setSelection({ base, files: next, ...(clip ? { clip } : {}) }); setReview(null); setNotice(null);
+    setSelection({ base, owner: mediaOwner, files: next, ...(currentClip ? { clip: currentClip } : {}) }); setReview(null); setNotice(null);
   }
 
   function removeEvidence(index?: number) {
@@ -89,7 +97,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
     operation.current?.controller.abort(); operation.current = null;
     setBusyScope(null); setPreparedPhotos(null); setReview(null); setNotice(null);
     if (index === undefined) invalidateClipInput();
-    setSelection({ base, files: index === undefined ? photos : photos.filter((_, i) => i !== index), ...(index !== undefined && clip ? { clip } : {}) });
+    setSelection({ base, owner: mediaOwner, files: index === undefined ? photos : photos.filter((_, i) => i !== index), ...(index !== undefined && clip ? { clip } : {}) });
   }
 
   function chooseSaved(record: SavedJobDocument, withPhoto: boolean) {
@@ -127,7 +135,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
         images.push(await prepareQuotePhoto(file, task.controller.signal));
       }
       if (!isCurrent()) return;
-      setPreparedPhotos({ scope, images, ownership });
+      setPreparedPhotos({ evidence: photoContext, images, ownership });
       setNotice({ scope, text: "Photos prepared on this phone. Check the previews, then Review with AI to send them.", error: false });
     } catch (error) { if (isCurrent()) setNotice({ scope, text: error instanceof Error ? error.message : "A photo could not be prepared. Remove it or try another copy.", error: true }); }
     finally { if (operation.current === task) { operation.current = null; if (active()) setBusyScope(null); } }
@@ -205,7 +213,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
     <div className="mt-3 space-y-4">
       <p className="text-sm text-slate-300">Add site photos or a short video and describe the work you want. Check the AI scope, then build editable labour and materials using your saved packs and rates.</p>
       <p className="text-sm text-slate-400">Review with AI sends the visible job notes, any checked transcript and selected photos or sampled frames to OpenAI. Only include information you want to share.</p>
-      {!enabled ? <p className="text-sm text-amber-200">Sign in with an office account and wait for your job data to load before using connected AI.</p> : null}
+      {!enabled ? <p className="text-sm text-amber-200">{mediaOwner ? "Waiting for your account and job data. Local media is kept on this page while the same account is checked. AI actions will unlock when the checks finish." : "Sign in with an office account and wait for your job data to load before using connected AI."}</p> : null}
       <AiConnectionHelp canManage={canManageAi} />
       <fieldset disabled={!enabled} className="space-y-3">
         <div className="grid gap-3 sm:grid-cols-2">
@@ -248,7 +256,7 @@ export function ConnectedQuoteAssistant({ notes, contextKey, ready, jobEvidence,
           <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{saved.record.notes || "No saved notes."}</p>
         </>}
       </div> : null}
-      <QuoteClipInput key={clipVersion} context={clipContext} enabled={enabled} blocked={busy} notes={notes} organisationId={member?.organisationId || ""} userId={member?.userId || ""} canManageAi={canManageAi} canUse={canUseClip} onUse={useClip} />
+      <QuoteClipInput key={clipVersion} context={clipContext} mediaContext={mediaOwner} canSelectLocal={canSelectLocal} enabled={enabled} blocked={busy} notes={notes} organisationId={mediaOwner?.organisationId || ""} userId={mediaOwner?.userId || ""} canManageAi={canManageAi} canUse={canUseClip} onUse={useClip} />
       {clip ? <div className="space-y-3 rounded-xl border border-cyan-500/20 p-3">
         <p className="font-semibold">Reviewed recording evidence for this AI request</p>
         {clip.transcript ? <p className="whitespace-pre-wrap break-words text-sm text-slate-300">{clip.transcript}</p> : <p className="text-sm text-slate-400">Using sampled frames with the typed job notes.</p>}

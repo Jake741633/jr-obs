@@ -12,7 +12,7 @@ import { AiRecoveryNotice, aiRecoveryCode, type AiRecoveryCode } from "./AiConne
 type Ownership = ReturnType<typeof captureSupabaseSessionOwnership>;
 type Prepared = { scope: object; value: PreparedClip; ownership: Ownership };
 type Transcript = { scope: object; text: string; reviewed: boolean; ownership: Ownership };
-type Props = { context: object; enabled: boolean; blocked?: boolean; notes: string; organisationId: string; userId: string; canManageAi?: boolean; canUse?: () => boolean; onUse: (clip: ReviewedClip) => boolean | void };
+type Props = { context: object; mediaContext?: object | null; canSelectLocal?: () => boolean; enabled: boolean; blocked?: boolean; notes: string; organisationId: string; userId: string; canManageAi?: boolean; canUse?: () => boolean; onUse: (clip: ReviewedClip) => boolean | void };
 
 export function ClipFrames({ frames }: { frames: ClipFrame[] }) {
   return <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{frames.map(frame => <figure key={frame.seconds} className="min-w-0 rounded-xl border border-slate-700 p-2">
@@ -21,27 +21,35 @@ export function ClipFrames({ frames }: { frames: ClipFrame[] }) {
   </figure>)}</div>;
 }
 
-export function QuoteClipInput({ context, enabled, blocked = false, notes, organisationId, userId, canManageAi = false, canUse, onUse }: Props) {
+export function QuoteClipInput({ context, mediaContext, canSelectLocal, enabled, blocked = false, notes, organisationId, userId, canManageAi = false, canUse, onUse }: Props) {
+  const pickerOwnership = captureSupabaseSessionOwnership();
+  const owns = (owner: Ownership) => sameSupabaseSessionOwnership(readSupabaseSession(), readSupabaseSessionOwnershipEpoch(), owner.session, owner.epoch);
+  const localTarget = mediaContext ?? context;
+  const localBase = useMemo(() => ({ localTarget, organisationId, userId }), [localTarget, organisationId, userId]);
   const base = useMemo(() => ({ context, enabled, notes, organisationId, userId }), [context, enabled, notes, organisationId, userId]);
-  const [selection, setSelection] = useState<{ base: object; file: File } | null>(null);
-  const file = selection?.base === base ? selection.file : null;
-  const scope = useMemo(() => ({ base, file }), [base, file]);
+  const [selection, setSelection] = useState<{ base: object; file: File; ownership: Ownership } | null>(null);
+  const heldFile = selection?.base === localBase && owns(selection.ownership) ? selection.file : null;
+  const file = enabled ? heldFile : null;
+  const mediaScope = useMemo(() => ({ localBase, file: heldFile }), [localBase, heldFile]);
+  const scope = useMemo(() => ({ base, mediaScope }), [base, mediaScope]);
   const [prepared, setPrepared] = useState<Prepared | null>(null);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
   const [notice, setNotice] = useState<{ scope: object; text: string; error: boolean; recovery?: AiRecoveryCode } | null>(null);
   const [busyScope, setBusyScope] = useState<object | null>(null);
   const operation = useRef<{ controller: AbortController } | null>(null);
   const used = useRef<Prepared | null>(null);
-  const latest = useRef({ active: false, scope, prepared, transcript, blocked });
-  const currentPrepared = prepared?.scope === scope ? prepared : null;
-  const currentTranscript = transcript?.scope === scope ? transcript : null;
+  const latest = useRef({ active: false, scope, prepared, transcript, blocked, enabled, localBase });
+  const currentPrepared = enabled && prepared?.scope === mediaScope && owns(prepared.ownership) ? prepared : null;
+  const currentTranscript = enabled && transcript?.scope === mediaScope && owns(transcript.ownership) ? transcript : null;
   const currentNotice = notice?.scope === scope ? notice : null;
   const busy = busyScope === scope;
-  useLayoutEffect(() => { latest.current = { active: true, scope, prepared, transcript, blocked }; return () => { latest.current.active = false; }; });
+  useLayoutEffect(() => { latest.current = { active: true, scope, prepared, transcript, blocked, enabled, localBase }; return () => { latest.current.active = false; }; });
   useLayoutEffect(() => () => { operation.current?.controller.abort(); operation.current = null; }, [scope]);
   useLayoutEffect(() => { if (blocked) operation.current?.controller.abort(); }, [blocked]);
   const active = () => latest.current.active && latest.current.scope === scope && enabled && !latest.current.blocked && (!canUse || canUse());
-  const owns = (owner: Ownership) => sameSupabaseSessionOwnership(readSupabaseSession(), readSupabaseSessionOwnershipEpoch(), owner.session, owner.epoch);
+  const canReceiveFile = () => latest.current.active && latest.current.localBase === localBase
+    && (canSelectLocal ? canSelectLocal() : latest.current.enabled)
+    && owns(pickerOwnership) && !pickerOwnership.session?.is_password_recovery && supabaseSessionUserId(pickerOwnership.session) === userId;
   const message = (text: string, error = false) => setNotice({ scope, text, error });
   function ownership() {
     const owner = captureSupabaseSessionOwnership();
@@ -50,9 +58,10 @@ export function QuoteClipInput({ context, enabled, blocked = false, notes, organ
   }
   function choose(event: ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0]; event.target.value = "";
-    if (!selected || !active() || operation.current) return;
+    if (!selected || !canReceiveFile()) return;
     const error = clipFileError(selected); if (error) { message(error, true); return; }
-    setSelection({ base, file: selected }); setPrepared(null); setTranscript(null); setNotice(null);
+    operation.current?.controller.abort(); operation.current = null; setBusyScope(null);
+    setSelection({ base: localBase, file: selected, ownership: pickerOwnership }); setPrepared(null); setTranscript(null); setNotice(null);
   }
   function clear() {
     if (!active()) return;
@@ -68,7 +77,7 @@ export function QuoteClipInput({ context, enabled, blocked = false, notes, organ
     try {
       const value = await prepareQuoteClip(file, { speech, signal: task.controller.signal, onProgress: text => { if (current()) message(text); } });
       if (!current()) return;
-      setPrepared({ scope, value, ownership: owner }); message("Prepared on this phone. Nothing has been sent to AI yet.");
+      setPrepared({ scope: mediaScope, value, ownership: owner }); message("Prepared on this phone. Nothing has been sent to AI yet.");
     } catch (error) { if (current()) message(error instanceof Error ? error.message : "This recording could not be prepared.", true); }
     finally { if (operation.current === task) { operation.current = null; if (latest.current.active && latest.current.scope === scope) setBusyScope(null); } }
   }
@@ -91,7 +100,7 @@ export function QuoteClipInput({ context, enabled, blocked = false, notes, organ
         return;
       }
       if (typeof payload?.transcript !== "string" || !payload.transcript.trim() || payload.transcript.length > 12000) throw new Error("AI returned no usable transcript. Check the sound or enter the spoken details yourself.");
-      setTranscript({ scope, text: payload.transcript.trim(), reviewed: false, ownership: owner }); message("Check names, quantities and anything unclear before using the transcript.");
+      setTranscript({ scope: mediaScope, text: payload.transcript.trim(), reviewed: false, ownership: owner }); message("Check names, quantities and anything unclear before using the transcript.");
     } catch (error) { if (current()) message(error instanceof Error ? error.message : "Speech transcription is unavailable.", true); }
     finally { if (operation.current === task) { operation.current = null; if (latest.current.active && latest.current.scope === scope) setBusyScope(null); } }
   }

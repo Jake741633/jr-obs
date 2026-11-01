@@ -14,6 +14,7 @@ acceptance is tracked separately in [Release Review](docs/RELEASE_REVIEW.md).
 - [x] Multiple wholesaler references per material, preferred-source swaps, supplier/code search and per-reference product sharing
 - [x] Scope-aware local estimates that separate included work/questions/exclusions and require task relevance for saved packs/history
 - [x] Multiple site photos with local preparation/previews, combined reviewed video frames and one-step checked scope to editable labour/materials quote draft
+- [x] Same-session phone picker/focus recovery for local quote media, with hidden/inert account checks and stale AI-request cancellation
 - [x] AI suggestions retain pack allowances, distinguish missing costs from zero, and require complete cost review before saving quotes or purchase lists; historical cost samples use recorded quote allowances
 - [x] AI quote/list saves prevent repeated-tap duplicates, retain retry identities, recover exact saved versions and link directly to the saved record
 - [x] Durable Materials Library forms and price updates with retained failed drafts, exact retry recovery, changed-record review and account/sync guards

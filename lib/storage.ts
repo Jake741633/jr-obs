@@ -98,6 +98,9 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
 
   useEffect(() => {
     if (!isReady) return;
+    // A retained page can render once with its old items/collection readiness
+    // after identity is cleared. Never mirror that snapshot into a legacy key.
+    if (!identityReady) return;
     if (mode !== "local" && userId && cacheRole) {
       purgeCustomerNetworkOnlyCollectionCaches(window.localStorage, key);
       purgeElectricianNetworkOnlyCollectionCaches(window.localStorage, key);
@@ -151,7 +154,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
       window.localStorage.setItem(activeStorageKey, JSON.stringify(items.map((item) => cloudSafeFileRecord(key, item as unknown as object))));
     } catch { /* Keep the repository's persisted records if this ordering write fails. */ }
     previousRef.current = items;
-  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, items, key, mode, networkOnly, organisationId, target, userId]);
+  }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, identityReady, isReady, items, key, mode, networkOnly, organisationId, target, userId]);
 
   useEffect(() => {
     function reconcileCloudCache(event: Event) {
