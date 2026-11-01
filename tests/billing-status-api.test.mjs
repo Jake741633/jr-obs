@@ -10,7 +10,7 @@ test('status authenticates the normal user and calls the owner-scoped RPC with t
  const h=setup(),res=await h.handler(request());assert.equal(res.status,200);assert.deepEqual(await res.json(),{mode:'test',subscription:null,checkoutAvailable:false,portalAvailable:false});assert.equal(h.calls.length,2);assert.equal(h.calls[1].url,'https://fixture.supabase.co/rest/v1/rpc/jr_billing_owner_status');assert.equal(h.calls[1].init.headers.Authorization,'Bearer token');assert.match(res.headers.get('Cache-Control'),/no-store/);
 });
 
-const ready=()=>({...env,JR_OS_BILLING_CHECKOUT_ENABLED:'true',JR_OS_BILLING_PORTAL_ENABLED:'true',JR_OS_BILLING_WEBHOOK_ENABLED:'true',JR_OS_BILLING_RECONCILIATION_ENABLED:'true',JR_OS_BILLING_SANDBOX_VERIFIED:'true',SUPABASE_SERVICE_ROLE_KEY:'fixture-service',STRIPE_MODE:'test',STRIPE_ACCOUNT_ID:'acct_1UWyMhRxGUITlJWL',STRIPE_RESTRICTED_KEY:'rk_test_fixture',STRIPE_WEBHOOK_SECRET:'whsec_fixture',STRIPE_PRICE_MONTHLY:'price_1UX0fdRxGUITlJWLXoEGdcBE',STRIPE_PRICE_ANNUAL:'price_1UX0fpRxGUITlJWLs2gwl34S',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_fixture',APP_ORIGIN:'https://jr-os.example'});
+const ready=()=>({...env,JR_OS_BILLING_CHECKOUT_ENABLED:'true',JR_OS_BILLING_SCHEDULE_ENABLED:'true',JR_OS_BILLING_PORTAL_ENABLED:'true',JR_OS_BILLING_WEBHOOK_ENABLED:'true',JR_OS_BILLING_RECONCILIATION_ENABLED:'true',JR_OS_BILLING_SANDBOX_VERIFIED:'true',SUPABASE_SERVICE_ROLE_KEY:'fixture-service',STRIPE_MODE:'test',STRIPE_ACCOUNT_ID:'acct_1UWyMhRxGUITlJWL',STRIPE_RESTRICTED_KEY:'rk_test_fixture',STRIPE_WEBHOOK_SECRET:'whsec_fixture',STRIPE_PRICE_MONTHLY:'price_1UX0fdRxGUITlJWLXoEGdcBE',STRIPE_PRICE_ANNUAL:'price_1UX0fpRxGUITlJWLs2gwl34S',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_fixture',APP_ORIGIN:'https://jr-os.example'});
 test('phone capabilities require complete private server readiness and an own-business binding',async()=>{
  const active={plan:'monthly',status:'active',paidThroughMs:Date.UTC(2030,0,1),trialEndsAtMs:null,cancelAtPeriodEnd:false,reconciledAtMs:1790000000000};
  for(const [result,wantCheckout,wantPortal] of [[{...status(),hasBillingCustomer:false},true,false],[{...status(),hasBillingCustomer:true},true,true],[{...status(),hasBillingCustomer:true,subscription:active},false,true],[{...status(),hasBillingCustomer:true,subscription:{...active,status:'canceled'}},true,true],[{...status(),hasBillingCustomer:true,subscription:{...active,status:'past_due'}},false,true]]){
@@ -34,4 +34,8 @@ test('sanitized subscription status includes dates but excludes provider IDs and
 test('missing migration, malformed status or auth outages return a safe setup error',async()=>{
  for(const opts of [{rpcStatus:404,result:{message:'secret database text'}},{result:{...status(),mode:'live'}},{result:{...status(),subscription:{status:'active',paidThroughMs:Infinity}}}]){const h=setup(opts),r=await h.handler(request());assert.equal(r.status,503);assert.deepEqual(await r.json(),{code:'billing_status_unavailable'});}
  const r=await createBillingStatusHandler({env,fetchImpl:async()=>{throw Error('sensitive');}})(request());assert.equal(r.status,503);assert.deepEqual(await r.json(),{code:'billing_status_unavailable'});
+});
+
+test('pausing the scheduler blocks signup capability while preserving owner portal capability',async()=>{
+ const res=await setup({environment:{...ready(),JR_OS_BILLING_SCHEDULE_ENABLED:'false'},result:{...status(),hasBillingCustomer:true}}).handler(request()),data=await res.json();assert.equal(data.checkoutAvailable,false);assert.equal(data.portalAvailable,true);
 });

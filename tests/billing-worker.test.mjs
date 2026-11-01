@@ -2,7 +2,10 @@ import test,{before,beforeEach,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {PGlite} from '@electric-sql/pglite';
+import http from 'node:http';
+import Stripe from 'stripe';
 import {runBillingReconciliation,runConfiguredBillingReconciliation,createBillingReconciliationStore} from '../lib/server/billingWorker.mjs';
+import {createStripeBillingGateway,readStripeBillingConfig} from '../lib/server/stripeBilling.mjs';
 import {evidence} from './helpers/billingEvidence.mjs';
 const db=new PGlite(),org='11111111-1111-4111-8111-111111111111';
 const rpc=async(name,args=[])=>{const r=await db.query(`select public.${name}(${args.map((_,i)=>'$'+(i+1)).join(',')}) as value`,args);return r.rows[0].value;};
@@ -73,4 +76,39 @@ test('exhausted provider failures report review consistently with persisted queu
  await enqueue();await db.exec('update public.jr_billing_events set attempts=9');
  assert.deepEqual(await runBillingReconciliation({store:store(),gateway:gateway({readSubscriptionEvidence:async()=>{throw Error('billing_provider_unavailable');}})}),{state:'review'});
  assert.equal((await db.query('select state from public.jr_billing_events')).rows[0].state,'review');
+});
+
+test('processing budget deferral releases the business lease without consuming a failure attempt',async()=>{
+ await enqueue();
+ assert.deepEqual(await runBillingReconciliation({store:store(),gateway:gateway({readSubscriptionEvidence:async()=>{throw Error('billing_processing_budget_exhausted');}})}),{state:'deferred'});
+ assert.deepEqual((await db.query('select state,attempts from public.jr_billing_events')).rows,[{state:'pending',attempts:0}]);
+ assert.equal((await db.query('select reconcile_token from public.jr_billing_customers')).rows[0].reconcile_token,null);
+ assert.equal((await db.query('select * from public.jr_billing_subscriptions')).rows.length,0);
+ assert.deepEqual(await runBillingReconciliation({store:store(),gateway:gateway()}),{state:'idle'});
+});
+test('exhausted RPC budget stops before any service request is sent',async()=>{
+ let calls=0;const bounded=createBillingReconciliationStore({env:{NEXT_PUBLIC_SUPABASE_URL:'https://fixture.supabase.co',SUPABASE_SERVICE_ROLE_KEY:'fixture-secret'},remainingRequestMs:()=>0,fetchImpl:async()=>{calls++;return Response.json(null);}});
+ await assert.rejects(bounded.claimEvent(),/billing_store_unavailable/);assert.equal(calls,0);
+});
+
+test('a trickling real SDK read after lease acquisition defers before the deadline and preserves attempts',{timeout:5000},async t=>{
+ let accounts=0,closed;const connectionClosed=new Promise(resolve=>{closed=resolve;});
+ const server=http.createServer(async(req,res)=>{
+  res.setHeader('Content-Type','application/json');const path=new URL(req.url,'http://localhost').pathname;
+  if(path==='/v1/account'){
+   const value={id:'acct_1UWyMhRxGUITlJWL'};
+   if(++accounts===1){res.end(JSON.stringify(value));return;}
+   res.flushHeaders();res.write(' ');const interval=setInterval(()=>res.write(' '),20);
+   const complete=setTimeout(()=>{clearInterval(interval);res.end(JSON.stringify(value));},1400);
+   res.once('close',()=>{clearInterval(interval);clearTimeout(complete);closed();});return;
+  }
+  if(path==='/v1/invoices/in_A'){res.end(JSON.stringify(evidence().invoice));return;}
+  res.writeHead(404);res.end('{}');
+ });await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));t.after(()=>{server.closeAllConnections();return new Promise(resolve=>server.close(resolve));});
+ const config=readStripeBillingConfig({STRIPE_MODE:'test',STRIPE_ACCOUNT_ID:'acct_1UWyMhRxGUITlJWL',STRIPE_RESTRICTED_KEY:'rk_test_fixture',STRIPE_WEBHOOK_SECRET:'whsec_fixture',STRIPE_PRICE_MONTHLY:'price_1UX0fdRxGUITlJWLXoEGdcBE',STRIPE_PRICE_ANNUAL:'price_1UX0fpRxGUITlJWLs2gwl34S',STRIPE_PORTAL_CONFIGURATION_ID:'bpc_fixture',APP_ORIGIN:'https://jr-os.example'});
+ const endpoint={host:'127.0.0.1',port:server.address().port,protocol:'http'},stripe=new Stripe(config.restrictedKey,{...endpoint,maxNetworkRetries:0}),createReader=(key,options)=>new Stripe(key,{...options,...endpoint});
+ let deadline=Infinity;const reader=createStripeBillingGateway({config,stripe,createReader,remainingReadMs:()=>deadline-performance.now()});
+ await enqueue();const start=performance.now();deadline=start+500;
+ assert.deepEqual(await runBillingReconciliation({store:store(),gateway:reader}),{state:'deferred'});await connectionClosed;assert.ok(performance.now()-start<1100,'Body cancellation must leave time for fenced database cleanup');assert.equal(accounts,2);
+ assert.deepEqual((await db.query('select state,attempts from public.jr_billing_events')).rows,[{state:'pending',attempts:0}]);assert.equal((await db.query('select reconcile_token from public.jr_billing_customers')).rows[0].reconcile_token,null);assert.equal((await db.query('select * from public.jr_billing_subscriptions')).rows.length,0);
 });

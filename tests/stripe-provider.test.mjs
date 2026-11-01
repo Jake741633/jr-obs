@@ -36,7 +36,8 @@ async function fixture(t, overrides={}) {
   t.after(()=>new Promise(resolve=>server.close(resolve)));
   const config=readStripeBillingConfig(environment());
   const stripe=new Stripe(config.restrictedKey,{host:'127.0.0.1',port:server.address().port,protocol:'http',maxNetworkRetries:0,apiVersion:'2026-10-28.endive'});
-  return {config,stripe,requests,gateway:createStripeBillingGateway({config,stripe})};
+  const createReader=(key,options)=>new Stripe(key,{...options,host:'127.0.0.1',port:server.address().port,protocol:'http'});
+  return {config,stripe,requests,gateway:createStripeBillingGateway({config,stripe,createReader})};
 }
 
 test('billing configuration is server-only, exact sandbox configuration and never reveals secrets',()=>{
