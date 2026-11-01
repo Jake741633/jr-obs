@@ -11,6 +11,7 @@ const annual='price_1UX0fpRxGUITlJWLs2gwl34S';
 const environment=()=>({STRIPE_MODE:'test',STRIPE_ACCOUNT_ID:'acct_1UWyMhRxGUITlJWL',STRIPE_RESTRICTED_KEY:'rk_test_fixtureOnlyNotARealKey',STRIPE_WEBHOOK_SECRET:'whsec_fixtureOnlyNotARealSecret',STRIPE_PRICE_MONTHLY:monthly,STRIPE_PRICE_ANNUAL:annual,STRIPE_PORTAL_CONFIGURATION_ID:'bpc_fixture',APP_ORIGIN:'https://jr-os.example'});
 const operation=()=>({organisationId:'business-a',customerId:'cus_businessA',operationId:'11111111-1111-4111-8111-111111111111',plan:'monthly'});
 const catalog=id=>({id,object:'price',livemode:false,active:true,currency:'gbp',unit_amount:id===monthly?2900:29000,product:'jr_os_business',type:'recurring',billing_scheme:'per_unit',recurring:{interval:id===monthly?'month':'year',interval_count:1,usage_type:'licensed'},tax_behavior:'unspecified'});
+const portalConfiguration=()=>({id:'bpc_fixture',object:'billing_portal.configuration',active:true,is_default:false,application:null,livemode:false,login_page:{enabled:false,url:null},features:{invoice_history:{enabled:true},payment_method_update:{enabled:true,payment_method_configuration:null},subscription_cancel:{enabled:true,mode:'at_period_end',proration_behavior:'none',cancellation_reason:{enabled:false,options:[]}},subscription_update:{enabled:false,default_allowed_updates:[],products:[],proration_behavior:'none'},subscription_pause:{enabled:false,duration:{}}}});
 async function fixture(t, overrides={}) {
   const requests=[];
   const server=http.createServer(async(req,res)=>{
@@ -25,7 +26,8 @@ async function fixture(t, overrides={}) {
     else if(path.startsWith('/v1/prices/'))payload=catalog(path.split('/').at(-1));
     else if(path==='/v1/customers/cus_businessA')payload={id:'cus_businessA',object:'customer',livemode:false};
     else if(path==='/v1/checkout/sessions')payload={id:'cs_test_session',object:'checkout.session',livemode:false,url:'https://checkout.stripe.com/c/pay/cs_test_session',customer:'cus_businessA',mode:'subscription'};
-    else if(path==='/v1/billing_portal/sessions')payload={id:'bps_fixture',object:'billing_portal.session',livemode:false,url:'https://billing.stripe.com/p/session/fixture',customer:'cus_businessA'};
+    else if(path==='/v1/billing_portal/configurations/bpc_fixture')payload=portalConfiguration();
+    else if(path==='/v1/billing_portal/sessions')payload={id:'bps_fixture',object:'billing_portal.session',created:1793553600,configuration:portalConfiguration(),livemode:false,url:'https://billing.stripe.com/p/session/fixture',customer:'cus_businessA',customer_account:null,on_behalf_of:null,flow:null,locale:null,return_url:'https://jr-os.example/settings/billing'};
     else {res.writeHead(404);res.end('{}');return;}
     if(overrides[path])payload=overrides[path](payload,record);
     res.setHeader('Content-Type','application/json');res.end(JSON.stringify(payload));
@@ -100,6 +102,38 @@ test('portal uses the trusted customer, approved configuration and fixed return 
   assert.equal((await gateway.createPortal({organisationId,customerId,operationId})).url,'https://billing.stripe.com/p/session/fixture');
   const b=requests.find(r=>r.path==='/v1/billing_portal/sessions').body;
   assert.equal(b.get('customer'),'cus_businessA');assert.equal(b.get('configuration'),'bpc_fixture');assert.equal(b.get('return_url'),'https://jr-os.example/settings/billing');
+  assert.equal(b.get('expand[0]'),'configuration');
+});
+
+test('portal refuses drifted configuration before creating a bearer link',async t=>{
+  const bad=[{active:false},{livemode:true},{id:'bpc_other'},{application:'ca_other'},{login_page:{enabled:true,url:'https://billing.stripe.com/p/login/other'}},
+    ...[['invoice_history','enabled',false],['payment_method_update','enabled',false],['subscription_cancel','enabled',false],['subscription_cancel','mode','immediately'],['subscription_cancel','proration_behavior','create_prorations'],['subscription_update','enabled',true],['subscription_pause','enabled',true]].map(([feature,key,value])=>({features:{...portalConfiguration().features,[feature]:{...portalConfiguration().features[feature],[key]:value}}}))];
+  for(const change of bad){
+    const {gateway,requests}=await fixture(t,{'/v1/billing_portal/configurations/bpc_fixture':p=>({...p,...change})});
+    await assert.rejects(gateway.createPortal({organisationId:'business-a',customerId:'cus_businessA',operationId:'11111111-1111-4111-8111-111111111111'}),/billing_provider_unavailable/);
+    assert.equal(requests.some(r=>r.method==='POST'),false);
+  }
+});
+
+test('portal checks the returned configuration, business and fixed return destination',async t=>{
+  for(const change of [{configuration:'bpc_other'},{customer:'cus_other'},{livemode:true},{return_url:'https://evil.example'},{on_behalf_of:'acct_other'},{customer_account:'acct_other'},{flow:{type:'subscription_update'}},{url:'https://billing.stripe.com.evil.example/p/session/x'}]){
+    const {gateway}=await fixture(t,{'/v1/billing_portal/sessions':p=>({...p,...change})});
+    await assert.rejects(gateway.createPortal({organisationId:'business-a',customerId:'cus_businessA',operationId:'11111111-1111-4111-8111-111111111111'}),/billing_provider_unavailable/);
+  }
+});
+
+test('a portal configuration changed during creation cannot release its Session URL',async t=>{
+  for(const [feature,key,value] of [['subscription_cancel','mode','immediately'],['subscription_update','enabled',true],['subscription_pause','enabled',true]]){
+    const {gateway,requests}=await fixture(t,{'/v1/billing_portal/sessions':p=>({...p,configuration:{...p.configuration,features:{...p.configuration.features,[feature]:{...p.configuration.features[feature],[key]:value}}}})});
+    await assert.rejects(gateway.createPortal({organisationId:'business-a',customerId:'cus_businessA',operationId:'11111111-1111-4111-8111-111111111111'}),/billing_provider_unavailable/);
+    assert.equal(requests.some(r=>r.path==='/v1/billing_portal/configurations/bpc_fixture'),true);
+  }
+});
+test('portal needs a dedicated configuration and an expanded configuration on creation',async t=>{
+  for(const overrides of [{'/v1/billing_portal/configurations/bpc_fixture':p=>({...p,is_default:true})},{'/v1/billing_portal/sessions':p=>({...p,configuration:'bpc_fixture'})}]){
+    const {gateway}=await fixture(t,overrides);
+    await assert.rejects(gateway.createPortal({organisationId:'business-a',customerId:'cus_businessA',operationId:'11111111-1111-4111-8111-111111111111'}),/billing_provider_unavailable/);
+  }
 });
 
 test('unexpected provider redirect URLs and returned customer/mode are rejected',async t=>{

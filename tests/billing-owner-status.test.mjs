@@ -19,7 +19,7 @@ before(async()=>{
 beforeEach(async()=>{await db.exec('reset role');await db.exec(`update public.profiles set role='owner',active=true;delete from auth.sessions;insert into auth.sessions values('${session}','${uid}');`);await db.query("select set_config('test.user_id',$1,false),set_config('test.claims',$2,false)",[uid,JSON.stringify({session_id:session,is_anonymous:false})]);await db.exec('set role authenticated');});
 after(()=>db.close());
 test('active owner with a live session reads only sanitized own-business billing',async()=>{
- const data=await rpc();assert.equal(data.actorUserId,uid);assert.equal(data.organisationId,org);assert.equal(data.subscription.plan,'monthly');assert.equal(data.subscription.paidThroughMs,1792678400000);assert.equal(data.mode,'test');
+ const data=await rpc();assert.equal(data.actorUserId,uid);assert.equal(data.organisationId,org);assert.equal(data.subscription.plan,'monthly');assert.equal(data.subscription.paidThroughMs,1792678400000);assert.equal(data.mode,'test');assert.equal(data.hasBillingCustomer,true);
  assert.equal(JSON.stringify(data).includes('cus_'),false);assert.equal(JSON.stringify(data).includes('sub_'),false);assert.equal(JSON.stringify(data).includes('in_'),false);
 });
 test('non-owner roles cannot call the privileged billing status helper',async()=>{

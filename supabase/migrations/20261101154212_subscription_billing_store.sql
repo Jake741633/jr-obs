@@ -64,6 +64,8 @@ create table public.jr_billing_operations (
 );
 create unique index jr_billing_one_pending_checkout on public.jr_billing_operations(mode,account_id,organisation_id)
   where kind='checkout' and state in ('pending','ready','review');
+create unique index jr_billing_one_pending_portal on public.jr_billing_operations(mode,account_id,organisation_id)
+  where kind='portal' and state='pending';
 
 create table public.jr_billing_events (
   mode text not null default 'test' check(mode='test'),
@@ -273,6 +275,7 @@ begin
     where organisation_id=business and mode='test' and account_id='acct_1UWyMhRxGUITlJWL'
     order by case when status in ('canceled','incomplete_expired') then 1 else 0 end,reconciled_at desc,subscription_id limit 1;
   return pg_catalog.jsonb_build_object('actorUserId',actor,'organisationId',business,'role','owner','mode','test',
+    'hasBillingCustomer',exists(select 1 from public.jr_billing_customers where organisation_id=business and mode='test' and account_id='acct_1UWyMhRxGUITlJWL'),
     'subscription',case when current_subscription.subscription_id is null then null else pg_catalog.jsonb_build_object(
       'plan',case current_subscription.price_id when 'price_1UX0fdRxGUITlJWLXoEGdcBE' then 'monthly' when 'price_1UX0fpRxGUITlJWLs2gwl34S' then 'annual' else null end,
       'status',current_subscription.status,'paidThroughMs',floor(extract(epoch from current_subscription.paid_through)*1000),
@@ -363,6 +366,45 @@ end $$;
 
 revoke execute on function public.jr_billing_reserve_checkout(uuid,uuid,text),public.jr_billing_bind_checkout_customer(uuid,uuid,uuid,text),public.jr_billing_record_checkout_session(uuid,uuid,uuid,text,bigint),public.jr_billing_release_checkout(uuid,uuid,uuid,text) from public,anon,authenticated,service_role;
 grant execute on function public.jr_billing_reserve_checkout(uuid,uuid,text),public.jr_billing_bind_checkout_customer(uuid,uuid,uuid,text),public.jr_billing_record_checkout_session(uuid,uuid,uuid,text,bigint),public.jr_billing_release_checkout(uuid,uuid,uuid,text) to service_role;
+
+-- Portal URLs are short-lived bearer credentials. Store only the attempt and
+-- provider identifier. Each completed/expired attempt is followed by a fresh one.
+create function public.jr_billing_reserve_portal(p_organisation_id uuid,p_actor_id uuid)
+returns jsonb language plpgsql security invoker set search_path='' as $$
+declare op public.jr_billing_operations%rowtype; bound_customer text;
+begin
+  if not exists(select 1 from public.profiles where id=p_actor_id and organisation_id=p_organisation_id and active and role='owner') then raise exception 'billing_portal_denied' using errcode='42501'; end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('jr_billing_portal:'||p_organisation_id::text,0));
+  select customer_id into bound_customer from public.jr_billing_customers where organisation_id=p_organisation_id and mode='test' and account_id='acct_1UWyMhRxGUITlJWL';
+  if not found then return pg_catalog.jsonb_build_object('state','unbound'); end if;
+  select * into op from public.jr_billing_operations where organisation_id=p_organisation_id and mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and kind='portal' and state='pending' for update;
+  if found then
+    if op.reservation_expires_at>clock_timestamp() then return pg_catalog.jsonb_build_object('state','busy'); end if;
+    update public.jr_billing_operations set state='expired',reservation_token=null,reservation_expires_at=null where id=op.id;
+  end if;
+  insert into public.jr_billing_operations(organisation_id,customer_id,kind,reservation_token,reservation_expires_at)
+    values(p_organisation_id,bound_customer,'portal',gen_random_uuid(),clock_timestamp()+interval '60 seconds') returning * into op;
+  return pg_catalog.jsonb_build_object('state','reserved','operation',pg_catalog.jsonb_build_object(
+    'operationId',op.id,'organisationId',op.organisation_id,'customerId',op.customer_id,'leaseToken',op.reservation_token));
+end $$;
+
+create function public.jr_billing_finish_portal(p_operation_id uuid,p_lease_token uuid,p_actor_id uuid,p_session_id text)
+returns boolean language plpgsql security invoker set search_path='' as $$
+declare op public.jr_billing_operations%rowtype;
+begin
+  select * into op from public.jr_billing_operations where id=p_operation_id and kind='portal';
+  if not found then return false; end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('jr_billing_portal:'||op.organisation_id::text,0));
+  select * into op from public.jr_billing_operations where id=p_operation_id and kind='portal' for update;
+  if not found or op.state<>'pending' or p_lease_token is null or op.reservation_token is null or op.reservation_token is distinct from p_lease_token or op.reservation_expires_at is null or op.reservation_expires_at<=clock_timestamp() then return false; end if;
+  if not exists(select 1 from public.profiles where id=p_actor_id and organisation_id=op.organisation_id and active and role='owner') then raise exception 'billing_portal_denied' using errcode='42501'; end if;
+  if not exists(select 1 from public.jr_billing_customers where mode=op.mode and account_id=op.account_id and organisation_id=op.organisation_id and customer_id=op.customer_id) then return false; end if;
+  if p_session_id is not null and p_session_id !~ '^bps_[a-zA-Z0-9]+$' then raise exception 'billing_portal_invalid'; end if;
+  update public.jr_billing_operations set state=case when p_session_id is null then 'failed' else 'succeeded' end,provider_session_id=p_session_id,reservation_token=null,reservation_expires_at=null where id=op.id;
+  return true;
+end $$;
+revoke execute on function public.jr_billing_reserve_portal(uuid,uuid),public.jr_billing_finish_portal(uuid,uuid,uuid,text) from public,anon,authenticated,service_role;
+grant execute on function public.jr_billing_reserve_portal(uuid,uuid),public.jr_billing_finish_portal(uuid,uuid,uuid,text) to service_role;
 
 create or replace function public.jr_os_deployed_migration()
 returns jsonb language sql immutable parallel safe security invoker set search_path='' as $$
