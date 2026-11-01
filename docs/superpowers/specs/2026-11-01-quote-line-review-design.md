@@ -1,0 +1,13 @@
+# Faster phone quote-line review
+
+Jake asked to continue JR OS's mobile quote workflow. The existing estimator can miss a material, yet adding it requires navigating away from an unsaved draft. Pricing lines have repeated unlabeled context, no line amount and small remove controls. Hourly quantity edits also leave total labour hours unchanged, distorting overhead/profit estimates.
+
+Extend the existing local draft editor, keeping saved prices, cost precision and explicit durable saving. Add a saved material or a blank material allowance directly to the open draft. Resolve a saved material by its unique current identity, copy its exact buying/selling prices and preferred supplier/code, and keep the source unchanged. Unknown/invalid prices remain blank and require review; no invented zero. New allowances require a description. Repeated deliberate additions are separate lines, never silently merged or used to alter existing edited prices.
+
+Show line descriptions as editable fields, current line amounts, the number of incomplete lines, per-line missing-field reasons, and a filter for lines needing review. Filtering must never drop a line from calculations or saving and must preserve an editor that becomes complete while it is being edited. All controls are at least 48px on phones. Line totals are before contingency, extras and VAT; the existing quote profitability/totals remain authoritative.
+
+For hourly labour, billing quantity is also its time allowance and edits keep `labourHours` in sync, including clearing/repairing an invalid quantity. For day/half-day/call-out labour, show an explicit editable time allowance in hours, separate from the billing quantity. Require a finite positive time allowance for a labour line before profit/saving; do not infer it from the rate name or invent a duration. Existing generated draft allowances are retained until explicitly edited.
+
+Descriptions, identities, quantities, costs, selling prices and labour hours all participate in review. Unknown/ambiguous line identity is not editable through an id callback and cannot be saved. Saved drafts, changed owners/targets/sessions/readiness and retained stale callbacks must not accept additions or edits. Saved-material refreshes/duplicates cannot be added through an older callback. Existing retry identity, cost/profit, VAT/customer presentation and human scope review remain.
+
+No new dependencies, schema/RLS, persistence, provider/API calls, credentials, hosted activation or production release. Native execution, meaningful RED→GREEN unit/consumer tests, independent review, full suite/lint/build and green development CI precede jr-os-v2 integration. Physical-phone and funded-AI acceptance remain separate.
