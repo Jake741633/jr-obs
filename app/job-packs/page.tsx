@@ -15,13 +15,18 @@ import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
 import { captureSupabaseSessionOwnership, readSupabaseSession, readSupabaseSessionOwnershipEpoch } from "../../lib/supabase/client";
 import { sameSupabaseSessionOwnership, supabaseSessionUserId } from "../../lib/supabase/sessionOwnership-core.mjs";
 import { savedIdentityIndex } from "../../lib/assistantIdentity";
-import { jobPackTotals } from "../../lib/jobPackCatalogue";
-import type { JobPack, JobPackMaterial, Material } from "../../lib/models";
+import { hasLegacyOtherAllowances, jobPackAllowanceCategories, jobPackTotals } from "../../lib/jobPackCatalogue";
+import type { JobPack, JobPackAllowance, JobPackMaterial, Material } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const categories = ["Consumer unit", "Rewire", "EICR", "Fault finding", "EV charger", "Domestic small works", "Commercial small works", "Dedicated supplies", "Ventilation", "Kitchen", "Earthing and bonding", "Containment", "Lighting", "Emergency lighting", "Fire alarm", "Custom"];
 const blankForm = { name: "", category: "Custom", description: "", labourDescription: "Electrician labour", labourHours: "8", labourRate: "50", testingRequirements: "", certificatesRequired: "", notes: "", internalNotes: "" };
 const blankMaterial = { materialId: "", description: "", quantity: "1", unitPrice: "", unitCost: "" };
+const otherChargeCategories: readonly string[] = jobPackAllowanceCategories;
+const blankCharge = { description: "", category: "Other", quantity: "1", unitPrice: "", unitCost: "" };
+type ChargeDraft = typeof blankCharge & { id: string };
+const chargeNumber = (value: string) => value.trim() ? Number(value) : NaN;
+const legacyChargeHelp = "Verify the old amounts against the original quote, enter or confirm them under Other charges, then remove the old list and its heading from Notes. Retain unrelated scope notes.";
 
 export default function JobPacksPage() {
   const packs = useJobPacksCollection();
@@ -41,6 +46,8 @@ export default function JobPacksPage() {
   const [form, setForm] = useState(blankForm);
   const [materials, setMaterials] = useState<JobPackMaterial[]>([]);
   const [materialLine, setMaterialLine] = useState(blankMaterial);
+  const [otherCharges, setOtherCharges] = useState<ChargeDraft[]>([]);
+  const [chargeLine, setChargeLine] = useState(blankCharge);
   const latest = useRef({ active: false, scope, packs, materialsLibrary, draft });
   const consumed = useRef<object | null>(null);
   useLayoutEffect(() => { latest.current = { active: true, scope, packs, materialsLibrary, draft }; return () => { latest.current.active = false; }; });
@@ -58,13 +65,23 @@ export default function JobPacksPage() {
     return searchWords.every(word => content.includes(word));
   });
   const visiblePacks = filtered.slice(0, visibleLimit);
-  const labourTotal = Number(form.labourHours || 0) * Number(form.labourRate || 0);
-  const materialsTotal = materials.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const otherAllowances: JobPackAllowance[] = otherCharges.map(line => ({
+    id: line.id,
+    description: line.description.trim(),
+    category: line.category as JobPackAllowance["category"],
+    quantity: chargeNumber(line.quantity),
+    unitPrice: chargeNumber(line.unitPrice),
+    ...(line.unitCost.trim() ? { unitCost: Number(line.unitCost) } : {}),
+  }));
+  const draftTotals = jobPackTotals({ labourHours: chargeNumber(form.labourHours), labourRate: chargeNumber(form.labourRate), materials, otherAllowances }, materialsLibrary.items);
+  const legacyCharges = hasLegacyOtherAllowances(form.notes);
 
   function reset() {
     setForm(blankForm);
     setMaterials([]);
     setMaterialLine(blankMaterial);
+    setOtherCharges([]);
+    setChargeLine(blankCharge);
     setEditingId(null);
     setDraft(null);
     setError("");
@@ -81,7 +98,7 @@ export default function JobPacksPage() {
     const quantity = Number(materialLine.quantity);
     const unitPrice = Number(materialLine.unitPrice);
     const unitCost = materialLine.unitCost.trim() ? Number(materialLine.unitCost) : undefined;
-    if (!materialLine.description.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || (unitCost !== undefined && (!Number.isFinite(unitCost) || unitCost < 0))) {
+    if (!materialLine.description.trim() || !materialLine.unitPrice.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || (unitCost !== undefined && (!Number.isFinite(unitCost) || unitCost < 0))) {
       setError("Add a material description, positive quantity and valid selling price.");
       return;
     }
@@ -90,15 +107,34 @@ export default function JobPacksPage() {
     setError("");
   }
 
+  function addCharge() {
+    if (!draftActive()) return;
+    const quantity = chargeNumber(chargeLine.quantity), unitPrice = chargeNumber(chargeLine.unitPrice);
+    const unitCost = chargeLine.unitCost.trim() ? Number(chargeLine.unitCost) : undefined;
+    if (!chargeLine.description.trim() || !otherChargeCategories.includes(chargeLine.category) || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0 || (unitCost !== undefined && (!Number.isFinite(unitCost) || unitCost < 0))) {
+      setError("Add an other charge description, positive quantity and valid selling price.");
+      return;
+    }
+    setOtherCharges(current => [...current, { id: makeId("jpa"), ...chargeLine, description: chargeLine.description.trim() }]);
+    setChargeLine(blankCharge);
+    setError("");
+  }
+
+  function updateCharge(index: number, patch: Partial<ChargeDraft>) {
+    if (draftActive()) setOtherCharges(current => current.map((line, lineIndex) => lineIndex === index ? { ...line, ...patch } : line));
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!draftActive()) return;
+    if (Object.keys(blankCharge).some(key => chargeLine[key as keyof typeof blankCharge] !== blankCharge[key as keyof typeof blankCharge])) { setError("Please add or clear the unfinished other charge before saving the pack."); return; }
     const labourHours = Number(form.labourHours);
     const labourRate = Number(form.labourRate);
     if (!form.name.trim()) { setError("Job pack name is required."); return; }
     if (!Number.isFinite(labourHours) || labourHours < 0 || !Number.isFinite(labourRate) || labourRate < 0) { setError("Labour hours and rate must be valid positive amounts."); return; }
     const now = new Date().toISOString();
-    const payload = { name: form.name.trim(), category: form.category, description: form.description, labourDescription: form.labourDescription.trim() || "Electrician labour", labourHours, labourRate, materials, testingRequirements: form.testingRequirements, certificatesRequired: form.certificatesRequired, notes: form.notes, internalNotes: form.internalNotes };
+    const payload = { name: form.name.trim(), category: form.category, description: form.description, labourDescription: form.labourDescription.trim() || "Electrician labour", labourHours, labourRate, materials, otherAllowances, testingRequirements: form.testingRequirements, certificatesRequired: form.certificatesRequired, notes: form.notes, internalNotes: form.internalNotes };
+    if (savedIdentityIndex(otherAllowances).unusableCount || otherAllowances.some(line => !line.description || !otherChargeCategories.includes(line.category ?? "Other") || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unitPrice) || line.unitPrice < 0 || (line.unitCost !== undefined && (!Number.isFinite(line.unitCost) || line.unitCost < 0)))) { setError("Check each other charge description, category, positive quantity and valid non-negative buying/selling amounts."); return; }
     if (jobPackTotals(payload, materialsLibrary.items).total === null || savedIdentityIndex(materials).unusableCount || materials.some(line => !line.description.trim() || (line.unitCost !== undefined && (!Number.isFinite(line.unitCost) || line.unitCost < 0)))) { setError("Check each material description, positive quantity and non-negative buying/selling amounts."); return; }
     try {
       if (editingId) {
@@ -116,6 +152,16 @@ export default function JobPacksPage() {
     if (!active() || savedIdentityIndex(latest.current.packs.items).unique.get(pack.id) !== pack) return;
     setForm({ name: pack.name, category: pack.category, description: pack.description, labourDescription: pack.labourDescription, labourHours: String(pack.labourHours), labourRate: String(pack.labourRate), testingRequirements: pack.testingRequirements, certificatesRequired: pack.certificatesRequired, notes: pack.notes, internalNotes: pack.internalNotes || "" });
     setMaterials(structuredClone(pack.materials));
+    const charges = Array.isArray(pack.otherAllowances) ? pack.otherAllowances : pack.otherAllowances === undefined ? [] : [null];
+    setOtherCharges(charges.map(line => ({
+      id: typeof line?.id === "string" && line.id ? line.id : makeId("jpa"),
+      description: typeof line?.description === "string" ? line.description : "",
+      category: line?.category === undefined ? "Other" : typeof line.category === "string" ? line.category : "",
+      quantity: typeof line?.quantity === "number" ? String(line.quantity) : "",
+      unitPrice: typeof line?.unitPrice === "number" ? String(line.unitPrice) : "",
+      unitCost: line?.unitCost === undefined ? "" : String(line.unitCost),
+    })));
+    setChargeLine(blankCharge);
     setEditingId(pack.id);
     setDraft({ ownerKey: accountKey, original: structuredClone(pack) });
     setError("");
@@ -136,7 +182,7 @@ export default function JobPacksPage() {
   function updateLine(id: string, patch: Partial<JobPackMaterial>) { if (draftActive()) setMaterials(current => current.map(line => line.id === id ? { ...line, ...patch } : line)); }
 
   return <div className="space-y-6">
-    <PageHeader eyebrow="Templates" title="Job Packs" description="Reusable electrical scopes with material quantities, buying allowances and fixed-price estimates. Review every pack for the actual job." action={<Button disabled={!enabled} onClick={() => { if (!active()) return; if (showForm) reset(); else { reset(); setDraft({ ownerKey: accountKey }); } }}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New job pack"}</Button>} />
+    <PageHeader eyebrow="Templates" title="Job Packs" description="Reusable electrical scopes with labour, materials, other charges and fixed-price estimates. Review every pack for the actual job." action={<Button disabled={!enabled} onClick={() => { if (!active()) return; if (showForm) reset(); else { reset(); setDraft({ ownerKey: accountKey }); } }}><Plus className="mr-2 size-4" />{showForm ? "Close builder" : "New job pack"}</Button>} />
     <StarterCatalogue materials={materialsLibrary} packs={packs} identityState={identityState} />
     {!showForm && error ? <p role="alert" className="text-sm text-amber-200">{error}</p> : null}
 
@@ -164,15 +210,40 @@ export default function JobPacksPage() {
           <div className="grid gap-3 sm:grid-cols-3">
             <InputField label={`Quantity · ${item.description}`} type="number" min="0.01" step="any" value={item.quantity} onChange={event => updateLine(item.id, { quantity: Number(event.target.value) })} />
             <InputField label={`Buying cost each (£) · ${item.description}`} type="number" min="0" step="any" value={item.unitCost ?? ""} onChange={event => updateLine(item.id, { unitCost: event.target.value.trim() ? Number(event.target.value) : undefined })} />
-            <InputField label={`Selling price each (£) · ${item.description}`} type="number" min="0" step="any" value={item.unitPrice} onChange={event => updateLine(item.id, { unitPrice: Number(event.target.value) })} />
+            <InputField label={`Selling price each (£) · ${item.description}`} type="number" min="0" step="any" value={Number.isFinite(item.unitPrice) ? item.unitPrice : ""} onChange={event => updateLine(item.id, { unitPrice: chargeNumber(event.target.value) })} />
           </div><Button type="button" variant="secondary" onClick={() => { if (draftActive()) setMaterials(current => current.filter(line => line.id !== item.id)); }}>Remove material line</Button>
         </div>)}</div>
       </div>
 
+      <section aria-label="Other charges" className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4">
+        <h2 className="font-semibold">Other charges</h2>
+        <p className="mt-2 text-sm text-slate-400">Add parking, permits and other job charges with their own quantity and selling price. Buying cost is optional.</p>
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <InputField label="Other charge description" value={chargeLine.description} onChange={event => { if (draftActive()) setChargeLine({ ...chargeLine, description: event.target.value }); }} />
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Other charge category</span><select aria-label="Other charge category" value={chargeLine.category} onChange={event => { if (draftActive()) setChargeLine({ ...chargeLine, category: event.target.value }); }} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{otherChargeCategories.map(category => <option key={category}>{category}</option>)}</select></label>
+          <InputField label="Other charge quantity" type="number" min="0" step="any" value={chargeLine.quantity} onChange={event => { if (draftActive()) setChargeLine({ ...chargeLine, quantity: event.target.value }); }} />
+          <InputField label="Other charge selling price each (£)" type="number" min="0" step="any" value={chargeLine.unitPrice} onChange={event => { if (draftActive()) setChargeLine({ ...chargeLine, unitPrice: event.target.value }); }} />
+          <InputField label="Other charge buying cost each (£)" type="number" min="0" step="any" value={chargeLine.unitCost} onChange={event => { if (draftActive()) setChargeLine({ ...chargeLine, unitCost: event.target.value }); }} />
+          <Button type="button" className="self-end" onClick={addCharge}>Add other charge</Button>
+          <Button type="button" variant="secondary" className="self-end" onClick={() => { if (draftActive()) { setChargeLine(blankCharge); setError(""); } }}>Clear other charge</Button>
+        </div>
+        <div className="mt-4 space-y-3">{otherCharges.map((item, index) => <div key={`${item.id}-${index}`} className="space-y-3 rounded-xl bg-slate-900 p-3">
+          <div className="grid gap-3 md:grid-cols-2">
+            <InputField label={`Other charge description · ${item.description}`} value={item.description} onChange={event => updateCharge(index, { description: event.target.value })} />
+            <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category · {item.description}</span><select aria-label={`Other charge category · ${item.description}`} value={item.category} onChange={event => updateCharge(index, { category: event.target.value })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{!otherChargeCategories.includes(item.category) ? <option value={item.category}>Choose a valid category</option> : null}{otherChargeCategories.map(category => <option key={category}>{category}</option>)}</select></label>
+            <InputField label={`Other charge quantity · ${item.description}`} type="number" min="0" step="any" value={item.quantity} onChange={event => updateCharge(index, { quantity: event.target.value })} />
+            <InputField label={`Other charge selling price each (£) · ${item.description}`} type="number" min="0" step="any" value={item.unitPrice} onChange={event => updateCharge(index, { unitPrice: event.target.value })} />
+            <InputField label={`Other charge buying cost each (£) · ${item.description}`} type="number" min="0" step="any" value={item.unitCost} onChange={event => updateCharge(index, { unitCost: event.target.value })} />
+          </div>
+          <Button type="button" variant="secondary" onClick={() => { if (draftActive()) setOtherCharges(current => current.filter((line, lineIndex) => lineIndex !== index)); }}>Remove other charge</Button>
+        </div>)}</div>
+      </section>
+
       <div className="grid gap-4 lg:grid-cols-3"><TextareaField label="Testing requirements" value={form.testingRequirements} onChange={(e) => setForm({ ...form, testingRequirements: e.target.value })} /><TextareaField label="Certificates required" value={form.certificatesRequired} onChange={(e) => setForm({ ...form, certificatesRequired: e.target.value })} /><TextareaField label="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></div>
+      {legacyCharges ? <p role="alert" className="text-sm text-amber-200">{legacyChargeHelp}</p> : null}
       <p className="text-xs text-amber-200">Scope, testing, certification and Notes are copied into the quote. Keep internal prices and history in the separate field below.</p>
       <TextareaField label="Internal pricing notes" value={form.internalNotes} onChange={event => setForm({ ...form, internalNotes: event.target.value })} />
-      <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Labour {money.format(labourTotal)}</p><p className="text-sm text-slate-400">Materials {money.format(materialsTotal)}</p><p className="text-xl font-bold">Pack total {money.format(labourTotal + materialsTotal)}</p><Button type="submit" className="mt-3">{editingId ? "Update job pack" : "Save job pack"}</Button></div></div>
+      <div className="flex flex-col gap-3 border-t border-slate-800 pt-5 md:flex-row md:items-end md:justify-between"><div>{error ? <p className="text-sm text-red-300">{error}</p> : null}</div><div className="text-right"><p className="text-sm text-slate-400">Labour {draftTotals.labour === null ? "Check amounts" : money.format(draftTotals.labour)}</p><p className="text-sm text-slate-400">Materials {money.format(draftTotals.materialsSell)}</p><p className="text-sm text-slate-400">Other charges {money.format(draftTotals.otherSell)}</p><p className="text-xl font-bold">Pack total {legacyCharges ? "Review legacy charges" : draftTotals.total === null ? "Check invalid amounts" : money.format(draftTotals.total)}</p><Button type="submit" className="mt-3">{editingId ? "Update job pack" : "Save job pack"}</Button></div></div>
     </form></Card> : null}
 
     <div className="grid gap-3 sm:grid-cols-2">

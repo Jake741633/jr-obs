@@ -36,8 +36,8 @@ records. Local persistence/queued sync is not claimed as confirmed cloud sync.
 - A pack line's optional `unitCost` is a saved buying allowance. If absent on a
   legacy line, a uniquely linked material's library cost is used. Missing or
   ambiguous costs are incomplete, never silently zero.
-- Quantities and buying/selling amounts are editable. The guide total is labour
-  plus materials selling allowances, not buying cost. No VAT is added here.
+- Quantities and buying/selling amounts are editable. The guide total adds
+  labour, materials selling allowances and itemised Other charges before VAT.
   Confirm whether buying prices include irrecoverable VAT and use saved quote VAT
   settings; the catalogue does not assume the business is VAT registered.
 - Quote import preserves the reviewed pack selling prices and saved buying
@@ -46,6 +46,19 @@ records. Local persistence/queued sync is not claimed as confirmed cloud sync.
 - Quote-to-pack saving retains material cost snapshots and recorded labour hours.
   If exact labour hours are unavailable, an explicitly labelled internal 1h
   placeholder preserves the fixed labour amount until the pack is reviewed.
+- Enter a reusable expense such as a parking permit under **Other charges**.
+  Its section (Travel, Parking, Plant Hire, Contingency or Other), description,
+  quantity, selling price and any recorded buying cost carry through **Save as
+  job pack** and **Add pack to quote**. Check quote-level
+  travel, parking and contingency separately each time. Enter each charge once.
+- Some older packs list charges under **Other allowances from original quote**
+  in Notes. Before reusing one, open it in Job Packs, check each entry against
+  the original quote, add or confirm its priced line under Other charges, then
+  remove the old heading and list from Notes and save. Keep any unrelated scope
+  and exclusions. JR OS does not guess amounts from the text.
+  Older saves omitted named Parking, Travel, Plant Hire and Contingency lines
+  entirely. Compare older quote-derived packs with their original quotes for
+  these charges, even if there is no heading in Notes.
 - `notes` contains customer-copyable scope/exclusions. `internalNotes` contains
   private pricing references and assumptions and is never copied into quote scope.
 - Copy code, Copy link and Share include only product name, supplier, stock code

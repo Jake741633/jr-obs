@@ -33,3 +33,51 @@ test("non-cent-divisible fixed labour survives quote-to-pack-to-quote round trip
   const h=harness();h.add();h.state.items[0].unitPrice=350;h.state.items[0].labourHours=6;await h.save();
   const saved=h.state.writes[0];assert.equal(saved.labourHours,6);assert.equal(saved.labourRate,350/6);assert.equal(helpers.jobPackQuoteLines(saved,[],()=>"id")[0].unitPrice,350);
 });
+
+test("saving and reusing mixed or Other-only quotes preserves real allowances and customer notes", () => {
+  for (const otherOnly of [false, true]) {
+    const h = harness(); if (!otherOnly) h.add();
+    h.state.name = "Site access pack"; h.state.form.notes = "Customer supplied access details";
+    h.state.items.push({ id: "parking", category: "Other", description: "Parking", quantity: 2, unitPrice: 7.5, unitCost: 0 }, { id: "permit", category: "Other", description: "Permit", quantity: 1, unitPrice: 12 });
+    const original = h.state.items.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
+    h.save(); const saved = h.state.writes[0]; assert.ok(saved); assert.equal(saved.otherAllowances.length, 2); assert.equal(saved.notes, "Customer supplied access details");
+    h.ctx.jobPacks.items = [{ ...saved, id: "p1" }]; h.state.items = []; h.state.form.notes = ""; h.add();
+    assert.equal(h.state.items.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0), original);
+    const other = h.state.items.filter(line => line.category === "Other"); assert.equal(other.length, 2); assert.equal(other[0].unitCost, 0); assert.equal(other[1].unitCost, undefined);
+    assert.doesNotMatch(h.state.form.notes, /Other allowances from original quote|£/);
+  }
+});
+
+test("legacy note-only charges require reconciliation before pack reuse or saving", () => {
+  const legacy = "Access notes\n\nOther allowances from original quote:\n- Parking: 1 × £15.00";
+  const h = harness(); h.pack.notes = legacy; h.add(); assert.equal(h.state.items.length, 0); assert.match(h.state.error, /review|reconcil|Other charges/i);
+  for (const hasStructured of [false, true]) {
+    const quote = harness(); quote.add(); quote.state.form.notes = legacy;
+    if (hasStructured) quote.state.items.push({ id: "parking", category: "Other", description: "Parking", quantity: 1, unitPrice: 15 });
+    quote.save(); assert.equal(quote.state.writes.length, 0); assert.match(quote.state.error, /review|reconcil|Other charges/i);
+  }
+});
+
+test("invalid Other quote amounts cannot create a reusable pack", () => {
+  for (const patch of [{ quantity: 0 }, { quantity: -1 }, { unitPrice: NaN }, { unitCost: -1 }, { description: " " }]) {
+    const h = harness(); h.state.name = "Access";
+    h.state.items = [{ id: "parking", category: "Other", description: "Parking", quantity: 1, unitPrice: 15, ...patch }];
+    h.save(); assert.equal(h.state.writes.length, 0); assert.match(h.state.error, /amounts/i);
+  }
+});
+
+test("all supported allowance categories survive alongside adjacent material and allowance lines", () => {
+  const h = harness(); h.add();
+  const categories = ["Parking", "Travel", "Other", "Plant Hire", "Contingency", "Parking"];
+  h.state.items.push(...categories.map((category, index) => ({ id: `allowance-${index}`, category, description: `${category} ${index}`, quantity: 2, unitPrice: index + 1 })));
+  h.save(); const saved = h.state.writes[0]; assert.ok(saved);
+  assert.deepEqual(Array.from(saved.otherAllowances, line => line.category), categories);
+  h.ctx.jobPacks.items = [{ ...saved, id: "p1" }]; h.state.items = []; h.add();
+  assert.deepEqual(Array.from(h.state.items.slice(2), line => line.category), categories);
+  assert.equal(h.state.items.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0), 208);
+});
+
+test("unsupported quote categories block pack saving before any line can be dropped", () => {
+  const h = harness(); h.add(); h.state.items.push({ id: "unknown", category: "Unknown", description: "Charge", quantity: 1, unitPrice: 5 });
+  h.save(); assert.equal(h.state.writes.length, 0); assert.match(h.state.error, /category|categories|unsupported/i);
+});

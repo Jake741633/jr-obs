@@ -15,7 +15,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.30.0",
-    "next": "16.3.8",
+    "next": "16.4.3",
     "radix-ui": "^1.6.7",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -29,10 +29,15 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "minimatch": "file:scripts/eslint-minimatch-compat",
     "tailwindcss": "^4",
     "typescript": "^5"
   },
   "overrides": {
+    "minimatch": "$minimatch",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.3"
+    },
     "@next/eslint-plugin-next": {
       "fast-glob": "npm:tinyglobby@0.2.17"
     }

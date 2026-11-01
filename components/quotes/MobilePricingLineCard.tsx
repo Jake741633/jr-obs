@@ -34,10 +34,10 @@ export function MobilePricingLineCard({ item, formattedTotal, onChange, onRemove
           </select>
         </label>
         <div className="grid grid-cols-2 gap-3">
-          <InputField label="Quantity" type="number" min="0.01" step="0.01" value={String(item.quantity)} onChange={(event) => onChange({ quantity: Number(event.target.value) })} />
-          <InputField label="Unit cost (£)" type="number" min="0" step="0.01" value={String(item.unitCost ?? item.unitPrice)} onChange={(event) => onChange({ unitCost: Number(event.target.value) })} />
+          <InputField label="Quantity" type="number" min="0" step="any" value={String(item.quantity)} onChange={(event) => onChange({ quantity: Number(event.target.value) })} />
+          <InputField label="Unit cost (£)" type="number" min="0" step="any" value={String(item.unitCost ?? item.unitPrice)} onChange={(event) => onChange({ unitCost: Number(event.target.value) })} />
         </div>
-        <InputField label="Customer price (£)" type="number" min="0" step="0.01" value={String(item.unitPrice)} onChange={(event) => onChange({ unitPrice: Number(event.target.value) })} />
+        <InputField label="Customer price (£)" type="number" min="0" step="any" value={String(item.unitPrice)} onChange={(event) => onChange({ unitPrice: Number(event.target.value) })} />
         <button type="button" onClick={onRemove} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-red-500/20 bg-red-500/5 px-4 text-sm font-semibold text-red-300 active:bg-red-500/15">
           <Trash2 className="size-4" />Remove pricing line
         </button>

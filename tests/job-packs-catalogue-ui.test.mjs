@@ -26,6 +26,89 @@ function harness(){
 }
 test("Job Packs exposes the catalogue and separated cost breakdown without writes",()=>{const h=harness(),view=h.render();assert.ok(nodes(view).some(n=>n.type==="Catalogue"));assert.ok(nodes(view).some(n=>n.type==="Breakdown"));assert.equal(h.writes.length,0);});
 test("pack editor saves quantities, buying/selling allowances and private notes separately",()=>{const h=harness();h.edit();h.field("Quantity · Socket","3");h.field("Buying cost each (£) · Socket","7");h.field("Selling price each (£) · Socket","11");h.field("Internal pricing notes","New private benchmark");h.submit();assert.equal(h.writes.length,1);assert.equal(h.writes[0].materials[0].quantity,3);assert.equal(h.writes[0].materials[0].unitCost,7);assert.equal(h.writes[0].materials[0].unitPrice,11);assert.equal(h.writes[0].internalNotes,"New private benchmark");assert.equal(h.writes[0].notes,"Making good excluded");});
+test("plain other charge lines save separately and contribute to the editor total", () => {
+  const h = harness(); h.edit();
+  h.field("Other charge description", "Parking"); h.field("Other charge quantity", "2");
+  h.field("Other charge selling price each (£)", "15"); h.field("Other charge buying cost each (£)", "10");
+  h.button("Add other charge").props.onClick();
+  assert.match(text(h.render()), /Other charges £30.00.*Pack total £200.00/);
+  h.submit();
+  const line = h.writes[0].otherAllowances[0];
+  assert.equal(line.description, "Parking"); assert.equal(line.quantity, 2);
+  assert.equal(line.unitPrice, 15); assert.equal(line.unitCost, 10);
+  assert.equal(line.materialId, undefined); assert.equal(line.supplier, undefined);
+  assert.equal(h.writes[0].materials.length, 1);
+});
+test("other charges can be edited and removed while older packs remain editable", () => {
+  const h = harness(); h.packs.items = [{ ...h.packs.items[0], otherAllowances: [{ id: "c1", description: "Permit", quantity: 1, unitPrice: 25 }] }]; h.edit();
+  h.field("Other charge description · Permit", "Site permit");
+  h.field("Other charge quantity · Site permit", "1.5"); h.field("Other charge selling price each (£) · Site permit", "30");
+  h.submit(); assert.equal(h.writes[0].otherAllowances[0].description, "Site permit");
+  assert.equal(h.writes[0].otherAllowances[0].quantity, 1.5); assert.equal(h.writes[0].otherAllowances[0].unitPrice, 30);
+  h.edit(); h.button("Remove other charge").props.onClick(); h.submit(); assert.equal(h.writes[1].otherAllowances.length, 0);
+  const older = harness(); older.edit(); older.field("Internal pricing notes", "Reviewed"); older.submit(); assert.equal(older.writes.length, 1);
+});
+test("blank charge prices are incomplete until explicitly priced and failure preserves the draft", () => {
+  const h = harness(); h.edit(); h.field("Other charge description", "Parking");
+  h.button("Add other charge").props.onClick(); assert.match(text(h.render()), /valid selling price/i);
+  h.field("Other charge selling price each (£)", "0"); h.button("Add other charge").props.onClick();
+  h.field("Other charge selling price each (£) · Parking", ""); h.submit(); assert.equal(h.writes.length, 0);
+  assert.equal(h.field("Other charge selling price each (£) · Parking").props.value, "");
+  assert.doesNotMatch(text(h.render()), /Pack total £170.00/);
+  h.field("Other charge selling price each (£) · Parking", "5"); h.fail(); h.submit();
+  assert.match(text(h.render()), /Storage full/); assert.equal(h.field("Other charge selling price each (£) · Parking").props.value, "5");
+});
+test("stale charge editor callbacks cannot add, edit or remove after an account switch", () => {
+  const h = harness(); h.packs.items = [{ ...h.packs.items[0], otherAllowances: [{ id: "c1", description: "Parking", quantity: 1, unitPrice: 5 }] }]; h.edit();
+  const edit = h.field("Other charge selling price each (£) · Parking").props.onChange;
+  const remove = h.button("Remove other charge").props.onClick, add = h.button("Add other charge").props.onClick;
+  h.identity.identity = { ...h.identity.identity, organisationId: "other" }; h.render();
+  edit({ target: { value: "99" } }); remove(); add();
+  assert.equal(h.writes.length, 0); assert.equal(h.packs.items[0].otherAllowances[0].unitPrice, 5);
+  h.identity.identity = { ...h.identity.identity, organisationId: "o1" }; h.render();
+  assert.equal(h.field("Other charge selling price each (£) · Parking").props.value, "5");
+  assert.equal(nodes(h.render()).filter(node => node.type === "Button" && text(node) === "Remove other charge").length, 1);
+});
+test("legacy notes withhold editor totals until verified charges are entered and old list removed", () => {
+  const h = harness(); h.packs.items = [{ ...h.packs.items[0], notes: "Making good excluded\nOther allowances from original quote:\nParking £30" }]; h.edit();
+  assert.doesNotMatch(text(h.render()), /Pack total £170.00/); assert.match(text(h.render()), /original quote/);
+  h.field("Other charge description", "Parking"); h.field("Other charge selling price each (£)", "30"); h.button("Add other charge").props.onClick();
+  assert.doesNotMatch(text(h.render()), /Pack total £200.00/);
+  h.field("Notes", "Making good excluded"); assert.match(text(h.render()), /Pack total £200.00/); h.submit();
+  assert.equal(h.writes[0].notes, "Making good excluded"); assert.equal(h.writes[0].otherAllowances[0].unitPrice, 30);
+});
+test("unfinished new other charges keep both new and edited packs open until added or cleared", () => {
+  for (const editing of [false, true]) {
+    const h = harness();
+    if (editing) h.edit(); else { nodes(h.render()).find(node => node.type === "PageHeader").props.action.props.onClick(); h.field("Job pack name", "Parking job"); }
+    h.field("Other charge description", "Parking"); h.field("Other charge selling price each (£)", "15"); h.submit();
+    assert.equal(h.writes.length, 0); assert.equal(h.field("Other charge description").props.value, "Parking");
+    assert.match(text(h.render()), /add or clear.*other charge/i);
+    if (editing) h.button("Add other charge").props.onClick(); else h.button("Clear other charge").props.onClick();
+    h.submit(); assert.equal(h.writes.length, 1);
+    assert.equal(h.writes[0].otherAllowances.length, editing ? 1 : 0);
+  }
+});
+test("duplicate stored charge IDs remain independently editable and removable", () => {
+  const h = harness(); h.packs.items = [{ ...h.packs.items[0], otherAllowances: [
+    { id: "duplicate", description: "Parking", quantity: 1, unitPrice: 15 },
+    { id: "duplicate", description: "Permit", quantity: 1, unitPrice: 25 },
+  ] }]; h.edit();
+  h.field("Other charge selling price each (£) · Parking", "20");
+  assert.equal(h.field("Other charge selling price each (£) · Permit").props.value, "25");
+  const removals = nodes(h.render()).filter(node => node.type === "Button" && text(node) === "Remove other charge");
+  removals[0].props.onClick(); h.submit();
+  assert.equal(h.writes[0].otherAllowances.length, 1);
+  assert.equal(h.writes[0].otherAllowances[0].description, "Permit"); assert.equal(h.writes[0].otherAllowances[0].unitPrice, 25);
+});
+test("editing imported charge rows retains their category and supports new charge categories", () => {
+  const h = harness(); h.packs.items = [{ ...h.packs.items[0], otherAllowances: [{ id: "parking", description: "Site parking", category: "Parking", quantity: 1, unitPrice: 15 }] }]; h.edit();
+  h.field("Internal pricing notes", "Reviewed"); h.submit(); assert.equal(h.writes[0].otherAllowances[0].category, "Parking");
+  h.edit(); const select = nodes(h.render()).find(node => node.type === "select" && node.props["aria-label"] === "Other charge category");
+  assert.ok(select); assert.deepEqual(nodes(select).filter(node => node.type === "option").map(text), ["Other", "Travel", "Parking", "Plant Hire", "Contingency"]);
+  select.props.onChange({ target: { value: "Travel" } }); h.field("Other charge description", "Mileage"); h.field("Other charge selling price each (£)", "20"); h.button("Add other charge").props.onClick();
+  h.submit(); assert.equal(h.writes[1].otherAllowances[1].category, "Travel");
+});
 test("failed persistence keeps the draft and invalid quantities cannot be saved",()=>{const h=harness();h.edit();h.field("Quantity · Socket","0");h.submit();assert.equal(h.writes.length,0);h.field("Quantity · Socket","3");h.fail();h.submit();assert.equal(h.writes.length,0);assert.equal(h.field("Quantity · Socket").props.value,3);assert.match(text(h.render()),/Storage full/);});
 test("changing the stored pack while editing cannot overwrite the newer record",()=>{const h=harness();h.edit();h.packs.items=[{...h.packs.items[0],notes:"Newer scope"}];h.render();h.submit();assert.equal(h.writes.length,0);assert.equal(h.packs.items[0].notes,"Newer scope");assert.match(text(h.render()),/changed/);});
 test("pack supplier actions fail closed for removed, duplicate or changed material records",()=>{const h=harness(),view=h.render(),card=nodes(view).find(n=>n.type==="Breakdown");assert.ok(card);const material=h.library.items[0];assert.equal(card.props.canUseMaterial(material),true);h.library.items=[{...material,stockCode:"CHANGED"}];h.render();assert.equal(card.props.canUseMaterial(material),false);h.library.items=[material,material];h.render();assert.equal(card.props.canUseMaterial(material),false);h.library.items=[];h.render();assert.equal(card.props.canUseMaterial(material),false);});
