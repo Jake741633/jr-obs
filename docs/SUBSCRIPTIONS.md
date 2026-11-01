@@ -1,10 +1,10 @@
 # JR OS subscriptions — commercialisation foundation
 
-Status: initial server policy implemented and tested; **not connected to runtime access, checkout, payment collection or live billing**. Existing JR access remains unchanged. No subscription price or trial has been published.
+Status: initial server policy implemented and tested; **not connected to runtime access, checkout, payment collection or live billing**. Existing JR access remains unchanged. Jake approved GBP 29/month, GBP 290/year and a founding offer of GBP 19/month for 12 months for the first 20 businesses. Sandbox catalog created; no public paid checkout or trial has been launched.
 
 ## Proposed product
 
-One subscription per business, with monthly and annual billing. Start with a straightforward business plan; staff-seat tiers can follow. Prices, included staff and any trial duration need Jake's choice. AI must have a separate server usage budget/allowance rather than an unlimited-cost promise. This is software access billing, separate from invoices that electricians issue to their customers.
+One subscription per business, with monthly and annual billing. Start with a straightforward business plan; staff-seat tiers can follow. Prices are approved as above; included staff and the trial policy still need final configuration. AI must have a separate server usage budget/allowance rather than an unlimited-cost promise. This is software access billing, separate from invoices that electricians issue to their customers.
 
 Stripe-hosted Checkout and Customer Portal are the proposed payment interfaces. The portal can manage payment methods, subscription changes and invoice history. Each existing business gets a server-owned Stripe customer binding; an owner manages their own business's billing. Staff roles do not inherit payment-management powers.
 
@@ -26,6 +26,6 @@ Inputs must come from trusted server records reconciled with Stripe. This helper
 
 ## Setup still required
 
-Stripe plugin connected on 1 November 2026 to the JR Electrical Services sandbox (test mode). The implementation planner was run and its applicable paths accepted; see `STRIPE_INTEGRATION_PLAN.md`. Server restricted API key/webhook secret, configured products/prices/portal, server persistence/migrations, payment routes/webhooks and real integration acceptance are still required. No payment-provider account, secret, product, subscription or charge was created by this foundation or planning work. The pure policy is deliberately not a sale-ready billing system.
+Stripe plugin connected on 1 November 2026 to the JR Electrical Services sandbox (test mode). The implementation planner was run and its applicable paths accepted; see `STRIPE_INTEGRATION_PLAN.md`. Server restricted API key/webhook secret, configured products/prices/portal, server persistence/migrations, payment routes/webhooks and real integration acceptance are still required. The approved JR OS Product, monthly/annual Prices and capped founding discount now exist in the sandbox; IDs and enforcement limits are in the integration plan. No provider account, secret, subscription or charge was created by this work. The pure policy is deliberately not a sale-ready billing system.
 
 Primary implementation references: https://docs.stripe.com/billing/subscriptions/webhooks , https://docs.stripe.com/webhooks , https://docs.stripe.com/billing/subscriptions/integrating-customer-portal , https://docs.stripe.com/payments/checkout/limit-subscriptions . Verify current API/SDK contracts when wiring the provider.

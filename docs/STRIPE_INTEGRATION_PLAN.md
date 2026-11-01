@@ -14,7 +14,7 @@ JR OS currently uses Next.js/React, Netlify and Supabase business accounts. Its 
 
 ## Recommended first release
 
-- Flat subscription per business. One Product per purchasable tier; monthly and annual GBP Prices for variants of the same tier. Amounts, included staff, AI allowance and trial remain undecided.
+- Flat subscription per business. One Product per purchasable tier; monthly and annual GBP Prices for variants of the same tier. Jake approved GBP 29/month and GBP 290/year on 1 November 2026, plus the founding monthly offer below. Included staff and AI allowance remain undecided; a 14-day trial is proposed but not yet wired into Checkout.
 - Standard Stripe-hosted Checkout with flexible billing mode and dynamic payment methods. Omit `payment_method_types`. Use `integration_identifier` with a stable flow label and an eight-random-letter suffix per current API guidance. Do not enable Managed Payments by assumption.
 - Pay at signup is a proposed default, not a published policy. Do not configure a trial until Jake chooses it. Stripe Billing generates subscription invoices; do not create a second job invoice for subscription charges.
 - Owner-only Customer Portal for payment methods, invoices and cancellation at period end. Enable plan switching only between approved compatible Prices. Choose proration behavior explicitly before offering changes.
@@ -45,7 +45,7 @@ Confirm JR Electrical's VAT registrations and intended customer locations, plus 
 
 Test authenticated owner/staff/customer access and cross-business ID substitution; duplicate Checkout clicks, concurrent signup and expired sessions; successful payment, authentication challenge and failed/asynchronous payment; renewal and exact paid-period boundaries; portal updates/cancellation/reactivation; invoice failure and recovery; trial expiry if trials are chosen; forged signatures and wrong signing secrets; duplicate, concurrent, delayed and out-of-order events; worker retry/crash and reconciliation; partial/full refund, dispute and fraud-review outcomes; test/live mixing; direct database/RPC bypass; revoked membership; historical read/export after expiry; AI allowance exhaustion. Job invoice tests must cover draft review, retry without duplicates, deposit/balance accounting, credits and wrong-business customer/job IDs.
 
-Only describe billing as operational after deployed sandbox Checkout, real webhook delivery, persistence, portal and access enforcement pass end to end. Live activation, prices and tax settings need separate deliberate configuration. No real charges, invoice emails, account settings, products, migrations or subscriptions were created during this planning pass.
+Only describe billing as operational after deployed sandbox Checkout, real webhook delivery, persistence, portal and access enforcement pass end to end. Live activation, prices and tax settings need separate deliberate configuration. No real charges, invoice emails, account settings, migrations or subscriptions were created. Sandbox catalog objects were subsequently created after Jake approved the prices; see the configuration record below.
 
 ## Stripe primary references selected by the planner
 
@@ -60,3 +60,18 @@ Only describe billing as operational after deployed sandbox Checkout, real webho
 - [Tax for recurring payments](https://docs.stripe.com/billing/taxes/collect-taxes)
 
 The planner also offered Connect paths because other businesses were mentioned. Those paths were explicitly excluded from the initial acceptance; selling software access alone does not authorize collecting money for other merchants.
+
+## Approved sandbox catalog — 1 November 2026
+
+Account: `acct_1UWyMhRxGUITlJWL` (JR Electrical Services sandbox), `livemode:false`. These are test identifiers only, never fallback live configuration. Both Prices were read back and verified as active, GBP, correct amount/interval and attached to the same Product. No secret keys are recorded here.
+
+| Object | Stripe ID | Configuration |
+| --- | --- | --- |
+| Business subscription Product | `jr_os_business` | JR OS Business; software access for one business |
+| Monthly Price | `price_1UX0fdRxGUITlJWLXoEGdcBE` | GBP 29.00 / month; default Product price |
+| Annual Price | `price_1UX0fpRxGUITlJWLs2gwl34S` | GBP 290.00 / year; lookup key `jr_os_business_annual_gbp_v1` |
+| Founding discount | `jr_os_founders_20_monthly_v1` | GBP 10.00 off, repeating 12 months, max 20 redemptions, restricted to JR OS Product |
+
+The founding offer is GBP 19/month for the first 12 months, then the normal GBP 29/month. It is deliberately a temporary discount on the standard monthly Price, not a permanently cheap recurring Price. No public promotion code or payment link was created. Coupon metadata describes restrictions but does not enforce them: the server must admit one qualifying business once, allow only the approved monthly Price and quantity one, and prevent annual switching or additional discounts from misapplying the offer. Portal plan-change configuration must preserve these restrictions. Twenty Stripe redemptions alone do not guarantee twenty distinct businesses. Validate discount start/end boundaries with the chosen trial policy and sandbox clocks before launch.
+
+Tax behavior on both test Prices is `unspecified`. No automatic tax collection or immutable inclusive/exclusive tax choice was enabled; verify current VAT registration and intended displayed price treatment before launch. Catalog creation does not make billing operational: credentials, Checkout, portal, webhooks, persistence, enforcement and end-to-end tests remain outstanding.
