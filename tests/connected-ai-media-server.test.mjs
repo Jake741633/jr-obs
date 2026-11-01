@@ -19,6 +19,45 @@ function harness(provider) {
   }});
   return {handler,calls,profile,paid:()=>calls.filter(c=>c.url),advance:()=>{time+=60001;}};
 }
+function sizedJpeg(size) {
+  const bytes = Buffer.alloc(size, 7); bytes[0] = 255; bytes[1] = 216; bytes[size - 2] = 255; bytes[size - 1] = 217;
+  return "data:image/jpeg;base64," + bytes.toString("base64");
+}
+test("a six-photo request sends every image in order without changing the priced-data boundary", async () => {
+  const photos = [4, 5, 6, 7, 8, 9].map(sizedJpeg), h = harness();
+  const r = await h.handler(request({ operation: "draft", notes: "Install six kitchen downlights", consent: true, photos }));
+  assert.equal(r.status, 200); assert.deepEqual(await r.json(), { draft });
+  const sent = JSON.parse(h.paid()[0].init.body), content = sent.input[0].content;
+  assert.deepEqual(content.filter(item => item.type === "input_image").map(item => item.image_url), photos);
+  assert.equal(content.filter(item => item.type === "input_text" && /Photo [1-6]/.test(item.text)).length, 6);
+  assert.equal(sent.store, false); assert.equal(h.calls.filter(c => c.profile).length, 3);
+  assert.match(sent.instructions, /overlapping|repeated views/i);
+});
+test("photos and timestamped video frames share one bounded review", async () => {
+  const h = harness(), frames = [0, 30, 60].map(seconds => ({ dataUrl: jpeg, seconds }));
+  const r = await h.handler(request({ operation: "draft", notes: "", consent: true, photos: [jpeg, jpeg, jpeg], frames }));
+  assert.equal(r.status, 200);
+  const content = JSON.parse(h.paid()[0].init.body).input[0].content;
+  assert.equal(content.filter(item => item.type === "input_image").length, 6);
+  assert.equal(content.filter(item => item.type === "input_text" && /Sampled still/.test(item.text)).length, 3);
+});
+test("bad or excessive photo batches cannot make a paid request", async () => {
+  for (const extra of [
+    { photos: [] }, { photos: null }, { photos: jpeg }, { photos: [null] }, { photos: [{}] },
+    { photos: ["https://private.example/image"] }, { photos: [jpeg + "="] }, { photos: [sizedJpeg(250001)] },
+    { photos: Array(7).fill(jpeg) }, { photos: Array(4).fill(jpeg), frames: [0, 30, 60].map(seconds => ({ dataUrl: jpeg, seconds })) },
+    { photos: [jpeg], photo: jpeg }, { photos: [jpeg], frames: [] }, { photos: [jpeg], video: "data:video/mp4;base64,AAAA" },
+  ]) {
+    const h = harness(); const r = await h.handler(request({ operation: "draft", notes: "Two sockets", consent: true, ...extra }));
+    assert.equal(r.status, 400); assert.equal(h.paid().length, 0);
+  }
+});
+test("maximum prepared-image batch fits the existing streaming cap with fully escaped notes", async () => {
+  const image = sizedJpeg(250000), photos = Array(3).fill(image), frames = [0, 30, 60].map(seconds => ({ dataUrl: image, seconds }));
+  const h = harness(), body = { operation: "draft", notes: "\u0001".repeat(12000), consent: true, photos, frames };
+  assert.ok(Buffer.byteLength(JSON.stringify(body)) < 2100000);
+  assert.equal((await h.handler(request(body))).status, 200); assert.equal(h.paid().length, 1);
+});
 test("prepared sound is sent as a bounded multipart file and only transcript text is returned", async()=>{
   for(const audio of [mp4,webm]){
     const h=harness(), r=await h.handler(request({operation:"transcribe",audio,consent:true}));

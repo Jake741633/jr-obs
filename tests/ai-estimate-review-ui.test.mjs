@@ -36,8 +36,52 @@ function harness(page) {
   const render = () => { cursor = 0; const tree=mod.exports.default();effects.splice(0).forEach(fn=>fn());return tree; };
   const button = label => { const found = nodes(render()).find(n => n.type === "Button" && text(n).includes(label)); assert.ok(found,label); return found; };
   const field = (label, value) => { const found = nodes(render()).find(n => n.props.label === label) ?? nodes(render()).find(n => n.type === "label" && text(n).startsWith(label))?.props.children?.find?.(n => n?.type === "input" || n?.type === "select"); assert.ok(found,label); if (value !== undefined) found.props.onChange({target:{value}}); return found; };
-  return {render,button,field,writes,attempts,stores,pack,identity,fail(value=true){fail=value;},failAfterWrite(){failAfterWrite=true;},session(){epoch++;session=null;},unmount(){slots.forEach(slot=>slot?.cleanup?.());},generate(notes="Domestic socket installation"){render();const input=nodes(render()).find(n=>n.type==="TextareaField");input.props.onChange({target:{value:notes}});button(page==="materials"?"Suggest materials":"Create priced draft").props.onClick();render();},chooseCustomer(){const select=nodes(render()).find(n=>n.type==="select"&&nodes(n).some(o=>o.type==="option"&&o.props.value==="c1"));assert.ok(select);select.props.onChange({target:{value:"c1"}});render();}};
+  return {render,button,field,writes,attempts,stores,pack,identity,assistant(){const found=nodes(render()).find(n=>n.type==="ConnectedQuoteAssistant");assert.ok(found);return found;},notes(value){nodes(render()).find(n=>n.type==="TextareaField").props.onChange({target:{value}});render();},fail(value=true){fail=value;},failAfterWrite(){failAfterWrite=true;},session(){epoch++;session=null;},unmount(){slots.forEach(slot=>slot?.cleanup?.());},generate(notes="Domestic socket installation"){render();const input=nodes(render()).find(n=>n.type==="TextareaField");input.props.onChange({target:{value:notes}});button(page==="materials"?"Suggest materials":"Create priced draft").props.onClick();render();},chooseCustomer(){const select=nodes(render()).find(n=>n.type==="select"&&nodes(n).some(o=>o.type==="option"&&o.props.value==="c1"));assert.ok(select);select.props.onChange({target:{value:"c1"}});render();}};
 }
+
+const reviewedLighting = "Kitchen lighting\nReviewed photos and requested work\nProposed scope\n- Install six LED downlights\nQuestions to confirm\n- Confirm cable route\nExclusions\n- Replace sockets excluded";
+test("reviewed media scope builds current saved labour and materials immediately without saving", () => {
+  const h = harness("quote-builder"); h.generate();
+  Object.assign(h.pack, {name:"Install four LED downlights",description:"Install four downlights",labourHours:3,materials:[{id:"lights",description:"LED downlight",quantity:4,unitCost:5,unitPrice:9.875}]});
+  h.stores["jr-os-labour-rates"].items=[{id:"r1",name:"Electrician",unit:"Hour",costRate:20,chargeRate:50,active:true}]; h.render();
+  const panel = h.assistant(); assert.equal(typeof panel.props.onBuildDraft,"function");
+  panel.props.onBuildDraft("Domestic socket installation",reviewedLighting); const tree=h.render();
+  assert.equal(h.field("Job notes").props.value,reviewedLighting);
+  const labour=nodes(tree).find(n=>n.props["aria-label"]==="Labour pricing lines"), materials=nodes(tree).find(n=>n.props["aria-label"]==="Materials pricing lines");
+  assert.ok(labour); assert.ok(materials); assert.match(text(labour),/Electrician/); assert.match(text(materials),/LED downlight/); assert.doesNotMatch(text(materials),/Socket/);
+  assert.equal(nodes(materials).find(n=>n.props.label==="Quantity").props.value,4); assert.equal(nodes(labour).find(n=>n.props.label==="Quantity").props.value,3);
+  assert.match(text(tree),/6 downlights.*allows 4/); assert.equal(h.writes.length,0); assert.equal(h.attempts.length,0);
+});
+test("reviewed-media callbacks cannot replace a newer draft after notes or target changes",()=>{
+  for(const kind of ["notes","target","readiness","session","unmount"]){
+    const h=harness("quote-builder");h.identity.mode="cloud";h.generate(); const callback=h.assistant().props.onBuildDraft; assert.equal(typeof callback,"function");
+    if(kind==="notes")h.notes("Latest note text");
+    if(kind==="target")h.chooseCustomer();
+    if(kind==="readiness"){h.stores["jr-os-jobs"].isReady=false;h.render();}
+    if(kind==="session")h.session();
+    if(kind==="unmount")h.unmount();
+    callback("Domestic socket installation",reviewedLighting); if(kind==="readiness")h.stores["jr-os-jobs"].isReady=true;h.render();
+    assert.equal(h.writes.length,0); assert.notEqual(h.field("Job notes").props.value,reviewedLighting);
+  }
+});
+test("notes-only media handoff clears the old estimate, while a stale handoff retains newer work",()=>{
+  const h=harness("quote-builder");h.generate();h.assistant().props.onApply("Domestic socket installation",reviewedLighting);
+  assert.equal(h.field("Job notes").props.value,reviewedLighting);assert.match(text(h.render()),/Your draft will appear here/);assert.equal(h.writes.length,0);
+  const old=harness("quote-builder");old.generate();const apply=old.assistant().props.onApply;old.notes("Newest socket scope");old.button("Create priced draft").props.onClick();old.render();
+  apply("Domestic socket installation",reviewedLighting);assert.equal(old.field("Job notes").props.value,"Newest socket scope");assert.match(text(old.render()),/Draft pricing lines/);
+});
+test("invoice evidence refresh invalidates an old media draft callback and a current callback can build",()=>{
+ const h=harness("quote-builder");h.generate();const old=h.assistant().props.onBuildDraft;
+ h.stores["jr-os-invoices"].items=[{id:"paid",status:"Paid",jobId:"job-1",total:500}];h.render();old("Domestic socket installation",reviewedLighting);
+ assert.equal(h.field("Job notes").props.value,"Domestic socket installation");assert.equal(h.writes.length,0);
+ h.assistant().props.onBuildDraft("Domestic socket installation",reviewedLighting);h.render();assert.equal(h.field("Job notes").props.value,reviewedLighting);assert.equal(h.writes.length,0);
+});
+test("media draft review explains missing saved labour and materials with direct setup links",()=>{
+  const h=harness("quote-builder");h.render();h.stores["jr-os-job-packs"].items=[];h.notes("Install a specialist unit");
+  const callback=h.assistant().props.onBuildDraft;assert.equal(typeof callback,"function");callback("Install a specialist unit","Proposed scope\n- Install a specialist unit");
+  const tree=h.render();assert.match(text(tree),/No priced labour line/);assert.match(text(tree),/No matching material lines/);assert.equal(h.writes.length,0);
+  assert.ok(nodes(tree).some(n=>n.type==="Link"&&n.props.href==="/labour-costs"));assert.ok(existsSync(new URL("../app/labour-costs/page.tsx",import.meta.url)));assert.ok(nodes(tree).some(n=>n.type==="Link"&&n.props.href==="/starter-library"));
+});
 
 test("local quote review separates included work, survey questions and exclusions without creating records", () => {
   const h = harness("quote-builder");

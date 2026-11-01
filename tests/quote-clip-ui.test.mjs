@@ -41,6 +41,23 @@ test('edits reset transcript review and frames-only use makes no provider reques
  const h=harness();await h.ready();await h.transcribe();h.review();h.edit('Three sockets.');assert.equal(h.button('Use checked transcript').props.disabled,true);h.review();h.button('Use checked transcript').props.onClick();assert.equal(h.uses[0].transcript,'Three sockets.');
  const frames=harness();await frames.ready();frames.button('Use video frames without speech').props.onClick();assert.equal(frames.calls.length,0);assert.equal(frames.uses[0].transcript,'');
 });
+test('a parent rejected recording remains available for a corrected handoff', async()=>{
+ const h=harness(); await h.ready(); h.props.onUse=()=>false;
+ h.button('Use video frames without speech').props.onClick(); assert.equal(h.uses.length,0);
+ h.props.onUse=value=>h.uses.push(value); h.render(); h.button('Use video frames without speech').props.onClick();
+ assert.equal(h.uses.length,1);
+});
+test('temporary parent activity preserves prepared frames and a checked transcript without another paid request',async()=>{
+ const h=harness();await h.ready();await h.transcribe();h.review();h.props.blocked=true;h.render();
+ assert.equal(h.button('Use checked transcript').props.disabled,true);assert.equal(h.button('Transcribe speech').props.disabled,true);
+ h.props.blocked=false;h.render();assert.equal(h.button('Use checked transcript').props.disabled,false);h.button('Use checked transcript').props.onClick();
+ assert.equal(h.uses.length,1);assert.equal(h.uses[0].transcript,'Add two sockets.');assert.equal(h.prepares.length,1);assert.equal(h.calls.length,1);
+});
+test('blocking a pending clip preparation cancels it and releases its busy state for retry',async()=>{
+ const h=harness();let finish;h.prepare(()=>new Promise(resolve=>{finish=resolve;}));h.choose();const pending=h.button('Prepare sound and frames').props.onClick();
+ h.props.blocked=true;h.render();assert.equal(h.prepares[0][1].signal.aborted,true);finish(prepared);await pending;h.props.blocked=false;h.render();
+ assert.equal(h.button('Prepare sound and frames').props.disabled,false);assert.equal(h.calls.length,0);assert.equal(h.uses.length,0);
+});
 test('account, target, note, readiness and session changes discard local preparation',async()=>{
  for(const change of [h=>{h.props.context={job:'two'};h.render();},h=>{h.props.notes='Other notes';h.render();},h=>{h.props.userId='other';h.render();},h=>{h.props.enabled=false;h.render();},h=>h.session(),h=>h.unmount()]){
   const h=harness();let done;h.prepare(()=>new Promise(resolve=>{done=resolve;}));h.choose();const pending=h.button('Prepare sound and frames').props.onClick();change(h);done(prepared);await pending;assert.equal(h.calls.length,0);assert.equal(h.uses.length,0);assert.ok(!text(h.render()).includes('Use video frames without speech'));

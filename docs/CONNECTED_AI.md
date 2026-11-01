@@ -1,8 +1,16 @@
 # Connected AI quote scope
 
-Quote Builder includes **Review notes, photos or a site recording with AI**. The user chooses one camera/gallery photo, a saved job-evidence record or a reviewed recording, then explicitly submits it with the notes currently visible in the form. OpenAI returns an unpriced scope, questions and exclusions. The user edits and checks this text, then chooses **Use reviewed scope in quote notes**. The existing priced draft is cleared so it must be rebuilt and checked using saved pricing settings.
+Quote Builder includes a directly visible **Quote from photos or video** panel. The **Photos & video** tab moves it above the notes without discarding an open selection. Add camera/gallery photographs and an optional reviewed short recording, or choose one saved job-evidence record. Explicitly submit with the notes currently visible in the form. OpenAI returns an unpriced scope, questions and exclusions. Edit and check the text, then choose **Build labour & materials draft** to build an editable estimate immediately from that exact reviewed text using saved packs, labour rates, costs and business defaults. **Use reviewed scope in quote notes** remains available to replace the notes and clear the old estimate without building another.
 
 This step does not save/send a quote, alter a job or send the CRM. The original video is not uploaded or saved by the AI workflow. Photo/clip evidence is transient; save job evidence through the separate job capture form. The deterministic priced-draft button is labelled **Create priced draft from notes**.
+
+## Add several site photos
+
+Use **Take a photo** repeatedly or **Add photos from library** to append a batch. Select at most six photos, each at most 25 MiB and at most 100 MiB combined. Remove individual files before proceeding. **Prepare photos for review** makes bounded JPEG copies locally (250,000 bytes each, long edge initially 1,280 pixels, smaller if necessary) and shows previews; it does not contact AI. Then explicitly choose **Review with AI**. Unreadable or over-limit batches do not replace an existing selection or send a partial batch. Removing evidence cancels pending preparation/review.
+
+Photos can accompany a reviewed recording, with at most six images together counting its sampled video frames. If the combination is too large, remove photos or the recording; no selected image is silently omitted. Using saved evidence replaces this transient collection. The model is instructed to keep repeated/overlapping views separate from counts and to put only requested work in scope. Missing/conflicting counts, routes and specifications are questions, not priced assumptions. Saved pack quantities are retained exactly and mismatches require review; photo-derived counts do not automatically scale a saved bill of materials. Missing labour rates or material matches are shown with setup links.
+
+Adding/removing photos preserves a finished prepared recording and checked transcript, including when correcting the combined image limit. Photo preparation and connection/review requests temporarily block recording actions without discarding finished evidence; in-progress recording work is cancelled. Account, target, notes, source evidence or session changes still invalidate use. A valid arriving photo selection cancels the old pending photo preparation/review and requires preparing the complete new selection before sending.
 
 ## Reuse saved job evidence
 
@@ -96,11 +104,11 @@ Open **Use a short video or voice recording** inside Quote Builder's AI panel. C
 
 The helper releases playback, audio tracks/contexts and object URLs on completion, cancellation, failure or backgrounding. No clip, transient transcript or model response is written to localStorage or cloud records. Saving durable job media remains the separate job evidence workflow; direct large private video-file storage is still pending.
 
-Prepared audio is limited to 1,500,000 bytes. Video stills have a 960-pixel long edge and a 250,000-byte limit per JPEG, with at most three increasing timestamps between 0 and 60 seconds. The request accepts either these frames or the existing photo, never both. Combined typed notes plus attributed transcript remain under 12,000 characters. Transcription and scope share the same authentication, bounded input/response, single-flight and burst-limit lifecycle.
+Prepared audio is limited to 1,500,000 bytes. Video stills have a 960-pixel long edge and a 250,000-byte limit per JPEG, with at most three increasing timestamps between 0 and 60 seconds. New `photos` batches and frames can accompany one another, with at most six images total. The legacy single `photo` (including saved evidence) remains mutually exclusive with batches/frames. Combined typed notes plus attributed transcript remain under 12,000 characters. Transcription and scope share the same authentication, bounded input/response, single-flight and burst-limit lifecycle.
 
 ## Limits and failure behavior
 
-- Notes: 12,000 characters; JPEG: 1,500,000 bytes after existing browser optimisation (source up to 25 MiB).
+- Notes: 12,000 characters; uploaded batch JPEGs: 250,000 bytes each, six photos/frames combined. Legacy saved-photo optimisation: 1,500,000 bytes (source up to 25 MiB).
 - Request: 2,100,000 bytes, enforced while reading even with no/false Content-Length. Only validated inline JPEG frames/photos or prepared MP4/WebM sound are accepted; URLs cannot trigger server-side downloads.
 - Provider response: 100,000 bytes, strict schema plus application validation, no incomplete/refused/malformed answer shown as a draft.
 - Provider timeout: 40 seconds. No automatic retries. Per-process single-flight and four starts/minute are accidental-repeat protection, not a distributed spending cap. Use OpenAI project billing/usage controls for the actual account budget.
