@@ -13,6 +13,7 @@ import { businessStorageKeys, defaultBusinessProfile, defaultDocumentBranding, d
 import { usePricingDocumentsCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { quotePresentationAudiences, type QuotePresentationAudience } from "../../../lib/quotePresentation";
 import { useCloudLocalCollection } from "../../../lib/storage";
+import { pricingDocumentNetTotal } from "../../../lib/workflow";
 import type { Builder, BusinessProfile, Customer, DocumentBrandingSettings, Job, VatSettings } from "../../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -37,7 +38,7 @@ export default function PricingDocumentDetailPage() {
   const customer = customers.items.find((item) => item.id === document.customerId);
   const builder = builders.items.find((item) => item.id === document.builderId);
   const job = jobs.items.find((item) => item.id === document.jobId);
-  const subtotal = document.profitability?.sellingPrice ?? document.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+  const subtotal = pricingDocumentNetTotal(document);
   const vat = document.vatEnabled ? subtotal * document.vatRate / 100 : 0;
   const total = subtotal + vat;
   const profitability = document.profitability;

@@ -5,7 +5,8 @@ import vm from "node:vm";
 import ts from "typescript";
 import * as permissions from "../lib/cloud/permissions.ts";
 import * as assistantSignals from "../lib/assistantSignals-core.mjs";
-import * as paymentHelpers from "../lib/payments.ts";
+import { loadLocalTs } from "./helpers/load-local-ts.mjs";
+const paymentHelpers = loadLocalTs(new URL("../lib/payments.ts", import.meta.url));
 import * as taskCore from "../lib/jobTasks-core.mjs";
 import manifest from "../app/manifest.ts";
 

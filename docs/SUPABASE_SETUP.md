@@ -40,6 +40,13 @@ effective migration chain in order, including permission, role-escalation,
 session, Storage and projection hardening. It stops on the first error and the
 last migration publishes the deployed-migration marker.
 
+The November 2026 customer quote update depends on
+`20261101085426_project_customer_quote_total.sql`. It adds the agreed selling
+subtotal to customer-visible quotes and refreshes existing projections while
+preserving quote and approval versions. Until the target database supplies that
+subtotal, the updated signed-in portal withholds the price, deposit and approval.
+A web preview deployment alone does not apply the database migration.
+
 Do not run only a hand-picked subset of `supabase/migrations`, do not continue
 after an error, and do not use the Supabase SQL editor for the recovery file:
 the script relies on `psql` `\ir` includes to install the entire chain.

@@ -397,19 +397,25 @@ export default function JobDetailPage() {
     if (job.status !== "Complete") { setInvoiceMessage("Mark the job as Complete before generating its final invoice."); return; }
     if (linkedInvoices.length) { setInvoiceMessage(`${linkedInvoices[0].number} is already linked to this job.`); return; }
     const now = new Date().toISOString();
-    const generated = createInvoiceFromCompletedJob({
-      job,
-      quote: sourceQuote,
-      variations: linkedVariations,
-      invoices: invoices.items,
-      invoiceId: makeId("invoice"),
-      now,
-      createId: makeId,
-      bankDetails: bankDetailsStore.items[0] ?? defaultBankDetails,
-      defaultPaymentTerms: paymentTermsStore.items.find((item) => item.active && item.isDefault),
-    });
+    let generated: ReturnType<typeof createInvoiceFromCompletedJob>;
+    try {
+      generated = createInvoiceFromCompletedJob({
+        job,
+        quote: sourceQuote,
+        variations: linkedVariations,
+        invoices: invoices.items,
+        invoiceId: makeId("invoice"),
+        now,
+        createId: makeId,
+        bankDetails: bankDetailsStore.items[0] ?? defaultBankDetails,
+        defaultPaymentTerms: paymentTermsStore.items.find((item) => item.active && item.isDefault),
+      });
+    } catch (error) {
+      setInvoiceMessage(error instanceof Error ? error.message : "Review the agreed job value before creating an invoice.");
+      return;
+    }
     invoices.setItems((current) => [generated.invoice, ...current]);
-    const includedVariationIds = new Set(generated.invoice.items.map((item) => item.variationId).filter(Boolean));
+    const includedVariationIds = new Set(generated.invoice.variationIds ?? []);
     const includedVariations = linkedVariations.filter((variation) => includedVariationIds.has(variation.id) && isAcceptedVariationStatus(variation.status));
     variations.setItems((current) => current.map((variation) => {
       if (!includedVariationIds.has(variation.id)) return variation;

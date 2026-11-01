@@ -4,7 +4,6 @@ import test from "node:test";
 import vm from "node:vm";
 import ts from "typescript";
 import * as signals from "../lib/assistantSignals-core.mjs";
-import * as paymentsCore from "../lib/payments-core.mjs";
 import * as jobsCore from "../lib/jobManagement-core.mjs";
 import * as taskCore from "../lib/jobTasks-core.mjs";
 import * as invoiceLink from "../lib/invoiceLink.ts";
@@ -16,7 +15,7 @@ function compile(path, dependencies = {}) {
   vm.runInNewContext(output, { module: mod, exports: mod.exports, Date, Intl, require(name) { assert.ok(name in dependencies, name); return dependencies[name]; } });
   return mod.exports;
 }
-const payments = compile("../lib/payments.ts", { "./payments-core.mjs": paymentsCore });
+const payments = loadLocalTs(new URL("../lib/payments.ts", import.meta.url));
 const assistantIdentity = compile("../lib/assistantIdentity.ts");
 const assistantQuotes = compile("../lib/assistantQuotes.ts", { "./assistantIdentity": assistantIdentity, "./assistantSignals-core.mjs": signals });
 const assistantMoney = compile("../lib/assistantMoney.ts", { "./invoiceLink": invoiceLink, "./assistantIdentity": assistantIdentity, "./payments": payments, "./assistantSignals-core.mjs": signals });

@@ -397,4 +397,7 @@ begin;
 \ir ../migrations/20260919084500_allow_authenticated_storage_download_checks.sql
 commit;
 
+\echo 'Projecting the complete customer quote selling total'
+\ir ../migrations/20261101085426_project_customer_quote_total.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

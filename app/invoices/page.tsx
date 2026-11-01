@@ -20,7 +20,7 @@ import {
 } from "../../lib/businessSettings";
 import { useInvoicesCollection } from "../../lib/cloud/coreBusinessCollections";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
-import { nextInvoiceNumber } from "../../lib/workflow";
+import { invoiceItemsFromQuote, nextInvoiceNumber } from "../../lib/workflow";
 import { invoiceFromLink } from "../../lib/invoiceLink";
 import type { Builder, BusinessBankDetails, BusinessProfile, Customer, DocumentBrandingSettings, Invoice, InvoiceStatus, Job, JobTimelineEntry, PaymentTermsTemplate, PricingDocument, PricingLineItem, VatSettings } from "../../lib/models";
 
@@ -170,11 +170,18 @@ export default function InvoicesPage() {
   function importQuote(id: string) {
     const quote = quotes.items.find((item) => item.id === id);
     if (!quote) return;
+    let importedItems: PricingLineItem[];
+    try {
+      importedItems = invoiceItemsFromQuote(quote, makeId);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Review the accepted quote price before creating an invoice.");
+      return;
+    }
     setForm((current) => {
       const dueDays = quote.paymentTerms?.dueDays ?? (quote.paymentTerms?.type === "Due on completion" ? 0 : 7);
       return { ...current, quoteId: quote.id, title: quote.title, customerId: quote.customerId ?? "", builderId: quote.builderId ?? "", jobId: quote.jobId ?? "", paymentTermsTemplateId: quote.paymentTerms?.templateId ?? current.paymentTermsTemplateId, paymentTermsText: paymentTermsText(quote.paymentTerms), dueDate: addDays(current.issueDate, dueDays), vatEnabled: quote.vatEnabled, vatRate: String(quote.vatRate), notes: quote.notes };
     });
-    setItems(quote.items.map((item) => ({ ...item, id: makeId("invoice-line") })));
+    setItems(importedItems);
     setError("");
   }
 

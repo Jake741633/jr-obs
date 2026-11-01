@@ -273,17 +273,23 @@ export default function AiPage() {
       ?? paymentTermsStore.items.find((template) => template.active);
     const now = new Date().toISOString();
     const linkedVariations = variations.items.filter((variation) => variation.jobId === job.id);
-    const generated = createInvoiceFromCompletedJob({
-      job,
-      quote,
-      variations: linkedVariations,
-      invoices: invoices.items,
-      invoiceId: makeId("invoice"),
-      now,
-      createId: makeId,
-      bankDetails: bankStore.items[0] ?? defaultBankDetails,
-      defaultPaymentTerms,
-    });
+    let generated: ReturnType<typeof createInvoiceFromCompletedJob>;
+    try {
+      generated = createInvoiceFromCompletedJob({
+        job,
+        quote,
+        variations: linkedVariations,
+        invoices: invoices.items,
+        invoiceId: makeId("invoice"),
+        now,
+        createId: makeId,
+        bankDetails: bankStore.items[0] ?? defaultBankDetails,
+        defaultPaymentTerms,
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Review the agreed job value before creating an invoice.");
+      return;
+    }
     invoices.setItems((current) => [generated.invoice, ...current]);
     const includedVariationIds = new Set(generated.invoice.variationIds ?? []);
     const includedVariations = linkedVariations.filter((variation) => includedVariationIds.has(variation.id) && isAcceptedVariationStatus(variation.status));
