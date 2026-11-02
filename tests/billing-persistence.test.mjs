@@ -16,7 +16,7 @@ before(async()=>{
 });
 after(()=>db.close());
 test('billing persistence exists in real Postgres with RLS and no browser privileges',async()=>{
- for(const table of ['jr_billing_customers','jr_billing_subscriptions','jr_billing_operations','jr_billing_events']){
+ for(const table of ['jr_billing_customers','jr_billing_subscriptions','jr_billing_operations','jr_billing_events','jr_billing_review_signals','jr_billing_review_resolutions']){
   const {rows}=await db.query('select relrowsecurity from pg_class where oid=to_regclass($1)', ['public.'+table]);
   assert.equal(rows[0]?.relrowsecurity,true);
   for(const role of ['anon','authenticated'])for(const action of ['select','insert','update','delete','truncate']){

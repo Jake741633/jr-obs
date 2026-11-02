@@ -13,6 +13,7 @@ create table public.jr_billing_customers (
   review_source_id text,
   review_event_id text,
   review_marked_at timestamptz,
+  review_version integer not null default 0 check(review_version>=0),
   reconcile_token uuid unique,
   reconcile_expires_at timestamptz,
   reconcile_event_id text,
@@ -94,6 +95,45 @@ create table public.jr_billing_events (
 );
 create index jr_billing_events_pending on public.jr_billing_events(received_at,event_id)
   where state in ('pending','processing');
+
+-- Each verified signal is retained, including later signals on an existing hold.
+create table public.jr_billing_review_signals (
+  mode text not null default 'test',
+  account_id text not null default 'acct_1UWyMhRxGUITlJWL',
+  organisation_id uuid not null,
+  customer_id text not null,
+  event_id text not null check(length(event_id)<=128),
+  review_version integer not null check(review_version>0),
+  reason text not null check(reason in ('refund','dispute','fraud','credit_note')),
+  source_id text not null check(source_id ~ '^[a-z]+_[a-zA-Z0-9]+$' and length(source_id)<=128),
+  marked_at timestamptz not null,
+  primary key(mode,account_id,event_id),
+  unique(mode,account_id,organisation_id,review_version),
+  foreign key(mode,account_id,organisation_id,customer_id)
+    references public.jr_billing_customers(mode,account_id,organisation_id,customer_id) on delete restrict,
+  foreign key(mode,account_id,event_id) references public.jr_billing_events(mode,account_id,event_id) on delete restrict
+);
+create table public.jr_billing_review_resolutions (
+  id uuid primary key,
+  mode text not null default 'test',
+  account_id text not null default 'acct_1UWyMhRxGUITlJWL',
+  organisation_id uuid not null,
+  customer_id text not null,
+  review_version integer not null check(review_version>0),
+  operator_reference text not null check(operator_reference ~ '^[A-Za-z0-9][A-Za-z0-9@._:/+-]{2,127}$'),
+  note text not null check(note=btrim(note) and length(note) between 12 and 1000),
+  signals jsonb not null check(jsonb_typeof(signals)='array' and jsonb_array_length(signals) between 1 and 20),
+  resolved_at timestamptz not null default clock_timestamp(),
+  unique(mode,account_id,organisation_id,review_version),
+  foreign key(mode,account_id,organisation_id,customer_id)
+    references public.jr_billing_customers(mode,account_id,organisation_id,customer_id) on delete restrict,
+  foreign key(mode,account_id,organisation_id,review_version)
+    references public.jr_billing_review_signals(mode,account_id,organisation_id,review_version) on delete restrict
+);
+alter table public.jr_billing_review_signals enable row level security;
+alter table public.jr_billing_review_resolutions enable row level security;
+revoke all on public.jr_billing_review_signals,public.jr_billing_review_resolutions from public,anon,authenticated,service_role;
+grant select,insert on public.jr_billing_review_signals,public.jr_billing_review_resolutions to service_role;
 
 alter table public.jr_billing_customers enable row level security;
 alter table public.jr_billing_subscriptions enable row level security;
@@ -261,7 +301,7 @@ grant execute on function public.jr_billing_begin_reconciliation(text,uuid,text)
 -- first evidence remains on the Customer; every event also stays in the inbox.
 create function public.jr_billing_mark_review(p_event_id text,p_lease_token uuid,p_reconcile_token uuid,p_reason text,p_source_id text)
 returns boolean language plpgsql security invoker set search_path='' as $$
-declare e public.jr_billing_events%rowtype; c public.jr_billing_customers%rowtype; expected_reason text;
+declare e public.jr_billing_events%rowtype; c public.jr_billing_customers%rowtype; expected_reason text; marked timestamptz;
 begin
   select * into e from public.jr_billing_events where mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and event_id=p_event_id for update;
   if not found or e.state<>'processing' or e.lease_token is distinct from p_lease_token or e.lease_expires_at<=clock_timestamp() then return false; end if;
@@ -271,15 +311,75 @@ begin
   expected_reason:=case e.payload->>'type' when 'charge.refunded' then 'refund' when 'charge.dispute.created' then 'dispute' when 'radar.early_fraud_warning.created' then 'fraud' when 'credit_note.created' then 'credit_note' else null end;
   if expected_reason is null or p_reason is distinct from expected_reason or p_source_id is null or p_source_id !~ '^[a-z]+_[a-zA-Z0-9]+$'
     or p_source_id is distinct from e.payload#>>'{data,object,id}' then raise exception 'billing_invalid_review'; end if;
-  if not c.review_required then
-    update public.jr_billing_customers set review_required=true,review_reason=p_reason,review_source_id=p_source_id,review_event_id=p_event_id,review_marked_at=clock_timestamp()
-      where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id;
-  end if;
+  marked:=clock_timestamp();
+  update public.jr_billing_customers set review_required=true,review_version=review_version+1,
+    review_reason=case when review_required then review_reason else p_reason end,
+    review_source_id=case when review_required then review_source_id else p_source_id end,
+    review_event_id=case when review_required then review_event_id else p_event_id end,
+    review_marked_at=case when review_required then review_marked_at else marked end
+    where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id returning * into c;
+  insert into public.jr_billing_review_signals(mode,account_id,organisation_id,customer_id,event_id,review_version,reason,source_id,marked_at)
+    values(c.mode,c.account_id,c.organisation_id,c.customer_id,p_event_id,c.review_version,p_reason,p_source_id,marked);
   if not public.jr_billing_finish_event(p_event_id,p_lease_token,'review') then raise exception 'billing_expired_lease'; end if;
   return true;
 end $$;
 revoke execute on function public.jr_billing_mark_review(text,uuid,uuid,text,text) from public,anon,authenticated,service_role;
 grant execute on function public.jr_billing_mark_review(text,uuid,uuid,text,text) to service_role;
+
+-- Private operator inspection. These IDs/evidence never enter the tenant status DTO.
+create function public.jr_billing_operator_review(p_organisation_id uuid)
+returns jsonb language plpgsql stable security invoker set search_path='' as $$
+declare c public.jr_billing_customers%rowtype; resolved_version integer; signal_count integer; summaries jsonb;
+begin
+  if p_organisation_id is null then raise exception 'billing_invalid_review_request' using errcode='22023'; end if;
+  select * into c from public.jr_billing_customers where organisation_id=p_organisation_id and mode='test' and account_id='acct_1UWyMhRxGUITlJWL';
+  if not found then return pg_catalog.jsonb_build_object('state','unbound'); end if;
+  select coalesce(max(review_version),0) into resolved_version from public.jr_billing_review_resolutions where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id;
+  select count(*) into signal_count from public.jr_billing_review_signals where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id and review_version>resolved_version and review_version<=c.review_version;
+  select coalesce(pg_catalog.jsonb_agg(x.summary order by x.version),'[]'::jsonb) into summaries from (
+    select s.review_version as version,pg_catalog.jsonb_build_object('reviewVersion',s.review_version,'reason',s.reason,'sourceId',s.source_id,'eventId',s.event_id,'markedAtMs',floor(extract(epoch from s.marked_at)*1000)) as summary
+    from public.jr_billing_review_signals s where s.mode=c.mode and s.account_id=c.account_id and s.organisation_id=c.organisation_id and s.review_version>resolved_version and s.review_version<=c.review_version order by s.review_version limit 20
+  ) x;
+  return pg_catalog.jsonb_build_object('state',case when c.review_required then 'held' else 'clear' end,'organisationId',c.organisation_id,'customerId',c.customer_id,'reviewVersion',c.review_version,
+    'review',case when c.review_required then pg_catalog.jsonb_build_object('reason',c.review_reason,'sourceId',c.review_source_id,'eventId',c.review_event_id,'markedAtMs',floor(extract(epoch from c.review_marked_at)*1000)) else null end,
+    'signals',summaries,'signalCount',signal_count,'truncated',signal_count>20,'reconciliationBusy',c.reconcile_token is not null and c.reconcile_expires_at>clock_timestamp());
+end $$;
+
+-- Clearing app review is not payment proof. Old coverage is invalidated atomically.
+create function public.jr_billing_resolve_review(p_organisation_id uuid,p_customer_id text,p_expected_version integer,p_resolution_id uuid,p_operator_reference text,p_note text)
+returns jsonb language plpgsql security invoker set search_path='' as $$
+declare c public.jr_billing_customers%rowtype; prior public.jr_billing_review_resolutions%rowtype; resolved_version integer; signal_count integer; evidence jsonb;
+begin
+  if p_organisation_id is null or p_customer_id is null or p_customer_id !~ '^cus_[a-zA-Z0-9]+$' or length(p_customer_id)>128
+    or p_expected_version is null or p_expected_version<0 or p_resolution_id is null or p_operator_reference is null or p_operator_reference !~ '^[A-Za-z0-9][A-Za-z0-9@._:/+-]{2,127}$'
+    or p_note is null or p_note<>btrim(p_note) or length(p_note) not between 12 and 1000 then raise exception 'billing_invalid_review_request' using errcode='22023'; end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('jr_billing_review_resolution:'||p_resolution_id::text,0));
+  select * into prior from public.jr_billing_review_resolutions where id=p_resolution_id;
+  if found then
+    if prior.organisation_id=p_organisation_id and prior.customer_id=p_customer_id and prior.review_version=p_expected_version and prior.operator_reference=p_operator_reference and prior.note=p_note then return pg_catalog.jsonb_build_object('state','already_recorded'); end if;
+    return pg_catalog.jsonb_build_object('state','conflict');
+  end if;
+  select * into c from public.jr_billing_customers where mode='test' and account_id='acct_1UWyMhRxGUITlJWL' and organisation_id=p_organisation_id and customer_id=p_customer_id for update;
+  if not found then return pg_catalog.jsonb_build_object('state','unbound'); end if;
+  if c.review_version<>p_expected_version then return pg_catalog.jsonb_build_object('state','stale'); end if;
+  if not c.review_required then return pg_catalog.jsonb_build_object('state','not_held'); end if;
+  if c.reconcile_token is not null and c.reconcile_expires_at>clock_timestamp() then return pg_catalog.jsonb_build_object('state','busy'); end if;
+  select coalesce(max(review_version),0) into resolved_version from public.jr_billing_review_resolutions where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id;
+  select count(*) into signal_count from public.jr_billing_review_signals s where s.mode=c.mode and s.account_id=c.account_id and s.organisation_id=c.organisation_id and s.review_version>resolved_version and s.review_version<=c.review_version;
+  if signal_count not between 1 and 20 or signal_count<>c.review_version-resolved_version
+    or not exists(select 1 from public.jr_billing_review_signals s where s.mode=c.mode and s.account_id=c.account_id and s.organisation_id=c.organisation_id and s.review_version=resolved_version+1
+      and s.reason=c.review_reason and s.source_id=c.review_source_id and s.event_id=c.review_event_id and s.marked_at=c.review_marked_at) then return pg_catalog.jsonb_build_object('state','needs_investigation'); end if;
+  select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('reviewVersion',s.review_version,'reason',s.reason,'sourceId',s.source_id,'eventId',s.event_id,'markedAtMs',floor(extract(epoch from s.marked_at)*1000)) order by s.review_version)
+    into evidence from public.jr_billing_review_signals s where s.mode=c.mode and s.account_id=c.account_id and s.organisation_id=c.organisation_id and s.review_version>resolved_version and s.review_version<=c.review_version;
+  insert into public.jr_billing_review_resolutions(id,mode,account_id,organisation_id,customer_id,review_version,operator_reference,note,signals)
+    values(p_resolution_id,c.mode,c.account_id,c.organisation_id,c.customer_id,c.review_version,p_operator_reference,p_note,evidence);
+  update public.jr_billing_subscriptions set paid_through=null,paid_invoice_id=null,trial_ends_at=null where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id and customer_id=c.customer_id;
+  update public.jr_billing_customers set review_required=false,review_reason=null,review_source_id=null,review_event_id=null,review_marked_at=null,
+    reconcile_token=null,reconcile_expires_at=null,reconcile_event_id=null,reconcile_event_lease=null where mode=c.mode and account_id=c.account_id and organisation_id=c.organisation_id;
+  return pg_catalog.jsonb_build_object('state','cleared');
+end $$;
+revoke execute on function public.jr_billing_operator_review(uuid),public.jr_billing_resolve_review(uuid,text,integer,uuid,text,text) from public,anon,authenticated,service_role;
+grant execute on function public.jr_billing_operator_review(uuid),public.jr_billing_resolve_review(uuid,text,integer,uuid,text,text) to service_role;
 
 -- Private definer is necessary to read service-owned billing tables. Every
 -- invocation checks the existing live membership/session helpers first.

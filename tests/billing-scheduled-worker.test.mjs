@@ -72,8 +72,10 @@ test('overlapping batches defer a busy business and cannot duplicate its coverag
 });
 test('risk review and provider failures keep their existing persisted outcomes',async()=>{
  await enqueue('evt_risk','charge.refunded');await enqueue('evt_failure');
+ await db.exec("update public.jr_billing_events set received_at='2026-11-02T00:00:00Z'");
  const h=setup({readEvidence:()=>{throw Error('rk_test_private_provider_error');}}),result=await h.run();assert.equal(result.counts.review,1);assert.equal(result.counts.retry,1);assert.equal(result.handled,2);assert.equal(result.stop,'idle');
- assert.deepEqual((await db.query('select state,attempts from public.jr_billing_events order by received_at,event_id')).rows,[{state:'review',attempts:1},{state:'pending',attempts:1}]);
+ // Equal receipt times use event ID ordering, not the order of these inserts.
+ assert.deepEqual((await db.query('select event_id,state,attempts from public.jr_billing_events order by event_id')).rows,[{event_id:'evt_failure',state:'pending',attempts:1},{event_id:'evt_risk',state:'review',attempts:1}]);
 });
 test('lost acquisition responses remain retryable and partial storage outages retain accurate counts',async()=>{
  await enqueue('evt_lost');let lost=false;
