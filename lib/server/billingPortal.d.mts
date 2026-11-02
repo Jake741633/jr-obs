@@ -1,0 +1,1 @@
+export function createBillingPortalHandler(options?:{env?:Record<string,string|undefined>;deployment?:{url?:string;alias?:string};fetchImpl?:typeof globalThis.fetch}):(request:Request)=>Promise<Response>;

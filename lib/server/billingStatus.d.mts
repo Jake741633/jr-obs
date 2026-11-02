@@ -1,0 +1,3 @@
+export interface BillingOwnerRequestOptions {request:Request;env?:Record<string,string|undefined>;deployment?:{url?:string;alias?:string};fetchImpl?:typeof globalThis.fetch;requireClearBilling?:boolean;validateBody?:(body:Record<string,unknown>)=>boolean;}
+export function readBillingOwnerRequest(options:BillingOwnerRequestOptions):Promise<{body:Record<string,unknown>;result:Record<string,unknown>;owner:Readonly<{userId:string;organisationId:string;role:'owner'}>;revalidateOwner:()=>Promise<boolean>}>;
+export function createBillingStatusHandler(options?:{env?:Record<string,string|undefined>;deployment?:{url?:string;alias?:string};fetchImpl?:typeof globalThis.fetch}):(request:Request)=>Promise<Response>;

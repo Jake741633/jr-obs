@@ -22,7 +22,11 @@ function listRouteFiles(directory, prefix = "") {
 }
 
 test("server API route inventory stays explicit for security review", () => {
-  assert.deepEqual(listRouteFiles(apiRoot).sort(), ["ai/quote-scope/route.ts", "materials/lookup/route.ts"]);
+  assert.deepEqual(listRouteFiles(apiRoot).sort(), ["ai/quote-scope/route.ts", "billing/checkout/route.ts", "billing/portal/route.ts", "billing/status/route.ts", "billing/webhook/route.ts", "materials/lookup/route.ts"]);
+});
+
+test("native function inventory prevents an unreviewed helper becoming a public endpoint", () => {
+  assert.deepEqual(readdirSync(new URL("../netlify/functions/", import.meta.url)).sort(), ["billing-reconcile.mjs"]);
 });
 
 test("supplier lookup accepts no request-controlled organisation selector", () => {

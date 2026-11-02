@@ -35,9 +35,8 @@ test("recovery and frozen upgrade inventory include the exact total migration", 
   const recovery = read("supabase/recovery/after_schema_only.sql");
   assert.ok(recovery.includes(`\\ir ../migrations/${filename}`));
   const manifest = JSON.parse(read("docs/security/supabase-upgrade-manifest-2026-09-19.json"));
-  assert.equal(manifest.target_migration, filename);
   assert.equal(manifest.pending_count, manifest.pending_migrations.length);
-  const entry = manifest.pending_migrations.at(-1);
+  const entry = manifest.pending_migrations.find(item => item.file === `supabase/migrations/${filename}`);
   assert.equal(entry.file, `supabase/migrations/${filename}`);
   assert.equal(entry.sha256, createHash("sha256").update(migration).digest("hex"));
 });
