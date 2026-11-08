@@ -16,7 +16,7 @@ const supabaseClient = readFileSync(new URL("../lib/supabase/client.ts", import.
 test("record enumeration cannot remove the organisation filter", () => {
   assert.match(adapter, /const readTable = collectionCloudReadTable\(table, cacheRole, collectionKey\)/);
   assert.match(adapter, /const select = networkOnly \? cloudSelectFresh : cloudSelect/);
-  assert.match(adapter, /select<CloudEnvelope<T>>\(readTable, `select=\*&organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}\$\{collectionFilter\}&deleted_at=is\.null`\)/);
+  assert.match(adapter, /select<CloudEnvelope<T>>\(readTable, `select=\*&organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}\$\{collectionFilter\}&deleted_at=is\.null`, signal\)/);
   assert.match(adapter, /collection_key=eq\.\$\{encodeURIComponent\(collectionKey\)\}/);
   assert.match(adapter, /queueChange\(\{ table, storageKey: scopedStorageKey, operation: "upsert", organisationId, sourceId: record\.id/);
   assert.match(adapter, /queueChange\(\{ table, storageKey: scopedStorageKey, operation: "delete", organisationId, sourceId/);

@@ -42,7 +42,7 @@ test("switching organisations, users, roles or customer assignments changes the 
 
 test("fresh browsers hydrate only tenant-filtered cloud records", () => {
   assert.match(adapter, /organisation_id=eq\.\$\{encodeURIComponent\(organisationId\)\}/);
-  assert.match(adapter, /const cloudRecords = rows\.map\(\(row\) => row\.payload\)/);
+  assert.match(adapter, /const records = new Map\(rows\.map\(\(row\) => \[row\.source_id, row\.payload\]\)\)/);
   assert.match(adapter, /writeLocal\(scopedStorageKey, roleProjectionRecords\)/);
 });
 

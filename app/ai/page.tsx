@@ -322,14 +322,20 @@ export default function AiPage() {
       return;
     }
     const now = new Date().toISOString();
-    const list = createPurchaseListFromPricingDocument({
-      document,
-      materials: materials.items,
-      purchaseLists: purchaseLists.items,
-      purchaseListId: makeId("purchase"),
-      now,
-      createId: makeId,
-    });
+    let list: ReturnType<typeof createPurchaseListFromPricingDocument>;
+    try {
+      list = createPurchaseListFromPricingDocument({
+        document,
+        materials: materials.items,
+        purchaseLists: purchaseLists.items,
+        purchaseListId: makeId("purchase"),
+        now,
+        createId: makeId,
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Review the source material references before creating a purchase list.");
+      return;
+    }
     if (!list) {
       setMessage("No priced material lines were found on that record.");
       return;

@@ -5,6 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import * as priceBook from "../lib/priceBook-core.mjs";
 import * as billing from "../lib/depositBilling-core.mjs";
+import { loadLocalTs } from "./helpers/load-local-ts.mjs";
 
 function loadModule(path, dependencies) {
   const output = ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), {
@@ -26,6 +27,7 @@ const workflow = loadModule("../lib/workflow.ts", {
   "./businessSettings": {},
   "./depositBilling-core.mjs": billing,
   "./jobManagement-core.mjs": {},
+  "./materialSuppliers": loadLocalTs(new URL("../lib/materialSuppliers.ts", import.meta.url)),
 });
 
 function elements(node) {

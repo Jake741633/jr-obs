@@ -31,7 +31,7 @@ function harness({ mode = "cloud", initial = [oldRecord] } = {}) {
   function compile(path, dependencies) {
     const mod = { exports: {} };
     vm.runInNewContext(ts.transpileModule(readFileSync(new URL(path, import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
-      exports: mod.exports, module: mod, window, navigator, crypto: { randomUUID }, Error, AggregateError, queueMicrotask,
+      exports: mod.exports, module: mod, window, navigator, crypto: { randomUUID }, Error, AggregateError, queueMicrotask, AbortController,
       Event: class Event {}, CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options.detail; } },
       require(name) { assert.ok(name in dependencies, `Unexpected dependency: ${name}`); return dependencies[name]; },
     });
