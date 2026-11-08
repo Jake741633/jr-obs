@@ -353,7 +353,8 @@ test("collection adapter sanitizes cached fallback and fetched role-projection r
   assert.match(adapter, /if \(mode === "local" \|\| !navigator\.onLine\) return local/);
   assert.match(adapter, /const roleProjectionRecords = sanitizeRoleProjectionCache\(\{ storageKey, role: cacheRole, mode, records: cloudRecords \}\)/);
   assert.match(adapter, /writeLocal\(scopedStorageKey, roleProjectionRecords\)/);
-  assert.match(adapter, /writeVersions\(scopedStorageKey, roleProjectionVersionMap\(rows, roleProjectionRecords\)\)/);
+  assert.match(adapter, /const versions = roleProjectionVersionMap\(rows, roleProjectionRecords\)/);
+  assert.match(adapter, /writeVersions\(scopedStorageKey, versions\)/);
   assert.doesNotMatch(adapter, /Object\.fromEntries\(rows\.map\(\(row\) => \[row\.source_id, row\.version\]\)\)/);
   assert.match(adapter, /const projectionGeneration = roleProjectionCacheGeneration\(\{ storageKey, role: cacheRole \}\)/);
   assert.match(adapter, /if \(projectionGeneration\) window\.localStorage\.setItem\(projectionGenerationKey\(scopedStorageKey\), projectionGeneration\)/);

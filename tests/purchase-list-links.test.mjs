@@ -5,6 +5,8 @@ import vm from "node:vm";
 import ts from "typescript";
 import * as links from "../lib/purchaseListLink.ts";
 import * as inbox from "../lib/purchaseInbox.ts";
+import { loadLocalTs } from "./helpers/load-local-ts.mjs";
+const workflow = loadLocalTs(new URL("../lib/workflow.ts", import.meta.url));
 
 const jsx = (type, props) => ({ type, props });
 const nodes = (tree) => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === "object" ? [tree, ...nodes(tree.props?.children)] : [];
@@ -39,7 +41,7 @@ function harness({ search = "", lists: initial = [], ready: initialReady = true,
     react: { useMemo: (fn) => fn(), useEffect: (fn) => { if (!mounted) effects.push(fn); }, useRef(initial) { const i = cursor++; if (!(i in state)) state[i] = { current: initial }; return state[i]; }, useState(initial) { const i = cursor++; if (!(i in state)) state[i] = typeof initial === "function" ? initial() : initial; return [state[i], (value) => { state[i] = typeof value === "function" ? value(state[i]) : value; }]; } },
     "next/link": { default: "Link" }, "lucide-react": {}, "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" },
     "../../lib/cloud/coreBusinessCollections": { usePurchaseListsCollection: () => ({ ...store(lists), createItem, updateItem, removeItem }) }, "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: { role } }) },
-    "../../lib/storage": { useCloudLocalCollection: (key) => store(key === "jr-os-pricing-documents" ? pricing : key === "jr-os-jobs" ? jobs : materials), makeId: (prefix) => `${prefix}-${++ids}` }, "../../lib/purchaseListLink": links, "../../lib/purchaseInbox": inbox,
+    "../../lib/storage": { useCloudLocalCollection: (key) => store(key === "jr-os-pricing-documents" ? pricing : key === "jr-os-jobs" ? jobs : materials), makeId: (prefix) => `${prefix}-${++ids}` }, "../../lib/purchaseListLink": links, "../../lib/purchaseInbox": inbox, "../../lib/workflow": workflow,
   };
   const mod = { exports: {} };
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL("../app/purchases/page.tsx", import.meta.url), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, { module: mod, exports: mod.exports, Intl, Date, Error, window: { location: { search }, requestAnimationFrame(fn) { fn(); return 1; }, cancelAnimationFrame() {}, confirm(message) { confirmations.push(message); return confirm; } }, require(name) { assert.ok(name in deps, name); return deps[name]; } });

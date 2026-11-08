@@ -7,7 +7,7 @@ const storage = readFileSync(new URL("../lib/storage.ts", import.meta.url), "utf
 const privateFiles = readFileSync(new URL("../lib/cloud/privateFiles.ts", import.meta.url), "utf8");
 
 test("private file bridge receives the base allowlisted collection key", () => {
-  assert.match(storage, /usePrivateFileCollectionBridge\(\{ storageKey: key, items, setItems, isReady, identity, mode \}\)/);
+  assert.match(storage, /usePrivateFileCollectionBridge\(\{ storageKey: key, items, updateItem, isReady, identity, mode \}\)/);
   assert.doesNotMatch(storage, /usePrivateFileCollectionBridge\(\{ storageKey: activeStorageKey/);
   assert.match(privateFiles, /\["jr-os-job-documents", "jr-os-expenses", "jr-os-surveys"\]\.includes\(storageKey\)/);
 });
@@ -53,4 +53,30 @@ test("a replaced attachment's pending download cannot hydrate the new record", a
   assert.equal((await h.settled())[0].signedDownloadUrl, currentUrl);
   assert.equal(h.revoked.length, 1); assert.equal(h.blobs.size, 1);
   h.unmount(); assert.equal(h.blobs.size, 0);
+});
+
+test('a missing private attachment cannot block a late successful sibling preview',async()=>{
+ const h=privateBridgeHarness([{id:'good',privateStoragePath:'org-1/jobs/job-1/good.jpg',privateFileId:'good'},{id:'missing',privateStoragePath:'org-1/jobs/job-1/missing.jpg',privateFileId:'missing'}]);let finish;
+ h.download(path=>path.endsWith('missing.jpg')?Promise.reject(Error('Object not found')):new Promise(resolve=>{finish=resolve;}));h.render();await new Promise(resolve=>setImmediate(resolve));finish(new Blob(['good photo'],{type:'image/jpeg'}));
+ const records=await h.settled();assert.ok(records[0].signedDownloadUrl);assert.equal(records[1].signedDownloadUrl,undefined);assert.equal(await h.blobs.get(records[0].signedDownloadUrl).text(),'good photo');h.unmount();assert.equal(h.blobs.size,0);
+});
+
+test('late successful bytes after a sibling failure and unmount are revoked',async()=>{
+ const h=privateBridgeHarness([{id:'good',privateStoragePath:'org-1/jobs/job-1/good.jpg',privateFileId:'good'},{id:'missing',privateStoragePath:'org-1/jobs/job-1/missing.jpg',privateFileId:'missing'}]);let finish;
+ h.download(path=>path.endsWith('missing.jpg')?Promise.reject(Error('Object not found')):new Promise(resolve=>{finish=resolve;}));h.render();await new Promise(resolve=>setImmediate(resolve));h.unmount();finish(new Blob(['good photo'],{type:'image/jpeg'}));
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(h.blobs.size,0);assert.equal(h.revoked.length,1);
+});
+
+test('a retired upload bridge retains work for a remounted owner to durably confirm',async()=>{
+ const record={id:'photo',jobId:'job-1',fileName:'photo.jpg',mimeType:'image/jpeg',dataUrl:'data:image/jpeg;base64,b2xk'};
+ const h=privateBridgeHarness([record]);let finish;h.upload(()=>new Promise(resolve=>{finish=resolve;}));h.render();await new Promise(resolve=>setImmediate(resolve));
+ h.remount([{...record}]);const first=finish;first();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(h.pending().length,1,'retired callback must not consume the durable queue');assert.deepEqual(h.mutations,[]);assert.equal(h.uploads.length,2);
+ finish();const records=await h.settled();assert.equal(records[0].privateFileId,'file-photo');assert.ok(records[0].privateStoragePath);assert.deepEqual(h.mutations,[2]);assert.equal(h.pending().length,0);h.unmount();
+});
+
+test('failed durable attachment confirmation retains bytes and recovers on retry',async()=>{
+ const record={id:'photo',jobId:'job-1',fileName:'photo.jpg',mimeType:'image/jpeg',dataUrl:'data:image/jpeg;base64,b2xk'},h=privateBridgeHarness([record]);
+ h.failWrite(Error('fixture local storage full'));h.render();await new Promise(resolve=>setImmediate(resolve));assert.equal(h.pending().length,1);assert.equal(h.pending()[0].state,'Failed');assert.equal(h.props.items[0].privateFileId,undefined);
+ h.failWrite(null);h.remount([{...record}]);const records=await h.settled();assert.equal(records[0].privateFileId,'file-photo');assert.equal(h.pending().length,0);h.unmount();
 });

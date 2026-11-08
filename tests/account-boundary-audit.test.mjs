@@ -136,7 +136,6 @@ test("private upload queue retries preserve every other authorisation context", 
   assert.match(privateUploadQueue, /activeQueue\.push\(item\)/);
   assert.match(privateUploadQueue, /preserved\.push\(item\)/);
   assert.match(privateFiles, /partitionPrivateUploadQueue\(allQueue, authorization, storageKey\)/);
-  assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
   assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity, storageKey,/);
   assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
 });

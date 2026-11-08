@@ -176,8 +176,6 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     return () => window.removeEventListener("jr-os-cloud-cache-reconciled", reconcileCloudCache);
   }, [activeStorageKey]);
 
-  const { items: displayItems } = usePrivateFileCollectionBridge({ storageKey: key, items, setItems, isReady, identity, mode });
-
   const remove = useCallback((predicate: (item: T) => boolean) => {
     setItems((current) => current.filter((item) => !predicate(item)));
   }, []);
@@ -257,6 +255,8 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     setItems(next);
     return item;
   }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, key, networkOnly, organisationId, target, userId]);
+
+  const { items: displayItems } = usePrivateFileCollectionBridge({ storageKey: key, items, updateItem, isReady, identity, mode });
 
   return { items: displayItems, setItems, createItem, updateItem, removeItem, remove, isReady, createdBySourceId };
 }
