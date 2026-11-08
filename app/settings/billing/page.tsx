@@ -10,7 +10,7 @@ import {sameSupabaseSessionOwnership,supabaseSessionUserId} from '../../../lib/s
 import {loadOwnerBillingStatus,type BillingStatusResult} from '../../../lib/billingStatusClient.mjs';
 import {createOwnerBillingActions,type BillingAction,type BillingActionState} from '../../../lib/billingActionsClient.mjs';
 type Owner={userId:string;organisationId:string;role:'owner';accessToken:string;ownership:ReturnType<typeof captureSupabaseSessionOwnership>};
-const messages:Record<BillingActionState,string>={redirecting:'Opening secure Stripe billing…',busy:'A billing request is already in progress. Try again in a moment.',denied:'Sign in again with the business owner account to manage billing.',conflict:'Another plan is already being prepared. Refresh billing status before trying again.',review:'Your billing needs review before another subscription can start. Refresh billing status or use Manage subscription.',already_subscribed:'A subscription already exists. Refresh billing status to manage it.',not_started:'Start your subscription before opening billing management.',unavailable:'Billing is temporarily unavailable. Please try again shortly.'};
+const messages:Record<BillingActionState,string>={redirecting:'Opening secure Stripe billing…',busy:'A billing request is already in progress. Try again in a moment.',denied:'Sign in again with the business owner account to manage billing.',conflict:'Another plan is already being prepared. Choose the original plan to resume its checkout. An open checkout must expire before you can choose a different plan.',review:'Your billing needs review before another subscription can start. Refresh billing status or use Manage subscription.',already_subscribed:'A subscription already exists. Refresh billing status to manage it.',not_started:'Start your subscription before opening billing management.',unavailable:'Billing is temporarily unavailable. Please try again shortly.'};
 const subscribeToLocation=(notify:()=>void)=>{window.addEventListener('popstate',notify);return ()=>window.removeEventListener('popstate',notify);};
 const pendingCheckout=()=>new URLSearchParams(window.location.search).get('checkout')==='pending';
 function ownsCurrentSession(owner:Owner){const current=captureSupabaseSessionOwnership();return sameSupabaseSessionOwnership(current.session,current.epoch,owner.ownership.session,owner.ownership.epoch)&&!current.session?.is_password_recovery&&supabaseSessionUserId(current.session)===owner.userId;}
@@ -19,6 +19,9 @@ function OwnerBilling({owner}:{owner:Owner}){
  // Keep an explicit server review response visible through refresh failures.
  // This view state belongs to this owner instance and never changes billing records.
  const [reviewReported,setReviewReported]=useState(false);
+ // A status-read review survives transient failures, but a current successful
+ // read can replace it. Checkout reviews may describe a separate uncertain operation.
+ const [statusReviewReported,setStatusReviewReported]=useState(false);
  const [busy,setBusy]=useState<BillingAction|null>(null),[actionMessage,setActionMessage]=useState<string|null>(null),inFlight=useRef(false);
  const actionClient=useRef<ReturnType<typeof createOwnerBillingActions>|null>(null);
  const checkoutPending=useSyncExternalStore(subscribeToLocation,pendingCheckout,()=>false);
@@ -26,11 +29,17 @@ function OwnerBilling({owner}:{owner:Owner}){
  useEffect(()=>{
   const controller=new AbortController();
   const isCurrent=()=>!controller.signal.aborted&&ownsCurrentSession(owner);
-  void loadOwnerBillingStatus({owner,signal:controller.signal,isCurrent}).then(value=>{if(value&&isCurrent())setResult(value);});
+  void loadOwnerBillingStatus({owner,signal:controller.signal,isCurrent}).then(value=>{
+   if(value&&isCurrent()){
+    if(value.state==='ready')setStatusReviewReported(value.data.reviewRequired);
+    if(value.state==='denied')setStatusReviewReported(false);
+    setResult(value);
+   }
+  });
   return ()=>controller.abort();
  },[owner,revision]);
  async function begin(action:BillingAction){
-  if(inFlight.current||result.state!=='ready'||!(action==='portal'?result.data.portalAvailable:!reviewReported&&result.data.reviewRequired===false&&result.data.checkoutAvailable))return;
+  if(inFlight.current||result.state!=='ready'||!(action==='portal'?result.data.portalAvailable:!reviewReported&&!statusReviewReported&&result.data.reviewRequired===false&&result.data.checkoutAvailable))return;
   inFlight.current=true;setBusy(action);setActionMessage(action==='portal'?'Opening secure Stripe billing…':'Opening secure Stripe checkout…');
   const actions=createOwnerBillingActions({owner,isCurrent:()=>ownsCurrentSession(owner),navigate:url=>window.location.assign(url)});actionClient.current=actions;
   const outcome=await actions.run(action);inFlight.current=false;
@@ -40,7 +49,7 @@ function OwnerBilling({owner}:{owner:Owner}){
    if(outcome.state==='review'){setReviewReported(true);setRevision(value=>value+1);}
   }
  }
- return <BillingStatusPanel result={result} reviewReported={reviewReported} busy={busy} actionMessage={actionMessage} checkoutPending={checkoutPending} onAction={action=>void begin(action)} onRefresh={()=>{setActionMessage(null);setResult({state:'loading'});setRevision(value=>value+1);}}/>;
+ return <BillingStatusPanel result={result} reviewReported={reviewReported||statusReviewReported} busy={busy} actionMessage={actionMessage} checkoutPending={checkoutPending} onAction={action=>void begin(action)} onRefresh={()=>{setActionMessage(null);setResult({state:'loading'});setRevision(value=>value+1);}}/>;
 }
 export default function BillingPage(){
  const {identity,isReady,mode}=useCloudIdentity(),ownership=captureSupabaseSessionOwnership(),session=ownership.session;

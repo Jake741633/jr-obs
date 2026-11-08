@@ -5,8 +5,8 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {loadLocalTs} from './helpers/load-local-ts.mjs';
 import {loadOwnerBillingStatus} from '../lib/billingStatusClient.mjs';
 import {createOwnerBillingActions} from '../lib/billingActionsClient.mjs';
-function harness({holdCheckout=false,reviewRequired=false,checkoutReview=false,checkoutPending=false,portalAvailable=false,holdReviewStatus=false}={}){
- const slots=[],effects=[],calls=[],links=[],statusResolvers=[];let cursor=0,finishCheckout,reportedReview=false,lastPanel;
+function harness({holdCheckout=false,reviewRequired=false,checkoutReview=false,checkoutPending=false,portalAvailable=false,holdReviewStatus=false,holdRefreshStatus=false,conflictPlan=null}={}){
+ const slots=[],effects=[],calls=[],links=[],statusResolvers=[];let cursor=0,finishCheckout,reportedReview=false,lastPanel,statusReads=0;
  let session={access_token:'fixture-token',user:{id:'22222222-2222-4222-8222-222222222222'}};
  const identity={userId:session.user.id,organisationId:'11111111-1111-4111-8111-111111111111',role:'owner'};
  const useState=initial=>{const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return [slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];};
@@ -15,12 +15,14 @@ function harness({holdCheckout=false,reviewRequired=false,checkoutReview=false,c
  const fetchImpl=async(url,options)=>{
   calls.push({url,options});
   if(url==='/api/billing/status'){
-   if(reportedReview&&holdReviewStatus)return new Promise(resolve=>statusResolvers.push(resolve));
+   statusReads++;
+   if(reportedReview&&holdReviewStatus||holdRefreshStatus&&statusReads>1)return new Promise(resolve=>statusResolvers.push(resolve));
    return Response.json({mode:'test',reviewRequired:reportedReview||reviewRequired,checkoutAvailable:!reportedReview,portalAvailable:portalAvailable||reviewRequired,subscription:null});
   }
   if(url==='/api/billing/portal')return Response.json({mode:'test',sessionId:'bps_A',url:'https://billing.stripe.com/p/session/A'});
   assert.equal(url,'/api/billing/checkout');
   if(checkoutReview){reportedReview=true;return Response.json({code:'billing_checkout_review'},{status:409});}
+  if(JSON.parse(options.body).plan===conflictPlan)return Response.json({code:'billing_checkout_conflict'},{status:409});
   if(holdCheckout)return new Promise(resolve=>{finishCheckout=resolve;});
   return Response.json({mode:'test',sessionId:'cs_test_A',url:'https://checkout.stripe.com/c/pay/A'});
  };
@@ -47,6 +49,26 @@ test('actual phone page refuses Checkout during review while keeping Portal acti
  const h=harness({reviewRequired:true});h.render();const view=await h.settled();view.onAction('monthly');view.onAction('annual');await h.settled();assert.equal(h.calls.filter(x=>x.url==='/api/billing/checkout').length,0);
  h.render().onAction('portal');await h.settled();assert.deepEqual(h.links,['https://billing.stripe.com/p/session/A']);h.unmount();
 });
+test('a different-plan conflict explains how to resume the original Checkout and permits that retry',async()=>{
+ const h=harness({conflictPlan:'annual'});h.render();let view=await h.settled();view.onAction('annual');view=await h.settled();
+ assert.deepEqual(h.links,[]);assert.match(h.html(),/original plan.*resume|resume.*original plan/i);assert.match(h.html(),/expire/i);assert.doesNotMatch(h.html(),/Refresh billing status before trying again/);
+ assert.equal(view.busy,null);view.onAction('monthly');await h.settled();
+ const requests=h.calls.filter(call=>call.url==='/api/billing/checkout');assert.deepEqual(requests.map(call=>JSON.parse(call.options.body)),[{plan:'annual'},{plan:'monthly'}]);assert.deepEqual(h.links,['https://checkout.stripe.com/c/pay/A']);h.unmount();
+});
+test('a review learned from verified status survives refresh failure but yields to a sign-in denial',async()=>{
+ const h=harness({reviewRequired:true,holdRefreshStatus:true,checkoutPending:true});h.render();let view=await h.settled();assert.match(h.html(),/Payment needs review/);
+ view.onRefresh();h.render();assert.match(h.html(),/Payment needs review/);assert.doesNotMatch(h.html(),/payment confirmation is pending/i);
+ h.finishStatus(new Response('',{status:503}));view=await h.settled();assert.match(h.html(),/Payment needs review/);assert.doesNotMatch(h.html(),/Subscription setup in progress|payment confirmation is pending/i);
+ view.onAction('annual');await h.settled();assert.equal(h.calls.filter(call=>call.url==='/api/billing/checkout').length,0);
+ h.render().onRefresh();h.render();h.finishStatus(new Response('',{status:403}));await h.settled();assert.match(h.html(),/Sign in with the business owner/);assert.doesNotMatch(h.html(),/Payment needs review|payment confirmation is pending/i);
+ h.render().onRefresh();h.render();assert.doesNotMatch(h.html(),/Payment needs review|payment confirmation is pending/i);h.finishStatus(new Response('',{status:403}));await h.settled();h.unmount();
+});
+test('a fresh clear status replaces a prior status-read review with current recovery information',async()=>{
+ const h=harness({reviewRequired:true,holdRefreshStatus:true,checkoutPending:true});h.render();const view=await h.settled();assert.match(h.html(),/Payment needs review/);
+ view.onRefresh();h.render();assert.match(h.html(),/Payment needs review/);
+ h.finishStatus(Response.json({mode:'test',reviewRequired:false,checkoutAvailable:false,portalAvailable:true,subscription:{plan:'monthly',status:'trialing',paidThroughMs:null,trialEndsAtMs:null,cancelAtPeriodEnd:false,reconciledAtMs:Date.UTC(2026,10,8)}}));await h.settled();
+ assert.match(h.html(),/Trial confirmation needed/);assert.doesNotMatch(h.html(),/Payment needs review|Trial ended|Trial in progress/);assert.match(h.html(),/payment confirmation is pending/i);h.unmount();
+});
 test('late Checkout review immediately replaces pending claims and survives authoritative refresh failure',async()=>{
  const h=harness({checkoutReview:true,checkoutPending:true,portalAvailable:true,holdReviewStatus:true});
  const button=(label)=>[...h.html().matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].find(x=>x[2].replace(/<[^>]*>/g,'').includes(label));
@@ -57,5 +79,7 @@ test('late Checkout review immediately replaces pending claims and survives auth
  h.render().onRefresh();h.render();reviewed();h.finishStatus(new Response('',{status:503}));await h.settled();reviewed();
  h.render().onRefresh();h.render();h.finishStatus(Response.json({mode:'test',reviewRequired:true,checkoutAvailable:false,portalAvailable:true,subscription:null}));view=await h.settled();reviewed();assert.doesNotMatch(button('Manage subscription')[1],/\sdisabled(?:=|\s|$)/);
  view.onAction('portal');await h.settled();assert.deepEqual(h.links,['https://billing.stripe.com/p/session/A']);
+ h.render().onRefresh();h.render();h.finishStatus(Response.json({mode:'test',reviewRequired:false,checkoutAvailable:true,portalAvailable:true,subscription:null}));await h.settled();reviewed();
+ h.render().onAction('annual');await h.settled();assert.equal(h.calls.filter(x=>x.url==='/api/billing/checkout').length,1,'clear Customer status does not discard an uncertain Checkout review');
  h.render().onRefresh();h.render();h.finishStatus(new Response('',{status:403}));await h.settled();assert.match(h.html(),/Sign in with the business owner/);assert.doesNotMatch(h.html(),/Payment needs review/);h.unmount();
 });

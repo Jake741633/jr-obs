@@ -7,7 +7,7 @@ const date=(value:number)=>new Intl.DateTimeFormat('en-GB',{day:'numeric',month:
 function stateLabel(sub:PublicBillingSubscription|null){
  if(!sub)return 'No subscription started';
  if(sub.status==='active')return sub.paidThroughMs&&sub.paidThroughMs>Date.now()?'Active subscription':sub.paidThroughMs?'Paid period ended':'Payment confirmation needed';
- if(sub.status==='trialing')return sub.trialEndsAtMs&&sub.trialEndsAtMs>Date.now()?'Trial in progress':'Trial ended';
+ if(sub.status==='trialing')return sub.trialEndsAtMs===null?'Trial confirmation needed':sub.trialEndsAtMs>Date.now()?'Trial in progress':'Trial ended';
  if(sub.status==='canceled')return 'Cancelled';
  return 'Payment needs attention';
 }
@@ -15,7 +15,9 @@ export function BillingStatusPanel({result,onRefresh,onAction,busy=null,actionMe
  const sub=result.state==='ready'?result.data.subscription:null;
  const review=result.state!=='denied'&&(reviewReported||result.state==='ready'&&result.data.reviewRequired);
  const checkout=!review&&result.state==='ready'&&result.data.reviewRequired===false&&result.data.checkoutAvailable,portal=result.state==='ready'&&result.data.portalAvailable;
- const label=review?'Payment needs review':stateLabel(sub),pending=checkoutPending&&!review&&label!=='Active subscription';
+ const label=review?'Payment needs review':stateLabel(sub);
+ const awaitingConfirmation=!sub||sub.status==='active'&&sub.paidThroughMs===null||sub.status==='trialing'&&sub.trialEndsAtMs===null;
+ const pending=checkoutPending&&!review&&result.state==='ready'&&result.data.reviewRequired===false&&awaitingConfirmation;
  return <div className="space-y-5">
   {pending?<Card><p role="status" className="text-sm text-amber-200">Checkout returned. Your payment confirmation is pending. Refresh billing status in a moment.</p></Card>:null}
   <Card>

@@ -6,7 +6,11 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {loadLocalTs} from './helpers/load-local-ts.mjs';
 const icon=()=>React.createElement('svg',{'aria-hidden':true});
 const deps={'react/jsx-runtime':jsx,react:React,'lucide-react':{CreditCard:icon,CalendarDays:icon,ShieldCheck:icon,RefreshCw:icon,ArrowLeft:icon},'next/link':{default:props=>React.createElement('a',props)}};
-function panel(result,props={}){const {BillingStatusPanel}=loadLocalTs(new URL('../components/billing/BillingStatusPanel.tsx',import.meta.url),deps);return renderToStaticMarkup(React.createElement(BillingStatusPanel,{result,onRefresh(){},onAction(){},...props}));}
+const now=Date.UTC(2026,10,8,17);
+class BillingClock extends Date{static now(){return now;}}
+function panel(result,props={}){const {BillingStatusPanel}=loadLocalTs(new URL('../components/billing/BillingStatusPanel.tsx',import.meta.url),deps,{Date:BillingClock});return renderToStaticMarkup(React.createElement(BillingStatusPanel,{result,onRefresh(){},onAction(){},...props}));}
+const statusData=subscription=>({mode:'test',reviewRequired:false,checkoutAvailable:false,portalAvailable:true,subscription});
+const subscription=(patch={})=>({plan:'monthly',status:'active',paidThroughMs:null,trialEndsAtMs:null,cancelAtPeriodEnd:false,reconciledAtMs:now,...patch});
 test('phone billing screen shows approved prices and clear inactive actions without a payment form',()=>{
  const html=panel({state:'unavailable'});assert.match(html,/£29/);assert.match(html,/£290/);assert.match(html,/£19/);assert.match(html,/setup in progress/i);assert.doesNotMatch(html,/<form|card number|sk_live|cus_/i);assert.match(html,/<button[^>]*disabled/);
 });
@@ -19,6 +23,35 @@ test('large phone actions follow server capabilities and disable together during
 });
 test('returning from Checkout shows pending confirmation without claiming payment or access',()=>{
  const html=panel({state:'ready',data:{mode:'test',reviewRequired:false,checkoutAvailable:false,portalAvailable:false,subscription:null}},{checkoutPending:true});assert.match(html,/payment confirmation is pending/i);assert.doesNotMatch(html,/Active subscription/);
+});
+test('a trial awaiting fresh dates is distinct from a confirmed or expired trial',()=>{
+ for(const [trialEndsAtMs,label] of [[null,'Trial confirmation needed'],[now+1,'Trial in progress'],[now,'Trial ended'],[now-1,'Trial ended']]){
+  const html=panel({state:'ready',data:statusData(subscription({status:'trialing',trialEndsAtMs}))});assert.ok(html.includes(label),label);
+  if(trialEndsAtMs===null){assert.doesNotMatch(html,/Trial ended|Trial in progress|Trial ends|Paid through|Active subscription/);assert.match(html,/Manage subscription/);}
+ }
+});
+test('Checkout return information remains available for ready clear records awaiting confirmation',()=>{
+ for(const sub of [null,subscription(),subscription({status:'trialing'})]){
+  const html=panel({state:'ready',data:statusData(sub)},{checkoutPending:true});assert.match(html,/payment confirmation is pending/i);assert.doesNotMatch(html,/Active subscription|Trial in progress|Trial ended/);
+ }
+});
+test('old Checkout return hints cannot override confirmed, expired or payment-attention states',()=>{
+ const cases=[
+  [subscription({paidThroughMs:now+1}),'Active subscription'],
+  [subscription({paidThroughMs:now}),'Paid period ended'],
+  [subscription({paidThroughMs:now-1}),'Paid period ended'],
+  [subscription({status:'trialing',trialEndsAtMs:now+1}),'Trial in progress'],
+  [subscription({status:'trialing',trialEndsAtMs:now}),'Trial ended'],
+  [subscription({status:'canceled'}),'Cancelled'],
+  ...['past_due','unpaid','paused','incomplete','incomplete_expired'].map(status=>[subscription({status}),'Payment needs attention']),
+ ];
+ for(const [sub,label] of cases){const html=panel({state:'ready',data:statusData(sub)},{checkoutPending:true});assert.ok(html.includes(label),sub.status);assert.doesNotMatch(html,/payment confirmation is pending/i,sub.status);}
+});
+test('Checkout return hints await a successful current owner status read',()=>{
+ for(const state of ['loading','denied','unavailable']){
+  const html=panel({state},{checkoutPending:true});assert.doesNotMatch(html,/payment confirmation is pending/i,state);
+  for(const match of html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g))if(/Choose monthly|Choose annual|Manage subscription/.test(match[2]))assert.match(match[1],/\sdisabled(?:=|\s|$)/);
+ }
 });
 test('server-reported coverage distinguishes scheduled ending, failed payment and expired coverage',()=>{
  const data={mode:'test',reviewRequired:false,checkoutAvailable:false,subscription:{plan:'monthly',status:'active',paidThroughMs:Date.UTC(2030,0,2),trialEndsAtMs:null,cancelAtPeriodEnd:true,reconciledAtMs:Date.UTC(2026,10,1)}};
