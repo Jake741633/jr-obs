@@ -29,7 +29,7 @@ export function privateBridgeHarness(records, storageKey = "jr-os-job-documents"
     "./repository": { activeSyncAuthorizationMatches: () => true, revalidateSyncAuthorization: async () => true },
   };
   const mod = { exports: {} };
-  vm.runInNewContext(source, { module: mod, exports: mod.exports, Blob, Error, Date, CustomEvent,
+  vm.runInNewContext(source, { module: mod, exports: mod.exports, Blob, Error, Date, CustomEvent, AbortController,
     navigator: {onLine:true}, Uint8Array,
     window: { localStorage: { getItem: key => key === "jr-os-active-organisation" ? identity.organisationId : values.get(key)??null, setItem(key, value) {values.set(key,String(value));} }, atob, addEventListener() {}, removeEventListener() {}, dispatchEvent() {} },
     URL: { createObjectURL(blob) { const url = `blob:https://preview.example.com/7a4fffb3-6a59-431b-a126-${String(++sequence).padStart(12, "0")}`; blobs.set(url, blob); return url; }, revokeObjectURL(url) { revoked.push(url); blobs.delete(url); } },

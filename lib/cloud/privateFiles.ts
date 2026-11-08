@@ -213,12 +213,12 @@ export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "i
   return queued;
 }
 
-export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) {
+export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem, signal?: AbortSignal) {
   assertOrganisationPrivateObjectPath(item.organisationId, item.objectPath);
   if (effectiveCloudMode() === "local") return { state: "Pending" as const };
   if (typeof navigator !== "undefined" && !navigator.onLine) return { state: "Offline" as const };
   const authorization = privateUploadAuthorization(item);
-  if (!activeReplayOwnerMatches(authorization)) {
+  if (signal?.aborted || !activeReplayOwnerMatches(authorization)) {
     throw new Error("Private upload authorisation changed before replay.");
   }
   const blob = dataUrlToBlob(item.dataUrl, item.mimeType);
@@ -238,10 +238,10 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
     updated_by: item.userId,
   };
   const rows = await replayPrivateUploadStages({
-    authorizationIsCurrent: () => activeReplayOwnerMatches(authorization),
-    revalidateAuthorization: () => revalidateSyncAuthorization(authorization),
-    upsertMetadata: () => cloudUpsert<PrivateFileMetadata>("private_files", [metadata]),
-    uploadObject: () => uploadPrivateObject(item.objectPath, blob, item.mimeType),
+    authorizationIsCurrent: () => !signal?.aborted && activeReplayOwnerMatches(authorization),
+    revalidateAuthorization: () => revalidateSyncAuthorization(authorization, signal),
+    upsertMetadata: () => cloudUpsert<PrivateFileMetadata>("private_files", [metadata], undefined, signal),
+    uploadObject: () => uploadPrivateObject(item.objectPath, blob, item.mimeType, signal),
   });
   return { state: "Synced" as const, metadata: rows[0] ?? metadata };
 }
@@ -253,26 +253,27 @@ async function replayPrivateUploadQueueSnapshot(
   authorization: SyncAuthorizationContext,
   storageKey: string,
   onSynced?: PrivateUploadConfirmation,
+  signal?: AbortSignal,
 ) {
   const allQueue = readAllPrivateUploadQueue();
   const { activeQueue } = partitionPrivateUploadQueue(allQueue, authorization, storageKey);
   const outcomes = new Map<string, { snapshot: string; remaining?: PrivateFileUploadQueueItem }>();
   for (const item of activeQueue) {
-    if (!activeReplayOwnerMatches(authorization)) break;
+    if (signal?.aborted || !activeReplayOwnerMatches(authorization)) break;
     // Timestamps can collide when a picker replaces a file in the same tick.
     // Compare the entire persisted entry, including its bytes and binding.
     const snapshot = JSON.stringify(item);
     const stillQueued = () => readAllPrivateUploadQueue().some((current) => current.id === item.id && JSON.stringify(current) === snapshot);
     if (!stillQueued()) continue;
     try {
-      const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() });
-      if (!activeReplayOwnerMatches(authorization)) break;
+      const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() }, signal);
+      if (signal?.aborted || !activeReplayOwnerMatches(authorization)) break;
       if (!stillQueued()) continue;
       if (result.state === "Synced" && onSynced?.(item, result) === false) continue;
-      if (!activeReplayOwnerMatches(authorization)) break;
+      if (signal?.aborted || !activeReplayOwnerMatches(authorization)) break;
       outcomes.set(item.id, { snapshot, remaining: result.state === "Synced" ? undefined : { ...item, state: result.state, updatedAt: new Date().toISOString() } });
     } catch (error) {
-      if (!activeReplayOwnerMatches(authorization)) break;
+      if (signal?.aborted || !activeReplayOwnerMatches(authorization)) break;
       outcomes.set(item.id, { snapshot, remaining: { ...item, state: "Failed", error: error instanceof Error ? error.message : "Private upload failed.", updatedAt: new Date().toISOString() } });
     }
   }
@@ -293,19 +294,21 @@ export async function flushPrivateFileUploadQueue(
   authorization: SyncAuthorizationContext,
   storageKey: string,
   onSynced?: PrivateUploadConfirmation,
+  signal?: AbortSignal,
 ) {
   const key = JSON.stringify([authorization.organisationId, authorization.userId, authorization.role, authorization.customerSourceId ?? null, storageKey]);
   const previous = privateUploadFlushes.get(key);
-  const replay = () => replayPrivateUploadQueueSnapshot(authorization, storageKey, onSynced);
+  const replay = () => replayPrivateUploadQueueSnapshot(authorization, storageKey, onSynced, signal);
   const pending = previous ? previous.catch(() => undefined).then(replay) : replay();
   privateUploadFlushes.set(key, pending);
   try { return await pending; }
   finally { if (privateUploadFlushes.get(key) === pending) privateUploadFlushes.delete(key); }
 }
 
-export async function authenticatedPrivateDownloadUrl(objectPath: string, organisationId: string) {
+export async function authenticatedPrivateDownloadUrl(objectPath: string, organisationId: string, signal?: AbortSignal) {
   assertOrganisationPrivateObjectPath(organisationId, objectPath);
-  const file = await downloadPrivateObject(objectPath);
+  const file = await downloadPrivateObject(objectPath, signal);
+  if (signal?.aborted) throw new Error("Private download was cancelled.");
   return URL.createObjectURL(file);
 }
 
@@ -352,6 +355,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
   useEffect(() => {
     if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
     let active = true;
+    const controller = new AbortController();
     const queuedIds = new Set(
       readPrivateUploadQueue(identity)
         .filter((item) => item.storageKey === storageKey)
@@ -436,15 +440,16 @@ export function usePrivateFileCollectionBridge<T>(input: {
         } as T;
       });
       return true;
-    }).catch(() => { /* A failed queue write retains its bytes for a later retry. */ });
+    }, controller.signal).catch(() => { /* A failed queue write retains its bytes for a later retry. */ });
     flush();
     window.addEventListener("online", flush);
-    return () => { active = false; window.removeEventListener("online", flush); };
+    return () => { active = false; controller.abort(); window.removeEventListener("online", flush); };
   }, [identity, isReady, items, mode, updateItem, storageKey]);
 
   useEffect(() => {
     if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
     let active = true;
+    const controller = new AbortController();
     const missing = items.flatMap((item) => {
       const record = item as PrivateFileBackedRecord;
       if (storageKey === "jr-os-surveys") {
@@ -455,7 +460,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
     if (missing.length === 0) return;
     const createdUrls = new Set<string>();
     Promise.allSettled(missing.map(async (record) => {
-      const url = await authenticatedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId);
+      const url = await authenticatedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId, controller.signal);
       if (!active) { URL.revokeObjectURL(url); return null; }
       createdUrls.add(url);
       return [privateAttachmentDownloadCacheKey(identity, record), url] as const;
@@ -472,6 +477,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
     });
     return () => {
       active = false;
+      controller.abort();
       for (const url of createdUrls) URL.revokeObjectURL(url);
       createdUrls.clear();
     };

@@ -51,7 +51,7 @@ test("a replaced attachment's pending download cannot hydrate the new record", a
   assert.equal(await h.blobs.get(currentUrl).text(), "new photo");
   finishOld(new Blob(["old photo"], { type: "image/jpeg" }));
   assert.equal((await h.settled())[0].signedDownloadUrl, currentUrl);
-  assert.equal(h.revoked.length, 1); assert.equal(h.blobs.size, 1);
+  assert.equal(h.revoked.length, 0); assert.equal(h.blobs.size, 1);
   h.unmount(); assert.equal(h.blobs.size, 0);
 });
 
@@ -61,10 +61,10 @@ test('a missing private attachment cannot block a late successful sibling previe
  const records=await h.settled();assert.ok(records[0].signedDownloadUrl);assert.equal(records[1].signedDownloadUrl,undefined);assert.equal(await h.blobs.get(records[0].signedDownloadUrl).text(),'good photo');h.unmount();assert.equal(h.blobs.size,0);
 });
 
-test('late successful bytes after a sibling failure and unmount are revoked',async()=>{
+test('late successful bytes after a sibling failure and unmount never create a blob URL',async()=>{
  const h=privateBridgeHarness([{id:'good',privateStoragePath:'org-1/jobs/job-1/good.jpg',privateFileId:'good'},{id:'missing',privateStoragePath:'org-1/jobs/job-1/missing.jpg',privateFileId:'missing'}]);let finish;
  h.download(path=>path.endsWith('missing.jpg')?Promise.reject(Error('Object not found')):new Promise(resolve=>{finish=resolve;}));h.render();await new Promise(resolve=>setImmediate(resolve));h.unmount();finish(new Blob(['good photo'],{type:'image/jpeg'}));
- await new Promise(resolve=>setImmediate(resolve));assert.equal(h.blobs.size,0);assert.equal(h.revoked.length,1);
+ await new Promise(resolve=>setImmediate(resolve));assert.equal(h.blobs.size,0);assert.equal(h.revoked.length,0);
 });
 
 test('a retired upload bridge retains work for a remounted owner to durably confirm',async()=>{

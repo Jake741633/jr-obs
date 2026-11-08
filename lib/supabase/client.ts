@@ -1,4 +1,5 @@
-import { supabaseSessionFingerprint } from "./sessionOwnership-core.mjs";
+import { sameSupabaseSessionOwnership, supabaseSessionFingerprint } from "./sessionOwnership-core.mjs";
+import { withRequestLifecycle } from "../cloud/requestLifecycle";
 
 export interface SupabaseSession {
   access_token: string;
@@ -128,6 +129,7 @@ export async function supabaseFetch(path: string, init: RequestInit = {}, authen
   const config = getSupabaseConfig();
   if (!config) throw new Error("Supabase is not configured yet.");
   const session = readSupabaseSession();
+  const startingOwnership = { session, epoch: readSupabaseSessionOwnershipEpoch() };
 
   const headers = new Headers(init.headers);
   headers.set("apikey", config.anonKey);
@@ -149,21 +151,31 @@ export async function supabaseFetch(path: string, init: RequestInit = {}, authen
     requestPath = `${path}?redirect_to=${encodeURIComponent(redirectTo)}`;
   }
 
-  let response: Response;
+  // Revoking an explicitly captured credential must finish even when the
+  // browser already owns another account. Its transport still has a deadline.
+  const capturedLogout = !authenticated && path.startsWith("/auth/v1/logout")
+    && (init.method || "GET").toUpperCase() === "POST" && headers.has("Authorization");
   try {
-    response = await fetch(`${config.url}${requestPath}`, { ...init, headers });
-  } catch {
+    return await withRequestLifecycle(`${config.url}${requestPath}`, { ...init, headers }, async (response) => {
+      const body = response.status === 204 ? null : await response.json().catch((error: unknown) => {
+        if (error && typeof error === "object" && "name" in error && error.name === "SyntaxError") return null;
+        throw error;
+      });
+      if (!response.ok) {
+        const message = body?.msg || body?.message || body?.error_description || body?.error || "Cloud request failed.";
+        const code = typeof body?.code === "string"
+          ? body.code
+          : typeof body?.error_code === "string"
+            ? body.error_code
+            : undefined;
+        throw new SupabaseRequestError("http", message, { status: response.status, code });
+      }
+      return body;
+    }, () => capturedLogout || sameSupabaseSessionOwnership(
+      readSupabaseSession(), readSupabaseSessionOwnershipEpoch(), startingOwnership.session, startingOwnership.epoch,
+    ));
+  } catch (error) {
+    if (error instanceof SupabaseRequestError) throw error;
     throw new SupabaseRequestError("network", cloudServiceUnavailableMessage);
   }
-  const body = response.status === 204 ? null : await response.json().catch(() => null);
-  if (!response.ok) {
-    const message = body?.msg || body?.message || body?.error_description || body?.error || "Cloud request failed.";
-    const code = typeof body?.code === "string"
-      ? body.code
-      : typeof body?.error_code === "string"
-        ? body.error_code
-        : undefined;
-    throw new SupabaseRequestError("http", message, { status: response.status, code });
-  }
-  return body;
 }

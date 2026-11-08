@@ -9,7 +9,7 @@ test("private file metadata is always bound to the active organisation and uploa
   assert.match(privateFiles, /object_path: item\.objectPath/);
   assert.match(privateFiles, /created_by: item\.userId/);
   assert.match(privateFiles, /updated_by: item\.userId/);
-  assert.match(privateFiles, /cloudUpsert<PrivateFileMetadata>\("private_files", \[metadata\]\)/);
+  assert.match(privateFiles, /cloudUpsert<PrivateFileMetadata>\("private_files", \[metadata\], undefined, signal\)/);
 });
 
 test("existing attachment metadata cannot register a cross-organisation path", () => {
@@ -20,10 +20,10 @@ test("existing attachment metadata cannot register a cross-organisation path", (
 
 test("authenticated attachment transfers validate object ownership before cloud access", () => {
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(item\.organisationId, item\.objectPath\)/);
-  assert.match(privateFiles, /uploadPrivateObject\(item\.objectPath, blob, item\.mimeType\)/);
+  assert.match(privateFiles, /uploadPrivateObject\(item\.objectPath, blob, item\.mimeType, signal\)/);
   assert.match(privateFiles, /export async function authenticatedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
-  assert.match(privateFiles, /downloadPrivateObject\(objectPath\)/);
+  assert.match(privateFiles, /downloadPrivateObject\(objectPath, signal\)/);
 });
 
 test("authenticated attachment cache identity includes organisation, user, role, customer and source id", () => {

@@ -111,7 +111,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     mode: effectiveCloudMode(),
     storageKey: scopedStorageKey,
     recordCreators() { return { ...currentRecordCreators }; },
-    async list(): Promise<T[]> {
+    async list(signal?: AbortSignal): Promise<T[]> {
       const mode = effectiveCloudMode();
       purgeDormantNetworkOnlyCapabilities(mode);
       const cached = readLocal<T>(scopedStorageKey);
@@ -140,7 +140,8 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       const versionsAtRead: Record<string, number> = networkOnly ? {} : readVersions(scopedStorageKey);
       try {
         const select = networkOnly ? cloudSelectFresh : cloudSelect;
-        const rows = await select<CloudEnvelope<T>>(readTable, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`);
+        const rows = await select<CloudEnvelope<T>>(readTable, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`, signal);
+        if (signal?.aborted) return [];
         // Read the durable queue after the request: another tab or a retained
         // editor may have saved a newer local intent while this read awaited.
         const pending = networkOnly ? [] : pendingCollectionChanges();
@@ -206,7 +207,7 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
         }
         return roleProjectionRecords;
       } catch {
-        if (networkOnly) return [];
+        if (networkOnly || signal?.aborted) return [];
         const current = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: readLocal<T>(scopedStorageKey) });
         replaceRecordCreators(retainRecordCreatorsForRecords(readRecordCreators(scopedStorageKey), current));
         return current;

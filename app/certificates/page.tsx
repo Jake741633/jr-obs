@@ -122,17 +122,31 @@ export default function CertificatesPage() {
 
   function printCertificate() {
     if (!form) return;
-    const popup = window.open("", "_blank", "noopener,noreferrer");
-    if (!popup) return setMessage("Allow pop-ups to open the PDF-ready certificate.");
-    popup.document.write(certificatePdfHtml(
-      form,
-      customers.items.find((item) => item.id === form.customerId),
-      jobs.items.find((item) => item.id === form.jobId),
-      invoices.items.find((item) => item.id === form.invoiceId),
-    ));
-    popup.document.close();
-    popup.focus();
-    popup.print();
+    let popup: Window | null = null;
+    try {
+      // Retain the same-origin handle, then detach its opener before writing private content.
+      popup = window.open("", "_blank");
+      if (!popup) return setMessage("Allow pop-ups to open the PDF-ready certificate.");
+      popup.opener = null;
+      if (popup.opener !== null) throw new Error("Certificate preview opener could not be detached.");
+      popup.document.write(certificatePdfHtml(
+        form,
+        customers.items.find((item) => item.id === form.customerId),
+        jobs.items.find((item) => item.id === form.jobId),
+        invoices.items.find((item) => item.id === form.invoiceId),
+      ));
+      popup.document.close();
+      popup.focus();
+      popup.print();
+      setMessage("");
+    } catch {
+      if (popup) {
+        // Clear any partial private preview even if the browser refuses to close its window.
+        try { popup.document.open(); popup.document.close(); } catch { /* Best-effort cleanup. */ }
+        try { popup.close(); } catch { /* Best-effort cleanup. */ }
+      }
+      setMessage("The certificate preview could not be opened. Please try again.");
+    }
   }
 
   const awaitingIssue = certificates.items.filter((item) => item.status === "Ready for Review").length;

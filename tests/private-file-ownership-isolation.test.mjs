@@ -26,7 +26,7 @@ test("private upload replay stops when active or live authorisation changes", ()
   assert.match(privateFiles, /function activeReplayOwnerMatches\(authorization: SyncAuthorizationContext\)/);
   assert.match(privateFiles, /readSupabaseSession\(\)\?\.user\?\.id === authorization\.userId/);
   assert.match(privateFiles, /activeSyncAuthorizationMatches\(authorization\)/);
-  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
+  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization, signal\)/);
   assert.equal(privateUploadReplay.match(/await input\.revalidateAuthorization\(\)/g)?.length, 3);
   assert.match(privateUploadReplay, /const metadata = await input\.upsertMetadata\(\)[\s\S]*await input\.uploadObject\(\)/);
   assert.match(privateUploadReplay, /authorisation changed before object upload/);

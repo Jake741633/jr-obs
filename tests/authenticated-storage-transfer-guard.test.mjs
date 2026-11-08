@@ -67,8 +67,8 @@ test("the client uses live authenticated Storage requests only", () => {
   assert.match(client, /downloadPrivateObject[\s\S]*const session = cloudSession\.load\(\)/);
   assert.doesNotMatch(client, /\/storage\/v1\/object\/(?:upload\/)?sign\//);
   assert.doesNotMatch(client, /createSigned(?:Upload|Download)/);
-  assert.match(privateFiles, /uploadPrivateObject\(item\.objectPath, blob, item\.mimeType\)/);
-  assert.match(privateFiles, /downloadPrivateObject\(objectPath\)/);
+  assert.match(privateFiles, /uploadPrivateObject\(item\.objectPath, blob, item\.mimeType, signal\)/);
+  assert.match(privateFiles, /downloadPrivateObject\(objectPath, signal\)/);
 });
 
 test("schema-only recovery reapplies authenticated Storage enforcement", () => {

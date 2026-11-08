@@ -55,6 +55,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   useEffect(() => {
     if (!identityReady) return;
     let active = true;
+    const controller = new AbortController();
     suppressSyncRef.current = true;
 
     async function loadCollection() {
@@ -76,7 +77,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
           cacheRole,
           cacheCustomerSourceId,
         });
-        loaded = await repository.list() as T[];
+        loaded = await repository.list(controller.signal) as T[];
         loadedCreators = repository.recordCreators();
       }
 
@@ -93,6 +94,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     void loadCollection();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, identityReady, key, mode, organisationId, target, userId]);
 
