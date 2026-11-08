@@ -12,6 +12,7 @@ import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import type { Job, Material, PricingDocument, PurchaseItemStatus, PurchaseList, PurchaseListItem } from "../../lib/models";
 import { purchaseListFromLink } from "../../lib/purchaseListLink";
 import { filterPurchaseInbox, purchaseInboxFilters, purchaseLinkedJob, purchaseSavedTotal, type PurchaseInboxFilter } from "../../lib/purchaseInbox";
+import { nextPurchaseListNumber, purchaseMaterialReference } from "../../lib/workflow";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
 const statuses: PurchaseItemStatus[] = ["Needed", "Ordered", "Delivered"];
@@ -68,11 +69,6 @@ export default function PurchasesPage() {
     };
   }, [visibleLists]);
 
-  function materialMatch(description: string) {
-    const normalised = description.trim().toLowerCase();
-    return materials.items.find((material) => material.name.trim().toLowerCase() === normalised);
-  }
-
   function resetInbox() {
     setInboxJobId(""); setInboxFilter("All"); setInboxQuery(""); setListLimit(8);
   }
@@ -91,6 +87,9 @@ export default function PurchasesPage() {
     if (!document) return setMessage("Choose a quote or estimate with material lines.");
     const materialLines = document.items.filter((item) => item.category === "Materials");
     if (materialLines.some((line) => !line.description.trim() || !Number.isFinite(line.quantity) || line.quantity <= 0 || !Number.isFinite(line.unitCost ?? 0) || (line.unitCost ?? 0) < 0)) return setMessage("Review the source material descriptions, quantities and unit costs before creating this purchase list.");
+    let materialReferences: ReturnType<typeof purchaseMaterialReference>[];
+    try { materialReferences = materialLines.map((line) => purchaseMaterialReference(line, materials.items)); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Review the source material references before creating this purchase list."); return; }
     const jobId = selectedJobId || document.jobId;
     if (jobId && !jobs.items.some((job) => job.id === jobId)) return setMessage("The linked job is unavailable. Review the source or choose a current job before creating the list.");
     const draft = creationDraft.current || { id: makeId("purchase"), createdAt: new Date().toISOString(), lineIds: [], complete: false };
@@ -98,20 +97,16 @@ export default function PurchasesPage() {
     const now = draft.createdAt;
     const list: PurchaseList = {
       id: draft.id,
-      number: `PO-${String(purchaseLists.items.length + 1).padStart(4, "0")}`,
+      number: nextPurchaseListNumber(purchaseLists.items),
       title: `${document.number} materials`,
       pricingDocumentId: document.id,
       jobId,
       items: materialLines.map((line, index) => {
-        const material = materialMatch(line.description);
         const id = draft.lineIds[index] || makeId("purchase-item"); draft.lineIds[index] = id;
         return {
           id,
-          materialId: material?.id,
+          ...materialReferences[index],
           description: line.description,
-          supplier: material?.supplier || "",
-          stockCode: material?.stockCode || "",
-          supplierUrl: material?.supplierUrl || undefined,
           quantity: line.quantity,
           unitCost: line.unitCost ?? 0,
           status: "Needed" as const,

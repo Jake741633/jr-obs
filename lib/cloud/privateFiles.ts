@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { readSupabaseSession } from "../supabase/client";
 import { cloudInsert, cloudUpsert, downloadPrivateObject, uploadPrivateObject } from "./client";
 import { cloudStorageBucket, effectiveCloudMode, type CloudMode } from "./config";
@@ -213,12 +213,12 @@ export function queuePrivateFileUpload(item: Omit<PrivateFileUploadQueueItem, "i
   return queued;
 }
 
-export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) {
+export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem, signal?: AbortSignal) {
   assertOrganisationPrivateObjectPath(item.organisationId, item.objectPath);
   if (effectiveCloudMode() === "local") return { state: "Pending" as const };
   if (typeof navigator !== "undefined" && !navigator.onLine) return { state: "Offline" as const };
   const authorization = privateUploadAuthorization(item);
-  if (!activeReplayOwnerMatches(authorization)) {
+  if (signal?.aborted || !activeReplayOwnerMatches(authorization)) {
     throw new Error("Private upload authorisation changed before replay.");
   }
   const blob = dataUrlToBlob(item.dataUrl, item.mimeType);
@@ -238,52 +238,77 @@ export async function uploadQueuedPrivateFile(item: PrivateFileUploadQueueItem) 
     updated_by: item.userId,
   };
   const rows = await replayPrivateUploadStages({
-    authorizationIsCurrent: () => activeReplayOwnerMatches(authorization),
-    revalidateAuthorization: () => revalidateSyncAuthorization(authorization),
-    upsertMetadata: () => cloudUpsert<PrivateFileMetadata>("private_files", [metadata]),
-    uploadObject: () => uploadPrivateObject(item.objectPath, blob, item.mimeType),
+    authorizationIsCurrent: () => !signal?.aborted && activeReplayOwnerMatches(authorization),
+    revalidateAuthorization: () => revalidateSyncAuthorization(authorization, signal),
+    upsertMetadata: () => cloudUpsert<PrivateFileMetadata>("private_files", [metadata], undefined, signal),
+    uploadObject: () => uploadPrivateObject(item.objectPath, blob, item.mimeType, signal),
   });
   return { state: "Synced" as const, metadata: rows[0] ?? metadata };
+}
+
+type PrivateUploadConfirmation = (item: PrivateFileUploadQueueItem, result: Awaited<ReturnType<typeof uploadQueuedPrivateFile>>) => void | boolean;
+const privateUploadFlushes = new Map<string, Promise<PrivateFileUploadQueueItem[]>>();
+
+async function replayPrivateUploadQueueSnapshot(
+  authorization: SyncAuthorizationContext,
+  storageKey: string,
+  onSynced?: PrivateUploadConfirmation,
+  signal?: AbortSignal,
+) {
+  const allQueue = readAllPrivateUploadQueue();
+  const { activeQueue } = partitionPrivateUploadQueue(allQueue, authorization, storageKey);
+  const outcomes = new Map<string, { snapshot: string; remaining?: PrivateFileUploadQueueItem }>();
+  for (const item of activeQueue) {
+    if (signal?.aborted || !activeReplayOwnerMatches(authorization)) break;
+    // Timestamps can collide when a picker replaces a file in the same tick.
+    // Compare the entire persisted entry, including its bytes and binding.
+    const snapshot = JSON.stringify(item);
+    const stillQueued = () => readAllPrivateUploadQueue().some((current) => current.id === item.id && JSON.stringify(current) === snapshot);
+    if (!stillQueued()) continue;
+    try {
+      const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() }, signal);
+      if (signal?.aborted || !activeReplayOwnerMatches(authorization)) break;
+      if (!stillQueued()) continue;
+      if (result.state === "Synced" && onSynced?.(item, result) === false) continue;
+      if (signal?.aborted || !activeReplayOwnerMatches(authorization)) break;
+      outcomes.set(item.id, { snapshot, remaining: result.state === "Synced" ? undefined : { ...item, state: result.state, updatedAt: new Date().toISOString() } });
+    } catch (error) {
+      if (signal?.aborted || !activeReplayOwnerMatches(authorization)) break;
+      outcomes.set(item.id, { snapshot, remaining: { ...item, state: "Failed", error: error instanceof Error ? error.message : "Private upload failed.", updatedAt: new Date().toISOString() } });
+    }
+  }
+  if (outcomes.size) {
+    // No await between the latest read and conditional write: other collections,
+    // appended files and replacements must not be replaced by our old snapshot.
+    const latest = readAllPrivateUploadQueue();
+    writeQueue(latest.flatMap((item) => {
+      const outcome = outcomes.get(item.id);
+      if (!outcome || JSON.stringify(item) !== outcome.snapshot) return [item];
+      return outcome.remaining ? [outcome.remaining] : [];
+    }));
+  }
+  return readPrivateUploadQueue(authorization).filter((item) => item.storageKey === storageKey);
 }
 
 export async function flushPrivateFileUploadQueue(
   authorization: SyncAuthorizationContext,
   storageKey: string,
-  onSynced?: (item: PrivateFileUploadQueueItem, result: Awaited<ReturnType<typeof uploadQueuedPrivateFile>>) => void,
+  onSynced?: PrivateUploadConfirmation,
+  signal?: AbortSignal,
 ) {
-  const allQueue = readAllPrivateUploadQueue();
-  const { preserved, activeQueue } = partitionPrivateUploadQueue(allQueue, authorization, storageKey);
-  const remaining: PrivateFileUploadQueueItem[] = [];
-  for (const [index, item] of activeQueue.entries()) {
-    if (!activeReplayOwnerMatches(authorization)) {
-      remaining.push(...activeQueue.slice(index));
-      break;
-    }
-    try {
-      const result = await uploadQueuedPrivateFile({ ...item, state: "Uploading", updatedAt: new Date().toISOString() });
-      if (!activeReplayOwnerMatches(authorization)) {
-        remaining.push({
-          ...item,
-          state: result.state === "Synced" ? "Pending" : result.state,
-          error: result.state === "Synced" ? undefined : item.error,
-          updatedAt: new Date().toISOString(),
-        });
-        remaining.push(...activeQueue.slice(index + 1));
-        break;
-      }
-      if (result.state === "Synced") onSynced?.(item, result);
-      else remaining.push({ ...item, state: result.state, updatedAt: new Date().toISOString() });
-    } catch (error) {
-      remaining.push({ ...item, state: "Failed", error: error instanceof Error ? error.message : "Private upload failed.", updatedAt: new Date().toISOString() });
-    }
-  }
-  writeQueue([...preserved, ...remaining]);
-  return remaining;
+  const key = JSON.stringify([authorization.organisationId, authorization.userId, authorization.role, authorization.customerSourceId ?? null, storageKey]);
+  const previous = privateUploadFlushes.get(key);
+  const replay = () => replayPrivateUploadQueueSnapshot(authorization, storageKey, onSynced, signal);
+  const pending = previous ? previous.catch(() => undefined).then(replay) : replay();
+  privateUploadFlushes.set(key, pending);
+  try { return await pending; }
+  finally { if (privateUploadFlushes.get(key) === pending) privateUploadFlushes.delete(key); }
 }
 
-export async function authenticatedPrivateDownloadUrl(objectPath: string, organisationId: string) {
+export async function authenticatedPrivateDownloadUrl(objectPath: string, organisationId: string, signal?: AbortSignal) {
   assertOrganisationPrivateObjectPath(organisationId, objectPath);
-  const file = await downloadPrivateObject(objectPath);
+  const file = await downloadPrivateObject(objectPath, signal);
+  if (signal?.aborted) throw new Error("Private download was cancelled.");
   return URL.createObjectURL(file);
 }
 
@@ -306,15 +331,43 @@ function supportedStorageKey(storageKey: string) {
   return ["jr-os-job-documents", "jr-os-expenses", "jr-os-surveys"].includes(storageKey);
 }
 
+/** Confirm private bytes synchronously before a caller acknowledges its save.
+ * Metadata and this queue remain separate durable writes; a failure must retain
+ * the caller's draft and stable retry identity rather than imply a rollback.
+ */
+export function persistPrivateFileRecordBytes(storageKey: "jr-os-job-documents" | "jr-os-expenses", value: object, authorization: SyncAuthorizationContext) {
+  if (storageKey !== "jr-os-job-documents" && storageKey !== "jr-os-expenses") throw new Error("Only standalone job documents and expense receipts support this confirmation.");
+  const record = value as PrivateFileBackedRecord;
+  const dataUrl = storageKey === "jr-os-expenses" ? record.receiptDataUrl : record.dataUrl;
+  if (!dataUrl || record.privateStoragePath) return;
+  const file = embeddedFile(storageKey, record);
+  if (!file || !file.fileName.trim()) throw new Error("The inline private file requires a filename.");
+  if (!record.id?.trim()) throw new Error("A private file requires a stable record identity.");
+  const size = dataUrlByteSize(file.dataUrl);
+  const invalid = validatePrivateFile({ name: file.fileName, size, type: file.mimeType });
+  if (invalid) throw new Error(invalid);
+  if (!activeReplayOwnerMatches(authorization)) throw new Error("The private file owner or active account changed. Review the current workspace before saving.");
+  const upload = {
+    organisationId: authorization.organisationId, userId: authorization.userId,
+    authorizationRole: authorization.role, authorizationCustomerSourceId: authorization.customerSourceId,
+    sourceId: record.id, storageKey, jobSourceId: record.jobId, customerSourceId: record.customerId,
+    ...file, size, objectPath: privateObjectPath(authorization.organisationId, record.jobId, record.id, file.fileName),
+  };
+  const id = privateUploadQueueItemId(upload.organisationId, upload.userId, upload.authorizationRole, upload.authorizationCustomerSourceId, storageKey, upload.sourceId);
+  const existing = readPrivateUploadQueue(authorization).filter(item => item.id === id);
+  if (existing.length === 1 && Object.entries(upload).every(([key, field]) => existing[0][key as keyof PrivateFileUploadQueueItem] === field)) return;
+  queuePrivateFileUpload(upload);
+}
+
 export function usePrivateFileCollectionBridge<T>(input: {
   storageKey: string;
   items: T[];
-  setItems: Dispatch<SetStateAction<T[]>>;
+  updateItem: (id: string, update: (current: T) => T) => T;
   isReady: boolean;
   identity: CloudIdentity | null;
   mode: CloudMode;
 }) {
-  const { storageKey, items, setItems, isReady, identity, mode } = input;
+  const { storageKey, items, updateItem, isReady, identity, mode } = input;
   const [downloadUrls, setDownloadUrls] = useState<Record<string, string>>({});
   const downloadUrlsRef = useRef<Record<string, string>>({});
 
@@ -329,6 +382,8 @@ export function usePrivateFileCollectionBridge<T>(input: {
 
   useEffect(() => {
     if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
+    let active = true;
+    const controller = new AbortController();
     const queuedIds = new Set(
       readPrivateUploadQueue(identity)
         .filter((item) => item.storageKey === storageKey)
@@ -384,11 +439,14 @@ export function usePrivateFileCollectionBridge<T>(input: {
     }
 
     const flush = () => void flushPrivateFileUploadQueue(identity, storageKey, (queued, result) => {
-      if (queued.storageKey !== storageKey || result.state !== "Synced") return;
-      setItems((current) => current.map((item) => {
+      if (!active || !activeReplayOwnerMatches(identity) || queued.storageKey !== storageKey || result.state !== "Synced") return false;
+      const sourceId = storageKey === "jr-os-surveys" ? queued.parentSourceId : queued.sourceId;
+      if (!sourceId) throw new Error("The private attachment parent is unavailable. Review it before retrying.");
+      updateItem(sourceId, (item) => {
+        if (!active || !activeReplayOwnerMatches(identity)) throw new Error("Private upload confirmation owner changed.");
         const record = item as PrivateFileBackedRecord;
         if (storageKey === "jr-os-surveys") {
-          if (record.id !== queued.parentSourceId) return item;
+          if (record.id !== queued.parentSourceId || (record.photos ?? []).filter((photo) => photo.id === queued.sourceId).length !== 1) throw new Error("The private photo changed or is unavailable. Review it before retrying.");
           return {
             ...record,
             photos: (record.photos ?? []).map((photo) => photo.id === queued.sourceId ? {
@@ -400,7 +458,7 @@ export function usePrivateFileCollectionBridge<T>(input: {
             } : photo),
           } as T;
         }
-        if (record.id !== queued.sourceId) return item;
+        if (record.id !== queued.sourceId) throw new Error("The private attachment changed before confirmation.");
         return {
           ...record,
           privateStoragePath: queued.objectPath,
@@ -408,16 +466,18 @@ export function usePrivateFileCollectionBridge<T>(input: {
           privateUploadState: "Synced",
           privateUploadError: undefined,
         } as T;
-      }));
-    });
+      });
+      return true;
+    }, controller.signal).catch(() => { /* A failed queue write retains its bytes for a later retry. */ });
     flush();
     window.addEventListener("online", flush);
-    return () => window.removeEventListener("online", flush);
-  }, [identity, isReady, items, mode, setItems, storageKey]);
+    return () => { active = false; controller.abort(); window.removeEventListener("online", flush); };
+  }, [identity, isReady, items, mode, updateItem, storageKey]);
 
   useEffect(() => {
     if (!isReady || mode === "local" || !identity || !supportedStorageKey(storageKey)) return;
     let active = true;
+    const controller = new AbortController();
     const missing = items.flatMap((item) => {
       const record = item as PrivateFileBackedRecord;
       if (storageKey === "jr-os-surveys") {
@@ -426,25 +486,29 @@ export function usePrivateFileCollectionBridge<T>(input: {
       return record.privateStoragePath && !downloadUrls[privateAttachmentDownloadCacheKey(identity, record)] ? [record] : [];
     });
     if (missing.length === 0) return;
-    const createdUrls: string[] = [];
-    Promise.all(missing.map(async (record) => {
-      const url = await authenticatedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId);
-      createdUrls.push(url);
+    const createdUrls = new Set<string>();
+    Promise.allSettled(missing.map(async (record) => {
+      const url = await authenticatedPrivateDownloadUrl(record.privateStoragePath!, identity.organisationId, controller.signal);
+      if (!active) { URL.revokeObjectURL(url); return null; }
+      createdUrls.add(url);
       return [privateAttachmentDownloadCacheKey(identity, record), url] as const;
-    })).then((entries) => {
-      if (!active) {
-        for (const url of createdUrls) URL.revokeObjectURL(url);
-        return;
-      }
+    })).then((results) => {
+      const entries = results.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
+      if (!active || entries.length === 0) return;
       setDownloadUrls((current) => {
+        if (!active) return current;
         const next = { ...current, ...Object.fromEntries(entries) };
+        for (const [, url] of entries) createdUrls.delete(url);
         downloadUrlsRef.current = next;
         return next;
       });
-    }).catch(() => {
-      for (const url of createdUrls) URL.revokeObjectURL(url);
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      controller.abort();
+      for (const url of createdUrls) URL.revokeObjectURL(url);
+      createdUrls.clear();
+    };
   }, [downloadUrls, identity, isReady, items, mode, storageKey]);
 
   const hydratedItems = useMemo(() => items.map((item) => {

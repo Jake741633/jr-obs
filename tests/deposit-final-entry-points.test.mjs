@@ -32,16 +32,17 @@ function importHarness(initialInvoices = [deposit]) {
     invoices: { items: initialInvoices, setItems(update) { state.writes.push(update(context.latestInvoices.current.items)); }, createItem(item) { if (state.failure) throw new Error(state.failure); state.durableWrites++; state.writes.push([item, ...context.latestInvoices.current.items]); } },
     latestInvoices: { current: { items: initialInvoices, ready: true } },
     makeId: prefix => `${prefix}-${++sequence}`, addDays: () => "2026-11-08",
-    timeline: { setItems() {} }, reset() {},
+    timeline: { items: [], isReady: true, createItem(item) { context.timeline.items = [item, ...context.timeline.items]; return item; } }, reset() {}, setReviewMessage() {}, setPendingMilestone() {},
     setForm(update) { state.form = typeof update === "function" ? update(state.form) : update; context.form = state.form; },
     setItems(items) { state.items = items; context.items = items; },
     setImportedQuote(value) { state.importedQuote = value; context.importedQuote = value; },
     setError(value) { state.error = value; }, importedQuote: null,
   };
   context.latestInvoices.current.createItem = context.invoices.createItem;
+  context.latestInvoices.current.timeline = context.timeline;
   context.formOwner = { current: context.invoices.createItem };
   vm.createContext(context);
-  vm.runInContext(functions("../app/invoices/page.tsx", ["importQuote", "selectJob", "submit"]), context);
+  vm.runInContext(functions("../app/invoices/page.tsx", ["importQuote", "selectJob", "submit", "addInvoiceMilestone"]), context);
   return { state, context, import() { context.importQuote("quote"); }, selectJob(id) { context.selectJob(id); }, save() { context.submit({ preventDefault() {} }); } };
 }
 

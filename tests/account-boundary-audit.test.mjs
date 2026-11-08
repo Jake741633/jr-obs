@@ -136,9 +136,8 @@ test("private upload queue retries preserve every other authorisation context", 
   assert.match(privateUploadQueue, /activeQueue\.push\(item\)/);
   assert.match(privateUploadQueue, /preserved\.push\(item\)/);
   assert.match(privateFiles, /partitionPrivateUploadQueue\(allQueue, authorization, storageKey\)/);
-  assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
   assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity, storageKey,/);
-  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
+  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization, signal\)/);
 });
 
 test("private authenticated transfers reject cross-organisation object paths", () => {
@@ -148,7 +147,7 @@ test("private authenticated transfers reject cross-organisation object paths", (
   assert.match(privateFiles, /authenticatedPrivateDownloadUrl\(objectPath: string, organisationId: string/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(organisationId, objectPath\)/);
   assert.match(privateFiles, /assertOrganisationPrivateObjectPath\(metadata\.organisation_id, metadata\.object_path\)/);
-  assert.match(privateFiles, /authenticatedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId\)/);
+  assert.match(privateFiles, /authenticatedPrivateDownloadUrl\(record\.privateStoragePath!, identity\.organisationId, controller\.signal\)/);
 });
 
 test("authenticated attachment URLs cannot be reused after an authorisation context change", () => {

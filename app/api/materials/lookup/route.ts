@@ -31,6 +31,38 @@ const supplierHosts: Record<SupplierKey, ReadonlySet<string>> = {
 };
 
 const materialLookupRoles = new Set(["owner", "admin", "office", "electrician"]);
+const lookupRequestByteLimit = 2_048;
+
+class LookupRequestTooLarge extends Error {}
+
+async function readLookupRequest(request: Request, signal: AbortSignal): Promise<unknown> {
+  signal.throwIfAborted();
+  const reader = request.body?.getReader();
+  if (!reader) throw new Error("Missing lookup request.");
+  // Request body streams are not automatically cancelled by Request.signal.
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener("abort", cancel, { once: true });
+  let size = 0;
+  const chunks: Uint8Array[] = [];
+  try {
+    while (true) {
+      signal.throwIfAborted();
+      const { value, done } = await reader.read();
+      signal.throwIfAborted();
+      if (done) break;
+      size += value.byteLength;
+      if (size > lookupRequestByteLimit) { cancel(); throw new LookupRequestTooLarge(); }
+      chunks.push(value);
+    }
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+  return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+}
 
 function text(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -61,7 +93,7 @@ function requestAccessToken(request: Request) {
   return /^Bearer\s+(.+)$/i.exec(authorization)?.[1]?.trim() || null;
 }
 
-async function materialLookupAccess(request: Request): Promise<LookupAccess> {
+async function materialLookupAccess(request: Request, signal: AbortSignal): Promise<LookupAccess> {
   const token = requestAccessToken(request);
   if (!token) return "unauthorized";
 
@@ -79,20 +111,23 @@ async function materialLookupAccess(request: Request): Promise<LookupAccess> {
     const userResponse = await fetch(`${supabaseUrl}/auth/v1/user`, {
       cache: "no-store",
       headers,
+      signal,
     });
     if (userResponse.status === 401 || userResponse.status === 403) return "unauthorized";
     if (!userResponse.ok) return "unavailable";
     const user = await userResponse.json().catch(() => null) as { id?: unknown } | null;
+    signal.throwIfAborted();
     const userId = text(user?.id);
     if (!userId) return "unauthorized";
 
     const profileResponse = await fetch(
       `${supabaseUrl}/rest/v1/profiles?id=eq.${encodeURIComponent(userId)}&active=eq.true&select=role,active&limit=1`,
-      { cache: "no-store", headers },
+      { cache: "no-store", headers, signal },
     );
     if (profileResponse.status === 401 || profileResponse.status === 403) return "unauthorized";
     if (!profileResponse.ok) return "unavailable";
     const rows = await profileResponse.json().catch(() => null) as Array<{ role?: unknown; active?: unknown }> | null;
+    signal.throwIfAborted();
     const profile = Array.isArray(rows) ? rows[0] : null;
     if (!profile?.active) return "forbidden";
     return materialLookupRoles.has(text(profile.role)) ? "allowed" : "forbidden";
@@ -128,6 +163,7 @@ async function fetchSupplierPage(searchUrl: string, supplier: SupplierKey, signa
     });
 
     if (response.status < 300 || response.status >= 400) return response;
+    void response.body?.cancel().catch(() => {});
     const location = response.headers.get("location");
     const nextUrl = location ? allowedSupplierUrl(location, supplier, currentUrl) : null;
     if (!nextUrl) throw new Error("Supplier returned an unsafe redirect.");
@@ -195,72 +231,98 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Cross-origin supplier lookups are not allowed." }, { status: 403 });
   }
 
-  const access = await materialLookupAccess(request);
-  if (access === "unauthorized") {
-    return NextResponse.json({ error: "Sign in before using supplier lookups." }, { status: 401 });
-  }
-  if (access === "forbidden") {
-    return NextResponse.json({ error: "Supplier lookups are not permitted for this account." }, { status: 403 });
-  }
-  if (access !== "allowed") {
-    return NextResponse.json({ error: "Supplier lookup authentication is temporarily unavailable." }, { status: 503 });
-  }
-
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid lookup request." }, { status: 400 });
-  }
-  if (!plainRecord(body)) {
-    return NextResponse.json({ error: "Invalid lookup request." }, { status: 400 });
-  }
-
-  const supplier = text(body.supplier) as SupplierKey;
-  const stockCode = text(body.stockCode);
-  if (!Object.hasOwn(supplierSearch, supplier)) {
-    return NextResponse.json({ error: "Choose CEF, Screwfix or TLC Direct." }, { status: 400 });
-  }
-  if (!stockCode || stockCode.length > 80) {
-    return NextResponse.json({ error: "Enter a valid supplier stock code." }, { status: 400 });
-  }
-
-  const searchUrl = supplierSearch[supplier](stockCode);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8_000);
-
+  const abandon = () => controller.abort(request.signal.reason);
+  request.signal.addEventListener("abort", abandon, { once: true });
+  const timeout = setTimeout(() => controller.abort(), 15_000);
+  const signal = controller.signal;
   try {
-    const response = await fetchSupplierPage(searchUrl, supplier, controller.signal);
-    if (!response.ok) throw new Error(`Supplier returned ${response.status}`);
-    const html = await response.text();
-    const product = productFromJsonLd(html, stockCode);
-    const finalSupplierUrl = allowedSupplierUrl(response.url, supplier) || searchUrl;
-    const result: ProductResult = {
-      supplier,
-      stockCode,
-      searchUrl,
-      exactMatch: product?.exactMatch ?? false,
-      name: product?.name,
-      manufacturer: product?.manufacturer,
-      productUrl: product?.productUrl
-        ? allowedSupplierUrl(product.productUrl, supplier, finalSupplierUrl) || finalSupplierUrl
-        : finalSupplierUrl,
-      publicPrice: product?.publicPrice,
-      message: product?.name
-        ? "Product details found. Confirm the item and your account-specific trade price before saving."
-        : "An exact product could not be read automatically. Open the supplier results and confirm the item manually.",
-    };
-    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    if (request.signal.aborted) abandon();
+    signal.throwIfAborted();
+    const access = await materialLookupAccess(request, signal);
+    signal.throwIfAborted();
+    if (access === "unauthorized") {
+      return NextResponse.json({ error: "Sign in before using supplier lookups." }, { status: 401 });
+    }
+    if (access === "forbidden") {
+      return NextResponse.json({ error: "Supplier lookups are not permitted for this account." }, { status: 403 });
+    }
+    if (access !== "allowed") {
+      return NextResponse.json({ error: "Supplier lookup authentication is temporarily unavailable." }, { status: 503 });
+    }
+
+    let body: unknown;
+    try {
+      body = await readLookupRequest(request, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      if (error instanceof LookupRequestTooLarge) {
+        return NextResponse.json({ error: "Lookup request is too large." }, { status: 413 });
+      }
+      return NextResponse.json({ error: "Invalid lookup request." }, { status: 400 });
+    }
+    if (!plainRecord(body)) {
+      return NextResponse.json({ error: "Invalid lookup request." }, { status: 400 });
+    }
+
+    if (Object.keys(body).some(key => key !== "supplier" && key !== "stockCode")) {
+      return NextResponse.json({ error: "Invalid lookup request." }, { status: 400 });
+    }
+
+    const supplier = text(body.supplier) as SupplierKey;
+    const stockCode = text(body.stockCode);
+    if (!Object.hasOwn(supplierSearch, supplier)) {
+      return NextResponse.json({ error: "Choose CEF, Screwfix or TLC Direct." }, { status: 400 });
+    }
+    if (!stockCode || stockCode.length > 80) {
+      return NextResponse.json({ error: "Enter a valid supplier stock code." }, { status: 400 });
+    }
+
+    const searchUrl = supplierSearch[supplier](stockCode);
+    try {
+      signal.throwIfAborted();
+      const response = await fetchSupplierPage(searchUrl, supplier, signal);
+      if (!response.ok) throw new Error(`Supplier returned ${response.status}`);
+      const html = await response.text();
+      signal.throwIfAborted();
+      const product = productFromJsonLd(html, stockCode);
+      const finalSupplierUrl = allowedSupplierUrl(response.url, supplier) || searchUrl;
+      const result: ProductResult = {
+        supplier,
+        stockCode,
+        searchUrl,
+        exactMatch: product?.exactMatch ?? false,
+        name: product?.name,
+        manufacturer: product?.manufacturer,
+        productUrl: product?.productUrl
+          ? allowedSupplierUrl(product.productUrl, supplier, finalSupplierUrl) || finalSupplierUrl
+          : finalSupplierUrl,
+        publicPrice: product?.publicPrice,
+        message: product?.name
+          ? "Product details found. Confirm the item and your account-specific trade price before saving."
+          : "An exact product could not be read automatically. Open the supplier results and confirm the item manually.",
+      };
+      return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    } catch {
+      signal.throwIfAborted();
+      const result: ProductResult = {
+        supplier,
+        stockCode,
+        searchUrl,
+        exactMatch: false,
+        message: "The supplier blocked or did not return machine-readable details. Open the supplier search result to confirm the product.",
+      };
+      return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    }
   } catch {
-    const result: ProductResult = {
-      supplier,
-      stockCode,
-      searchUrl,
-      exactMatch: false,
-      message: "The supplier blocked or did not return machine-readable details. Open the supplier search result to confirm the product.",
-    };
-    return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json(
+      { error: request.signal.aborted ? "Supplier lookup cancelled." : "Supplier lookup took too long. Try again." },
+      { status: request.signal.aborted ? 499 : 504, headers: { "Cache-Control": "no-store" } },
+    );
   } finally {
     clearTimeout(timeout);
+    request.signal.removeEventListener("abort", abandon);
+    // Close unread error/redirect bodies as well as any abandoned active read.
+    controller.abort();
   }
 }
