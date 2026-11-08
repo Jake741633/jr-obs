@@ -222,6 +222,9 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     const current = previousRef.current;
     const index = current.findIndex((record) => recordId(record) === id);
     if (!id || index < 0) throw new Error("The collection record is no longer available. Reload and review it before retrying.");
+    if (current.some((record, recordIndex) => recordIndex !== index && recordId(record) === id)) {
+      throw new Error("The collection record has an ambiguous id. Review the saved records before retrying.");
+    }
     const item = update(current[index]);
     if (recordId(item) !== id) throw new Error("A record update must retain its existing id.");
     if (item === current[index]) return item;
@@ -244,6 +247,9 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     const current = previousRef.current;
     const item = current.find((record) => recordId(record) === id);
     if (!id || !item) throw new Error("The collection record is no longer available. Reload and review it before retrying.");
+    if (current.filter((record) => recordId(record) === id).length !== 1) {
+      throw new Error("The collection record has an ambiguous id. Review the saved records before retrying.");
+    }
     validate?.(item);
     const next = current.filter((record) => recordId(record) !== id);
     if (target && organisationId && userId) {

@@ -21,13 +21,16 @@ import {
   paymentTermsFromTemplate,
 } from "../../lib/businessSettings";
 import { usePricingDocumentsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
+import { persistPrivateFileRecordBytes, privateObjectPath } from "../../lib/cloud/privateFiles";
 import { strictHttpsJobDocumentUrl } from "../../lib/cloud/fieldJobDocumentCapability-core.mjs";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
 import { editQuoteDraftLine } from "../../lib/quoteDraftLines";
 import { hasLegacyOtherAllowances, jobPackAllowanceCategories, jobPackQuoteLines, jobPackTotals } from "../../lib/jobPackCatalogue";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
-import { createJobFromAcceptedQuote, nextPricingDocumentNumber, pricingDocumentTotal } from "../../lib/workflow";
+import { nextPricingDocumentNumber, pricingDocumentTotal } from "../../lib/workflow";
+import { convertAcceptedQuote } from "../../lib/quoteConversion";
 import type { Builder, BusinessOverhead, BusinessProfile, BusinessTermsTemplate, Customer, DocumentBrandingSettings, FixedPriceWorkflow, Job, JobDocument, JobPack, JobPackAllowance, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsTemplate, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment, VatSettings } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -46,6 +49,10 @@ function quoteSaveSnapshot(value: object) {
 
 export default function QuotesPage() {
   const documents = usePricingDocumentsCollection();
+  const identityState = useCloudIdentity();
+  const conversionOwner = useMemo(() => ({ mode: identityState.mode, authorization: identityState.identity ? {
+    organisationId: identityState.identity.organisationId, userId: identityState.identity.userId, role: identityState.identity.role, customerSourceId: identityState.identity.customerSourceId,
+  } : null }), [identityState.mode, identityState.identity]);
   const latestDocuments = useRef({ active: false, documents });
   const editingSource = useRef<{ snapshot: string; updateItem: typeof documents.updateItem } | null>(null);
   const creationGeneration = useRef(0);
@@ -71,6 +78,11 @@ export default function QuotesPage() {
   const brandingStore = useCloudLocalCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
   const timeline = useCloudLocalCollection<JobTimelineEntry>("jr-os-job-timeline");
   const jobDocuments = useCloudLocalCollection<JobDocument>("jr-os-job-documents");
+  const latestConversion = useRef({ active: false, pricing: documents, jobs, timeline, jobDocuments, customers, builders, owner: conversionOwner });
+  useLayoutEffect(() => {
+    latestConversion.current = { active: identityState.isReady, pricing: documents, jobs, timeline, jobDocuments, customers, builders, owner: conversionOwner };
+    return () => { latestConversion.current = { ...latestConversion.current, active: false }; };
+  });
   const deepLinkHandled = useRef(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -466,25 +478,25 @@ export default function QuotesPage() {
   }
 
   function convertToJob(document: PricingDocument) {
-    if (document.jobId) { setPageMessage(`${document.number} is already linked to a job.`); return; }
-    if (document.status !== "Accepted") { setPageMessage("Mark the quote as Accepted before creating a live job."); return; }
-    const customer = customers.items.find((item) => item.id === document.customerId);
-    const builder = builders.items.find((item) => item.id === document.builderId);
-    const now = new Date().toISOString();
-    const jobId = makeId("job");
-    const converted = createJobFromAcceptedQuote({
-      document,
-      customerAddress: customer?.address,
-      builderAddress: builder?.address,
-      jobId,
-      now,
-      createId: makeId,
+    const current = latestConversion.current;
+    if (!current.active || current.owner !== conversionOwner || (current.owner.mode !== "local" && !current.owner.authorization)
+      || current.pricing.updateItem !== documents.updateItem || current.jobs.createItem !== jobs.createItem
+      || current.timeline.createItem !== timeline.createItem || current.jobDocuments.createItem !== jobDocuments.createItem) {
+      setPageMessage("The account or conversion records changed. Review the current quote before converting."); return;
+    }
+    const authorization = current.owner.authorization;
+    const result = convertAcceptedQuote(document, current, {
+      expectedPrivatePath: authorization ? record => privateObjectPath(authorization.organisationId, record.jobId, record.id, record.fileName) : undefined,
+      confirmPrivateBytes: current.owner.mode === "local" ? undefined : record => {
+        if (!authorization) throw new Error("The conversion attachment owner is unavailable.");
+        persistPrivateFileRecordBytes("jr-os-job-documents", record, authorization);
+      },
     });
-    jobs.setItems((current) => [converted.job, ...current]);
-    timeline.setItems((current) => [...converted.timelineEntries, ...current]);
-    if (converted.jobDocuments.length) jobDocuments.setItems((current) => [...converted.jobDocuments, ...current]);
-    documents.setItems((current) => current.map((item) => item.id === document.id ? { ...item, jobId, updatedAt: now } : item));
-    setPageMessage(`${document.number} converted into a live scheduled job with ${document.items.length} pricing lines and ${converted.jobDocuments.length} attachment${converted.jobDocuments.length === 1 ? "" : "s"}.`);
+    latestConversion.current = { ...current,
+      pricing: { ...current.pricing, ...result.collections.pricing }, jobs: { ...current.jobs, ...result.collections.jobs },
+      timeline: { ...current.timeline, ...result.collections.timeline }, jobDocuments: { ...current.jobDocuments, ...result.collections.jobDocuments },
+    };
+    setPageMessage(result.message);
   }
 
   function updateLine(id: string, changes: Partial<PricingLineItem>) {
