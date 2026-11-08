@@ -5,8 +5,9 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {loadLocalTs} from './helpers/load-local-ts.mjs';
 import {loadOwnerBillingStatus} from '../lib/billingStatusClient.mjs';
 import {createOwnerBillingActions} from '../lib/billingActionsClient.mjs';
-function harness({holdCheckout=false,reviewRequired=false,checkoutReview=false,checkoutPending=false,portalAvailable=false,holdReviewStatus=false,holdRefreshStatus=false,conflictPlan=null}={}){
- const slots=[],effects=[],calls=[],links=[],statusResolvers=[];let cursor=0,finishCheckout,reportedReview=false,lastPanel,statusReads=0;
+import {controlledBillingStatus,nativeBillingStatusFixture,settleBillingRead} from './helpers/billing-status-fixture.mjs';
+function harness({holdCheckout=false,reviewRequired=false,checkoutReview=false,checkoutPending=false,portalAvailable=false,holdReviewStatus=false,holdRefreshStatus=false,conflictPlan=null,statusClient=loadOwnerBillingStatus,statusFetch}={}){
+ const slots=[],effects=[],calls=[],links=[],statusResolvers=[];let cursor=0,finishCheckout,reportedReview=false,lastPanel,statusReads=0,lastStatusRead;
  let session={access_token:'fixture-token',user:{id:'22222222-2222-4222-8222-222222222222'}};
  const identity={userId:session.user.id,organisationId:'11111111-1111-4111-8111-111111111111',role:'owner'};
  const useState=initial=>{const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return [slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];};
@@ -16,7 +17,11 @@ function harness({holdCheckout=false,reviewRequired=false,checkoutReview=false,c
   calls.push({url,options});
   if(url==='/api/billing/status'){
    statusReads++;
-   if(reportedReview&&holdReviewStatus||holdRefreshStatus&&statusReads>1)return new Promise(resolve=>statusResolvers.push(resolve));
+   if(statusFetch)return statusFetch(url,options);
+   if(reportedReview&&holdReviewStatus||holdRefreshStatus&&statusReads>1)return new Promise((resolve,reject)=>{
+    const cancel=()=>reject(options.signal.reason);options.signal.addEventListener('abort',cancel,{once:true});
+    statusResolvers.push(value=>{options.signal.removeEventListener('abort',cancel);resolve(value);});
+   });
    return Response.json({mode:'test',reviewRequired:reportedReview||reviewRequired,checkoutAvailable:!reportedReview,portalAvailable:portalAvailable||reviewRequired,subscription:null});
   }
   if(url==='/api/billing/portal')return Response.json({mode:'test',sessionId:'bps_A',url:'https://billing.stripe.com/p/session/A'});
@@ -30,16 +35,28 @@ function harness({holdCheckout=false,reviewRequired=false,checkoutReview=false,c
   react,'react/jsx-runtime':jsx,'lucide-react':{ArrowLeft:()=>null,CreditCard:()=>null,CalendarDays:()=>null,RefreshCw:()=>null,ShieldCheck:()=>null},'next/link':{default:()=>null},
   '../../../lib/cloud/useCloudIdentity':{useCloudIdentity:()=>({identity,isReady:true,mode:'cloud'})},
   '../../../lib/supabase/client':{captureSupabaseSessionOwnership:()=>({session,epoch:'one'})},
-  '../../../lib/billingStatusClient.mjs':{loadOwnerBillingStatus:options=>loadOwnerBillingStatus({...options,fetchImpl})},
+  '../../../lib/billingStatusClient.mjs':{loadOwnerBillingStatus:options=>{lastStatusRead=statusClient({...options,fetchImpl});return lastStatusRead;}},
   '../../../lib/billingActionsClient.mjs':{createOwnerBillingActions:options=>createOwnerBillingActions({...options,fetchImpl})},
  },{AbortController,URLSearchParams,window:{location:{search:checkoutPending?'?checkout=pending':'',assign:url=>links.push(url)},addEventListener(){},removeEventListener(){}}}).default;
  const ownerElement=Page().props.children.at(-1);
  function render(){cursor=0;lastPanel=ownerElement.type(ownerElement.props);effects.splice(0).forEach(fn=>fn());return lastPanel.props;}
- return {calls,links,render,html:()=>renderToStaticMarkup(lastPanel),finishStatus:response=>statusResolvers.at(-1)(response),async settled(){await new Promise(resolve=>setImmediate(resolve));return render();},replayEffects(){for(const slot of slots)if(slot?.fn){slot.cleanup?.();slot.cleanup=slot.fn();}},unmount(){for(const slot of slots)slot?.cleanup?.();},switchAccount(){session={access_token:'different',user:{id:'another-user'}};},finish(){finishCheckout(Response.json({mode:'test',sessionId:'cs_test_A',url:'https://checkout.stripe.com/c/pay/A'}));}};
+ return {calls,links,render,statusSettled:()=>lastStatusRead,html:()=>renderToStaticMarkup(lastPanel),finishStatus:response=>statusResolvers.at(-1)(response),async settled(){await new Promise(resolve=>setImmediate(resolve));return render();},replayEffects(){for(const slot of slots)if(slot?.fn){slot.cleanup?.();slot.cleanup=slot.fn();}},unmount(){for(const slot of slots)slot?.cleanup?.();},switchAccount(){session={access_token:'different',user:{id:'another-user'}};},finish(){finishCheckout(Response.json({mode:'test',sessionId:'cs_test_A',url:'https://checkout.stripe.com/c/pay/A'}));}};
 }
 test('actual phone page can start Checkout after a development effect cleanup/replay',async()=>{
  const h=harness();h.render();await h.settled();h.replayEffects();const view=await h.settled();assert.equal(view.result.state,'ready');view.onAction('monthly');await h.settled();
  assert.equal(h.calls.filter(x=>x.url==='/api/billing/checkout').length,1);assert.deepEqual(h.links,['https://checkout.stripe.com/c/pay/A']);h.unmount();
+});
+test('an actual page status timeout enables Refresh and the next native read recovers',async t=>{
+ const client=controlledBillingStatus(),fixture=await nativeBillingStatusFixture(t),h=harness({statusClient:client.loadOwnerBillingStatus,statusFetch:fixture.fetchImpl});
+ t.after(()=>h.unmount());
+ const refresh=()=>[...h.html().matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].find(x=>x[2].replace(/<[^>]*>/g,'').includes('Refresh billing status'));
+ h.render();await fixture.headersReceived;await new Promise(resolve=>setImmediate(resolve));assert.equal(h.render().result.state,'loading');assert.match(refresh()[1],/\sdisabled(?:=|\s|$)/);
+ client.expire();
+ await settleBillingRead(h.statusSettled());let view=await h.settled();
+ assert.equal(view.result.state,'unavailable');assert.doesNotMatch(refresh()[1],/\sdisabled(?:=|\s|$)/);assert.equal(client.timers.size,0);
+ fixture.ready();view.onRefresh();h.render();
+ await h.statusSettled();view=await h.settled();
+ assert.equal(view.result.state,'ready');assert.doesNotMatch(refresh()[1],/\sdisabled(?:=|\s|$)/);assert.equal(fixture.calls(),2);assert.deepEqual(h.links,[]);assert.equal(client.timers.size,0);
 });
 test('actual phone page locks duplicate actions and discards the old account on unmount',async()=>{
  const h=harness({holdCheckout:true});h.render();const view=await h.settled();view.onAction('monthly');view.onAction('annual');assert.equal(h.calls.filter(x=>x.url==='/api/billing/checkout').length,1);assert.equal(h.render().busy,'monthly');
