@@ -5,7 +5,7 @@ import vm from "node:vm";
 import ts from "typescript";
 
 // Execute the real local dependency graph; no browser, network or external API.
-export function loadLocalTs(url, overrides = {}) {
+export function loadLocalTs(url, overrides = {}, globals = {}) {
   const cache = new Map();
   function load(path) {
     if (cache.has(path)) return cache.get(path).exports;
@@ -19,7 +19,7 @@ export function loadLocalTs(url, overrides = {}) {
       if (!resolved) throw new Error(`Missing dependency: ${name}`);
       return load(resolved);
     };
-    vm.runInNewContext(source, { module: mod, exports: mod.exports, require, URL, Date, Error, structuredClone }, { filename: path });
+    vm.runInNewContext(source, { module: mod, exports: mod.exports, require, URL, Date, Error, structuredClone, ...globals }, { filename: path });
     return mod.exports;
   }
   return load(fileURLToPath(url));

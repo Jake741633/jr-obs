@@ -22,7 +22,11 @@ function listRouteFiles(directory, prefix = "") {
 }
 
 test("server API route inventory stays explicit for security review", () => {
-  assert.deepEqual(listRouteFiles(apiRoot).sort(), ["ai/quote-scope/route.ts", "materials/lookup/route.ts"]);
+  assert.deepEqual(listRouteFiles(apiRoot).sort(), ["ai/quote-scope/route.ts", "billing/checkout/route.ts", "billing/portal/route.ts", "billing/status/route.ts", "billing/webhook/route.ts", "materials/lookup/route.ts"]);
+});
+
+test("native function inventory prevents an unreviewed helper becoming a public endpoint", () => {
+  assert.deepEqual(readdirSync(new URL("../netlify/functions/", import.meta.url)).sort(), ["billing-reconcile.mjs"]);
 });
 
 test("supplier lookup accepts no request-controlled organisation selector", () => {
@@ -46,9 +50,9 @@ test("supplier lookup authenticates an active permitted profile before supplier 
   assert.match(lookupRoute, /Sign in before using supplier lookups/);
   assert.match(lookupRoute, /Supplier lookups are not permitted for this account/);
   assert.match(lookupRoute, /Supplier lookup authentication is temporarily unavailable/);
-  const accessCheck = lookupRoute.indexOf("const access = await materialLookupAccess(request);");
-  const bodyRead = lookupRoute.indexOf("body = await request.json();");
-  const supplierFetch = lookupRoute.indexOf("const response = await fetchSupplierPage(searchUrl, supplier, controller.signal);");
+  const accessCheck = lookupRoute.indexOf("const access = await materialLookupAccess(request, signal);");
+  const bodyRead = lookupRoute.indexOf("body = await readLookupRequest(request, signal);");
+  const supplierFetch = lookupRoute.indexOf("const response = await fetchSupplierPage(searchUrl, supplier, signal);");
   assert.ok(accessCheck >= 0 && bodyRead > accessCheck, "Authentication must complete before request payload processing");
   assert.ok(supplierFetch > bodyRead, "Supplier network access must remain behind authentication and validation");
 });

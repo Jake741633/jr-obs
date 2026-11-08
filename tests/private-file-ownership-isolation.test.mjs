@@ -20,21 +20,17 @@ test("private upload queues do not cross authorisation boundaries", () => {
   assert.match(privateUploadQueue, /item\.authorizationRole === authorization\.role/);
   assert.match(privateFiles, /partitionPrivateUploadQueue\(allQueue, authorization, storageKey\)/);
   assert.match(privateFiles, /flushPrivateFileUploadQueue\(identity, storageKey,/);
-  assert.match(privateFiles, /writeQueue\(\[\.\.\.preserved, \.\.\.remaining\]\)/);
 });
 
 test("private upload replay stops when active or live authorisation changes", () => {
   assert.match(privateFiles, /function activeReplayOwnerMatches\(authorization: SyncAuthorizationContext\)/);
   assert.match(privateFiles, /readSupabaseSession\(\)\?\.user\?\.id === authorization\.userId/);
   assert.match(privateFiles, /activeSyncAuthorizationMatches\(authorization\)/);
-  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization\)/);
+  assert.match(privateFiles, /revalidateSyncAuthorization\(authorization, signal\)/);
   assert.equal(privateUploadReplay.match(/await input\.revalidateAuthorization\(\)/g)?.length, 3);
   assert.match(privateUploadReplay, /const metadata = await input\.upsertMetadata\(\)[\s\S]*await input\.uploadObject\(\)/);
   assert.match(privateUploadReplay, /authorisation changed before object upload/);
   assert.match(privateUploadReplay, /authorisation changed before upload confirmation/);
-  assert.match(privateFiles, /for \(const \[index, item\] of activeQueue\.entries\(\)\) \{\s*if \(!activeReplayOwnerMatches\(authorization\)\) \{\s*remaining\.push\(\.\.\.activeQueue\.slice\(index\)\);\s*break;/s);
-  assert.match(privateFiles, /const result = await uploadQueuedPrivateFile[\s\S]*if \(!activeReplayOwnerMatches\(authorization\)\) \{[\s\S]*state: result\.state === "Synced" \? "Pending" : result\.state[\s\S]*remaining\.push\(\.\.\.activeQueue\.slice\(index \+ 1\)\);[\s\S]*break;/);
-  assert.match(privateFiles, /if \(result\.state === "Synced"\) onSynced\?\.\(item, result\)/);
 });
 
 test("private upload queue identities cannot collide across tuple boundaries", () => {

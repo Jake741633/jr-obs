@@ -39,10 +39,11 @@ import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry 
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
 import {
   createInvoiceFromCompletedJob,
-  createJobFromAcceptedQuote,
   createPurchaseListFromPricingDocument,
   pricingDocumentTotal,
 } from "../../lib/workflow";
+import { convertAcceptedQuote } from "../../lib/quoteConversion";
+import { persistPrivateFileRecordBytes, privateObjectPath } from "../../lib/cloud/privateFiles";
 import { assistantInvoiceBalance } from "../../lib/assistantSignals-core.mjs";
 import { effectiveInvoicePaid } from "../../lib/payments";
 import { useAiLearningMemory } from "../../lib/useAiLearningMemory";
@@ -81,7 +82,10 @@ const defaultLabourSettings: LabourCostSettings = {
 };
 
 export default function AiPage() {
-  const { identity } = useCloudIdentity();
+  const { identity, mode, isReady: identityReady } = useCloudIdentity();
+  const conversionOwner = useMemo(() => ({ mode, authorization: identity ? {
+    organisationId: identity.organisationId, userId: identity.userId, role: identity.role, customerSourceId: identity.customerSourceId,
+  } : null }), [mode, identity]);
   const jobs = useLocalStorageCollection<Job>("jr-os-jobs");
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
@@ -96,6 +100,11 @@ export default function AiPage() {
   const surveys = useLocalStorageCollection<SiteSurvey>("jr-os-surveys");
   const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
   const jobDocuments = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
+  const latestConversion = useRef({ active: false, pricing, jobs, timeline, jobDocuments, customers, builders, owner: conversionOwner });
+  useLayoutEffect(() => {
+    latestConversion.current = { active: identityReady, pricing, jobs, timeline, jobDocuments, customers, builders, owner: conversionOwner };
+    return () => { latestConversion.current = { ...latestConversion.current, active: false }; };
+  });
   const materials = useLocalStorageCollection<Material>("jr-os-materials");
   const purchaseLists = useLocalStorageCollection<PurchaseList>("jr-os-purchase-lists");
   const variations = useJobVariationsCollection();
@@ -242,28 +251,26 @@ export default function AiPage() {
   }
 
   function convertQuote(quoteId: string) {
-    const document = pricing.items.find((item) => item.id === quoteId);
-    if (!document || document.status !== "Accepted" || document.jobId) {
-      setMessage("That quote is no longer ready to convert.");
-      return;
+    const current = latestConversion.current;
+    const matches = pricing.items.filter(item => item.id === quoteId);
+    if (!current.active || current.owner !== conversionOwner || (current.owner.mode !== "local" && !current.owner.authorization)
+      || current.pricing.updateItem !== pricing.updateItem || current.jobs.createItem !== jobs.createItem
+      || current.timeline.createItem !== timeline.createItem || current.jobDocuments.createItem !== jobDocuments.createItem || matches.length !== 1) {
+      setMessage("The account or conversion records changed. Review the current quote before converting."); return;
     }
-    const customer = customers.items.find((item) => item.id === document.customerId);
-    const builder = builders.items.find((item) => item.id === document.builderId);
-    const now = new Date().toISOString();
-    const jobId = makeId("job");
-    const converted = createJobFromAcceptedQuote({
-      document,
-      customerAddress: customer?.address,
-      builderAddress: builder?.address,
-      jobId,
-      now,
-      createId: makeId,
+    const authorization = current.owner.authorization;
+    const result = convertAcceptedQuote(matches[0], current, {
+      expectedPrivatePath: authorization ? record => privateObjectPath(authorization.organisationId, record.jobId, record.id, record.fileName) : undefined,
+      confirmPrivateBytes: current.owner.mode === "local" ? undefined : record => {
+        if (!authorization) throw new Error("The conversion attachment owner is unavailable.");
+        persistPrivateFileRecordBytes("jr-os-job-documents", record, authorization);
+      },
     });
-    jobs.setItems((current) => [converted.job, ...current]);
-    timeline.setItems((current) => [...converted.timelineEntries, ...current]);
-    if (converted.jobDocuments.length) jobDocuments.setItems((current) => [...converted.jobDocuments, ...current]);
-    pricing.setItems((current) => current.map((item) => item.id === document.id ? { ...item, jobId, updatedAt: now } : item));
-    setMessage(`${document.number} converted to ${converted.job.title}. Customer, address, scope, attachments and pricing remain linked.`);
+    latestConversion.current = { ...current,
+      pricing: { ...current.pricing, ...result.collections.pricing }, jobs: { ...current.jobs, ...result.collections.jobs },
+      timeline: { ...current.timeline, ...result.collections.timeline }, jobDocuments: { ...current.jobDocuments, ...result.collections.jobDocuments },
+    };
+    setMessage(result.message);
   }
 
   function generateInvoice(jobId: string) {
@@ -322,14 +329,20 @@ export default function AiPage() {
       return;
     }
     const now = new Date().toISOString();
-    const list = createPurchaseListFromPricingDocument({
-      document,
-      materials: materials.items,
-      purchaseLists: purchaseLists.items,
-      purchaseListId: makeId("purchase"),
-      now,
-      createId: makeId,
-    });
+    let list: ReturnType<typeof createPurchaseListFromPricingDocument>;
+    try {
+      list = createPurchaseListFromPricingDocument({
+        document,
+        materials: materials.items,
+        purchaseLists: purchaseLists.items,
+        purchaseListId: makeId("purchase"),
+        now,
+        createId: makeId,
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Review the source material references before creating a purchase list.");
+      return;
+    }
     if (!list) {
       setMessage("No priced material lines were found on that record.");
       return;

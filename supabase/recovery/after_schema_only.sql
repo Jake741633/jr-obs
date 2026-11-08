@@ -400,4 +400,7 @@ commit;
 \echo 'Projecting the complete customer quote selling total'
 \ir ../migrations/20261101085426_project_customer_quote_total.sql
 
+\echo 'Adding isolated sandbox billing persistence'
+\ir ../migrations/20261101154212_subscription_billing_store.sql
+
 \echo 'JR OS schema-only recovery completed successfully'

@@ -1,7 +1,8 @@
 "use client";
 
 import { ChangeEvent, useEffect, useState } from "react";
-import { Brain, CheckCircle2, Cloud, Download, ShieldCheck, Upload } from "lucide-react";
+import Link from "next/link";
+import { Brain, CheckCircle2, Cloud, CreditCard, Download, ShieldCheck, Upload } from "lucide-react";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { AiConnectionHelp } from "../../components/ai/AiConnectionHelp";
@@ -60,6 +61,8 @@ export default function SettingsPage() {
 
   return <div className="space-y-6">
     <div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Business control</p><h1 className="mt-1 text-3xl font-bold">Settings</h1><p className="mt-2 text-sm text-slate-400">Control how JR AI remembers your working preferences and protect the data stored in JR OS.</p></div>
+
+    {identity?.role === "owner" ? <Link href="/settings/billing" className="flex min-h-20 items-center gap-4 rounded-2xl border border-cyan-400/30 bg-cyan-400/10 p-5"><CreditCard className="size-8 text-cyan-300" aria-hidden="true" /><span><strong className="block text-lg">Subscription &amp; billing</strong><span className="text-sm text-slate-300">View your JR OS plan and billing status</span></span></Link> : null}
 
     <div className="grid gap-4 md:grid-cols-3">
       <Card><Brain className="size-6 text-cyan-300" /><p className="mt-3 font-bold">Personalised assistant</p><p className="mt-2 text-sm text-slate-400">Your approved preferences can guide future survey, quote and certificate drafts.</p></Card>
