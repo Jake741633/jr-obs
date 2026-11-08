@@ -7,7 +7,8 @@ const certificatesPage = readFileSync(new URL("../app/certificates/page.tsx", im
 const testingPage = readFileSync(new URL("../app/field/testing/page.tsx", import.meta.url), "utf8");
 
 test("certificate centre exposes canonical authoring mutations", () => {
-  assert.match(certificatesPage, /certificates\.setItems/);
+  assert.match(certificatesPage, /certificates\.createItem\(/);
+  assert.match(certificatesPage, /certificates\.updateItem\(/);
   assert.match(certificatesPage, /saveCertificateRevision/);
   assert.match(certificatesPage, /New certificate/);
   assert.match(certificatesPage, /Status<select/);

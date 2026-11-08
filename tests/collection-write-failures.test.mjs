@@ -174,6 +174,18 @@ test("durable mutations cannot act before collection loading finishes", async ()
   } });
 });
 
+for (const mode of ["local", "cloud"]) for (const operation of ["update", "remove"]) test(`durable ${mode} ${operation} rejects ambiguous current ids before any callback or write`, async () => {
+  const duplicate = { ...oldRecord, title: "Separate evidence with a duplicate identity" };
+  const h = harness({ mode, initial: [oldRecord, duplicate] }), hook = await mountedCollection(h);
+  assert.equal(hook.current().items.filter(item => item.id === oldRecord.id).length, 2);
+  const before = new Map(h.values); let invoked = false;
+  const mutate = () => operation === "update"
+    ? hook.current().updateItem(oldRecord.id, record => { invoked = true; return { ...record, title: "Must not replace ambiguous evidence" }; })
+    : hook.current().removeItem(oldRecord.id, () => { invoked = true; });
+  assert.throws(mutate, /ambiguous/i); assert.equal(invoked, false); assert.deepEqual(h.values, before);
+  assert.deepEqual(plain(hook.refresh().items), [oldRecord, duplicate]);
+});
+
 for (const operation of ["create", "update", "remove"]) test(`collection-hook ${operation} must not prewrite the cache before a failed enqueue`, async () => {
   const h = harness(); const hook = await mountedCollection(h); const before = new Map(h.values);
   h.blocked.add(queueKey);

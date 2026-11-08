@@ -331,6 +331,34 @@ function supportedStorageKey(storageKey: string) {
   return ["jr-os-job-documents", "jr-os-expenses", "jr-os-surveys"].includes(storageKey);
 }
 
+/** Confirm private bytes synchronously before a caller acknowledges its save.
+ * Metadata and this queue remain separate durable writes; a failure must retain
+ * the caller's draft and stable retry identity rather than imply a rollback.
+ */
+export function persistPrivateFileRecordBytes(storageKey: "jr-os-job-documents" | "jr-os-expenses", value: object, authorization: SyncAuthorizationContext) {
+  if (storageKey !== "jr-os-job-documents" && storageKey !== "jr-os-expenses") throw new Error("Only standalone job documents and expense receipts support this confirmation.");
+  const record = value as PrivateFileBackedRecord;
+  const dataUrl = storageKey === "jr-os-expenses" ? record.receiptDataUrl : record.dataUrl;
+  if (!dataUrl || record.privateStoragePath) return;
+  const file = embeddedFile(storageKey, record);
+  if (!file || !file.fileName.trim()) throw new Error("The inline private file requires a filename.");
+  if (!record.id?.trim()) throw new Error("A private file requires a stable record identity.");
+  const size = dataUrlByteSize(file.dataUrl);
+  const invalid = validatePrivateFile({ name: file.fileName, size, type: file.mimeType });
+  if (invalid) throw new Error(invalid);
+  if (!activeReplayOwnerMatches(authorization)) throw new Error("The private file owner or active account changed. Review the current workspace before saving.");
+  const upload = {
+    organisationId: authorization.organisationId, userId: authorization.userId,
+    authorizationRole: authorization.role, authorizationCustomerSourceId: authorization.customerSourceId,
+    sourceId: record.id, storageKey, jobSourceId: record.jobId, customerSourceId: record.customerId,
+    ...file, size, objectPath: privateObjectPath(authorization.organisationId, record.jobId, record.id, file.fileName),
+  };
+  const id = privateUploadQueueItemId(upload.organisationId, upload.userId, upload.authorizationRole, upload.authorizationCustomerSourceId, storageKey, upload.sourceId);
+  const existing = readPrivateUploadQueue(authorization).filter(item => item.id === id);
+  if (existing.length === 1 && Object.entries(upload).every(([key, field]) => existing[0][key as keyof PrivateFileUploadQueueItem] === field)) return;
+  queuePrivateFileUpload(upload);
+}
+
 export function usePrivateFileCollectionBridge<T>(input: {
   storageKey: string;
   items: T[];
