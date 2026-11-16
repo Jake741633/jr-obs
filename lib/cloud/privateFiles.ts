@@ -10,6 +10,7 @@ import { activeSyncAuthorizationMatches, revalidateSyncAuthorization, type SyncA
 import type { CloudIdentity } from "./useCloudIdentity";
 
 export const PRIVATE_FILE_UPLOAD_QUEUE_KEY = "jr-os-private-file-upload-queue";
+const privateFileReadyEvent = "jr-os-private-file-ready";
 export const MAX_PRIVATE_FILE_BYTES = 10 * 1024 * 1024;
 const ACTIVE_ORGANISATION_KEY = "jr-os-active-organisation";
 
@@ -355,8 +356,11 @@ export function persistPrivateFileRecordBytes(storageKey: "jr-os-job-documents" 
   };
   const id = privateUploadQueueItemId(upload.organisationId, upload.userId, upload.authorizationRole, upload.authorizationCustomerSourceId, storageKey, upload.sourceId);
   const existing = readPrivateUploadQueue(authorization).filter(item => item.id === id);
-  if (existing.length === 1 && Object.entries(upload).every(([key, field]) => existing[0][key as keyof PrivateFileUploadQueueItem] === field)) return;
-  queuePrivateFileUpload(upload);
+  const alreadyQueued = existing.length === 1
+    && Object.entries(upload).every(([key, field]) => existing[0][key as keyof PrivateFileUploadQueueItem] === field);
+  if (!alreadyQueued) queuePrivateFileUpload(upload);
+  // A retry can confirm the bytes without creating or changing the collection row.
+  window.dispatchEvent(new CustomEvent(privateFileReadyEvent, { detail: storageKey }));
 }
 
 export function usePrivateFileCollectionBridge<T>(input: {
@@ -469,9 +473,18 @@ export function usePrivateFileCollectionBridge<T>(input: {
       });
       return true;
     }, controller.signal).catch(() => { /* A failed queue write retains its bytes for a later retry. */ });
+    const onFileReady = (event: Event) => {
+      if ((event as CustomEvent<string>).detail === storageKey && activeReplayOwnerMatches(identity)) flush();
+    };
     flush();
     window.addEventListener("online", flush);
-    return () => { active = false; controller.abort(); window.removeEventListener("online", flush); };
+    window.addEventListener(privateFileReadyEvent, onFileReady);
+    return () => {
+      active = false;
+      controller.abort();
+      window.removeEventListener("online", flush);
+      window.removeEventListener(privateFileReadyEvent, onFileReady);
+    };
   }, [identity, isReady, items, mode, updateItem, storageKey]);
 
   useEffect(() => {

@@ -35,6 +35,8 @@ Four independent read-only reviews examined auth/sync, quote/invoice/purchase wo
 | A21 | High | Mobile testing actions claim evidence/status is saved before durability, allowing a later failed effect to lose the entered results. | Fixed and locally verified |
 | A22 | High | Expense creation clears its draft and receipt before a durable write; deferred status/delete and stale file callbacks also misrepresent the saved state. | Fixed and locally verified |
 | A23 | High | Durable update/removal accepts the first of several current rows sharing an ID, bypassing page-level uniqueness checks and risking ambiguous evidence changes. | Fixed and locally verified |
+| A24 | High | The job folder closes its Add document draft and releases the selected file before the record and private file writes finish. A delayed file read can continue after the job or account changes. | Fixed in the fourth correction batch |
+| A25 | Medium | Confirming private bytes on retry can leave a live bridge idle when the metadata row already exists. | Fixed in the fourth correction batch |
 
 ## Implementation and acceptance
 
@@ -129,3 +131,11 @@ Expense re-review additionally caught a preview regression from the sanitized me
 All **3,101 core tests**, zero-warning ESLint and production build pass on the final third-batch source. There are 107 additional cases beyond the 2,994-test second checkpoint. Each substantial slice received an independent read-only review; all reported findings were reproduced, corrected and reviewed again. Final scoped reviewers reported no remaining Critical, Important or Minor findings. Focused counts above overlap and are not additional to the full-suite total.
 
 The final source is saved before its remote jobs start; the pull request records its exact commit/tree, CI with both synthetic upgrades, Phase 1, dependency-review and preview results. PR327's earlier integrated 3,200-test checkpoint remains a separate inactive foundation until the newer core head has passed its checks and a new combined source is verified. No migration/dependency/credential/account/provider/financial mutation or billing activation occurred. Native-browser/physical-phone acceptance, hosted security/actual protected backup and cross-tab/cross-collection atomicity remain outside these local/CI claims.
+
+## 16 November continuation
+
+The Add document handler reproduced A24 against a synthetic delayed storage failure. It closed the form and released the selected RAMS PDF before the deferred write threw. The correction uses synchronous durable record creation, then confirms the private queue when a cloud file is present. The open draft retains the file and identity on either failure. Retry checks the current job, role and saved document, and resumes an exact metadata record without another create. The job folder can open locally queued files by matching the current account's queue entry to the exact job, document, name, MIME type and storage path. Already uploaded files use the authenticated bridge download. Queue previews stay in display state.
+
+A25 follows the same recovery path. Once the metadata exists, retry only modifies the private queue. The mounted collection bridge previously reacted to document changes and reconnects. It now receives a collection-specific notification from explicit byte confirmation. Replay still uses its existing account checks, serialisation and durable confirmation. Replay outcomes do not emit a second ready notification.
+
+Seven focused job form scenarios passed against the extracted page handlers with synthetic dependencies. The committed Node tests run those handlers with the repository's real private queue fixture and add a mounted-bridge retry test. The PR records GitHub Actions and preview results for the confirmed branch head. Signed-in physical phone acceptance remains open.

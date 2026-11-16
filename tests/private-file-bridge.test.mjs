@@ -80,3 +80,23 @@ test('failed durable attachment confirmation retains bytes and recovers on retry
  h.failWrite(Error('fixture local storage full'));h.render();await new Promise(resolve=>setImmediate(resolve));assert.equal(h.pending().length,1);assert.equal(h.pending()[0].state,'Failed');assert.equal(h.props.items[0].privateFileId,undefined);
  h.failWrite(null);h.remount([{...record}]);const records=await h.settled();assert.equal(records[0].privateFileId,'file-photo');assert.equal(h.pending().length,0);h.unmount();
 });
+
+test("late byte confirmation wakes the mounted bridge without another metadata write", async () => {
+  const record = { id: "manual-document", jobId: "job-1", fileName: "plan.pdf", mimeType: "application/pdf" };
+  const h = privateBridgeHarness([record]);
+  h.render();
+  await h.settled();
+  assert.equal(h.uploads.length, 0);
+
+  h.confirmBytes({ ...record, dataUrl: "data:application/pdf;base64,cGRm" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.uploads.length, 1);
+  assert.deepEqual(h.mutations, [1]);
+  assert.equal(h.pending().length, 0);
+
+  h.unmount();
+  h.confirmBytes({ ...record, dataUrl: "data:application/pdf;base64,cGRm" });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(h.uploads.length, 1);
+  assert.equal(h.pending().length, 1);
+});
