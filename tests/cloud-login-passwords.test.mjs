@@ -21,10 +21,22 @@ function textContent(node) {
   return node && typeof node === "object" ? textContent(node.props?.children) : "";
 }
 
-function accountHarness({ signInResult = async () => undefined } = {}) {
-  const states = [];
+function accountHarness({ signInResult = async () => undefined, getCurrentUser = async () => null, runEffects = false, initialSession = null } = {}) {
+  const states = [], effects = [], listeners = new Map();
   let cursor = 0;
+  let session = initialSession, identity = null, identityReady = true, accountReads = 0;
   const requests = [];
+  function hasChanged(previous, deps) {
+    return !previous || !deps || deps.some((value, index) => !Object.is(value, previous.deps[index]));
+  }
+  function memo(calculate, deps) {
+    const index = cursor++;
+    if (hasChanged(states[index], deps)) states[index] = { deps, value: calculate() };
+    return states[index].value;
+  }
+  function notify(type, event) {
+    for (const listener of listeners.get(type) ?? []) listener(event);
+  }
   const jsx = (type, props) => ({ type, props });
   const dependencies = {
     react: {
@@ -38,9 +50,16 @@ function accountHarness({ signInResult = async () => undefined } = {}) {
         if (!(index in states)) states[index] = { current: initial };
         return states[index];
       },
-      useMemo: (calculate) => calculate(),
-      useCallback: (callback) => callback,
-      useEffect() {},
+      useMemo: memo,
+      useCallback: (callback, deps) => memo(() => callback, deps),
+      useEffect(effect, deps) {
+        const index = cursor++;
+        const previous = states[index];
+        if (!runEffects || !hasChanged(previous, deps)) return;
+        const next = { deps, cleanup: previous?.cleanup };
+        states[index] = next;
+        effects.push(() => { next.cleanup?.(); next.cleanup = effect(); });
+      },
     },
     "react/jsx-runtime": { jsx, jsxs: jsx },
     "next/link": { default: "Link" },
@@ -50,11 +69,17 @@ function accountHarness({ signInResult = async () => undefined } = {}) {
     "../../components/mobile/InstallAppGuide": { InstallAppGuide: "InstallAppGuide" },
     "../../lib/cloud/cloudPageIdentity-core.mjs": pageIdentity,
     "../../lib/cloud/config": { effectiveCloudMode: () => "cloud" },
-    "../../lib/cloud/repository": {},
-    "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity: null, isReady: true }) },
-    "../../lib/supabase/client": { isSupabaseConfigured: () => true, readSupabaseSession: () => null },
+    "../../lib/cloud/repository": {
+      activeSyncAuthorizationMatches: () => Boolean(identity),
+      syncStatus: { get: () => "Synced" },
+    },
+    "../../lib/cloud/useCloudIdentity": { useCloudIdentity: () => ({ identity, isReady: identityReady }) },
+    "../../lib/supabase/client": { isSupabaseConfigured: () => true, readSupabaseSession: () => session },
     "../../lib/cloudSync": {
-      getCurrentCloudUser: async () => null,
+      canManageCloudMigration: () => true,
+      completeEmailVerificationFromUrl: async () => null,
+      getCurrentCloudUser: () => { accountReads += 1; return getCurrentUser(); },
+      readLastCloudSync: () => null,
       signInWithEmail: async (email, password) => { requests.push({ action: "sign-in", email, password }); return signInResult(); },
       signUpWithEmail: async (email, password) => { requests.push({ action: "create-account", email, password }); },
     },
@@ -64,6 +89,10 @@ function accountHarness({ signInResult = async () => undefined } = {}) {
     Error,
     module: commonJsModule,
     exports: commonJsModule.exports,
+    window: {
+      addEventListener(type, listener) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(listener); },
+      removeEventListener(type, listener) { listeners.get(type)?.delete(listener); },
+    },
     require(name) {
       assert.ok(Object.hasOwn(dependencies, name), `Unexpected module: ${name}`);
       return dependencies[name];
@@ -71,7 +100,9 @@ function accountHarness({ signInResult = async () => undefined } = {}) {
   });
   function render() {
     cursor = 0;
-    return commonJsModule.exports.default();
+    const view = commonJsModule.exports.default();
+    for (const effect of effects.splice(0)) effect();
+    return view;
   }
   function input(type) {
     return elements(render()).find((element) => element.type === "input" && element.props.type === type);
@@ -82,6 +113,10 @@ function accountHarness({ signInResult = async () => undefined } = {}) {
   }
   return {
     render, requests, fill, input,
+    publishIdentity(next, ready = true) { identity = next; identityReady = ready; render(); },
+    replaceSession(next) { session = next; notify("storage", { key: "jr-os-supabase-session" }); },
+    accountReads: () => accountReads,
+    async settle() { await new Promise(resolve => setImmediate(resolve)); return render(); },
     password: () => elements(render()).find((element) => element.props?.id === "account-password"),
     togglePassword: () => elements(render()).find((element) => element.props?.["aria-controls"] === "account-password").props.onClick(),
     signIn: () => elements(render()).find((element) => element.type === "form").props.onSubmit({ preventDefault() {} }),
@@ -163,4 +198,70 @@ test("new accounts retain the eight-character password minimum", () => {
   account.fill("owner@example.com", "long-password");
   account.createAccount();
   assert.deepEqual(account.requests, [{ action: "create-account", email: "owner@example.com", password: "long-password" }]);
+});
+
+const cloudAccount = { id: "owner-a", email: "owner@example.com" };
+const cloudSession = { access_token: "session-a", user: cloudAccount };
+const workspaceIdentity = { userId: cloudAccount.id, organisationId: "business-a", role: "owner", email: cloudAccount.email };
+
+function canOpenWorkspace(view) {
+  return elements(view).some(element => element.type === "Link" && element.props.href === "/app");
+}
+
+test("the account page resumes the workspace handoff after a transient user lookup failure", async () => {
+  let user = null;
+  const account = accountHarness({ initialSession: cloudSession, getCurrentUser: async () => user, runEffects: true });
+  account.render();
+  assert.equal(canOpenWorkspace(await account.settle()), false);
+  assert.equal(account.accountReads(), 1);
+
+  user = cloudAccount;
+  account.publishIdentity(workspaceIdentity);
+  assert.equal(canOpenWorkspace(await account.settle()), true);
+  assert.equal(account.accountReads(), 2);
+  assert.deepEqual(account.requests, [], "recover the verified session without another password submission");
+});
+
+test("a failed recheck waits for another verified identity update and ignores a different user", async () => {
+  const account = accountHarness({ initialSession: cloudSession, runEffects: true });
+  account.render();
+  await account.settle();
+
+  account.publishIdentity({ ...workspaceIdentity, userId: "owner-b" });
+  await account.settle();
+  assert.equal(account.accountReads(), 1);
+
+  account.publishIdentity(workspaceIdentity, false);
+  await account.settle();
+  assert.equal(account.accountReads(), 1);
+
+  account.publishIdentity(workspaceIdentity);
+  assert.equal(canOpenWorkspace(await account.settle()), false);
+  account.render();
+  await account.settle();
+  assert.equal(account.accountReads(), 2, "rendering must not loop a failed request");
+
+  account.publishIdentity({ ...workspaceIdentity });
+  await account.settle();
+  assert.equal(account.accountReads(), 3);
+});
+
+test("a pending account lookup cannot reopen the workspace after sign-out", async () => {
+  let getUser = async () => null;
+  const account = accountHarness({ initialSession: cloudSession, getCurrentUser: () => getUser(), runEffects: true });
+  account.render();
+  await account.settle();
+
+  let finish;
+  getUser = () => new Promise(resolve => { finish = resolve; });
+  account.publishIdentity(workspaceIdentity);
+  assert.equal(typeof finish, "function");
+  getUser = async () => null;
+  account.replaceSession(null);
+  finish(cloudAccount);
+
+  const view = await account.settle();
+  assert.equal(canOpenWorkspace(view), false);
+  assert.ok(textContent(view).includes("Sign in to JR OS"));
+  assert.ok(!textContent(view).includes(cloudAccount.email));
 });

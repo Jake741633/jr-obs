@@ -4,7 +4,7 @@ Jake asked: audit JR OS, work through the findings, continue for the available c
 
 ## Project and source
 
-- Repository: `Jake741633/jr-obs` (JR OS electrician business-management app). This is separate from Jake's trades-lead app and marketing website.
+- Repository: `Jake741633/jr-obs`, the JR OS electrician business-management app. [Live JR OS sign-in](https://jr-os.netlify.app/cloud)
 - Core audit branch: `fix/jr-os-audit-20261108`, created from `jr-os-v2` at `f2f7d9dac1973cdabe664151023c260fd6d1952e`. Find its current pull request and head through GitHub; copy returned IDs/SHAs exactly. Do not work on `main` or directly commit to `jr-os-v2`.
 - Audit report: `docs/audits/2026-11-08-jr-os-audit.md`. The PR description records exact remote acceptance after this document is saved.
 - Separate subscription foundation: draft PR327, branch `feat/subscription-foundation-20261101`. Its A11 status-deadline fix is at `e540e9c3230b32e31625a8872901b1c7073ccf96`, tree `f4bd056dd8658f2ed8a3fc4a86448a8f01a62587`. Re-fetch its current head before using that checkpoint. Billing remains disabled, its prepared migration unapplied, and the PR unmerged.
@@ -28,7 +28,7 @@ Final third-core local acceptance: **3,101/3,101 tests**, zero-warning lint and 
 ## Resume
 
 1. Re-fetch current branches/PR heads and inspect CI/Phase 1/dependency-review/Netlify checks. Read the current audit report and PR descriptions before repeating work. Preserve any newer edits; never force-reset a shared checkout.
-2. A01–A25 are implemented on the branches identified in the audit. Check each PR description for its current verification and billing integration checkpoint. Continue with remaining legacy save/attachment paths and signed-in phone workflows using synthetic test accounts/fixtures. Candidate entry points include paired site diary and snag/timeline saves. Start new verified findings at A26 and reproduce each suspected defect. Certificate printing needs a real browser and iPhone/Android check; the local optional browser binary was unavailable. Verify what can be established safely before asking for any missing account/environment decision.
+2. A01–A26 are implemented on the branches identified in the audit. Check each PR description for its current verification and billing integration checkpoint. Continue with remaining legacy save/attachment paths and signed-in phone workflows using synthetic test accounts/fixtures. Candidate entry points include paired site diary and snag/timeline saves. Start new verified findings at A27 and reproduce each suspected defect. Certificate printing needs a real browser and iPhone/Android check; the local optional browser binary was unavailable. Verify what can be established safely before asking for any missing account/environment decision.
 3. Reproduce each actual defect with synthetic fixtures, write a regression that fails, make a minimal correction, then verify focused tests. Preserve tenant/session/role/collection boundaries, original conflict versions, durable retries and supplier identities.
 4. Run `npm test`, `npm run lint`, `npm run build` and appropriate upgrade checks; obtain a fresh read-only review of each substantial new batch. Publish real commits and reviewable PR changes, then verify the exact remote head and preview. Keep a chronological evidence/remaining-work record and refresh this continuation record.
 5. Continue useful audit/fix work until the chat's practical limit, then give Jake a paste-ready continuation prompt with current repository, branches, PRs, exact heads, verified checks and remaining tasks. Do not merely offer to continue.
@@ -42,3 +42,7 @@ A14 retains exact token+epoch ownership. Deadlines are per request: JSON/Auth 30
 ## Fourth correction batch
 
 PR328 continues the core audit with A24 and A25. The ordinary Add document flow retains the selected file until record and private queue persistence succeed and rejects callbacks retired by a job or workspace change. The private file bridge starts replay after explicit byte confirmation, including after a retry with existing metadata. The previous billing checkpoint is recorded in PR327. Use the current PR head and its matching checks before relying on new changes.
+
+## Sign-in continuation
+
+A26 recovers the account page after a transient lookup failure when the same session's workspace identity verifies. The linked Supabase project was separately resumed after it paused. The live sign-in address above is the production entry point. PR328's Netlify status identifies the draft preview, and its description records the current checks.

@@ -37,6 +37,7 @@ Four independent read-only reviews examined auth/sync, quote/invoice/purchase wo
 | A23 | High | Durable update/removal accepts the first of several current rows sharing an ID, bypassing page-level uniqueness checks and risking ambiguous evidence changes. | Fixed and locally verified |
 | A24 | High | The job folder closes its Add document draft and releases the selected file before the record and private file writes finish. A delayed file read can continue after the job or account changes. | Fixed in the fourth correction batch |
 | A25 | Medium | Confirming private bytes on retry can leave a live bridge idle when the metadata row already exists. | Fixed in the fourth correction batch |
+| A26 | Medium | The account page can keep showing the password form after a transient account lookup failure even after the same signed-in workspace verifies again. | Fixed in the sign-in continuation |
 
 ## Implementation and acceptance
 
@@ -141,3 +142,9 @@ A25 follows the same recovery path. Once the metadata exists, retry only modifie
 Seven focused job form scenarios passed against the extracted page handlers with synthetic dependencies. The committed Node tests run those handlers with the repository's real private queue fixture and add a mounted-bridge retry test. The PR records GitHub Actions and preview results for the confirmed branch head. Signed-in physical phone acceptance remains open.
 
 The first GitHub Actions run for this batch passed all 3,109 tests, lint, the production build and both synthetic database upgrade jobs. Its dependency audit flagged Next.js 16.4.3. The follow-up pins the documented patched release, 16.4.5, and its matching environment and SWC packages using the lock entries prepared by Dependabot. [GitHub advisory](https://github.com/advisories/GHSA-mfr8-8qww-v76h) · [Dependabot PR](https://github.com/Jake741633/jr-obs/pull/329)
+
+## JR OS sign-in recovery
+
+The live [JR OS sign-in page](https://jr-os.netlify.app/cloud) uses the existing Netlify application's linked Supabase project. On 16 November the linked project reported a paused state. Resuming it returned the project to a healthy state, and a read-only check found an active, confirmed owner account. Netlify recorded HTTP 200 responses at the live sign-in address.
+
+A separate app test reproduced a transient failed account lookup followed by successful workspace identity verification. The account page kept showing the sign-in form because it never requested the account user again. It now repeats that lookup when the same session's workspace identity verifies. A failed recheck waits for another identity update, and a response retired by sign-out cannot open the workspace. An executed synthetic probe reproduced the failure on the earlier page and passed on the corrected path. The pull request records the full checks and preview. Interactive phone sign-in remains a separate check.

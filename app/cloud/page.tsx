@@ -189,6 +189,12 @@ export default function CloudPage() {
   }, [clearOwnedState, refreshAccountUser]);
 
   useEffect(() => {
+    if (!identityReady || !identity || identity.userId !== currentSessionUserId || sessionAccountUser) return;
+    // Workspace verification can recover after the account page's earlier user lookup failed.
+    void refreshAccountUser();
+  }, [identity, identityReady, currentSessionUserId, sessionAccountUser, refreshAccountUser]);
+
+  useEffect(() => {
     if (!identityReady) {
       if (operationCoordinatorRef.current?.current()?.ownerKey) invalidateActiveOperation();
       return;
