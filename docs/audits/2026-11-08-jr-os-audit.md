@@ -40,7 +40,9 @@ Four independent read-only reviews examined auth/sync, quote/invoice/purchase wo
 | A26 | Medium | The account page can keep showing the password form after a transient account lookup failure even after the same signed-in workspace verifies again. | Fixed in the sign-in continuation |
 | A27 | High | Both field diary forms can clear entered work and report capture before the diary and timeline note reach device storage. | Fixed in the field diary continuation |
 | A28 | High | Mobile snag creation clears the draft and status changes update the view before saving. An older status action can also overwrite a reconciled snag. | Fixed in the mobile snag continuation |
-| A29 | High | Mobile QA can clear an unsaved inspection draft, display unsaved checklist progress and report that a failed inspection has a linked snag when the snag write failed. | Reproduced |
+| A29 | High | Mobile QA can clear an unsaved inspection draft, display unsaved checklist progress and report that a failed inspection has a linked snag when the snag write failed. | Fixed in the Mobile QA continuation |
+| A30 | High | The full dependency audit flags Picomatch 4.0.7 in the lint toolchain. | Open upstream. Production-only audit passed. |
+| A31 | High | Mobile stock deduction can reduce the saved balance while failing to save its movement and job usage records. | Reproduced |
 
 ## Implementation and acceptance
 
@@ -164,4 +166,12 @@ Mobile snag creation now keeps the form until the task saves. Status updates per
 
 Twelve runtime cases exercise both handlers, blocked storage and queue writes, retry without duplicates, reassignment, sign-out, repeat transitions and local and unsigned migration workspaces. The full suite passed all 3,133 tests, lint and production build. The draft pull request records the matching CI and Netlify results.
 
-The next finding was reproduced in the local Mobile QA workspace. Blocked inspection storage clears entered notes and shows creation or checklist progress that never saved. Blocking the linked snag write can persist a failed inspection while the screen says the snag exists and the result controls close. The next correction needs current-inspection validation, confirmed inspection writes and a retry for each missing follow-up record.
+## 17 November Mobile QA continuation
+
+Blocked inspection storage reproduced cleared notes and checklist progress that never saved. Blocking the linked snag write could persist a failed inspection while the screen claimed the snag existed. The QA form now retains the draft until storage confirms creation, and checks and results update the current inspection only. The saved result keeps the IDs of its timeline note and any failure snag. Reopening the inspection can recover missing follow-up records using those IDs. A conflicting record requires review. Cloud electricians can review the existing QA records. Write and retry actions belong to the local and office workflows.
+
+Nine runtime cases cover the draft, checks, results, follow-up recovery after reopening, same-job identity conflicts, a stale Pass action and account retirement. The full suite passed all 3,142 tests, lint and the production build. The draft pull request records the corresponding hosted checks and preview.
+
+The full dependency scan flagged Picomatch 4.0.7 through the lint toolchain. The reviewed advisory lists no patched release, and the production-only audit found zero vulnerabilities. Lint and the full dependency scan still run in CI. [GitHub advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+
+Mobile Materials is the next verified defect. A local use action for one item cleared its note and reported deduction immediately. With the movement write blocked, the stored balance fell from five to four while the movement and job usage were absent. The correction needs a recoverable sequence for those writes that handles a retry without deducting twice.

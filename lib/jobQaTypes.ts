@@ -22,6 +22,7 @@ export interface JobQaInspection {
   inspectedAt: string;
   createdAt: string;
   updatedAt: string;
+  completion?: { timelineId: EntityId; snagId?: EntityId };
 }
 
 export function qaTaskCategory(type: JobQaInspectionType): JobTaskCategory {

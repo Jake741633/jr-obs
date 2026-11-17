@@ -29,10 +29,11 @@ export function content(view) {
   return typeof view === "string" || typeof view === "number" ? String(view) : "";
 }
 
-export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode !== "local", rowsByKey = {} } = {}) {
+export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode !== "local", role = owner.role, rowsByKey = {} } = {}) {
   const values = new Map(), blocked = new Set(), rejectedWrites = [], listeners = new Map();
   const slots = [], layouts = [], effects = [];
-  let cursor = 0, identity = signedIn ? owner : null;
+  const account = { ...owner, role };
+  let cursor = 0, identity = signedIn ? account : null;
   let sessionUserId = identity?.userId;
 
   const localStorage = {
@@ -88,8 +89,8 @@ export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode 
   const navigator = { onLine: mode !== "local" };
   const fixtureRows = { [jobKey]: [job], [teamKey]: [member], [diaryKey]: [], [timelineKey]: [], ...rowsByKey };
   async function readCollection(table, query) {
-    const key = table === "field_jobs" ? jobKey
-      : table === "field_team_members" ? teamKey
+    const key = table === "jobs" || table === "field_jobs" ? jobKey
+      : table === "team_members" || table === "field_team_members" ? teamKey
       : new URLSearchParams(query).get("collection_key")?.slice(3);
     return (fixtureRows[key] ?? []).map(payload => ({
       organisation_id: identity?.organisationId, source_id: payload.id, version: 1, payload,
@@ -198,7 +199,7 @@ export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode 
     },
     retireSession() { sessionUserId = undefined; },
     async switchAccount() {
-      identity = { ...owner, userId: "next-user", organisationId: "next-organisation" };
+      identity = { ...account, userId: "next-user", organisationId: "next-organisation" };
       sessionUserId = identity.userId;
       seed();
       return settled();

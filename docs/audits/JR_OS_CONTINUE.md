@@ -28,7 +28,7 @@ Final third-core local acceptance: **3,101/3,101 tests**, zero-warning lint and 
 ## Resume
 
 1. Re-fetch current branches/PR heads and inspect CI/Phase 1/dependency-review/Netlify checks. Read the current audit report and PR descriptions before repeating work. Preserve any newer edits; never force-reset a shared checkout.
-2. A01–A28 are implemented on the branches identified in the audit. Check each PR description for its current verification and billing integration checkpoint. Next, fix A29 in Mobile QA. A synthetic storage failure reproduced lost draft notes, unsaved checklist progress and a failed result claiming a linked snag that could not be saved. Continue the remaining legacy save and attachment paths and signed-in phone workflows using synthetic accounts or fixtures. Certificate printing still needs a browser and iPhone/Android check.
+2. A01–A29 are implemented on the branches identified in the audit. A30 is the open Picomatch advisory in lint dependencies. Inspect its current patched range and package tree before changing dependencies. Next, fix A31 in Mobile Materials. A blocked movement write leaves a reduced stock balance with neither movement nor job usage. Continue the remaining legacy save and attachment paths and signed-in phone workflows using synthetic accounts or fixtures. Certificate printing still needs a browser and iPhone/Android check.
 3. Reproduce each actual defect with synthetic fixtures, write a regression that fails, make a minimal correction, then verify focused tests. Preserve tenant/session/role/collection boundaries, original conflict versions, durable retries and supplier identities.
 4. Run `npm test`, `npm run lint`, `npm run build` and appropriate upgrade checks; obtain a fresh read-only review of each substantial new batch. Publish real commits and reviewable PR changes, then verify the exact remote head and preview. Keep a chronological evidence/remaining-work record and refresh this continuation record.
 5. Continue useful audit/fix work until the chat's practical limit, then give Jake a paste-ready continuation prompt with current repository, branches, PRs, exact heads, verified checks and remaining tasks. Do not merely offer to continue.
@@ -53,4 +53,10 @@ A27 covers both field diary forms. They preserve the draft if device storage or 
 
 ## Mobile snag continuation
 
-A28 covers mobile snag creation and status changes. Snag drafts and status displays now depend on the task write succeeding. The open page keeps a failed timeline note for retry, and the existing cloud sync notices follow each task and note separately. Review PR328 for the exact commit, CI and preview results. Mobile QA is the next reproduced issue.
+A28 covers mobile snag creation and status changes. Snag drafts and status displays now depend on the task write succeeding. The open page keeps a failed timeline note for retry, and the existing cloud sync notices follow each task and note separately. Review PR328 for the exact commit, CI and preview results.
+
+## Mobile QA continuation
+
+A29 confirms inspection, checklist and result writes before showing success. Saved results carry the identifiers needed to retry a missing timeline note or linked snag after reopening the inspection. The tested flow checks current records and keeps field cloud QA read-only. A30 remains open in the full dependency audit. The production-only scan passed. [Picomatch advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+
+A31 reproduces early success and a partial stock deduction in `/field/materials`. Use one item from a synthetic stock level of five, link an active job and block the stock movement write. Inspect the stock, movement and job material usage records. A retry must preserve the original deduction and complete only its missing records. Use PR328's current head and exact verification details when continuing.

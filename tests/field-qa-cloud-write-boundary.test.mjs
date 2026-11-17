@@ -19,17 +19,20 @@ test("mobile QA is read-only in field cloud mode", () => {
   assert.match(page, /Pass\/fail changes are locked in field cloud mode/);
 });
 
-test("cloud QA guards all mutation entry points before optimistic writes", () => {
-  for (const functionName of ["createInspection", "toggleCheck", "finishInspection"]) {
+test("cloud QA guards all mutation entry points before durable writes", () => {
+  const guard = page.slice(page.indexOf("function canWrite"), page.indexOf("function activeJobFor"));
+  assert.match(guard, /if \(cloudFieldMode\) \{[\s\S]*return false;/);
+  for (const functionName of ["createInspection", "toggleCheck", "finishInspection", "retryFollowUp", "saveFollowUpRecords"]) {
     const match = page.match(new RegExp(`function ${functionName}\\([^)]*\\) \\{([\\s\\S]*?)\\n  \\}`));
     assert.ok(match, `${functionName} should exist`);
-    assert.match(match[1], /if \(cloudFieldMode\)/, `${functionName} should fail closed in cloud mode`);
+    assert.match(match[1], /if \(!canWrite\(\)\) return/, `${functionName} should fail closed in cloud mode`);
   }
 });
 
 test("local QA mode retains the existing mutation workflow", () => {
   assert.match(page, /!cloudFieldMode \? <Card>/);
-  assert.match(page, /inspections\.setItems/);
-  assert.match(page, /tasks\.setItems/);
-  assert.match(page, /timeline\.setItems/);
+  assert.match(page, /inspections\.createItem/);
+  assert.match(page, /inspections\.updateItem/);
+  assert.match(page, /tasks\.createItem/);
+  assert.match(page, /timeline\.createItem/);
 });
