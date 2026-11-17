@@ -29,7 +29,7 @@ export function content(view) {
   return typeof view === "string" || typeof view === "number" ? String(view) : "";
 }
 
-export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode !== "local" } = {}) {
+export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode !== "local", rowsByKey = {} } = {}) {
   const values = new Map(), blocked = new Set(), rejectedWrites = [], listeners = new Map();
   const slots = [], layouts = [], effects = [];
   let cursor = 0, identity = signedIn ? owner : null;
@@ -86,7 +86,7 @@ export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode 
 
   const noNetwork = async () => { throw new Error("The field save fixture must never use a live service"); };
   const navigator = { onLine: mode !== "local" };
-  const fixtureRows = { [jobKey]: [job], [teamKey]: [member], [diaryKey]: [], [timelineKey]: [] };
+  const fixtureRows = { [jobKey]: [job], [teamKey]: [member], [diaryKey]: [], [timelineKey]: [], ...rowsByKey };
   async function readCollection(table, query) {
     const key = table === "field_jobs" ? jobKey
       : table === "field_team_members" ? teamKey
@@ -97,7 +97,7 @@ export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode 
   }
   const useCloudIdentity = () => ({ identity, isReady: true, mode });
   const jsx = (type, props) => typeof type === "function" ? type(props) : { type, props };
-  const auth = { readSupabaseSession: () => sessionUserId ? { user: { id: sessionUserId } } : null, supabaseFetch: noNetwork };
+  const auth = { readSupabaseSession: () => sessionUserId ? { access_token: "fixture-session", user: { id: sessionUserId } } : null, supabaseFetch: noNetwork };
   const overrides = {
     react, "react/jsx-runtime": { jsx, jsxs: jsx }, "next/link": { default: "Link" }, "lucide-react": {},
     "./config": { effectiveCloudMode: () => mode, cloudStorageBucket: "fixture-private" },
@@ -166,6 +166,10 @@ export async function fieldSaveHarness(route, { mode = "cloud", signedIn = mode 
     blocked, rejectedWrites, scoped, render, paint, field, button, settled,
     rows: (key) => JSON.parse(values.get(scoped(key)) ?? "[]"),
     queue: () => JSON.parse(values.get(queueKey) ?? "[]"),
+    confirmQueue() {
+      localStorage.setItem(queueKey, "[]");
+      window.dispatchEvent(new globals.CustomEvent("jr-os-sync-status", { detail: "Synced" }));
+    },
     fill(notes = "First fix upstairs lighting") {
       const select = nodes(form()).find(node => node.type === "select");
       assert.ok(select, "job selection");

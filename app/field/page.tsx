@@ -9,7 +9,7 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusBadge } from "../../components/ui/StatusBadge";
-import { SiteDiaryTimelineRetries } from "../../components/mobile/SiteDiaryTimelineRetries";
+import { TimelineNoteRetries } from "../../components/mobile/TimelineNoteRetries";
 import { accountStorageKey } from "../../lib/cloud/adapter";
 import { useSiteDiariesCollection } from "../../lib/cloud/coreBusinessCollections";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
@@ -389,7 +389,7 @@ export default function FieldWorkspacePage() {
     {cloudFieldMode && !operatorName ? <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-100"><p className="font-semibold">Field identity could not be resolved.</p><p className="mt-1 text-xs text-amber-100/70">Site writes remain locked until this signed-in account resolves to an active team identity.</p></div> : null}
     <section className="grid gap-4 sm:grid-cols-3"><Card><p className="text-sm text-slate-400">Today&apos;s jobs</p><p className="mt-2 text-3xl font-bold">{todaysJobs.length}</p></Card><Card><p className="text-sm text-slate-400">On site</p><p className="mt-2 text-3xl font-bold">{jobs.items.filter((job) => isJobOnSiteStatus(job.status)).length}</p></Card><Card><p className="text-sm text-slate-400">Diary records today</p><p className="mt-2 text-3xl font-bold">{todaysEntries.length}</p></Card></section>
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
-    <SiteDiaryTimelineRetries notes={diarySave.pendingNotes} onRetry={diarySave.retryNote} />
+    <TimelineNoteRetries notes={diarySave.pendingNotes} onRetry={diarySave.retryNote} description="The diary is saved on this device." />
     {cloudFieldMode ? Object.keys(activeSiteDiarySyncProjection.attempts).reverse().map(siteDiarySyncNotice) : null}
     {cloudFieldMode && unpairedSiteDiaryTargets.length ? <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${unpairedSiteDiaryTerminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
       <p className="font-semibold">One or more retained site diary sync targets are not cloud-confirmed.</p>

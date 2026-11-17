@@ -39,6 +39,8 @@ Four independent read-only reviews examined auth/sync, quote/invoice/purchase wo
 | A25 | Medium | Confirming private bytes on retry can leave a live bridge idle when the metadata row already exists. | Fixed in the fourth correction batch |
 | A26 | Medium | The account page can keep showing the password form after a transient account lookup failure even after the same signed-in workspace verifies again. | Fixed in the sign-in continuation |
 | A27 | High | Both field diary forms can clear entered work and report capture before the diary and timeline note reach device storage. | Fixed in the field diary continuation |
+| A28 | High | Mobile snag creation clears the draft and status changes update the view before saving. An older status action can also overwrite a reconciled snag. | Fixed in the mobile snag continuation |
+| A29 | High | Mobile QA can clear an unsaved inspection draft, display unsaved checklist progress and report that a failed inspection has a linked snag when the snag write failed. | Reproduced |
 
 ## Implementation and acceptance
 
@@ -155,3 +157,11 @@ A separate app test reproduced a transient failed account lookup followed by suc
 Synthetic storage failures in both field diary forms reproduced cleared drafts after a rejected queue write and a success message after a failed timeline write. The forms now confirm the diary save before clearing work. If the diary saves and the note fails, the open page keeps the note for retry with the original diary and job IDs. A retry checks the current account and field assignment. Pending timeline notes must be retried before leaving the page. Queue notices track the diary and timeline note separately.
 
 Nine regression cases use the rendered field handlers and real device storage and sync adapters with synthetic jobs and storage failures. They cover failed saves, offline retry without duplicate entries, assignment and account changes, sign-out, and local and unsigned migration workspaces. The live sign-in page and linked Supabase Auth health endpoint both returned HTTP 200. The pull request records test and preview results. Phone sign-in and field acceptance still need a signed-in device check.
+
+## 17 November mobile snag continuation
+
+Mobile snag creation now keeps the form until the task saves. Status updates persist the current task before changing its displayed status. The save checks the active session, job and field assignment and rejects callbacks from an older view. A failed timeline note stays on the open page for retry with the original snag and job IDs. Each task and note pair keeps its own cloud confirmation, including when a second status change follows a confirmed one.
+
+Twelve runtime cases exercise both handlers, blocked storage and queue writes, retry without duplicates, reassignment, sign-out, repeat transitions and local and unsigned migration workspaces. The full suite passed all 3,133 tests, lint and production build. The draft pull request records the matching CI and Netlify results.
+
+The next finding was reproduced in the local Mobile QA workspace. Blocked inspection storage clears entered notes and shows creation or checklist progress that never saved. Blocking the linked snag write can persist a failed inspection while the screen says the snag exists and the result controls close. The next correction needs current-inspection validation, confirmed inspection writes and a retry for each missing follow-up record.

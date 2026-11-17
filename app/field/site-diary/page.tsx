@@ -7,7 +7,7 @@ import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
-import { SiteDiaryTimelineRetries } from "../../../components/mobile/SiteDiaryTimelineRetries";
+import { TimelineNoteRetries } from "../../../components/mobile/TimelineNoteRetries";
 import { useJobsCollection, useJobTimelineCollection, useSiteDiariesCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { activeSyncAuthorizationMatches, getSyncQueue, type SyncState } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
@@ -284,7 +284,7 @@ export default function MobileSiteDiaryPage() {
       : "Capture labour, progress, deliveries, plant, safety actions and sign-off in the local diary record."} />
 
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-100">{message}</div> : null}
-    <SiteDiaryTimelineRetries notes={diarySave.pendingNotes} onRetry={diarySave.retryNote} />
+    <TimelineNoteRetries notes={diarySave.pendingNotes} onRetry={diarySave.retryNote} description="The diary is saved on this device." />
     {cloudFieldMode ? Object.keys(activeSiteDiarySyncProjection.attempts).reverse().map(siteDiarySyncNotice) : null}
     {cloudFieldMode && unpairedSiteDiaryTargets.length ? <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${unpairedSiteDiaryTerminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
       <p className="font-semibold">One or more retained site diary sync targets are not cloud-confirmed.</p>
