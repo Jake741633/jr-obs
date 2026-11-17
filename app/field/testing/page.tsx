@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, FileText, Plus, Save, Trash2 } from "lucide-react";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
@@ -54,6 +54,9 @@ export default function MobileTestingPage() {
   const [actionText, setActionText] = useState("");
   const [message, setMessage] = useState("");
   const [interactionScopeKey, setInteractionScopeKey] = useState("");
+  const [sourceSnapshot, setSourceSnapshot] = useState<string | null>(null);
+  const pendingWrite = useRef<{ owner: typeof records.updateItem; content: string; candidate: ElectricalTestingRecord } | null>(null);
+  const actionState = useRef<{ form: ElectricalTestingRecord; records: typeof records; scope: string; operatorName: string; activeJobs: Job[]; linkedCertificate: ElectricalCertificate | undefined; ready: boolean; active: boolean } | null>(null);
 
   const activeJobs = useMemo(() => jobs.items.filter((job) => normaliseJobStatus(job.status) === "Scheduled" || isJobOnSiteStatus(job.status)), [jobs.items]);
   const operatorName = useMemo(() => fieldOperatorName({
@@ -69,6 +72,8 @@ export default function MobileTestingPage() {
       setForm(blankRecord());
       setActionText("");
       setMessage("");
+      setSourceSnapshot(null);
+      pendingWrite.current = null;
       setInteractionScopeKey(testingIdentityScopeKey);
     });
     return () => { active = false; };
@@ -83,6 +88,12 @@ export default function MobileTestingPage() {
   const summary = certificateReadySummary(effectiveForm, selectedJob?.title ?? "", selectedCustomer?.name ?? "");
   const interactionScopeReady = interactionScopeKey === testingIdentityScopeKey;
 
+  useLayoutEffect(() => {
+    const current = { form, records, scope: testingIdentityScopeKey, operatorName, activeJobs, linkedCertificate, ready: jobs.isReady && customers.isReady && certificates.isReady && records.isReady && team.isReady && identityState.isReady && interactionScopeReady, active: true };
+    actionState.current = current;
+    return () => { current.active = false; };
+  }, [form, records, records.isReady, testingIdentityScopeKey, operatorName, activeJobs, linkedCertificate, jobs.isReady, customers.isReady, certificates.isReady, team.isReady, identityState.isReady, interactionScopeReady]);
+
   function chooseJob(jobId: string) {
     const job = activeJobs.find((item) => item.id === jobId);
     setForm((current) => ({ ...current, jobId, customerId: job?.customerId, certificateId: undefined, updatedAt: new Date().toISOString() }));
@@ -93,10 +104,44 @@ export default function MobileTestingPage() {
   }
 
   function persistRecord(record: ElectricalTestingRecord) {
-    records.setItems((current) => current.some((item) => item.id === record.id) ? current.map((item) => item.id === record.id ? record : item) : [record, ...current]);
+    const current = actionState.current;
+    if (!current?.active || !current.ready || !current.records.isReady || current.form !== form || current.scope !== testingIdentityScopeKey
+      || current.operatorName !== operatorName || current.activeJobs !== activeJobs
+      || current.records.updateItem !== records.updateItem || current.records.createItem !== records.createItem) return false;
+    const matches = current.records.items.filter((item) => item.id === record.id);
+    const pending = pendingWrite.current;
+    const content = JSON.stringify({ ...record, updatedAt: "" });
+    let expected = sourceSnapshot;
+    const recovered = pending?.owner === records.updateItem && pending.candidate.id === record.id
+      && matches.length === 1 && JSON.stringify(matches[0]) === JSON.stringify(pending.candidate);
+    if (recovered) {
+      expected = JSON.stringify(pending.candidate);
+      if (pending.content === content) {
+        setForm(matches[0]); setSourceSnapshot(expected); pendingWrite.current = null;
+        actionState.current = null;
+        return true;
+      }
+    }
+    try {
+      if (!record.id.trim() || (expected === null ? matches.length !== 0 : matches.length !== 1)) throw new Error("The saved testing identity changed.");
+      const candidate = pending?.owner === records.updateItem && pending.content === content ? pending.candidate : record;
+      pendingWrite.current = { owner: records.updateItem, content, candidate };
+      const saved = expected === null ? current.records.createItem(candidate) : current.records.updateItem(record.id, (stored) => {
+        if (JSON.stringify(stored) !== expected) throw new Error("The saved testing evidence changed.");
+        return candidate;
+      });
+      setForm(saved); setSourceSnapshot(JSON.stringify(saved)); pendingWrite.current = null;
+      actionState.current = null;
+      return true;
+    } catch {
+      setMessage("The testing save could not be confirmed. Your draft is still here. If the saved evidence changed, use Resume to review it before retrying.");
+      return false;
+    }
   }
 
   function activeJobForWrite() {
+    const current = actionState.current;
+    if (!current?.active || !current.ready || current.form !== form || current.operatorName !== operatorName || current.activeJobs !== activeJobs) return null;
     const activeJob = activeJobs.find((job) => job.id === form.jobId);
     if (!activeJob) {
       setMessage("The selected active job is no longer available for this account. Choose a current active job before saving testing evidence.");
@@ -111,14 +156,23 @@ export default function MobileTestingPage() {
     if (!operatorName) { setMessage("Your active team identity could not be resolved. Refresh your account before saving."); return; }
     const activeJob = activeJobForWrite();
     if (!activeJob) return;
+    if ((form.status === "Ready for certificate" || form.status === "Complete") && warnings.some((warning) => warning.severity === "Missing")) {
+      setMessage("Complete the missing fields before saving a ready or complete testing record."); return;
+    }
     const record = { ...effectiveForm, jobId: activeJob.id, customerId: activeJob.customerId, inspectorName: operatorName, updatedAt: new Date().toISOString() };
-    persistRecord(record);
-    setForm(record);
+    if (!persistRecord(record)) return;
     setMessage(localTestingMode ? "Testing draft saved locally. You can leave and resume it later." : "Testing record saved and queued for secure cloud sync.");
   }
 
   function resume(record: ElectricalTestingRecord) {
+    const current = actionState.current;
+    const matches = current?.records.items.filter((item) => item.id === record.id) ?? [];
+    if (!current?.active || !current.ready || current.form !== form || current.records.updateItem !== records.updateItem || !record.id.trim()
+      || matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(record)) {
+      setMessage("This testing record changed or is unavailable. Review the current saved evidence before resuming."); return;
+    }
     setForm({ ...record, circuits: record.circuits.length ? record.circuits : [blankCircuit()], outstandingActions: record.outstandingActions ?? [] });
+    setSourceSnapshot(JSON.stringify(record)); pendingWrite.current = null;
     setMessage(`Resumed testing record for ${jobs.items.find((job) => job.id === record.jobId)?.title ?? "job"}.`);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -141,12 +195,12 @@ export default function MobileTestingPage() {
       return;
     }
     const record = { ...effectiveForm, jobId: activeJob.id, customerId: activeJob.customerId, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: new Date().toISOString() };
-    persistRecord(record);
-    setForm(record);
+    if (!persistRecord(record)) return;
     setMessage("Testing record marked ready for certificate preparation. Inspector review is still required.");
   }
 
   function prepareCertificateSummary() {
+    if (actionState.current?.linkedCertificate !== linkedCertificate) return;
     if (fieldMode) { setMessage("Certificate linking and authoring are office-controlled. Save the testing draft and hand the structured summary to the office for certificate preparation."); return; }
     if (!operatorName) { setMessage("Your active team identity could not be resolved. Refresh your account before preparing testing evidence."); return; }
     const activeJob = activeJobForWrite();
@@ -158,8 +212,7 @@ export default function MobileTestingPage() {
     }
     const now = new Date().toISOString();
     const record = { ...effectiveForm, jobId: activeJob.id, customerId: activeJob.customerId, inspectorName: operatorName, status: "Ready for certificate" as const, updatedAt: now };
-    persistRecord(record);
-    setForm(record);
+    if (!persistRecord(record)) return;
     setMessage(`Testing summary prepared for ${linkedCertificate.number}. The certificate has not been changed; open Certificates to review and transfer the results.`);
   }
 

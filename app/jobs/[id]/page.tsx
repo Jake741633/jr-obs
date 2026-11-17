@@ -27,18 +27,21 @@ import { ProjectTimeline } from "../../../components/workflow/ProjectTimeline";
 import { SavedCalculationRecords } from "../../../components/calculators/CalculationRecords";
 import { JobAssistantLink } from "../../../components/ai/JobAssistantLink";
 import { JobMediaCapture } from "../../../components/jobs/JobMediaCapture";
-import { JobDocumentBrowser, JobPhotoPreview, jobDocumentDateLabel, jobDocumentSelection } from "../../../components/jobs/JobDocumentBrowser";
+import { JobDocumentBrowser, JobPhotoPreview, jobDocumentDateLabel, jobDocumentSelection, photoPreviewSource } from "../../../components/jobs/JobDocumentBrowser";
 import { businessStorageKeys, defaultBankDetails, defaultPaymentTermsTemplates } from "../../../lib/businessSettings";
 import { useJobVariationsCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { strictHttpsJobDocumentUrl } from "../../../lib/cloud/fieldJobDocumentCapability-core.mjs";
 import { openLiveFieldJobDocumentUrl } from "../../../lib/cloud/fieldJobDocumentCapability";
 import { collectionCloudMutationRoute, fieldMutationRouteAllows } from "../../../lib/cloud/fieldMutationPolicy-core.mjs";
 import { canAccessPath, canEditFinance } from "../../../lib/cloud/permissions";
+import { cloudSafeFileRecord, persistPrivateFileRecordBytes, privateObjectPath, readPrivateUploadQueue, validatePrivateFile, PRIVATE_FILE_UPLOAD_QUEUE_KEY } from "../../../lib/cloud/privateFiles";
 import { activeSyncAuthorizationMatches, type SyncAuthorizationContext } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { isAcceptedVariationStatus, transitionVariation, variationTimelineEntry } from "../../../lib/jobManagement-core.mjs";
 import { fieldOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../../lib/storage";
+import { readSupabaseSession } from "../../../lib/supabase/client";
+import type { SavedJobDocument } from "../../../lib/jobPhotoEvidence";
 import { createInvoiceFromCompletedJob } from "../../../lib/workflow";
 import type {
   Builder,
@@ -102,6 +105,24 @@ const blankDocument = {
   uploadedBy: "Jake",
 };
 
+const jobDocumentStorageKey = "jr-os-job-documents";
+const documentRecordFields = ["id", "jobId", "name", "category", "fileName", "mimeType", "dataUrl", "externalUrl", "notes", "uploadedBy", "uploadedAt", "createdAt"] as const;
+
+type DocumentScope = {
+  jobId: string;
+  mode: ReturnType<typeof useCloudIdentity>["mode"];
+  authorization: SyncAuthorizationContext | null;
+};
+type DocumentAttempt = { record: JobDocument; metadataSaved: boolean };
+type DocumentDraft = {
+  scope: DocumentScope;
+  open: boolean;
+  form: typeof blankDocument;
+  file: File | null;
+  saving?: boolean;
+  attempt?: DocumentAttempt;
+};
+
 const financeHandoffMessage = "Job completion is ready for office review. Final invoice creation is restricted to office roles.";
 const documentHandoffMessage = "Assigned job documents remain available to review. Contact the office to arrange new files, links or removals until a dedicated secure field document route is available.";
 const timelineHandoffMessage = "Field job timeline changes are limited to plain site notes. Milestone completion and removals are unavailable in this field workflow.";
@@ -132,7 +153,7 @@ export default function JobDetailPage() {
   const customers = useLocalStorageCollection<Customer>("jr-os-customers");
   const builders = useLocalStorageCollection<Builder>("jr-os-builders");
   const timeline = useLocalStorageCollection<JobTimelineEntry>("jr-os-job-timeline");
-  const documents = useLocalStorageCollection<JobDocument>("jr-os-job-documents");
+  const documents = useLocalStorageCollection<SavedJobDocument>(jobDocumentStorageKey);
   const quotes = useLocalStorageCollection<PricingDocument>("jr-os-pricing-documents");
   const invoices = useLocalStorageCollection<Invoice>("jr-os-invoices");
   const variations = useJobVariationsCollection();
@@ -140,12 +161,50 @@ export default function JobDetailPage() {
   const bankDetailsStore = useLocalStorageCollection<BusinessBankDetails>(businessStorageKeys.bank, [defaultBankDetails]);
   const paymentTermsStore = useLocalStorageCollection<PaymentTermsTemplate>(businessStorageKeys.paymentTerms, defaultPaymentTermsTemplates);
   const [showTimelineForm, setShowTimelineForm] = useState(false);
-  const [showDocumentForm, setShowDocumentForm] = useState(false);
   const [timelineForm, setTimelineForm] = useState(blankEntry);
-  const [documentForm, setDocumentForm] = useState(blankDocument);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [timelineError, setTimelineError] = useState("");
-  const [documentError, setDocumentError] = useState("");
+  const { organisationId, userId, role, customerSourceId } = identityState.identity ?? {};
+  const mode = identityState.mode;
+  const documentScope = useMemo<DocumentScope>(() => ({
+    jobId, mode,
+    authorization: organisationId && userId && role ? { organisationId, userId, role, customerSourceId } : null,
+  }), [jobId, mode, organisationId, userId, role, customerSourceId]);
+  const [documentDraft, setDocumentDraft] = useState<DocumentDraft | null>(null);
+  const draftRef = useRef<DocumentDraft | null>(null);
+  const fileReaderRef = useRef<FileReader | null>(null);
+  const currentDocumentDraft = documentDraft?.scope === documentScope ? documentDraft : null;
+  const showDocumentForm = currentDocumentDraft?.open === true;
+  const documentForm = currentDocumentDraft?.form ?? blankDocument;
+  const selectedFile = currentDocumentDraft?.file ?? null;
+  const [documentSaveFeedback, setDocumentSaveFeedback] = useState<{ scope: DocumentScope; text: string; error: boolean } | null>(null);
+  const documentFeedback = documentSaveFeedback?.scope === documentScope ? documentSaveFeedback : null;
+  const [documentQueueVersion, setDocumentQueueVersion] = useState(0);
+  const queuedDocuments = useMemo(() => {
+    void documentQueueVersion;
+    const authorization = documentScope.authorization;
+    return identityState.isReady && !documentMutationRestricted && documentScope.mode !== "local"
+      && authorization && activeSyncAuthorizationMatches(authorization) ? readPrivateUploadQueue(authorization) : [];
+  }, [documentScope, documentQueueVersion, documentMutationRestricted, identityState.isReady]);
+
+  useEffect(() => {
+    function refreshQueue(event: Event) {
+      const key = (event as StorageEvent).key;
+      if (event.type === "storage" && key && key !== PRIVATE_FILE_UPLOAD_QUEUE_KEY) return;
+      setDocumentQueueVersion((version) => version + 1);
+    }
+    window.addEventListener("jr-os-private-file-queue-changed", refreshQueue);
+    window.addEventListener("storage", refreshQueue);
+    return () => {
+      window.removeEventListener("jr-os-private-file-queue-changed", refreshQueue);
+      window.removeEventListener("storage", refreshQueue);
+    };
+  }, []);
+  useLayoutEffect(() => () => {
+    draftRef.current = null;
+    const reader = fileReaderRef.current;
+    fileReaderRef.current = null;
+    if (reader?.readyState === FileReader.LOADING) reader.abort();
+  }, [documentScope]);
   const [documentNotice, setDocumentNotice] = useState("");
   const [openingDocumentId, setOpeningDocumentId] = useState("");
   const [invoiceMessage, setInvoiceMessage] = useState("");
@@ -208,6 +267,11 @@ export default function JobDetailPage() {
     finalCreationState.current = { invoices, jobs: jobs.items, quotes: quotes.items, variations: variations.items, ready: isReady };
     return () => { finalCreationState.current.ready = false; };
   }, [invoices, jobs.items, quotes.items, variations.items, isReady]);
+  const documentWriteState = useRef({ scope: documentScope, documents, jobs: jobs.items, ready: false });
+  useLayoutEffect(() => {
+    documentWriteState.current = { scope: documentScope, documents, jobs: jobs.items, ready: isReady && !documentMutationRestricted };
+    return () => { documentWriteState.current.ready = false; };
+  }, [documentScope, documents, jobs.items, isReady, documentMutationRestricted]);
   if (!isReady) return <Card>Loading job…</Card>;
 
   if (!job) {
@@ -275,54 +339,167 @@ export default function JobDetailPage() {
     if (window.confirm(`Delete ${entry.milestone} from this job timeline?`)) timeline.remove((item) => item.id === entry.id);
   }
 
+  function publishDocumentDraft(draft: DocumentDraft | null) {
+    draftRef.current = draft;
+    setDocumentDraft(draft);
+  }
+
+  function setDocumentError(text: string) {
+    setDocumentSaveFeedback({ scope: documentScope, text, error: true });
+  }
+
+  function documentWriteIsCurrent() {
+    const current = documentWriteState.current;
+    const authorization = documentScope.authorization;
+    return current.scope === documentScope && current.ready
+      && current.jobs.filter((item) => item.id === jobId).length === 1
+      && (documentScope.mode === "local" || (authorization
+        && activeSyncAuthorizationMatches(authorization)
+        && readSupabaseSession()?.user?.id === authorization.userId));
+  }
+
+  function toggleDocumentForm() {
+    const draft = draftRef.current;
+    if (!documentWriteIsCurrent() || draft?.saving) return;
+    publishDocumentDraft(draft?.scope === documentScope
+      ? { ...draft, open: !draft.open }
+      : { scope: documentScope, open: true, form: blankDocument, file: null });
+    setDocumentSaveFeedback(null);
+  }
+
+  function changeDocumentForm(patch: Partial<typeof blankDocument>) {
+    const draft = draftRef.current;
+    if (!draft || draft !== currentDocumentDraft || !draft.open || draft.saving || draft.attempt || !documentWriteIsCurrent()) return;
+    publishDocumentDraft({ ...draft, form: { ...draft.form, ...patch } });
+  }
+
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
+    const draft = draftRef.current;
+    if (!draft || draft !== currentDocumentDraft || !draft.open || draft.saving || draft.attempt || !documentWriteIsCurrent()) return;
     const file = event.target.files?.[0] ?? null;
-    setSelectedFile(file);
-    if (file && !documentForm.name) setDocumentForm((current) => ({ ...current, name: file.name.replace(/\.[^/.]+$/, "") }));
+    const name = draft.form.name || file?.name.replace(/\.[^/.]+$/, "") || "";
+    publishDocumentDraft({ ...draft, file, form: { ...draft.form, name } });
+    setDocumentSaveFeedback(null);
   }
 
   async function addDocument(event: FormEvent) {
     event.preventDefault();
     if (documentMutationRestricted) { setDocumentError(documentHandoffMessage); return; }
+    const draft = draftRef.current;
+    if (!draft || draft !== currentDocumentDraft || !draft.open || draft.saving || !documentWriteIsCurrent()) return;
     const name = documentForm.name.trim();
     const externalUrl = documentForm.externalUrl.trim();
     const safeExternalUrl = externalUrl ? strictHttpsJobDocumentUrl(externalUrl) : undefined;
     if (!name) { setDocumentError("Enter a document name."); return; }
     if (!selectedFile && !externalUrl) { setDocumentError("Choose a file or add an external document link."); return; }
     if (externalUrl && !safeExternalUrl) { setDocumentError("Enter a valid HTTPS document link without embedded credentials."); return; }
-    if (selectedFile && selectedFile.size > 2_000_000) { setDocumentError("For local storage, choose a file smaller than 2 MB. Larger cloud uploads will be added later."); return; }
-
-    let dataUrl = "";
-    if (selectedFile) {
-      dataUrl = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result ?? ""));
-        reader.onerror = () => reject(new Error("Unable to read file"));
-        reader.readAsDataURL(selectedFile);
-      }).catch(() => "");
-      if (!dataUrl) { setDocumentError("The selected file could not be read."); return; }
+    if (selectedFile && selectedFile.size > 2_000_000) { setDocumentError("Choose a file no bigger than 2 MB."); return; }
+    if (selectedFile && documentScope.mode !== "local") {
+      const fileError = validatePrivateFile(selectedFile);
+      if (fileError) { setDocumentError(fileError); return; }
     }
 
-    const now = new Date().toISOString();
-    const record: JobDocument = {
-      id: makeId("document"),
-      jobId,
-      name,
-      category: documentForm.category,
-      fileName: selectedFile?.name ?? "",
-      mimeType: selectedFile?.type ?? "",
-      dataUrl,
-      externalUrl: safeExternalUrl ?? "",
-      notes: documentForm.notes.trim(),
-      uploadedBy: documentForm.uploadedBy.trim() || "Jake",
-      uploadedAt: now,
-      createdAt: now,
-    };
-    documents.setItems((current) => [record, ...current]);
-    setDocumentForm(blankDocument);
-    setSelectedFile(null);
-    setDocumentError("");
-    setShowDocumentForm(false);
+    const workingDraft = { ...draft, saving: true };
+    publishDocumentDraft(workingDraft);
+    setDocumentSaveFeedback(null);
+    let attempt = draft.attempt;
+    let savingPrivateFile = false;
+
+    try {
+      if (!attempt) {
+        let dataUrl: string | undefined;
+        if (selectedFile) {
+          dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            fileReaderRef.current = reader;
+            const failed = () => reject(new Error("The selected file could not be read."));
+            reader.onload = () => {
+              if (typeof reader.result === "string" && reader.result.startsWith("data:")) resolve(reader.result);
+              else failed();
+            };
+            reader.onerror = failed;
+            reader.onabort = failed;
+            reader.readAsDataURL(selectedFile);
+          });
+        }
+        if (draftRef.current !== workingDraft || !documentWriteIsCurrent()) return;
+        fileReaderRef.current = null;
+        const id = makeId("document");
+        if (documentWriteState.current.documents.items.some((item) => item.id === id)) {
+          setDocumentError("The document identity is already in use. Save again to retry.");
+          return;
+        }
+        const now = new Date().toISOString();
+        attempt = { metadataSaved: false, record: {
+          id, jobId, name, category: documentForm.category,
+          fileName: selectedFile?.name ?? "", mimeType: selectedFile?.type ?? "", dataUrl,
+          externalUrl: safeExternalUrl ?? "", notes: documentForm.notes.trim(),
+          uploadedBy: documentForm.uploadedBy.trim() || "Jake", uploadedAt: now, createdAt: now,
+        } };
+      }
+
+      const { record } = attempt;
+      const authorization = documentScope.authorization;
+      const currentDocuments = documentWriteState.current.documents;
+      const metadata = documentScope.mode === "local" ? record : cloudSafeFileRecord(jobDocumentStorageKey, record);
+      const matches = currentDocuments.items.filter((item) => item.id === record.id);
+      const saved = matches[0];
+      if (saved) {
+        if (matches.length !== 1 || documentRecordFields.some((key) => saved[key] !== metadata[key])) {
+          throw new Error("The saved document changed. Review the job folder before retrying.");
+        }
+        if (saved.privateStoragePath && (!authorization || !record.dataUrl
+          || saved.privateStoragePath !== privateObjectPath(authorization.organisationId, jobId, record.id, record.fileName))) {
+          throw new Error("The saved file binding changed. Review the job folder before retrying.");
+        }
+      } else {
+        if (attempt.metadataSaved) throw new Error("The saved document is no longer in this job folder.");
+        currentDocuments.createItem(metadata);
+      }
+
+      attempt = { record, metadataSaved: true };
+      if (authorization && documentScope.mode !== "local" && !saved?.privateStoragePath) {
+        savingPrivateFile = Boolean(record.dataUrl);
+        persistPrivateFileRecordBytes(jobDocumentStorageKey, record, authorization);
+      }
+
+      publishDocumentDraft(null);
+      setDocumentSaveFeedback({ scope: documentScope, error: false,
+        text: record.dataUrl && documentScope.mode !== "local"
+          ? "Document saved on this device. Check sync status before switching devices."
+          : "Document saved on this device." });
+    } catch {
+      if (draftRef.current !== workingDraft) return;
+      if (!attempt) {
+        setDocumentError("The selected file could not be read. Your draft is still here.");
+      } else if (savingPrivateFile) {
+        setDocumentError("The document record was saved, but the file could not be queued. Your file is still selected. Keep this page open and retry.");
+      } else {
+        setDocumentError("Document save could not be confirmed. Your draft is still here. Keep this page open and retry.");
+      }
+    } finally {
+      if (draftRef.current === workingDraft) {
+        fileReaderRef.current = null;
+        publishDocumentDraft({ ...workingDraft, saving: false, attempt });
+      }
+    }
+  }
+
+  function documentDownloadUrl(document: SavedJobDocument) {
+    if (documentMutationRestricted) return undefined;
+    if (document.dataUrl?.startsWith("data:")) return document.dataUrl;
+    if (document.privateStoragePath) {
+      const origin = typeof window === "undefined" ? "" : window.location.origin;
+      return origin && document.signedDownloadUrl?.startsWith(`blob:${origin}/`) ? document.signedDownloadUrl : undefined;
+    }
+    const authorization = documentScope.authorization;
+    if (!authorization || !document.fileName) return undefined;
+    const path = privateObjectPath(authorization.organisationId, jobId, document.id, document.fileName);
+    const matches = queuedDocuments.filter((item) => item.storageKey === jobDocumentStorageKey && item.sourceId === document.id
+      && item.fileName === document.fileName && item.mimeType === document.mimeType && item.jobSourceId === jobId
+      && !item.parentSourceId && !item.customerSourceId && item.objectPath === path);
+    const dataUrl = matches[0]?.dataUrl;
+    return matches.length === 1 && typeof dataUrl === "string" && dataUrl.startsWith(`data:${document.mimeType};base64,`) ? dataUrl : undefined;
   }
 
   function deleteDocument(document: JobDocument) {
@@ -470,7 +647,7 @@ export default function JobDetailPage() {
     </section>
 
     <section className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job folder</p><h2 className="mt-1 text-2xl font-bold">Documents and records</h2><p className="mt-1 text-sm text-slate-400">Keep certificates, photos, drawings, RAMS, handover documents and site records together.</p></div>{documentMutationRestricted ? <p className="max-w-xl text-sm text-amber-200">{documentHandoffMessage}</p> : <Button onClick={() => setShowDocumentForm((current) => !current)}><Plus className="mr-2 size-4" />{showDocumentForm ? "Close document" : "Add document"}</Button>}</div>
+      <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">Job folder</p><h2 className="mt-1 text-2xl font-bold">Documents and records</h2><p className="mt-1 text-sm text-slate-400">Keep certificates, photos, drawings, RAMS, handover documents and site records together.</p></div>{documentMutationRestricted ? <p className="max-w-xl text-sm text-amber-200">{documentHandoffMessage}</p> : <Button onClick={toggleDocumentForm} disabled={currentDocumentDraft?.saving}><Plus className="mr-2 size-4" />{showDocumentForm ? "Close document" : "Add document"}</Button>}</div>
 
       <div className={financeRestricted ? "grid gap-4" : "grid gap-4 sm:grid-cols-3"}>
         <Card><p className="text-sm text-slate-400">Uploaded documents</p><p className="mt-2 text-3xl font-bold">{jobDocuments.length}</p></Card>
@@ -481,19 +658,46 @@ export default function JobDetailPage() {
       </div>
 
       {!documentMutationRestricted && showDocumentForm ? <Card><form onSubmit={addDocument} className="grid gap-4 md:grid-cols-2">
-        <InputField required label="Document name" value={documentForm.name} onChange={(event) => setDocumentForm({ ...documentForm, name: event.target.value })} />
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={documentForm.category} onChange={(event) => setDocumentForm({ ...documentForm, category: event.target.value as JobDocumentCategory })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{documentCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
-        <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Upload file</span><input type="file" onChange={chooseFile} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1 file:text-slate-200" /><span className="text-xs font-normal text-slate-500">Local files must be under 2 MB.</span></label>
-        <InputField label="External link" type="url" placeholder="https://..." value={documentForm.externalUrl} onChange={(event) => setDocumentForm({ ...documentForm, externalUrl: event.target.value })} />
-        <InputField label="Added by" value={documentForm.uploadedBy} onChange={(event) => setDocumentForm({ ...documentForm, uploadedBy: event.target.value })} />
-        <div className="md:col-span-2"><TextareaField label="Notes" value={documentForm.notes} onChange={(event) => setDocumentForm({ ...documentForm, notes: event.target.value })} /></div>
-        {documentError ? <p className="md:col-span-2 text-sm text-red-300">{documentError}</p> : null}
-        <div className="md:col-span-2 flex justify-end"><Button type="submit">Save document</Button></div>
+        <fieldset disabled={currentDocumentDraft?.saving || Boolean(currentDocumentDraft?.attempt)} className="contents">
+          <InputField required label="Document name" value={documentForm.name} onChange={(event) => changeDocumentForm({ name: event.target.value })} />
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Category</span><select value={documentForm.category} onChange={(event) => changeDocumentForm({ category: event.target.value as JobDocumentCategory })} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3">{documentCategories.map((category) => <option key={category}>{category}</option>)}</select></label>
+          <label className="grid gap-2 text-sm font-medium text-slate-300"><span>Upload file</span><input type="file" onChange={chooseFile} className="min-h-11 rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-800 file:px-3 file:py-1 file:text-slate-200" /><span className="text-xs font-normal text-slate-500">{selectedFile ? `Selected: ${selectedFile.name}` : "Files can be up to 2 MB."}</span></label>
+          <InputField label="External link" type="url" placeholder="https://..." value={documentForm.externalUrl} onChange={(event) => changeDocumentForm({ externalUrl: event.target.value })} />
+          <InputField label="Added by" value={documentForm.uploadedBy} onChange={(event) => changeDocumentForm({ uploadedBy: event.target.value })} />
+          <div className="md:col-span-2"><TextareaField label="Notes" value={documentForm.notes} onChange={(event) => changeDocumentForm({ notes: event.target.value })} /></div>
+        </fieldset>
+        <div className="md:col-span-2 flex justify-end"><Button type="submit" disabled={currentDocumentDraft?.saving}>{currentDocumentDraft?.saving ? "Saving document…" : "Save document"}</Button></div>
       </form></Card> : null}
 
+      {documentFeedback ? <p role={documentFeedback.error ? "alert" : "status"} className={documentFeedback.error ? "text-sm text-red-300" : "text-sm text-cyan-200"}>{documentFeedback.text}</p> : null}
       {documentNotice ? <p className="text-sm text-amber-200">{documentNotice}</p> : null}
       <JobDocumentBrowser key={JSON.stringify([identityState.mode, identityState.identity?.organisationId, identityState.identity?.userId, identityState.identity?.role, identityState.identity?.customerSourceId, jobId])} jobId={jobId} documents={documents.items}>
-        {(jobDocuments) => <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((document) => <Card key={document.id}><div className="flex items-start gap-3"><div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p><h3 className="mt-1 truncate font-bold">{document.name}</h3><p className="mt-1 text-xs text-slate-500">{jobDocumentDateLabel(document.uploadedAt)} · {document.uploadedBy}</p></div>{!documentMutationRestricted ? <button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}</div><JobPhotoPreview document={document} identityState={identityState} />{document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}<div className="mt-4 flex flex-wrap gap-2">{document.dataUrl ? <a href={document.dataUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}{documentExternalLink(document)}</div></div></div></Card>)}</div>}
+        {(jobDocuments) => <div className="grid gap-3 md:grid-cols-2">{jobDocuments.map((saved) => {
+          const downloadUrl = documentDownloadUrl(saved);
+          const document = downloadUrl?.startsWith("data:") ? { ...saved, dataUrl: downloadUrl } : saved;
+          const previewDownload = !document.dataUrl && photoPreviewSource(document, typeof window === "undefined" ? "" : window.location.origin);
+          return <Card key={document.id}>
+            <div className="flex items-start gap-3">
+              <div className="rounded-xl bg-cyan-500/10 p-2 text-cyan-300"><FileText className="size-5" /></div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-cyan-400">{document.category}</p>
+                    <h3 className="mt-1 truncate font-bold">{document.name}</h3>
+                    <p className="mt-1 text-xs text-slate-500">{jobDocumentDateLabel(document.uploadedAt)} · {document.uploadedBy}</p>
+                  </div>
+                  {!documentMutationRestricted ? <button onClick={() => deleteDocument(document)} aria-label={`Delete ${document.name}`} className="rounded-lg p-2 text-slate-500 hover:bg-red-500/10 hover:text-red-300"><Trash2 className="size-4" /></button> : null}
+                </div>
+                <JobPhotoPreview document={document} identityState={identityState} />
+                {document.notes ? <p className="mt-3 whitespace-pre-wrap text-sm text-slate-300">{document.notes}</p> : null}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {downloadUrl && !previewDownload ? <a href={downloadUrl} download={document.fileName || document.name} className="inline-flex items-center gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400/50"><Download className="size-4" />Download</a> : null}
+                  {documentExternalLink(document)}
+                </div>
+              </div>
+            </div>
+          </Card>;
+        })}</div>}
       </JobDocumentBrowser>
 
       {!financeRestricted && (linkedQuotes.length > 0 || linkedInvoices.length > 0) ? <div className="grid gap-4 md:grid-cols-2">

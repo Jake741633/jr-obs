@@ -59,7 +59,7 @@ test("restricted document creation returns before file or collection side effect
   assert.ok(guard >= 0 && guardReturn > guard, "document creation must return from the restriction guard");
   assert.match(handler.slice(guard, guardReturn), /setDocumentError\(documentHandoffMessage\)/);
 
-  for (const sideEffect of ["new FileReader", "documents.setItems", "setShowDocumentForm(false)"]) {
+  for (const sideEffect of ["new FileReader", "currentDocuments.createItem", "persistPrivateFileRecordBytes", "publishDocumentDraft(null)"]) {
     assert.ok(handler.indexOf(sideEffect) > guardReturn, `${sideEffect} must remain behind the document guard`);
   }
 });
@@ -89,14 +89,14 @@ test("field job document records remain readable while add, form and delete cont
   );
   assert.match(jobPage, /!documentMutationRestricted && showDocumentForm \? <Card><form onSubmit=\{addDocument\}/);
   assert.match(jobPage, /\{!documentMutationRestricted \? <button onClick=\{\(\) => deleteDocument\(document\)\}/);
-  assert.match(jobPage, /jobDocuments\.map\(\(document\) => <Card/);
+  assert.match(jobPage, /jobDocuments\.map\(\(saved\) => \{[\s\S]*return <Card key=\{document\.id\}/);
   assert.match(jobPage, /\{document\.notes \? <p[^>]*>\{document\.notes\}<\/p> : null\}/);
   assert.match(jobPage, /<ExternalLink[^>]*\/>Open link<\/a>/);
 });
 
 test("non-field and local document controls remain available", () => {
   assert.match(jobPage, /identityState\.mode !== "local"/);
-  assert.match(jobPage, /documents\.setItems\(\(current\) => \[record, \.\.\.current\]\)/);
+  assert.match(jobPage, /currentDocuments\.createItem\(metadata\)/);
   assert.match(jobPage, /documents\.remove\(\(item\) => item\.id === document\.id\)/);
   assert.match(jobPage, /Save document/);
 });

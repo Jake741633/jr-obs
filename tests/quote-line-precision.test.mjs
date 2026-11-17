@@ -55,8 +55,10 @@ function saveDraft(rows) {
   function visit(node) { if (ts.isFunctionDeclaration(node) && node.name?.text === "submit") submitNode = node; ts.forEachChild(node, visit); }
   visit(pageAst);
   const state = { error: "", records: [], reset: false };
+  const documents = { isReady: true, items: [], createItem(record) { state.records = [record, ...state.records]; } };
   const context = {
-    form: { title: "Site quote", customerId: "customer", siteAddress: "", type: "Quote", vatRate: "0" }, items: rows, editingId: "", documents: { items: [], setItems(update) { state.records = update(state.records); } },
+    form: { title: "Site quote", customerId: "customer", siteAddress: "", type: "Quote", vatRate: "0" }, items: rows, editingId: "", documents,
+    latestDocuments: { current: { active: true, documents } }, creationVersion: 0, creationGeneration: { current: 0 }, creationAttempt: { current: null }, quoteSaveSnapshot: JSON.stringify,
     setError(value) { state.error = value; }, nextPricingDocumentNumber: () => "Q001", makeId: () => "doc1", pricing: {}, profitability: {}, attachments: [], fixedPriceWorkflow: {}, paymentTerms: {}, reset() { state.reset = true; },
   };
   const { submit } = evaluate(`${submitNode.getText(pageAst)}\nexports.submit = submit;`, context);

@@ -43,7 +43,7 @@ test("cloud snag operator reuses the shared exact-one identity resolver", () => 
 test("cloud snag creation mirrors the server-bound assignee", () => {
   assert.match(page, /useCloudIdentity\(\)/);
   assert.match(page, /const cloudFieldMode = identityState\.mode !== "local"/);
-  assert.match(page, /assignedTo: cloudFieldMode \? operatorMember\?\.id : form\.assignedTo \|\| undefined/);
+  assert.match(page, /const assignedTo = cloudFieldMode \? operatorMember\?\.id : form\.assignedTo \|\| undefined/);
   assert.match(page, /label="Assigned to" value=\{operatorMember\?\.name \|\| "Resolving active engineer…"\} readOnly/);
   assert.match(page, /Your active team identity could not be resolved/);
 });
@@ -53,7 +53,7 @@ test("cloud snag status controls fail closed for another assignee", () => {
   assert.match(page, /Only snags assigned to your active field account can be updated here/);
 });
 
-test("unresolved snag identity fails before sync registration or optimistic writes", () => {
+test("unresolved snag identity fails before a task or timeline write", () => {
   const create = page.slice(page.indexOf("function createSnag"), page.indexOf("function changeStatus"));
   const change = page.slice(page.indexOf("function changeStatus"), page.indexOf("\n\n  return <div"));
   const createGuard = create.indexOf("if (cloudFieldMode && !operatorMember)");
@@ -61,10 +61,10 @@ test("unresolved snag identity fails before sync registration or optimistic writ
 
   assert.ok(createGuard >= 0);
   assert.ok(changeGuard >= 0);
-  for (const mutation of ["registerSnagSyncAttempt", "tasks.setItems", "timeline.setItems"]) {
-    assert.ok(create.indexOf(mutation) > createGuard, `create guard must precede ${mutation}`);
-    assert.ok(change.indexOf(mutation) > changeGuard, `status guard must precede ${mutation}`);
-  }
+  assert.ok(create.indexOf("tasks.createItem") > createGuard);
+  assert.ok(create.indexOf("saveTimelineNote") > createGuard);
+  assert.ok(change.indexOf("tasks.updateItem") > changeGuard);
+  assert.ok(change.indexOf("saveTimelineNote") > changeGuard);
 });
 
 test("cloud snag status controls mirror the exact field RPC transition graph", () => {
@@ -86,10 +86,10 @@ test("cloud snag status controls mirror the exact field RPC transition graph", (
   assert.match(migration, /canonical_task_status = 'In progress' and requested_task_status in \('Open', 'Completed'\)/);
 });
 
-test("cloud terminal reopen fails before optimistic task or timeline updates", () => {
+test("cloud terminal reopen fails before a durable task or timeline write", () => {
   const guard = page.indexOf("if (cloudFieldMode && !fieldJobTaskStatusTransitionAllowed(task.status, nextStatus))");
-  const taskMutation = page.indexOf("tasks.setItems", guard);
-  const timelineMutation = page.indexOf("timeline.setItems", guard);
+  const taskMutation = page.indexOf("tasks.updateItem", guard);
+  const timelineMutation = page.indexOf("saveTimelineNote", guard);
   assert.ok(guard >= 0 && taskMutation > guard && timelineMutation > guard);
   assert.match(page, /disabled=\{syncBlocked \|\| \(cloudFieldMode && !fieldJobTaskStatusTransitionAllowed\(snag\.status, "Open"\)\)\}/);
 });

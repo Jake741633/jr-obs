@@ -4,7 +4,7 @@ on:
   push:
     branches: [jr-os-v2]
   pull_request:
-    branches: [main]
+    branches: [main, jr-os-v2]
 
 permissions:
   contents: read

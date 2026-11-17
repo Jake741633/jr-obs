@@ -22,6 +22,37 @@ test("arrival and departure calculations retain breaks", () => {
   assert.equal(formatMinutes(495), "8h 15m");
 });
 
+test("midnight arrivals retain their worked hour and breaks", () => {
+  assert.equal(minutesBetween("00:00", "01:00"), 60);
+  assert.equal(paidMinutes({ startedAt: "00:00", finishedAt: "01:00", breakMinutes: 0 }), 60);
+  assert.equal(formatMinutes(paidMinutes({ startedAt: "00:00", finishedAt: "01:00" })), "1h");
+  assert.equal(paidMinutes({ startedAt: "00:00", finishedAt: "01:00", breakMinutes: 15 }), 45);
+  assert.equal(paidMinutes({ startedAt: "00:00", finishedAt: "01:00", breakMinutes: 90 }), 0);
+  assert.equal(paidMinutes({ startedAt: "00:00", finishedAt: "01:00", breakMinutes: -15 }), 60);
+});
+
+test("day summaries count labour beginning at midnight", () => {
+  const entries = [{ id: "visit", title: "Night visit", date: "2026-08-02", startTime: "00:00", status: "Complete", jobId: "job-1" }];
+  const timesheets = [{ id: "time", workDate: "2026-08-02", jobId: "job-1", startedAt: "00:00", finishedAt: "01:00", breakMinutes: 0 }];
+  assert.deepEqual(dayPlannerSummary(entries, timesheets, "2026-08-02"), { scheduled: 1, completed: 1, remaining: 0, paidMinutes: 60 });
+});
+
+test("missing or malformed times do not become midnight labour", () => {
+  for (const invalid of [undefined, null, "", "invalid", "0:00", "00:0", "00:00:00", 0]) {
+    assert.equal(minutesBetween(invalid, "01:00"), 0, `invalid arrival: ${String(invalid)}`);
+    assert.equal(minutesBetween("00:00", invalid), 0, `invalid departure: ${String(invalid)}`);
+    assert.equal(paidMinutes({ startedAt: invalid, finishedAt: "01:00" }), 0);
+    assert.equal(paidMinutes({ startedAt: "00:00", finishedAt: invalid }), 0);
+  }
+});
+
+test("departure before arrival retains the current zero-duration overnight policy", () => {
+  for (const [startedAt, finishedAt] of [["23:00", "01:00"], ["23:00", "00:00"], ["00:00", "00:00"]]) {
+    assert.equal(minutesBetween(startedAt, finishedAt), 0);
+    assert.equal(paidMinutes({ startedAt, finishedAt, breakMinutes: 15 }), 0);
+  }
+});
+
 test("one visit owns the running or stopped-unsaved time log", () => {
   const startCases = [
     { activeEntryId: null, nextEntryId: "visit-b", finishedAt: "", expected: null },

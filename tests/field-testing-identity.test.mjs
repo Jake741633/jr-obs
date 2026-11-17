@@ -51,7 +51,7 @@ test("testing actions fail closed when the active operator cannot be resolved", 
 });
 
 test("testing resets transient state across the full identity scope and revalidates active jobs", () => {
-  assert.match(page, /import \{ FormEvent, useEffect, useMemo, useState \} from "react";/);
+  assert.match(page, /import \{[^}]*\buseEffect\b[^}]*\} from "react";/);
   assert.match(page, /const testingIdentityScopeKey = JSON\.stringify\(\[\s*identityState\.identity\?\.organisationId \?\? null,\s*identityState\.identity\?\.userId \?\? null,\s*identityState\.identity\?\.role \?\? null,\s*identityState\.identity\?\.customerSourceId \?\? null,\s*\]\);/);
 
   const resetEffect = page.slice(page.indexOf("useEffect(() => {"), page.indexOf("\n\n  const selectedJob"));
@@ -74,7 +74,7 @@ test("testing resets transient state across the full identity scope and revalida
   ];
   for (const action of writeActions) {
     const guardIndex = action.indexOf("const activeJob = activeJobForWrite();");
-    const persistIndex = action.indexOf("persistRecord(record);");
+    const persistIndex = action.indexOf("persistRecord(record)");
     assert.ok(guardIndex >= 0 && guardIndex < persistIndex, "each testing write must revalidate the current active job before persistence");
     assert.match(action, /jobId: activeJob\.id, customerId: activeJob\.customerId/);
   }

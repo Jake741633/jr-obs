@@ -4,7 +4,7 @@ import { cloudSelect, cloudSelectFresh } from "./client";
 import { collectionCloudReadTable } from "./collections";
 import { effectiveCloudMode } from "./config";
 import { creatorMapForCloudRows, normaliseRecordCreatorMap, retainRecordCreatorsForRecords } from "./recordCreatorMetadata-core.mjs";
-import { queueChange, type CloudEnvelope } from "./repository";
+import { queueChange, type CloudEnvelope, type SyncQueueItem } from "./repository";
 import { purgeCustomerNetworkOnlyCollectionCaches, purgeElectricianNetworkOnlyCollectionCaches, purgeRoleProjectionCacheStorage, roleProjectionCacheGeneration, roleProjectionCachePolicy, roleProjectionVersionMap, sanitizeRoleProjectionCache } from "./roleProjectionCache-core.mjs";
 
 export interface RepositoryRecord { id: string; updatedAt?: string; customerId?: string; jobId?: string; }
@@ -89,11 +89,29 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
     }
   }
 
+  function pendingCollectionChanges() {
+    if (!userId || !cacheUserId || userId !== cacheUserId || !cacheRole) return [];
+    try {
+      const queue: unknown = JSON.parse(window.localStorage.getItem("jr-os-cloud-sync-queue") || "[]");
+      if (!Array.isArray(queue)) return [];
+      return (queue as SyncQueueItem<T>[]).filter((item) => item
+        && item.organisationId === organisationId
+        && item.userId === userId
+        && item.role === cacheRole
+        && (item.customerSourceId ?? null) === (cacheCustomerSourceId ?? null)
+        && item.table === table
+        && (item.collectionKey ?? null) === (collectionKey ?? null)
+        && item.storageKey === scopedStorageKey
+        && typeof item.sourceId === "string"
+        && (item.operation === "delete" || (item.operation === "upsert" && item.payload?.id === item.sourceId)));
+    } catch { return []; }
+  }
+
   return {
     mode: effectiveCloudMode(),
     storageKey: scopedStorageKey,
     recordCreators() { return { ...currentRecordCreators }; },
-    async list(): Promise<T[]> {
+    async list(signal?: AbortSignal): Promise<T[]> {
       const mode = effectiveCloudMode();
       purgeDormantNetworkOnlyCapabilities(mode);
       const cached = readLocal<T>(scopedStorageKey);
@@ -119,23 +137,81 @@ export function createCollectionRepository<T extends RepositoryRecord>(options: 
       // a signed-in organisation.
       if (mode === "migration" && local.length > 0) return local;
 
+      const versionsAtRead: Record<string, number> = networkOnly ? {} : readVersions(scopedStorageKey);
       try {
         const select = networkOnly ? cloudSelectFresh : cloudSelect;
-        const rows = await select<CloudEnvelope<T>>(readTable, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`);
-        const cloudRecords = rows.map((row) => row.payload);
+        const rows = await select<CloudEnvelope<T>>(readTable, `select=*&organisation_id=eq.${encodeURIComponent(organisationId)}${collectionFilter}&deleted_at=is.null`, signal);
+        if (signal?.aborted) return [];
+        // Read the durable queue after the request: another tab or a retained
+        // editor may have saved a newer local intent while this read awaited.
+        const pending = networkOnly ? [] : pendingCollectionChanges();
+        const records = new Map(rows.map((row) => [row.source_id, row.payload]));
+        const confirmedVersions = new Map<string, number>();
+        if (!networkOnly) {
+          const latestRecords = new Map(readLocal<T>(scopedStorageKey).map((record) => [record.id, record]));
+          const remoteVersions = roleProjectionVersionMap(rows, rows.map((row) => row.payload));
+          for (const [sourceId, version] of Object.entries(readVersions(scopedStorageKey))) {
+            if (!Number.isSafeInteger(version) || version <= 0) continue;
+            const remoteVersion = remoteVersions[sourceId];
+            // Replay may already have removed its queue item. A response older
+            // than a confirmed local version must not undo that completion.
+            const confirmedDuringRead = version > (versionsAtRead[sourceId] ?? 0);
+            if (remoteVersion !== undefined ? version > remoteVersion : confirmedDuringRead) {
+              const latest = latestRecords.get(sourceId);
+              if (latest) records.set(sourceId, latest);
+              else records.delete(sourceId);
+              confirmedVersions.set(sourceId, version);
+            }
+          }
+        }
+        for (const item of pending) {
+          if (item.operation === "delete") records.delete(item.sourceId);
+          else records.set(item.sourceId, item.payload!);
+        }
+        const cloudRecords = [...records.values()];
         const roleProjectionRecords = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: cloudRecords });
         if (networkOnly) {
           purgeRoleProjectionCacheStorage(window.localStorage, scopedStorageKey);
           currentRecordCreators = {};
         } else {
+          const cachedCreators = readRecordCreators(scopedStorageKey);
+          const versions = roleProjectionVersionMap(rows, roleProjectionRecords);
+          const creators = creatorMapForCloudRows(rows, roleProjectionRecords);
+          const visibleIds = new Set(roleProjectionRecords.map((record) => record.id));
+          for (const [sourceId, version] of confirmedVersions) {
+            if (records.has(sourceId) && !visibleIds.has(sourceId)) continue;
+            versions[sourceId] = version;
+            if (cachedCreators[sourceId] && !creators[sourceId]) creators[sourceId] = cachedCreators[sourceId];
+          }
+          const basedIds = new Set<string>();
+          for (const item of pending) {
+            if (!visibleIds.has(item.sourceId) && item.operation !== "delete") continue;
+            // A fetched version belongs to clean cloud data. Queued data must
+            // keep its original comparison base, including an unknown base.
+            if (!basedIds.has(item.sourceId)) {
+              const baseVersion = item.expectedVersion ?? item.baseVersion ?? (item.baseIntent === "create" ? 0 : undefined);
+              if (baseVersion === undefined) delete versions[item.sourceId];
+              else versions[item.sourceId] = baseVersion;
+              basedIds.add(item.sourceId);
+            }
+            if (item.operation === "upsert" && !creators[item.sourceId]) {
+              const creator = item.baseIntent === "create" ? item.userId : cachedCreators[item.sourceId];
+              if (creator) creators[item.sourceId] = creator;
+            }
+          }
           writeLocal(scopedStorageKey, roleProjectionRecords);
-          writeVersions(scopedStorageKey, roleProjectionVersionMap(rows, roleProjectionRecords));
-          replaceRecordCreators(creatorMapForCloudRows(rows, roleProjectionRecords));
+          writeVersions(scopedStorageKey, versions);
+          replaceRecordCreators(retainRecordCreatorsForRecords(creators, roleProjectionRecords));
           const projectionGeneration = roleProjectionCacheGeneration({ storageKey, role: cacheRole });
           if (projectionGeneration) window.localStorage.setItem(projectionGenerationKey(scopedStorageKey), projectionGeneration);
         }
         return roleProjectionRecords;
-      } catch { return networkOnly ? [] : local; }
+      } catch {
+        if (networkOnly || signal?.aborted) return [];
+        const current = sanitizeRoleProjectionCache({ storageKey, role: cacheRole, mode, records: readLocal<T>(scopedStorageKey) });
+        replaceRecordCreators(retainRecordCreatorsForRecords(readRecordCreators(scopedStorageKey), current));
+        return current;
+      }
     },
     save(record: T, expectedVersion?: number) {
       const mode = effectiveCloudMode();

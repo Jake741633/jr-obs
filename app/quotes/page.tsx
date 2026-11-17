@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { BriefcaseBusiness, Calculator, Clock3, Download, ExternalLink, Eye, FileText, LayoutTemplate, PackagePlus, Paperclip, Pencil, Plus, Save, Search, Sparkles, TrendingUp, Trash2 } from "lucide-react";
 import { MobileActionDock, MobileDockAction } from "../../components/mobile/MobileActionDock";
 import { FixedPriceWorkflowCard } from "../../components/quotes/FixedPriceWorkflowCard";
@@ -21,12 +21,16 @@ import {
   paymentTermsFromTemplate,
 } from "../../lib/businessSettings";
 import { usePricingDocumentsCollection } from "../../lib/cloud/coreBusinessCollections";
+import { useCloudIdentity } from "../../lib/cloud/useCloudIdentity";
+import { persistPrivateFileRecordBytes, privateObjectPath } from "../../lib/cloud/privateFiles";
 import { strictHttpsJobDocumentUrl } from "../../lib/cloud/fieldJobDocumentCapability-core.mjs";
 import { makeId, useCloudLocalCollection } from "../../lib/storage";
 import { calculateQuoteProfitability, defaultQuotePricingSettings } from "../../lib/quoteEngine";
+import { editQuoteDraftLine } from "../../lib/quoteDraftLines";
 import { hasLegacyOtherAllowances, jobPackAllowanceCategories, jobPackQuoteLines, jobPackTotals } from "../../lib/jobPackCatalogue";
 import { defaultBusinessTermsTemplates, quoteTemplates } from "../../lib/quoteTemplates";
-import { createJobFromAcceptedQuote, nextPricingDocumentNumber, pricingDocumentTotal } from "../../lib/workflow";
+import { nextPricingDocumentNumber, pricingDocumentTotal } from "../../lib/workflow";
+import { convertAcceptedQuote } from "../../lib/quoteConversion";
 import type { Builder, BusinessOverhead, BusinessProfile, BusinessTermsTemplate, Customer, DocumentBrandingSettings, FixedPriceWorkflow, Job, JobDocument, JobPack, JobPackAllowance, JobTimelineEntry, LabourCostSettings, LabourRate, Material, PaymentTermsTemplate, PaymentTermsType, PricingDocument, PricingDocumentStatus, PricingDocumentType, PricingLineItem, QuoteLabourMode, QuotePaymentTerms, QuotePricingSettings, QuoteRevision, QuoteTemplateType, RecordAttachment, VatSettings } from "../../lib/models";
 
 const money = new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" });
@@ -38,8 +42,26 @@ const defaultLabourSettings: LabourCostSettings = { id: "labour-cost-settings", 
 const blankLabour = { rateId: "", mode: "Hours" as QuoteLabourMode, quantity: "1", fixedCost: "", fixedPrice: "", fixedHours: "" };
 const blankFixedPriceWorkflow: FixedPriceWorkflow = { type: "Direct fixed price", initialVisitCompleted: false, faultFindingCompleted: false, recommendation: "" };
 
+function quoteSaveSnapshot(value: object) {
+  return JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
+}
+
 export default function QuotesPage() {
   const documents = usePricingDocumentsCollection();
+  const identityState = useCloudIdentity();
+  const conversionOwner = useMemo(() => ({ mode: identityState.mode, authorization: identityState.identity ? {
+    organisationId: identityState.identity.organisationId, userId: identityState.identity.userId, role: identityState.identity.role, customerSourceId: identityState.identity.customerSourceId,
+  } : null }), [identityState.mode, identityState.identity]);
+  const latestDocuments = useRef({ active: false, documents });
+  const editingSource = useRef<{ snapshot: string; updateItem: typeof documents.updateItem } | null>(null);
+  const creationGeneration = useRef(0);
+  const [creationVersion, setCreationVersion] = useState(0);
+  const creationAttempt = useRef<{ id: string; createItem: typeof documents.createItem; candidate?: PricingDocument; inputSnapshot?: string; busy: boolean; complete: boolean } | null>(null);
+  useLayoutEffect(() => {
+    latestDocuments.current = { active: true, documents };
+    return () => { latestDocuments.current.active = false; };
+  });
   const customers = useCloudLocalCollection<Customer>("jr-os-customers");
   const builders = useCloudLocalCollection<Builder>("jr-os-builders");
   const jobs = useCloudLocalCollection<Job>("jr-os-jobs");
@@ -56,6 +78,11 @@ export default function QuotesPage() {
   const brandingStore = useCloudLocalCollection<DocumentBrandingSettings>(businessStorageKeys.branding, [defaultDocumentBranding]);
   const timeline = useCloudLocalCollection<JobTimelineEntry>("jr-os-job-timeline");
   const jobDocuments = useCloudLocalCollection<JobDocument>("jr-os-job-documents");
+  const latestConversion = useRef({ active: false, pricing: documents, jobs, timeline, jobDocuments, customers, builders, owner: conversionOwner });
+  useLayoutEffect(() => {
+    latestConversion.current = { active: identityState.isReady, pricing: documents, jobs, timeline, jobDocuments, customers, builders, owner: conversionOwner };
+    return () => { latestConversion.current = { ...latestConversion.current, active: false }; };
+  });
   const deepLinkHandled = useRef(false);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -96,6 +123,7 @@ export default function QuotesPage() {
         const customer = customers.items.find((item) => item.id === customerId);
         const builder = builders.items.find((item) => item.id === builderId);
         if (customer || builder) {
+          creationGeneration.current++; setCreationVersion(creationGeneration.current); creationAttempt.current = null;
           const savedPricing = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
           const savedVat = vatStore.items[0] ?? defaultVatSettings;
           const defaultPayment = paymentTermsTemplates.items.find((item) => item.active && item.isDefault)
@@ -162,6 +190,8 @@ export default function QuotesPage() {
   }, [documents.items]);
 
   function reset() {
+    creationGeneration.current++; setCreationVersion(creationGeneration.current); creationAttempt.current = null;
+    editingSource.current = null;
     setForm(blankForm);
     setItems([]);
     setLine(blankItem);
@@ -185,6 +215,8 @@ export default function QuotesPage() {
   }
 
   function startNewDocument() {
+    creationGeneration.current++; setCreationVersion(creationGeneration.current); creationAttempt.current = null;
+    editingSource.current = null;
     const savedPricing = quoteSettingsStore.items[0] ?? defaultQuotePricingSettings;
     const defaultPayment = paymentTermsTemplates.items.find((item) => item.active && item.isDefault)
       ?? paymentTermsTemplates.items.find((item) => item.active);
@@ -206,6 +238,14 @@ export default function QuotesPage() {
   }
 
   function startEdit(document: PricingDocument) {
+    const current = latestDocuments.current;
+    const matches = current.documents.items.filter((item) => item.id === document.id);
+    if (!current.active || !current.documents.isReady || current.documents.updateItem !== documents.updateItem
+      || !document.id?.trim() || matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(document)) {
+      setError("This document changed or is unavailable. Review its current saved record before editing."); return;
+    }
+    editingSource.current = { snapshot: JSON.stringify(document), updateItem: documents.updateItem };
+    creationGeneration.current++; setCreationVersion(creationGeneration.current); creationAttempt.current = null;
     setForm({ type: document.type, title: document.title, customerId: document.customerId ?? "", builderId: document.builderId ?? "", jobId: document.jobId ?? "", siteAddress: document.siteAddress ?? "", validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: String(document.vatRate), notes: document.notes, exclusions: document.exclusions ?? "", internalNotes: document.internalNotes ?? "", terms: document.terms, termsTemplateId: document.termsTemplateId ?? "", templateType: document.templateType });
     setItems(document.items);
     setPricing(document.pricingSettings ?? quoteSettingsStore.items[0] ?? defaultQuotePricingSettings);
@@ -438,34 +478,41 @@ export default function QuotesPage() {
   }
 
   function convertToJob(document: PricingDocument) {
-    if (document.jobId) { setPageMessage(`${document.number} is already linked to a job.`); return; }
-    if (document.status !== "Accepted") { setPageMessage("Mark the quote as Accepted before creating a live job."); return; }
-    const customer = customers.items.find((item) => item.id === document.customerId);
-    const builder = builders.items.find((item) => item.id === document.builderId);
-    const now = new Date().toISOString();
-    const jobId = makeId("job");
-    const converted = createJobFromAcceptedQuote({
-      document,
-      customerAddress: customer?.address,
-      builderAddress: builder?.address,
-      jobId,
-      now,
-      createId: makeId,
+    const current = latestConversion.current;
+    if (!current.active || current.owner !== conversionOwner || (current.owner.mode !== "local" && !current.owner.authorization)
+      || current.pricing.updateItem !== documents.updateItem || current.jobs.createItem !== jobs.createItem
+      || current.timeline.createItem !== timeline.createItem || current.jobDocuments.createItem !== jobDocuments.createItem) {
+      setPageMessage("The account or conversion records changed. Review the current quote before converting."); return;
+    }
+    const authorization = current.owner.authorization;
+    const result = convertAcceptedQuote(document, current, {
+      expectedPrivatePath: authorization ? record => privateObjectPath(authorization.organisationId, record.jobId, record.id, record.fileName) : undefined,
+      confirmPrivateBytes: current.owner.mode === "local" ? undefined : record => {
+        if (!authorization) throw new Error("The conversion attachment owner is unavailable.");
+        persistPrivateFileRecordBytes("jr-os-job-documents", record, authorization);
+      },
     });
-    jobs.setItems((current) => [converted.job, ...current]);
-    timeline.setItems((current) => [...converted.timelineEntries, ...current]);
-    if (converted.jobDocuments.length) jobDocuments.setItems((current) => [...converted.jobDocuments, ...current]);
-    documents.setItems((current) => current.map((item) => item.id === document.id ? { ...item, jobId, updatedAt: now } : item));
-    setPageMessage(`${document.number} converted into a live scheduled job with ${document.items.length} pricing lines and ${converted.jobDocuments.length} attachment${converted.jobDocuments.length === 1 ? "" : "s"}.`);
+    latestConversion.current = { ...current,
+      pricing: { ...current.pricing, ...result.collections.pricing }, jobs: { ...current.jobs, ...result.collections.jobs },
+      timeline: { ...current.timeline, ...result.collections.timeline }, jobDocuments: { ...current.jobDocuments, ...result.collections.jobDocuments },
+    };
+    setPageMessage(result.message);
   }
 
   function updateLine(id: string, changes: Partial<PricingLineItem>) {
-    setItems((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item));
+    setItems((current) => current.map((item) => item.id === id ? editQuoteDraftLine(item, changes) : item));
     setSuccess("");
   }
 
   function submit(event: FormEvent) {
     event.preventDefault();
+    if (!editingId) {
+      if (creationVersion !== creationGeneration.current) return;
+      const current = latestDocuments.current;
+      if (!current.active || !current.documents.isReady || current.documents.createItem !== documents.createItem) {
+        setError("The account or document collection changed or is loading. Review the current records before saving."); return;
+      }
+    }
     if (!form.title.trim()) { setError("Document title is required."); return; }
     if (!form.customerId && !form.builderId) { setError("Select a customer or builder."); return; }
     if (items.length === 0) { setError("Add at least one labour, material or other line item."); return; }
@@ -474,9 +521,18 @@ export default function QuotesPage() {
       || (item.unitCost !== undefined && (!Number.isFinite(item.unitCost) || item.unitCost < 0)))) {
       setError("Each pricing line needs a positive quantity and finite, non-negative cost and selling prices."); return;
     }
+    const edit = editingId ? editingSource.current : null;
+    if (editingId) {
+      const current = latestDocuments.current;
+      const matches = current.documents.items.filter((item) => item.id === editingId);
+      if (!current.active || !current.documents.isReady || !edit || edit.updateItem !== documents.updateItem
+        || edit.updateItem !== current.documents.updateItem || matches.length !== 1 || JSON.stringify(matches[0]) !== edit.snapshot) {
+        setError("The account or saved document changed, is unavailable or is ambiguous. Review its current record before updating."); return;
+      }
+    }
     const now = new Date().toISOString();
     const existing = documents.items.find((item) => item.id === editingId);
-    const nextNumber = existing?.number ?? nextPricingDocumentNumber(documents.items, form.type);
+    const nextNumber = existing?.number ?? nextPricingDocumentNumber(latestDocuments.current.documents.items, form.type);
     const payload = {
       type: form.type, customerId: form.customerId || undefined, builderId: form.builderId || undefined, jobId: form.jobId || undefined,
       title: form.title.trim(), siteAddress: form.siteAddress.trim() || undefined, validUntil: form.validUntil, vatEnabled: form.vatEnabled, vatRate: Number(form.vatRate || 0), items,
@@ -484,17 +540,52 @@ export default function QuotesPage() {
       profitability: { directCost: profitability.directCost, overheadCost: profitability.overheadCost, costPrice: profitability.costPrice, sellingPrice: profitability.sellingPrice, grossProfit: profitability.grossProfit, expectedProfit: profitability.expectedProfit, grossMargin: profitability.grossMargin, netMargin: profitability.netMargin, calculatedAt: now },
       attachments, notes: form.notes, exclusions: form.exclusions, internalNotes: form.internalNotes, fixedPriceWorkflow, terms: form.terms, termsTemplateId: form.termsTemplateId || undefined, paymentTerms, templateType: form.templateType, updatedAt: now,
     };
-    documents.setItems((current) => editingId ? current.map((document) => {
-      if (document.id !== editingId) return document;
-      const revision: QuoteRevision = {
-        id: makeId("revision"), revisionNumber: (document.revisions?.length ?? 0) + 1, savedAt: now,
-        title: document.title, siteAddress: document.siteAddress, validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: document.vatRate,
-        items: document.items, pricingSettings: document.pricingSettings, profitability: document.profitability,
-        attachments: document.attachments, notes: document.notes, exclusions: document.exclusions, internalNotes: document.internalNotes, fixedPriceWorkflow: document.fixedPriceWorkflow, terms: document.terms, termsTemplateId: document.termsTemplateId,
-        paymentTerms: document.paymentTerms, templateType: document.templateType,
-      };
-      return { ...document, ...payload, revisions: [...(document.revisions ?? []), revision] };
-    }) : [{ id: makeId("doc"), number: nextNumber, status: "Draft", ...payload, revisions: [], createdAt: now }, ...current]);
+    try {
+      if (editingId && edit) documents.updateItem(editingId, (document) => {
+        if (JSON.stringify(document) !== edit.snapshot) throw new Error("The saved document changed. Review its current record before updating.");
+        const revision: QuoteRevision = {
+          id: makeId("revision"), revisionNumber: (document.revisions?.length ?? 0) + 1, savedAt: now,
+          title: document.title, siteAddress: document.siteAddress, validUntil: document.validUntil, vatEnabled: document.vatEnabled, vatRate: document.vatRate,
+          items: document.items, pricingSettings: document.pricingSettings, profitability: document.profitability,
+          attachments: document.attachments, notes: document.notes, exclusions: document.exclusions, internalNotes: document.internalNotes, fixedPriceWorkflow: document.fixedPriceWorkflow, terms: document.terms, termsTemplateId: document.termsTemplateId,
+          paymentTerms: document.paymentTerms, templateType: document.templateType,
+        };
+        return { ...document, ...payload, revisions: [...(document.revisions ?? []), revision] };
+      });
+      else {
+        let attempt: NonNullable<typeof creationAttempt.current> = creationAttempt.current ?? { id: makeId("doc"), createItem: documents.createItem, busy: false, complete: false };
+        if (attempt.busy || attempt.complete) return;
+        if (attempt.createItem !== documents.createItem) throw new Error("The account or document collection changed. Start a new draft before saving.");
+        attempt = { ...attempt, busy: true };
+        creationAttempt.current = attempt;
+        try {
+          const inputSnapshot = quoteSaveSnapshot({ form, items, pricing, profitability, attachments, fixedPriceWorkflow, paymentTerms });
+          const matches = latestDocuments.current.documents.items.filter((document) => document.id === attempt.id);
+          if (matches.length) {
+            if (matches.length !== 1 || !attempt.candidate || inputSnapshot !== attempt.inputSnapshot
+              || quoteSaveSnapshot(matches[0]) !== quoteSaveSnapshot(attempt.candidate)) {
+              throw new Error("This draft identity belongs to a changed or duplicate saved document. Review saved records before continuing.");
+            }
+          } else {
+            if (!attempt.candidate || inputSnapshot !== attempt.inputSnapshot) {
+              attempt = { ...attempt, candidate: { id: attempt.id, number: nextNumber, status: "Draft", ...payload, revisions: [], createdAt: now }, inputSnapshot };
+            } else if (attempt.candidate.number !== nextNumber) {
+              attempt = { ...attempt, candidate: { ...attempt.candidate, number: nextNumber } };
+            }
+            creationAttempt.current = attempt;
+            documents.createItem(attempt.candidate!);
+          }
+          if (creationAttempt.current === attempt) {
+            attempt = { ...attempt, complete: true };
+            creationAttempt.current = attempt;
+          }
+        } finally {
+          if (creationAttempt.current === attempt) creationAttempt.current = { ...attempt, busy: false };
+        }
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "The document could not be saved. Review and retry."); return;
+    }
     reset();
   }
 

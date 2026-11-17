@@ -20,6 +20,13 @@ function harness({ search = "", invoices: initial = [], payments = [], ready: in
   let cursor = 0, invoices = initial, ready = initialReady, blurred = 0, promptEffect;
   const store = (items = []) => ({ items, isReady: ready, setItems() { throw new Error("Review navigation must not write related records"); } });
   const customers = [{ id: "c1", name: "Sample customer" }], builders = [{ id: "b1", companyName: "Example builder" }];
+  function updateItem(id, update) {
+    if (!ready) throw new Error("Invoice records are loading");
+    const index = invoices.findIndex(item => item.id === id); if (index < 0) throw new Error("Invoice unavailable");
+    const saved = update(invoices[index]);
+    if (saved !== invoices[index]) { invoices = invoices.map((item, i) => i === index ? saved : item); writes.push(invoices); }
+    return saved;
+  }
   function registerEffect(fn, deps, queue) {
     const i = cursor++; const previous = slots[i];
     if (!previous || deps.some((value, index) => !Object.is(value, previous.deps[index]))) {
@@ -38,7 +45,7 @@ function harness({ search = "", invoices: initial = [], payments = [], ready: in
     "lucide-react": {}, "../../components/ui/Button": { Button: "Button" }, "../../components/ui/Card": { Card: "Card" }, "../../components/ui/PageHeader": { PageHeader: "PageHeader" },
     "../../components/invoices/InvoicePreview": { InvoicePreview: "InvoicePreview" }, "../../components/ui/FormField": { InputField: "InputField", TextareaField: "TextareaField" }, "../../components/crm/EntityEmptyState": { EntityEmptyState: "Empty" },
     "../../lib/depositBilling-core.mjs": depositBilling, "../../lib/payments": billingPayments, "../../lib/businessSettings": settings, "../../lib/invoiceLink": links,
-    "../../lib/cloud/coreBusinessCollections": { useInvoicesCollection: () => ({ ...store(invoices), setItems(update) { invoices = update(invoices); writes.push(invoices); } }) },
+    "../../lib/cloud/coreBusinessCollections": { useInvoicesCollection: () => ({ ...store(invoices), updateItem, setItems(update) { invoices = update(invoices); writes.push(invoices); } }) },
     "../../lib/storage": { useCloudLocalCollection: (key, initial = []) => store(key === "jr-os-payments" ? payments : key === "jr-os-customers" ? customers : key === "jr-os-builders" ? builders : initial), makeId() { throw new Error("Review must not create an identity"); } },
     "../../lib/workflow": { nextInvoiceNumber() { throw new Error("Review must not create an invoice"); } },
   };

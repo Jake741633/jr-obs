@@ -1,21 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ClipboardCheck, Plus, Wrench } from "lucide-react";
+import { TimelineNoteRetries } from "../../../components/mobile/TimelineNoteRetries";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
+import { normalCloudPageSessionUserId } from "../../../lib/cloud/cloudPageIdentity-core.mjs";
 import { useJobsCollection, useJobTasksCollection, useJobTimelineCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { activeSyncAuthorizationMatches, getSyncQueue, type SyncState } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
 import { fieldJobTaskStatusTransitionAllowed, jobTaskTimelineEntry, transitionJobTask } from "../../../lib/jobTasks-core.mjs";
 import { prioritiseSnags, snagCategories, snagSummary } from "../../../lib/mobileSnagControl-core.mjs";
-import { fieldOperatorMemberId } from "../../../lib/siteDiaryIdentity-core.mjs";
+import { fieldJobAssignedToOperator, fieldOperatorMemberId } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { emptySnagSyncProjection, refreshSnagSyncProjection, registerSnagSyncAttempt, snagAttemptStates, snagTaskHasUnconfirmedSync, unpairedSnagTargetStates } from "../../../lib/snagSync-core.mjs";
 import { makeId } from "../../../lib/storage";
-import type { JobPriority, JobTask, JobTaskCategory, JobTimelineEntry } from "../../../lib/models";
+import { readSupabaseSession } from "../../../lib/supabase/client";
+import type { Job, JobPriority, JobTask, JobTaskCategory, JobTimelineEntry } from "../../../lib/models";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const blankForm = { jobId: "", title: "", description: "", category: "General" as JobTaskCategory, priority: "Normal" as JobPriority, assignedTo: "", dueDate: today(), notes: "" };
@@ -28,6 +31,7 @@ type SnagSyncProjection = {
   taskTargets: Record<string, { seen: boolean; state: SnagTargetState }>;
   timelineTargets: Record<string, { seen: boolean; state: SnagTargetState; taskId?: string }>;
 };
+type SnagDraft = { form: typeof blankForm; jobId: string; assignedTo?: string; id: string; saved: boolean };
 
 const snagTargetMessages: Record<SnagTargetState, string> = {
   AwaitingQueue: "waiting to enter the device sync queue",
@@ -48,7 +52,12 @@ export default function MobileSnagsPage() {
   const [form, setForm] = useState(blankForm);
   const [message, setMessage] = useState("");
   const [interactionScopeKey, setInteractionScopeKey] = useState("");
-  const [snagSyncProjection, setSnagSyncProjection] = useState<SnagSyncProjection>(() => emptySnagSyncProjection());
+  const [snagSyncProjection, renderSnagSyncProjection] = useState<SnagSyncProjection>(() => emptySnagSyncProjection());
+  const liveSnagSyncProjection = useRef(snagSyncProjection);
+  const setSnagSyncProjection = useCallback((next: SnagSyncProjection) => {
+    liveSnagSyncProjection.current = next;
+    renderSnagSyncProjection(next);
+  }, []);
 
   const activeJobs = useMemo(() => jobs.items.filter((job) => !["Complete", "Invoiced", "Paid", "Cancelled"].includes(job.status)), [jobs.items]);
   const visibleJobId = selectedJobId || form.jobId || activeJobs[0]?.id || "";
@@ -70,11 +79,27 @@ export default function MobileSnagsPage() {
     identityState.identity?.role ?? null,
     identityState.identity?.customerSourceId ?? null,
   ]);
+  const saveOwner = useMemo(() => ({ scopeKey: snagSyncScopeKey, mode: identityState.mode }), [snagSyncScopeKey, identityState.mode]);
+  const render = {};
+  const activeRender = useRef<object | null>(null);
+  const writes = useRef<{ owner: typeof saveOwner; draft: SnagDraft | null; notes: Map<string, JobTimelineEntry> } | null>(null);
+  const [unsavedNotes, setUnsavedNotes] = useState<{ owner: typeof saveOwner; notes: JobTimelineEntry[] } | null>(null);
+  const pendingNotes = unsavedNotes?.owner === saveOwner ? unsavedNotes.notes : [];
   const activeSnagSyncProjection = cloudFieldMode && snagSyncProjection.scopeKey === snagSyncScopeKey
     ? snagSyncProjection
     : emptySnagSyncProjection(snagSyncScopeKey) as SnagSyncProjection;
   const unpairedSnagTargets = cloudFieldMode ? unpairedSnagTargetStates(activeSnagSyncProjection) as { kind: "task" | "timeline"; sourceId: string; taskId?: string; state: SnagTargetState }[] : [];
   const unpairedSnagTerminal = unpairedSnagTargets.some(({ state }) => state === "Failed" || state === "Conflict");
+  const refreshWithQueue = useCallback((current: SnagSyncProjection) => {
+    const queue = getSyncQueue();
+    return refreshSnagSyncProjection({ current, scopeKey: snagSyncScopeKey, queue, online: navigator.onLine }) as SnagSyncProjection;
+  }, [snagSyncScopeKey]);
+
+  useLayoutEffect(() => {
+    if (writes.current?.owner !== saveOwner) writes.current = { owner: saveOwner, draft: null, notes: new Map() };
+    activeRender.current = render;
+    return () => { activeRender.current = null; };
+  });
 
   useEffect(() => {
     let active = true;
@@ -87,7 +112,7 @@ export default function MobileSnagsPage() {
       setInteractionScopeKey(snagSyncScopeKey);
     });
     return () => { active = false; };
-  }, [snagSyncScopeKey]);
+  }, [snagSyncScopeKey, setSnagSyncProjection]);
 
   useEffect(() => {
     const identity = identityState.identity;
@@ -102,13 +127,7 @@ export default function MobileSnagsPage() {
 
     function refreshSnagSyncStates() {
       if (!active || !activeSyncAuthorizationMatches(authorization)) return;
-      const queue = getSyncQueue();
-      setSnagSyncProjection((current) => refreshSnagSyncProjection({
-        current,
-        scopeKey: snagSyncScopeKey,
-        queue,
-        online: navigator.onLine,
-      }));
+      setSnagSyncProjection(refreshWithQueue(liveSnagSyncProjection.current));
     }
 
     window.addEventListener("jr-os-sync-status", refreshSnagSyncStates);
@@ -117,7 +136,7 @@ export default function MobileSnagsPage() {
       active = false;
       window.removeEventListener("jr-os-sync-status", refreshSnagSyncStates);
     };
-  }, [cloudFieldMode, identityState.identity, snagSyncScopeKey]);
+  }, [cloudFieldMode, identityState.identity, refreshWithQueue, setSnagSyncProjection]);
 
   const snagSyncReady = !cloudFieldMode || (activeSnagSyncProjection.initialized && snagSyncProjection.scopeKey === snagSyncScopeKey);
   const interactionScopeReady = interactionScopeKey === snagSyncScopeKey;
@@ -144,23 +163,108 @@ export default function MobileSnagsPage() {
     </div>;
   }
 
+  function currentWrite() {
+    if (!ready || activeRender.current !== render) return null;
+    if (identityState.mode === "local") return writes.current;
+    const session = readSupabaseSession();
+    const authorization = identityState.identity;
+    if (!authorization) return identityState.mode === "migration" && !session ? writes.current : null;
+    if (normalCloudPageSessionUserId(session) !== authorization.userId || !activeSyncAuthorizationMatches(authorization)) return null;
+    return writes.current;
+  }
+
+  function uniqueJob(jobId: string) {
+    const matching = jobs.items.filter(job => job.id === jobId);
+    return matching.length === 1 ? matching[0] : undefined;
+  }
+
+  function jobAssignedToOperator(job: Job) {
+    return fieldJobAssignedToOperator({ job, operatorMemberId: operatorMember?.id });
+  }
+
+  function saveTimelineNote(task: JobTask, note: JobTimelineEntry, action: string, before: SnagSyncProjection | null) {
+    const write = currentWrite();
+    if (!write) return null;
+    let noteSaved = true;
+    try {
+      timeline.createItem(note);
+    } catch {
+      noteSaved = false;
+      write.notes.set(note.id, note);
+      setUnsavedNotes({ owner: saveOwner, notes: [...write.notes.values()] });
+    }
+    if (before) {
+      // The new task write can already have refreshed the queue. Register the pair
+      // against the projection that approved the action, then read both new targets.
+      const attempt = registerSnagSyncAttempt(before, {
+        scopeKey: snagSyncScopeKey, taskId: task.id, timelineId: note.id, jobId: task.jobId, title: task.title, action,
+      });
+      setSnagSyncProjection(refreshWithQueue(attempt));
+    }
+    return noteSaved;
+  }
+
+  function retryTimelineNote(id: string) {
+    const write = currentWrite();
+    const note = write?.notes.get(id);
+    if (!write || !note) return;
+    const matching = tasks.items.filter(task => task.id === note.sourceId);
+    const task = matching.length === 1 ? matching[0] : undefined;
+    const job = uniqueJob(note.jobId);
+    if (!task || task.type !== "Snag" || task.jobId !== note.jobId || !job) {
+      setMessage("The original snag or job could not be verified. Review the saved records before retrying the note.");
+      return;
+    }
+    if (cloudFieldMode && !jobAssignedToOperator(job)) {
+      setMessage("The original job is no longer assigned to your active team identity. Refresh before retrying the note.");
+      return;
+    }
+    if (cloudFieldMode && (!operatorMember || task.assignedTo !== operatorMember.id)) {
+      setMessage("The original snag is no longer assigned to your active team identity. Refresh before retrying the note.");
+      return;
+    }
+    try {
+      timeline.createItem(note);
+    } catch {
+      setMessage("The timeline note save could not be confirmed. The snag change is still saved on this device.");
+      return;
+    }
+    write.notes.delete(id);
+    setUnsavedNotes({ owner: saveOwner, notes: [...write.notes.values()] });
+    if (cloudFieldMode) setSnagSyncProjection(refreshWithQueue(liveSnagSyncProjection.current));
+    setMessage("Timeline note saved on this device.");
+  }
+
   function createSnag(event: FormEvent) {
     event.preventDefault();
+    const write = currentWrite();
+    if (!write) return;
     const jobId = form.jobId || visibleJobId;
     if (!jobId) return setMessage("Choose a job before creating a snag.");
-    if (cloudFieldMode && !activeJobs.some((job) => job.id === jobId)) return setMessage("The selected active job is no longer available. Refresh the snag list before creating a snag.");
     if (!form.title.trim()) return setMessage("Enter a short snag title.");
     if (cloudFieldMode && !operatorMember) return setMessage("Your active team identity could not be resolved. Refresh your account before creating a snag.");
+    const job = uniqueJob(jobId);
+    if (!job || (cloudFieldMode && (!activeJobs.includes(job) || !jobAssignedToOperator(job)))) {
+      return setMessage("The selected job is unavailable or no longer assigned to your active team identity. Refresh the snag list before creating a snag.");
+    }
+    const assignedTo = cloudFieldMode ? operatorMember?.id : form.assignedTo || undefined;
+    let draft = write.draft;
+    if (draft?.form !== form || draft.jobId !== jobId || draft.assignedTo !== assignedTo) {
+      draft = { form, jobId, assignedTo, id: makeId("snag"), saved: false };
+      write.draft = draft;
+    }
+    if (draft.saved) return;
+    const before = cloudFieldMode ? refreshWithQueue(liveSnagSyncProjection.current) : null;
     const now = new Date().toISOString();
     const snag: JobTask = {
-      id: makeId("snag"),
+      id: draft.id,
       jobId,
       type: "Snag",
       title: form.title.trim(),
       description: form.description.trim(),
       category: form.category,
       priority: form.priority,
-      assignedTo: cloudFieldMode ? operatorMember?.id : form.assignedTo || undefined,
+      assignedTo,
       dueDate: form.dueDate,
       status: "Open",
       photos: [],
@@ -168,6 +272,13 @@ export default function MobileSnagsPage() {
       createdAt: now,
       updatedAt: now,
     };
+    try {
+      tasks.createItem(snag);
+    } catch {
+      setMessage("Snag save could not be confirmed. Your draft is still here. Try saving again.");
+      return;
+    }
+    draft.saved = true;
     const completedBy = cloudFieldMode ? operatorMember?.name || "" : "Mobile Snag Control";
     const timelineEntry: JobTimelineEntry = {
       id: makeId("timeline"),
@@ -181,35 +292,29 @@ export default function MobileSnagsPage() {
       completedAt: now,
       createdAt: now,
     };
-    if (cloudFieldMode) {
-      setSnagSyncProjection((current) => registerSnagSyncAttempt(current, {
-        scopeKey: snagSyncScopeKey,
-        taskId: snag.id,
-        timelineId: timelineEntry.id,
-        jobId,
-        title: snag.title,
-        action: "created",
-      }));
-    }
-    tasks.setItems((current) => [snag, ...current]);
-    timeline.setItems((current) => [timelineEntry, ...current]);
+    const noteSaved = saveTimelineNote(snag, timelineEntry, "created", before);
+    if (noteSaved === null) return;
     setSelectedJobId(jobId);
     setForm({ ...blankForm, jobId, dueDate: today() });
-    setMessage(cloudFieldMode
+    const success = cloudFieldMode
       ? `${snag.title} captured on this device; its task record and separate job timeline note are awaiting cloud confirmation.`
-      : `${snag.title} added to the job snag list.`);
+      : `${snag.title} added to the job snag list.`;
+    setMessage(noteSaved ? success : "");
   }
 
   function changeStatus(task: JobTask, nextStatus: "In progress" | "Completed" | "Open") {
+    if (!currentWrite()) return;
     if (cloudFieldMode && (!operatorMember || task.assignedTo !== operatorMember.id)) {
       setMessage("Only snags assigned to your active field account can be updated here.");
       return;
     }
-    if (cloudFieldMode && !activeJobs.some((job) => job.id === task.jobId)) {
+    const job = uniqueJob(task.jobId);
+    if (!job || (cloudFieldMode && (!activeJobs.includes(job) || !jobAssignedToOperator(job)))) {
       setMessage("The assigned active job is no longer available. Refresh the snag list before changing its status.");
       return;
     }
-    if (cloudFieldMode && snagTaskHasUnconfirmedSync(activeSnagSyncProjection, task.id)) {
+    const before = cloudFieldMode ? refreshWithQueue(liveSnagSyncProjection.current) : null;
+    if (before && snagTaskHasUnconfirmedSync(before, task.id)) {
       setMessage("This snag already has a task or timeline change awaiting cloud confirmation. Resolve pending changes before changing it again.");
       return;
     }
@@ -218,24 +323,31 @@ export default function MobileSnagsPage() {
       return;
     }
     const now = new Date().toISOString();
-    const updated = transitionJobTask({ task, nextStatus, now });
-    const completedBy = cloudFieldMode ? operatorMember?.name || "" : "Mobile Snag Control";
-    const timelineEntry = jobTaskTimelineEntry({ task, fromStatus: task.status, toStatus: nextStatus, timelineId: makeId("timeline"), completedBy, now }) as JobTimelineEntry;
-    if (cloudFieldMode) {
-      setSnagSyncProjection((current) => registerSnagSyncAttempt(current, {
-        scopeKey: snagSyncScopeKey,
-        taskId: task.id,
-        timelineId: timelineEntry.id,
-        jobId: task.jobId,
-        title: task.title,
-        action: `marked ${nextStatus.toLowerCase()}`,
-      }));
+    let changed = false;
+    let updated: JobTask;
+    try {
+      updated = tasks.updateItem(task.id, current => {
+        if (current.type !== "Snag" || current.jobId !== task.jobId || (cloudFieldMode && current.assignedTo !== operatorMember?.id)) {
+          throw new Error("The current snag or assignment has changed.");
+        }
+        if (current.status === nextStatus) return current;
+        if (current.status !== task.status) throw new Error("The snag status has changed.");
+        changed = true;
+        return transitionJobTask({ task: current, nextStatus, now });
+      });
+    } catch {
+      setMessage("Snag status save could not be confirmed. Review the current snag and try again.");
+      return;
     }
-    tasks.setItems((current) => current.map((item) => item.id === task.id ? updated : item));
-    timeline.setItems((current) => [timelineEntry, ...current]);
-    setMessage(cloudFieldMode
-      ? `${task.title} status captured on this device; its task record and separate job timeline note are awaiting cloud confirmation.`
-      : `${task.title} marked ${nextStatus.toLowerCase()}.`);
+    if (!changed) return;
+    const completedBy = cloudFieldMode ? operatorMember?.name || "" : "Mobile Snag Control";
+    const timelineEntry = jobTaskTimelineEntry({ task: updated, fromStatus: task.status, toStatus: nextStatus, timelineId: makeId("timeline"), completedBy, now }) as JobTimelineEntry;
+    const noteSaved = saveTimelineNote(updated, timelineEntry, `marked ${nextStatus.toLowerCase()}`, before);
+    if (noteSaved === null) return;
+    const success = cloudFieldMode
+      ? `${updated.title} status captured on this device; its task record and separate job timeline note are awaiting cloud confirmation.`
+      : `${updated.title} marked ${nextStatus.toLowerCase()}.`;
+    setMessage(noteSaved ? success : "");
   }
 
   return <div className="space-y-5 pb-24 sm:space-y-6 sm:pb-0">
@@ -243,7 +355,8 @@ export default function MobileSnagsPage() {
       ? "Capture site defects and status changes on this device, then follow the task record and separate timeline note through exact cloud confirmation."
       : "Capture site defects, track responsibility and close snags using the existing local job task workflow."} />
 
-    {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    {message ? <div role="status" className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    <TimelineNoteRetries notes={pendingNotes} onRetry={retryTimelineNote} description="The snag change is saved on this device." />
     {cloudFieldMode ? Object.keys(activeSnagSyncProjection.attempts).reverse().map(snagSyncNotice) : null}
     {cloudFieldMode && unpairedSnagTargets.length ? <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${unpairedSnagTerminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
       <p className="font-semibold">One or more retained snag sync targets are not cloud-confirmed.</p>

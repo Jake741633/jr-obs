@@ -7,6 +7,7 @@ import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { InputField, TextareaField } from "../../../components/ui/FormField";
 import { PageHeader } from "../../../components/ui/PageHeader";
+import { TimelineNoteRetries } from "../../../components/mobile/TimelineNoteRetries";
 import { useJobsCollection, useJobTimelineCollection, useSiteDiariesCollection, useTeamCollection } from "../../../lib/cloud/coreBusinessCollections";
 import { activeSyncAuthorizationMatches, getSyncQueue, type SyncState } from "../../../lib/cloud/repository";
 import { useCloudIdentity } from "../../../lib/cloud/useCloudIdentity";
@@ -15,6 +16,7 @@ import { buildDailyProgressSummary, dailyProgressWarnings } from "../../../lib/s
 import { fieldJobAssignedToOperator, fieldOperatorMemberId, siteDiaryOperatorName } from "../../../lib/siteDiaryIdentity-core.mjs";
 import { emptySiteDiarySyncProjection, refreshSiteDiarySyncProjection, registerSiteDiarySyncAttempt, siteDiaryAttemptStates, unpairedSiteDiaryTargetStates } from "../../../lib/siteDiarySync-core.mjs";
 import { makeId } from "../../../lib/storage";
+import { useSiteDiarySave } from "../../../lib/useSiteDiarySave";
 import type { JobTimelineEntry, SiteDiaryEntry } from "../../../lib/models";
 
 type DailyProgressEntry = SiteDiaryEntry & {
@@ -160,6 +162,10 @@ export default function MobileSiteDiaryPage() {
   const siteDiarySyncReady = !cloudFieldMode || (activeSiteDiarySyncProjection.initialized && siteDiarySyncProjection.scopeKey === siteDiarySyncScopeKey);
   const interactionScopeReady = interactionScopeKey === siteDiarySyncScopeKey;
   const ready = [jobs, diaries, timeline, team].every((collection) => collection.isReady) && identityState.isReady && siteDiarySyncReady && interactionScopeReady;
+  const diarySave = useSiteDiarySave({
+    scopeKey: siteDiarySyncScopeKey, mode: identityState.mode, authorization: identityState.identity,
+    ready, form, jobs: jobs.items, operatorMemberId, diaries: diaries, timeline, setMessage,
+  });
 
   function toggleStaff(memberId: string) {
     if (serverBoundLabour) return;
@@ -193,70 +199,81 @@ export default function MobileSiteDiaryPage() {
 
   function saveDiary(event: FormEvent) {
     event.preventDefault();
+    if (!diarySave.canSave()) return;
     if (!form.jobId) return setMessage("Choose a job before saving the daily progress record.");
-    const selectedJob = jobsById.get(form.jobId);
+    const matchingJobs = jobs.items.filter((job) => job.id === form.jobId);
+    const selectedJob = matchingJobs.length === 1 ? matchingJobs[0] : undefined;
     if (!selectedJob || isJobInactiveStatus(selectedJob.status)) return setMessage("The selected active job is no longer available. Refresh the diary before saving.");
     if (!operatorName || (cloudFieldMode && !operatorMemberId)) return setMessage("Your active team identity could not be resolved. Refresh your account before saving.");
     if (cloudFieldMode && !fieldJobAssignedToOperator({ job: selectedJob, operatorMemberId })) return setMessage(fieldJobAssignmentMessage);
     if (!form.workCompleted.trim()) return setMessage("Record the work completed before saving.");
-
-    const now = new Date().toISOString();
-    const base: DailyProgressEntry = {
-      id: makeId("diary"),
-      jobId: form.jobId,
-      workDate: form.workDate || today(),
-      startedAt: form.startedAt,
-      finishedAt: form.finishedAt,
-      breakMinutes: Math.max(0, Number(form.breakMinutes || 0)),
-      completedBy: operatorName,
-      staffPresent: serverBoundLabour ? [] : form.staffPresent,
-      otherStaffPresent: form.otherStaffPresent.trim(),
-      workCompleted: form.workCompleted.trim(),
-      delays: form.delays.trim(),
-      builderInstructions: form.builderInstructions.trim(),
-      customerRequests: form.customerInstructions.trim(),
-      customerInstructions: form.customerInstructions.trim(),
-      materialsUsed: form.materialsUsed.trim(),
-      materialsRequired: form.materialsRequired.trim(),
-      voiceNotes: form.voiceNoteTranscript.trim(),
-      voiceNoteTranscript: form.voiceNoteTranscript.trim(),
-      weather: form.weather.trim(),
-      issuesAndRisks: form.issuesAndRisks.trim(),
-      followUpActions: form.followUpActions.trim(),
-      plantAndEquipment: form.plantAndEquipment.trim(),
-      deliveriesReceived: form.deliveriesReceived.trim(),
-      toolboxTalks: form.toolboxTalks.trim(),
-      createdAt: now,
-      updatedAt: now,
-    };
-    const entry: DailyProgressEntry = cloudFieldMode ? base : {
-      ...base,
-      engineerSignatureName: form.engineerSignatureName.trim(),
-      engineerSignedAt: form.engineerSignatureName.trim() ? now : "",
-      customerSignOffName: form.customerSignOffName.trim(),
-      customerSignOffNotes: form.customerSignOffNotes.trim(),
-      customerSignedAt: form.customerSignOffName.trim() ? now : "",
-      dailySummary: buildDailyProgressSummary(base),
-    };
-    const timelineEntry = siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: entry.completedBy, now }) as JobTimelineEntry;
+    const saved = diarySave.saveDraft(() => {
+      const now = new Date().toISOString();
+      const base: DailyProgressEntry = {
+        id: makeId("diary"),
+        jobId: form.jobId,
+        workDate: form.workDate || today(),
+        startedAt: form.startedAt,
+        finishedAt: form.finishedAt,
+        breakMinutes: Math.max(0, Number(form.breakMinutes || 0)),
+        completedBy: operatorName,
+        staffPresent: serverBoundLabour ? [] : form.staffPresent,
+        otherStaffPresent: form.otherStaffPresent.trim(),
+        workCompleted: form.workCompleted.trim(),
+        delays: form.delays.trim(),
+        builderInstructions: form.builderInstructions.trim(),
+        customerRequests: form.customerInstructions.trim(),
+        customerInstructions: form.customerInstructions.trim(),
+        materialsUsed: form.materialsUsed.trim(),
+        materialsRequired: form.materialsRequired.trim(),
+        voiceNotes: form.voiceNoteTranscript.trim(),
+        voiceNoteTranscript: form.voiceNoteTranscript.trim(),
+        weather: form.weather.trim(),
+        issuesAndRisks: form.issuesAndRisks.trim(),
+        followUpActions: form.followUpActions.trim(),
+        plantAndEquipment: form.plantAndEquipment.trim(),
+        deliveriesReceived: form.deliveriesReceived.trim(),
+        toolboxTalks: form.toolboxTalks.trim(),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const entry: DailyProgressEntry = cloudFieldMode ? base : {
+        ...base,
+        engineerSignatureName: form.engineerSignatureName.trim(),
+        engineerSignedAt: form.engineerSignatureName.trim() ? now : "",
+        customerSignOffName: form.customerSignOffName.trim(),
+        customerSignOffNotes: form.customerSignOffNotes.trim(),
+        customerSignedAt: form.customerSignOffName.trim() ? now : "",
+        dailySummary: buildDailyProgressSummary(base),
+      };
+      const timelineEntry = siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: entry.completedBy, now }) as JobTimelineEntry;
+      return { entry, timelineEntry };
+    });
+    if (!saved) return;
+    const { entry, timelineEntry, timelineSaved } = saved;
 
     if (cloudFieldMode) {
-      setSiteDiarySyncProjection((current) => registerSiteDiarySyncAttempt(current, {
+      const queue = getSyncQueue();
+      setSiteDiarySyncProjection((current) => refreshSiteDiarySyncProjection({
+        current: registerSiteDiarySyncAttempt(current, {
+          scopeKey: siteDiarySyncScopeKey,
+          diaryId: entry.id,
+          timelineId: timelineEntry.id,
+          jobId: entry.jobId,
+          workDate: entry.workDate,
+        }),
         scopeKey: siteDiarySyncScopeKey,
-        diaryId: entry.id,
-        timelineId: timelineEntry.id,
-        jobId: entry.jobId,
-        workDate: entry.workDate,
+        queue,
+        online: navigator.onLine,
       }));
     }
-    diaries.setItems((current) => [entry, ...current]);
-    timeline.setItems((current) => [timelineEntry, ...current]);
     const warningCount = dailyProgressWarnings(entry, { requireEngineerSignature: !cloudFieldMode }).length;
     const warningSuffix = warningCount ? ` with ${warningCount} action${warningCount === 1 ? "" : "s"} to review` : "";
-    setMessage(cloudFieldMode
+    const successMessage = cloudFieldMode
       ? `Daily progress captured on this device; its diary record and separate job timeline note are awaiting cloud confirmation${warningSuffix}.`
-      : `Daily progress saved and added to the job timeline${warningSuffix}.`);
-    setForm({ ...blankForm, jobId: form.jobId, workDate: today() });
+      : `Daily progress saved and added to the job timeline${warningSuffix}.`;
+    setMessage(timelineSaved ? successMessage : "");
+    setForm({ ...blankForm, jobId: entry.jobId, workDate: today() });
   }
 
   if (!ready) return <Card>Loading mobile site diary…</Card>;
@@ -267,6 +284,7 @@ export default function MobileSiteDiaryPage() {
       : "Capture labour, progress, deliveries, plant, safety actions and sign-off in the local diary record."} />
 
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-100">{message}</div> : null}
+    <TimelineNoteRetries notes={diarySave.pendingNotes} onRetry={diarySave.retryNote} description="The diary is saved on this device." />
     {cloudFieldMode ? Object.keys(activeSiteDiarySyncProjection.attempts).reverse().map(siteDiarySyncNotice) : null}
     {cloudFieldMode && unpairedSiteDiaryTargets.length ? <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${unpairedSiteDiaryTerminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
       <p className="font-semibold">One or more retained site diary sync targets are not cloud-confirmed.</p>

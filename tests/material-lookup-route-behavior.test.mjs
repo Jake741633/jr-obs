@@ -13,7 +13,7 @@ function harness({ metadata, role = "office", active = true, supplierResponse } 
   const calls = [], timers = new Map();
   const mod = { exports: {} };
   vm.runInNewContext(compiled, {
-    module: mod, exports: mod.exports, URL, AbortController,
+    module: mod, exports: mod.exports, URL, AbortController, TextDecoder,
     process: { env: { NODE_ENV: "production", NEXT_PUBLIC_SUPABASE_URL: "https://auth.example.test", NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-key" } },
     require(name) {
       assert.equal(name, "next/server");

@@ -55,6 +55,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
   useEffect(() => {
     if (!identityReady) return;
     let active = true;
+    const controller = new AbortController();
     suppressSyncRef.current = true;
 
     async function loadCollection() {
@@ -76,7 +77,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
           cacheRole,
           cacheCustomerSourceId,
         });
-        loaded = await repository.list() as T[];
+        loaded = await repository.list(controller.signal) as T[];
         loadedCreators = repository.recordCreators();
       }
 
@@ -93,6 +94,7 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     void loadCollection();
     return () => {
       active = false;
+      controller.abort();
     };
   }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, identityReady, key, mode, organisationId, target, userId]);
 
@@ -176,8 +178,6 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     return () => window.removeEventListener("jr-os-cloud-cache-reconciled", reconcileCloudCache);
   }, [activeStorageKey]);
 
-  const { items: displayItems } = usePrivateFileCollectionBridge({ storageKey: key, items, setItems, isReady, identity, mode });
-
   const remove = useCallback((predicate: (item: T) => boolean) => {
     setItems((current) => current.filter((item) => !predicate(item)));
   }, []);
@@ -222,6 +222,9 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     const current = previousRef.current;
     const index = current.findIndex((record) => recordId(record) === id);
     if (!id || index < 0) throw new Error("The collection record is no longer available. Reload and review it before retrying.");
+    if (current.some((record, recordIndex) => recordIndex !== index && recordId(record) === id)) {
+      throw new Error("The collection record has an ambiguous id. Review the saved records before retrying.");
+    }
     const item = update(current[index]);
     if (recordId(item) !== id) throw new Error("A record update must retain its existing id.");
     if (item === current[index]) return item;
@@ -244,6 +247,9 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     const current = previousRef.current;
     const item = current.find((record) => recordId(record) === id);
     if (!id || !item) throw new Error("The collection record is no longer available. Reload and review it before retrying.");
+    if (current.filter((record) => recordId(record) === id).length !== 1) {
+      throw new Error("The collection record has an ambiguous id. Review the saved records before retrying.");
+    }
     validate?.(item);
     const next = current.filter((record) => recordId(record) !== id);
     if (target && organisationId && userId) {
@@ -257,6 +263,8 @@ export function useCloudLocalCollection<T>(key: string, initialValue: T[] = []) 
     setItems(next);
     return item;
   }, [activeStorageKey, cacheCustomerSourceId, cacheRole, cacheUserId, isReady, key, networkOnly, organisationId, target, userId]);
+
+  const { items: displayItems } = usePrivateFileCollectionBridge({ storageKey: key, items, updateItem, isReady, identity, mode });
 
   return { items: displayItems, setItems, createItem, updateItem, removeItem, remove, isReady, createdBySourceId };
 }

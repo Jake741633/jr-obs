@@ -84,7 +84,7 @@ test("snag changes wait for both exact targets and reset a later same-task attem
   assert.equal(projection.timelineTargets["timeline-1"], undefined);
 });
 
-test("an unconfirmed same-task attempt cannot be replaced by another optimistic transition", () => {
+test("an unconfirmed same-task attempt cannot be replaced by another transition", () => {
   const projection = registerSnagSyncAttempt(emptySnagSyncProjection(), {
     scopeKey: "scope-a",
     taskId: "task-1",
@@ -129,20 +129,15 @@ test("retained snag targets ignore unrelated tasks and map exact snag notes back
   assert.deepEqual(replacement.timelineTargets, {});
 });
 
-test("snag creation and status changes register exact pairs before optimistic surfaces", () => {
+test("snag creation and status changes register exact pairs after confirming the task write", () => {
+  const saveNote = page.slice(page.indexOf("function saveTimelineNote"), page.indexOf("function retryTimelineNote"));
   const create = page.slice(page.indexOf("function createSnag"), page.indexOf("\n\n  function changeStatus"));
   const change = page.slice(page.indexOf("function changeStatus"), page.indexOf("\n\n  return <div"));
 
-  for (const handler of [create, change]) {
-    const registration = handler.indexOf("registerSnagSyncAttempt");
-    assert.ok(registration >= 0);
-    assert.ok(registration < handler.indexOf("tasks.setItems"));
-    assert.ok(registration < handler.indexOf("timeline.setItems"));
-    assert.ok(registration < handler.indexOf("setMessage(cloudFieldMode"));
-  }
-  assert.ok(create.indexOf("registerSnagSyncAttempt") < create.indexOf("setForm({ ...blankForm"));
-  assert.match(create, /taskId: snag\.id,[\s\S]*timelineId: timelineEntry\.id,[\s\S]*jobId,[\s\S]*title: snag\.title/);
-  assert.match(change, /taskId: task\.id,[\s\S]*timelineId: timelineEntry\.id,[\s\S]*jobId: task\.jobId,[\s\S]*title: task\.title/);
+  assert.match(create, /tasks\.createItem\(snag\)[\s\S]*saveTimelineNote\(snag, timelineEntry, "created", before\)[\s\S]*setForm\(\{ \.\.\.blankForm/);
+  assert.match(change, /tasks\.updateItem\(task\.id,[\s\S]*saveTimelineNote\(updated, timelineEntry,/);
+  assert.match(saveNote, /timeline\.createItem\(note\)[\s\S]*registerSnagSyncAttempt\(before,[\s\S]*taskId: task\.id, timelineId: note\.id, jobId: task\.jobId, title: task\.title/);
+  assert.match(saveNote, /setSnagSyncProjection\(refreshWithQueue\(attempt\)\)/);
 });
 
 test("snag sync truth is exact-event and full-identity scoped", () => {
@@ -153,7 +148,7 @@ test("snag sync truth is exact-event and full-identity scoped", () => {
   assert.doesNotMatch(page, /jr-os-cloud-cache-reconciled/);
   assert.match(page, /snagSyncScopeKey = JSON\.stringify\(\[[\s\S]*organisationId[\s\S]*userId[\s\S]*role[\s\S]*customerSourceId/);
   assert.match(page, /snagSyncReady = !cloudFieldMode \|\| \(activeSnagSyncProjection\.initialized/);
-  assert.match(page, /setSnagSyncProjection\(emptySnagSyncProjection\(snagSyncScopeKey\)\)[\s\S]*setSelectedJobId\(""\)[\s\S]*setForm\(\{ \.\.\.blankForm, dueDate: today\(\) \}\)[\s\S]*setMessage\(""\)[\s\S]*setInteractionScopeKey\(snagSyncScopeKey\)[\s\S]*\[snagSyncScopeKey\]/);
+  assert.match(page, /setSnagSyncProjection\(emptySnagSyncProjection\(snagSyncScopeKey\)\)[\s\S]*setSelectedJobId\(""\)[\s\S]*setForm\(\{ \.\.\.blankForm, dueDate: today\(\) \}\)[\s\S]*setMessage\(""\)[\s\S]*setInteractionScopeKey\(snagSyncScopeKey\)[\s\S]*\[snagSyncScopeKey, setSnagSyncProjection\]/);
   assert.match(page, /interactionScopeReady = interactionScopeKey === snagSyncScopeKey/);
 });
 
@@ -163,13 +158,14 @@ test("field snag copy stays unconfirmed and blocks overlap until both targets cl
   assert.match(page, /The combined snag change is not fully cloud-confirmed/);
   assert.match(page, /retained snag sync targets are not cloud-confirmed/i);
   assert.match(page, /href="\/cloud"/);
-  assert.match(page, /snagTaskHasUnconfirmedSync\(activeSnagSyncProjection, task\.id\)/);
+  assert.match(page, /snagTaskHasUnconfirmedSync\(before, task\.id\)/);
   assert.match(page, /snagTaskHasUnconfirmedSync\(activeSnagSyncProjection, snag\.id\)/);
   assert.match(page, /disabled=\{syncBlocked\}/);
   assert.match(page, /disabled=\{syncBlocked \|\| \(cloudFieldMode && !fieldJobTaskStatusTransitionAllowed\(snag\.status, "Open"\)\)\}/);
   assert.match(page, /disabled=\{syncBlocked \|\| snag\.status === "Completed" \|\| snag\.status === "Customer confirmed"\}/);
-  assert.match(page, /activeJobs\.some\(\(job\) => job\.id === jobId\)/);
-  assert.match(page, /activeJobs\.some\(\(job\) => job\.id === task\.jobId\)/);
+  assert.match(page, /uniqueJob\(jobId\)/);
+  assert.match(page, /uniqueJob\(task\.jobId\)/);
+  assert.match(page, /cloudFieldMode && \(!activeJobs\.includes\(job\) \|\| !jobAssignedToOperator\(job\)\)/);
   assert.match(page, /: `\$\{snag\.title\} added to the job snag list\.`/);
-  assert.match(page, /: `\$\{task\.title\} marked \$\{nextStatus\.toLowerCase\(\)\}\.`/);
+  assert.match(page, /: `\$\{updated\.title\} marked \$\{nextStatus\.toLowerCase\(\)\}\.`/);
 });

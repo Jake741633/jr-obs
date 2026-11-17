@@ -16,6 +16,7 @@ import type {
   RecordAttachment,
 } from "./models";
 import { bankDetailsText, paymentTermsFromTemplate, paymentTermsText } from "./businessSettings";
+import { materialSupplierReferences } from "./materialSuppliers";
 import { isAcceptedVariationStatus, variationInvoiceLine } from "./jobManagement-core.mjs";
 
 import { finalInvoiceItems, linkedBillingInvoices, payablePence } from "./depositBilling-core.mjs";
@@ -359,6 +360,27 @@ export function createInvoiceFromCompletedJob({
   return { invoice, timelineEntry };
 }
 
+/** Saved product identities win over names; a changed catalogue must not mix wholesalers. */
+export function purchaseMaterialReference(line: PricingLineItem, materials: Material[]) {
+  const matches = line.materialId
+    ? materials.filter((material) => material.id === line.materialId)
+    : materials.filter((material) => material.name.trim().toLowerCase() === line.description.trim().toLowerCase());
+  const material = matches[0];
+  if (matches.length > 1 || (material && (!material.id?.trim() || materials.filter((item) => item.id === material.id).length !== 1))) {
+    throw new Error("Review ambiguous material identities or duplicate catalogue names before creating a purchase list.");
+  }
+  const supplier = line.supplier?.trim() || "", stockCode = line.stockCode?.trim() || "";
+  const reference = material && materialSupplierReferences(material).find((item) =>
+    (!supplier || item.supplier.toLowerCase() === supplier.toLowerCase())
+    && (!stockCode || item.stockCode.toLowerCase() === stockCode.toLowerCase()));
+  return {
+    materialId: line.materialId || material?.id,
+    supplier: supplier || reference?.supplier || "",
+    stockCode: stockCode || reference?.stockCode || "",
+    supplierUrl: reference?.supplierUrl || undefined,
+  };
+}
+
 export function createPurchaseListFromPricingDocument({
   document,
   materials,
@@ -370,14 +392,13 @@ export function createPurchaseListFromPricingDocument({
   const items: PurchaseListItem[] = document.items
     .filter((item) => item.category === "Materials")
     .map((line) => {
-      const material = materials.find((item) => item.id === line.materialId);
+      const reference = purchaseMaterialReference(line, materials);
+      const material = materials.find((item) => item.id === reference.materialId);
       return {
         id: createId("purchase-item"),
-        materialId: line.materialId,
+        ...reference,
         description: line.description,
-        supplier: line.supplier || material?.supplier || "Unassigned supplier",
-        stockCode: line.stockCode || material?.stockCode || "",
-        supplierUrl: material?.supplierUrl,
+        supplier: reference.supplier || "Unassigned supplier",
         quantity: line.quantity,
         unitCost: line.unitCost ?? material?.tradeCost ?? line.unitPrice,
         status: "Needed" as PurchaseItemStatus,

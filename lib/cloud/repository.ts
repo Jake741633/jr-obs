@@ -213,8 +213,8 @@ export function queueChange<T>(item: Omit<SyncQueueItem<T>, "id" | "mutationId" 
   }
 }
 
-export async function revalidateSyncAuthorization(expected: SyncAuthorizationContext) {
-  if (!activeSyncAuthorizationMatches(expected)) return false;
+export async function revalidateSyncAuthorization(expected: SyncAuthorizationContext, signal?: AbortSignal) {
+  if (signal?.aborted || !activeSyncAuthorizationMatches(expected)) return false;
   const sessionUserId = readSupabaseSession()?.user?.id;
   if (sessionUserId !== expected.userId) {
     setActiveSyncIdentity(null, null, null, null);
@@ -222,7 +222,7 @@ export async function revalidateSyncAuthorization(expected: SyncAuthorizationCon
     return false;
   }
   try {
-    const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(expected.userId)}&active=eq.true&select=organisation_id,role,customer_source_id,active`);
+    const rows = await supabaseFetch(`/rest/v1/profiles?id=eq.${encodeURIComponent(expected.userId)}&active=eq.true&select=organisation_id,role,customer_source_id,active`, { signal });
     const profile = Array.isArray(rows) ? rows[0] : null;
     const hasCustomerScope = profile?.role !== "customer" || Boolean(profile?.customer_source_id);
     const live: SyncAuthorizationContext | null = hasCustomerScope && profile?.active && profile?.organisation_id && profile?.role

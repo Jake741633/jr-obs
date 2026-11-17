@@ -69,7 +69,8 @@ export default function InvoicesPage() {
   const [invalidInvoiceLink, setInvalidInvoiceLink] = useState(false);
   const [linkReady, setLinkReady] = useState(false);
   const [reviewMessage, setReviewMessage] = useState("");
-  const latestInvoices = useRef({ items: invoices.items, payments: payments.items, ready: false, createItem: invoices.createItem });
+  const [pendingMilestone, setPendingMilestone] = useState<{ invoice: Invoice; milestone: JobTimelineEntry["milestone"]; note: string; now: string; owner: typeof timeline.createItem } | null>(null);
+  const latestInvoices = useRef({ items: invoices.items, payments: payments.items, ready: false, createItem: invoices.createItem, updateItem: invoices.updateItem, timeline });
   const formOwner = useRef<typeof invoices.createItem | null>(null);
   const latestQuotes = useRef(quotes.items);
   const latestManualBilling = useRef({ jobs: jobs.items, customers: customers.items, builders: builders.items });
@@ -83,9 +84,9 @@ export default function InvoicesPage() {
   useLayoutEffect(() => {
     latestQuotes.current = quotes.items;
     latestManualBilling.current = { jobs: jobs.items, customers: customers.items, builders: builders.items };
-    latestInvoices.current = { items: invoices.items, payments: payments.items, ready: ready && linkReady, createItem: invoices.createItem };
-    return () => { latestInvoices.current = { items: [], payments: [], ready: false, createItem: invoices.createItem }; };
-  }, [invoices.items, invoices.createItem, payments.items, quotes.items, jobs.items, customers.items, builders.items, ready, linkReady]);
+    latestInvoices.current = { items: invoices.items, payments: payments.items, ready: ready && linkReady, createItem: invoices.createItem, updateItem: invoices.updateItem, timeline };
+    return () => { latestInvoices.current = { ...latestInvoices.current, items: [], payments: [], ready: false }; };
+  }, [invoices.items, invoices.createItem, invoices.updateItem, payments.items, quotes.items, jobs.items, customers.items, builders.items, timeline, ready, linkReady]);
 
   useEffect(() => {
     if (deepLinkHandled.current || !ready) return;
@@ -307,7 +308,7 @@ export default function InvoicesPage() {
       return;
     }
     latestInvoices.current = { ...latestInvoices.current, items: [invoice, ...latestInvoices.current.items] };
-    if (invoice.jobId) timeline.setItems((current) => [{ id: makeId("timeline"), jobId: invoice.jobId!, milestone: "Invoice created", note: `${invoice.number} created and linked to this job.`, completedBy: "JR OS", completedAt: now, createdAt: now }, ...current]);
+    if (invoice.jobId) addInvoiceMilestone(invoice, "Invoice created", `${invoice.number} created and linked to this job.`, now);
     reset();
   }
 
@@ -315,15 +316,54 @@ export default function InvoicesPage() {
 
   function addInvoiceMilestone(invoice: Invoice, milestone: JobTimelineEntry["milestone"], note: string, now: string) {
     if (!invoice.jobId) return;
-    timeline.setItems((current) => current.some((entry) => entry.jobId === invoice.jobId && entry.milestone === milestone)
-      ? current
-      : [{ id: makeId("timeline"), jobId: invoice.jobId!, milestone, note, completedBy: "JR OS", completedAt: now, createdAt: now }, ...current]);
+    const current = latestInvoices.current;
+    try {
+      if (!current.ready || current.timeline.createItem !== timeline.createItem || !current.timeline.isReady) throw new Error("The job timeline changed or is loading.");
+      if (!current.timeline.items.some(entry => entry.jobId === invoice.jobId && entry.milestone === milestone)) {
+        const id = `invoice-milestone:${JSON.stringify([invoice.id, invoice.jobId, milestone])}`;
+        if (current.timeline.items.some(entry => entry.id === id)) throw new Error("The milestone identity needs review.");
+        const entry: JobTimelineEntry = { id, jobId: invoice.jobId, milestone, note, completedBy: "JR OS", completedAt: now, createdAt: now };
+        current.timeline.createItem(entry);
+        latestInvoices.current = { ...current, timeline: { ...current.timeline, items: [entry, ...current.timeline.items] } };
+      }
+      setPendingMilestone(pending => pending?.invoice.id === invoice.id && pending.milestone === milestone ? null : pending);
+    } catch {
+      setPendingMilestone({ invoice, milestone, note, now, owner: timeline.createItem });
+      setReviewMessage(`${invoice.number} was saved, but its job milestone could not be saved. Review the job timeline and retry the milestone below.`);
+    }
+  }
+
+  function retryInvoiceMilestone() {
+    const current = latestInvoices.current, pending = pendingMilestone;
+    if (!pending) return;
+    const matches = current.items.filter(invoice => invoice.id === pending.invoice.id);
+    if (!current.ready || current.timeline.createItem !== pending.owner || matches.length !== 1 || matches[0].jobId !== pending.invoice.jobId) {
+      setReviewMessage("The invoice, account or job link changed. Review the current saved records before retrying the milestone."); return;
+    }
+    setReviewMessage("");
+    addInvoiceMilestone(matches[0], pending.milestone, pending.note, pending.now);
+  }
+
+  function saveInvoiceChange(invoice: Invoice, status: InvoiceStatus, amountPaid: number, now: string) {
+    const current = latestInvoices.current;
+    try {
+      const saved = current.updateItem(invoice.id, record => {
+        if (JSON.stringify(record) !== JSON.stringify(invoice)) throw new Error("The saved invoice changed. Review its current record before updating.");
+        return record.status === status && record.amountPaid === amountPaid ? record : { ...record, status, amountPaid, updatedAt: now };
+      });
+      latestInvoices.current = { ...current, items: current.items.map(record => record.id === invoice.id ? saved : record) };
+      return saved;
+    } catch {
+      setReviewMessage("The invoice update could not be confirmed. Review its current saved record before retrying this action.");
+      return null;
+    }
   }
 
   function canUpdateInvoice(invoice: Invoice) {
     const current = latestInvoices.current;
     const matches = current.items.filter((item) => item.id === invoice.id);
-    if (!current.ready || typeof invoice.id !== "string" || !invoice.id.trim() || matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(invoice)) {
+    if (!current.ready || current.createItem !== invoices.createItem || current.updateItem !== invoices.updateItem
+      || typeof invoice.id !== "string" || !invoice.id.trim() || matches.length !== 1 || JSON.stringify(matches[0]) !== JSON.stringify(invoice)) {
       setReviewMessage("This invoice is unavailable, has an ambiguous identity or has changed. Review its current saved record before updating it.");
       return false;
     }
@@ -349,7 +389,7 @@ export default function InvoicesPage() {
     }
     const now = new Date().toISOString();
     const paidAmount = status === "Paid" ? roundedPence(invoiceTotal(invoice)) / 100 : invoice.amountPaid;
-    invoices.setItems((current) => current.map((item) => item.id === invoice.id ? { ...item, status, amountPaid: paidAmount, updatedAt: now } : item));
+    if (!saveInvoiceChange(invoice, status, paidAmount, now)) return;
     if (status === "Sent") addInvoiceMilestone(invoice, "Invoice sent", `${invoice.number} sent to the customer.`, now);
     if (status === "Paid") addInvoiceMilestone(invoice, "Payment received", `${invoice.number} paid in full.`, now);
   }
@@ -367,7 +407,7 @@ export default function InvoicesPage() {
     if (!Number.isFinite(amountPaid) || amountPaid < 0 || amountPaid > gross) { window.alert(`Enter an amount between £0.00 and ${money.format(gross)}.`); return; }
     const now = new Date().toISOString();
     const status: InvoiceStatus = amountPaid >= gross ? "Paid" : amountPaid > 0 ? "Part paid" : invoice.status;
-    invoices.setItems((current) => current.map((item) => item.id === invoice.id ? { ...item, amountPaid, status, updatedAt: now } : item));
+    if (!saveInvoiceChange(invoice, status, amountPaid, now)) return;
     if (status === "Paid") addInvoiceMilestone(invoice, "Payment received", `${invoice.number} paid in full.`, now);
   }
 
@@ -379,6 +419,7 @@ export default function InvoicesPage() {
     <PageHeader eyebrow="Finance" title="Invoices" description="Create invoices from accepted quotes or build them manually, then track payment status." action={<Button className="min-h-12" onClick={() => showForm ? reset() : startNewInvoice()}><Plus className="mr-2 size-4" />{showForm ? "Close form" : "New invoice"}</Button>} />
     {focused ? <section aria-label="Invoice selection" className="space-y-3 rounded-xl border border-cyan-400/30 p-4"><p role="status" className="break-words text-sm text-cyan-100">{invalidInvoiceLink ? "This invoice link is invalid. Show all invoices to choose a saved record." : focusUnavailable ? "The selected invoice is unavailable or its identity is ambiguous. Other invoices have not been substituted." : `Showing ${filtered[0].number} · ${filtered[0].title}. This is the exact saved invoice, with its current status.`}</p><button type="button" onClick={() => { setFocusedInvoiceId(""); setInvalidInvoiceLink(false); clearInvoiceFilters(); setReviewMessage(""); }} className="min-h-12 rounded-xl border border-slate-700 px-3 text-sm font-semibold">Show all invoices</button></section> : null}
     {reviewMessage ? <p role="status" className="rounded-xl border border-amber-400/30 p-3 text-sm text-amber-200">{reviewMessage}</p> : null}
+    {pendingMilestone ? <Button type="button" variant="secondary" onClick={retryInvoiceMilestone}>Retry job milestone</Button> : null}
 
     {showForm ? <Card><form onSubmit={submit} className="space-y-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">

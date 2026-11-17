@@ -6,7 +6,15 @@ import ts from "typescript";
 
 const client = await readFile(new URL("../lib/supabase/client.ts", import.meta.url), "utf8");
 const cloudClient = await readFile(new URL("../lib/cloud/client.ts", import.meta.url), "utf8");
+const lifecycle = await readFile(new URL("../lib/cloud/requestLifecycle.ts", import.meta.url), "utf8");
 const unavailableMessage = "JR OS cloud service is unavailable. Check your connection and confirm the Supabase project is active, then try again.";
+
+function loadLifecycle(fetchImpl) {
+  const mod = { exports: {} };
+  const output = ts.transpileModule(lifecycle, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  vm.runInNewContext(output, { module: mod, exports: mod.exports, fetch: fetchImpl, AbortController, setTimeout, clearTimeout, Error });
+  return mod.exports;
+}
 
 function loadRequestClassifier(fetchImpl = () => { throw new Error("Unexpected fetch"); }) {
   const output = ts.transpileModule(client, {
@@ -23,8 +31,9 @@ function loadRequestClassifier(fetchImpl = () => { throw new Error("Unexpected f
     fetch: fetchImpl,
     process: { env: {} },
     require(specifier) {
+      if (specifier === "../cloud/requestLifecycle") return loadLifecycle(fetchImpl);
       assert.equal(specifier, "./sessionOwnership-core.mjs");
-      return { supabaseSessionFingerprint: () => null };
+      return { supabaseSessionFingerprint: () => null, sameSupabaseSessionOwnership: () => true };
     },
   });
 
@@ -54,6 +63,7 @@ function loadCloudClient(fetchImpl) {
     fetch: fetchImpl,
     Headers,
     require(specifier) {
+      if (specifier === "./requestLifecycle") return loadLifecycle(fetchImpl);
       if (specifier === "./config") {
         return {
           cloudConfig: { url: "https://project.supabase.co", anonKey: "anon-key", isConfigured: true, mode: "cloud" },
@@ -86,7 +96,7 @@ test("unreachable Supabase requests produce an actionable cloud-service error", 
   );
   assert.match(
     client,
-    /let response: Response;\s*try \{\s*response = await fetch\([\s\S]*?\);\s*\} catch \{\s*throw new SupabaseRequestError\("network", cloudServiceUnavailableMessage\);\s*\}/,
+    /return await withRequestLifecycle\([\s\S]*catch \(error\) \{\s*if \(error instanceof SupabaseRequestError\) throw error;\s*throw new SupabaseRequestError\("network", cloudServiceUnavailableMessage\);/,
   );
 });
 
@@ -162,19 +172,15 @@ test("private download HTTP failures retain server text and fallback status", as
 });
 
 test("HTTP responses still retain Supabase's specific error message", () => {
-  const networkErrorBoundary = client.indexOf('throw new SupabaseRequestError("network", cloudServiceUnavailableMessage);');
-  const responseParsing = client.indexOf("const body = response.status === 204");
-  const apiErrorMessage = client.indexOf("body?.msg || body?.message || body?.error_description || body?.error");
-
-  assert.ok(networkErrorBoundary !== -1 && networkErrorBoundary < responseParsing);
-  assert.ok(responseParsing !== -1 && responseParsing < apiErrorMessage);
+  assert.match(client, /if \(error instanceof SupabaseRequestError\) throw error;/);
+  assert.match(client, /body\?\.msg \|\| body\?\.message \|\| body\?\.error_description \|\| body\?\.error/);
 });
 
 test("configuration and session checks still run before network access", () => {
   const fetchSource = client.slice(client.indexOf("export async function supabaseFetch"));
   const configurationCheck = fetchSource.indexOf('if (!config) throw new Error("Supabase is not configured yet.");');
   const sessionCheck = fetchSource.indexOf("const session = readSupabaseSession();");
-  const networkRequest = fetchSource.indexOf("response = await fetch(");
+  const networkRequest = fetchSource.indexOf("return await withRequestLifecycle(");
 
   assert.ok(configurationCheck !== -1 && configurationCheck < sessionCheck);
   assert.ok(sessionCheck < networkRequest);
