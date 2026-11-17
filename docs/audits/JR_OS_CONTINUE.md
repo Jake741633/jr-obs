@@ -28,7 +28,7 @@ Final third-core local acceptance: **3,101/3,101 tests**, zero-warning lint and 
 ## Resume
 
 1. Re-fetch current branches/PR heads and inspect CI/Phase 1/dependency-review/Netlify checks. Read the current audit report and PR descriptions before repeating work. Preserve any newer edits; never force-reset a shared checkout.
-2. A01–A26 are implemented on the branches identified in the audit. Check each PR description for its current verification and billing integration checkpoint. Continue with remaining legacy save/attachment paths and signed-in phone workflows using synthetic test accounts/fixtures. Candidate entry points include paired site diary and snag/timeline saves. Start new verified findings at A27 and reproduce each suspected defect. Certificate printing needs a real browser and iPhone/Android check; the local optional browser binary was unavailable. Verify what can be established safely before asking for any missing account/environment decision.
+2. A01–A27 are implemented on the branches identified in the audit. Check each PR description for its current verification and billing integration checkpoint. Next, reproduce any early success or draft loss in mobile snag creation and snag status changes, including the linked timeline note. Use A28 for the next verified finding. Continue the remaining legacy save and attachment paths and signed-in phone workflows using synthetic accounts or fixtures. Certificate printing still needs a browser and iPhone/Android check.
 3. Reproduce each actual defect with synthetic fixtures, write a regression that fails, make a minimal correction, then verify focused tests. Preserve tenant/session/role/collection boundaries, original conflict versions, durable retries and supplier identities.
 4. Run `npm test`, `npm run lint`, `npm run build` and appropriate upgrade checks; obtain a fresh read-only review of each substantial new batch. Publish real commits and reviewable PR changes, then verify the exact remote head and preview. Keep a chronological evidence/remaining-work record and refresh this continuation record.
 5. Continue useful audit/fix work until the chat's practical limit, then give Jake a paste-ready continuation prompt with current repository, branches, PRs, exact heads, verified checks and remaining tasks. Do not merely offer to continue.
@@ -46,3 +46,7 @@ PR328 continues the core audit with A24 and A25. The ordinary Add document flow 
 ## Sign-in continuation
 
 A26 recovers the account page after a transient lookup failure when the same session's workspace identity verifies. The linked Supabase project was separately resumed after it paused. The live sign-in address above is the production entry point. PR328's Netlify status identifies the draft preview, and its description records the current checks.
+
+## Field diary continuation
+
+A27 covers both field diary forms. They preserve the draft if device storage or queueing fails. If the diary is saved and the note fails, keep the page open to retry the original note from the saved diary. Check PR328 for the exact commit, build, test and preview results.

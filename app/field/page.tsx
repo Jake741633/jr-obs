@@ -9,6 +9,7 @@ import { Card } from "../../components/ui/Card";
 import { InputField, TextareaField } from "../../components/ui/FormField";
 import { PageHeader } from "../../components/ui/PageHeader";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { SiteDiaryTimelineRetries } from "../../components/mobile/SiteDiaryTimelineRetries";
 import { accountStorageKey } from "../../lib/cloud/adapter";
 import { useSiteDiariesCollection } from "../../lib/cloud/coreBusinessCollections";
 import { queueTargetSyncState } from "../../lib/cloud/repository-core.mjs";
@@ -19,6 +20,7 @@ import { isJobInactiveStatus, isJobOnSiteStatus, normaliseJobStatus, siteDiaryTi
 import { fieldJobAssignedToOperator, fieldOperatorMemberId, fieldOperatorName } from "../../lib/siteDiaryIdentity-core.mjs";
 import { emptySiteDiarySyncProjection, refreshSiteDiarySyncProjection, registerSiteDiarySyncAttempt, siteDiaryAttemptStates, unpairedSiteDiaryTargetStates } from "../../lib/siteDiarySync-core.mjs";
 import { makeId, useLocalStorageCollection } from "../../lib/storage";
+import { useSiteDiarySave } from "../../lib/useSiteDiarySave";
 import type { CanonicalJobStatus, Customer, Job, JobDocument, JobTimelineEntry, SiteDiaryEntry, TeamMember } from "../../lib/models";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -116,6 +118,13 @@ export default function FieldWorkspacePage() {
   const activeTimerJob = activeTimer.jobId ? jobs.items.find((job) => job.id === activeTimer.jobId) : undefined;
   const timerLocked = activeTimer.state !== "idle";
   const todaysEntries = diary.items.filter((entry) => entry.workDate === today());
+  const siteDiarySyncReady = !cloudFieldMode || (activeSiteDiarySyncProjection.initialized && siteDiarySyncProjection.scopeKey === siteDiarySyncScopeKey);
+  const interactionScopeReady = interactionScopeKey === fieldWorkspaceScopeKey;
+  const ready = jobs.isReady && customers.isReady && diary.isReady && documents.isReady && timeline.isReady && team.isReady && identityState.isReady && siteDiarySyncReady && interactionScopeReady;
+  const diarySave = useSiteDiarySave({
+    scopeKey: siteDiarySyncScopeKey, mode: identityState.mode, authorization: identityState.identity,
+    ready, form, jobs: jobs.items, operatorMemberId, diaries: diary, timeline, setMessage,
+  });
 
   useEffect(() => {
     let active = true;
@@ -309,30 +318,43 @@ export default function FieldWorkspacePage() {
 
   function saveDiary(event: FormEvent) {
     event.preventDefault();
+    if (!diarySave.canSave()) return;
     if (!form.jobId) return setMessage("Choose a job before saving the site record.");
-    const selectedJob = jobs.items.find((job) => job.id === form.jobId);
+    const matchingJobs = jobs.items.filter((job) => job.id === form.jobId);
+    const selectedJob = matchingJobs.length === 1 ? matchingJobs[0] : undefined;
     if (!selectedJob || isJobInactiveStatus(selectedJob.status)) return setMessage("The selected active job is no longer available. Refresh the field workspace before saving the site record.");
     if (!operatorName || (cloudFieldMode && !operatorMemberId)) return setMessage("Your active team identity could not be resolved. Refresh your account before saving the site record.");
     if (cloudFieldMode && !fieldJobAssignedToOperator({ job: selectedJob, operatorMemberId })) return setMessage(fieldJobAssignmentMessage);
     if (!form.startedAt) return setMessage("Add the time work started.");
-    const now = new Date().toISOString();
-    const entry: SiteDiaryEntry = { id: makeId("site-diary"), jobId: form.jobId, workDate: form.workDate, startedAt: form.startedAt, finishedAt: form.finishedAt, breakMinutes: Math.max(0, Number(form.breakMinutes || 0)), completedBy: operatorName, staffPresent: [], workCompleted: form.workCompleted.trim(), delays: form.delays.trim(), builderInstructions: "", customerRequests: form.customerRequests.trim(), customerInstructions: form.customerRequests.trim(), materialsUsed: form.materialsUsed.trim(), materialsRequired: "", voiceNotes: form.voiceNotes.trim(), voiceNoteTranscript: form.voiceNotes.trim(), weather: "", issuesAndRisks: form.delays.trim(), followUpActions: "", createdAt: now, updatedAt: now };
-    const timelineEntry = siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: operatorName, now }) as JobTimelineEntry;
+    const saved = diarySave.saveDraft(() => {
+      const now = new Date().toISOString();
+      const entry: SiteDiaryEntry = { id: makeId("site-diary"), jobId: form.jobId, workDate: form.workDate, startedAt: form.startedAt, finishedAt: form.finishedAt, breakMinutes: Math.max(0, Number(form.breakMinutes || 0)), completedBy: operatorName, staffPresent: [], workCompleted: form.workCompleted.trim(), delays: form.delays.trim(), builderInstructions: "", customerRequests: form.customerRequests.trim(), customerInstructions: form.customerRequests.trim(), materialsUsed: form.materialsUsed.trim(), materialsRequired: "", voiceNotes: form.voiceNotes.trim(), voiceNoteTranscript: form.voiceNotes.trim(), weather: "", issuesAndRisks: form.delays.trim(), followUpActions: "", createdAt: now, updatedAt: now };
+      const timelineEntry = siteDiaryTimelineEntry({ entry, timelineId: makeId("timeline"), completedBy: operatorName, now }) as JobTimelineEntry;
+      return { entry, timelineEntry };
+    });
+    if (!saved) return;
+    const { entry, timelineEntry, timelineSaved } = saved;
+
     if (cloudFieldMode) {
-      setSiteDiarySyncProjection((current) => registerSiteDiarySyncAttempt(current, {
+      const queue = getSyncQueue();
+      setSiteDiarySyncProjection((current) => refreshSiteDiarySyncProjection({
+        current: registerSiteDiarySyncAttempt(current, {
+          scopeKey: siteDiarySyncScopeKey,
+          diaryId: entry.id,
+          timelineId: timelineEntry.id,
+          jobId: entry.jobId,
+          workDate: entry.workDate,
+        }),
         scopeKey: siteDiarySyncScopeKey,
-        diaryId: entry.id,
-        timelineId: timelineEntry.id,
-        jobId: entry.jobId,
-        workDate: entry.workDate,
+        queue,
+        online: navigator.onLine,
       }));
     }
-    diary.setItems((current) => [entry, ...current]);
-    timeline.setItems((current) => [timelineEntry, ...current]);
-    setMessage(cloudFieldMode
+    const successMessage = cloudFieldMode
       ? "Site diary captured on this device; its diary record and separate job timeline note are awaiting cloud confirmation."
-      : "Site diary entry saved to the job record.");
-    setForm({ ...blankDiary, jobId: form.jobId, workDate: today() });
+      : "Site diary entry saved to the job record.";
+    setMessage(timelineSaved ? successMessage : "");
+    setForm({ ...blankDiary, jobId: entry.jobId, workDate: today() });
   }
 
   function choosePhoto(event: ChangeEvent<HTMLInputElement>) {
@@ -360,9 +382,6 @@ export default function FieldWorkspacePage() {
     setMessage("Completion checklist, customer sign-off and site photo saved. Job marked complete.");
   }
 
-  const siteDiarySyncReady = !cloudFieldMode || (activeSiteDiarySyncProjection.initialized && siteDiarySyncProjection.scopeKey === siteDiarySyncScopeKey);
-  const interactionScopeReady = interactionScopeKey === fieldWorkspaceScopeKey;
-  const ready = jobs.isReady && customers.isReady && diary.isReady && documents.isReady && timeline.isReady && team.isReady && identityState.isReady && siteDiarySyncReady && interactionScopeReady;
   if (!ready) return <Card>Loading field workspace…</Card>;
 
   return <div className="space-y-6 pb-28 sm:pb-0">
@@ -370,6 +389,7 @@ export default function FieldWorkspacePage() {
     {cloudFieldMode && !operatorName ? <div className="rounded-xl border border-amber-400/20 bg-amber-400/5 px-4 py-3 text-sm text-amber-100"><p className="font-semibold">Field identity could not be resolved.</p><p className="mt-1 text-xs text-amber-100/70">Site writes remain locked until this signed-in account resolves to an active team identity.</p></div> : null}
     <section className="grid gap-4 sm:grid-cols-3"><Card><p className="text-sm text-slate-400">Today&apos;s jobs</p><p className="mt-2 text-3xl font-bold">{todaysJobs.length}</p></Card><Card><p className="text-sm text-slate-400">On site</p><p className="mt-2 text-3xl font-bold">{jobs.items.filter((job) => isJobOnSiteStatus(job.status)).length}</p></Card><Card><p className="text-sm text-slate-400">Diary records today</p><p className="mt-2 text-3xl font-bold">{todaysEntries.length}</p></Card></section>
     {message ? <div className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-4 py-3 text-sm text-cyan-200">{message}</div> : null}
+    <SiteDiaryTimelineRetries notes={diarySave.pendingNotes} onRetry={diarySave.retryNote} />
     {cloudFieldMode ? Object.keys(activeSiteDiarySyncProjection.attempts).reverse().map(siteDiarySyncNotice) : null}
     {cloudFieldMode && unpairedSiteDiaryTargets.length ? <div role="status" className={`rounded-xl border px-4 py-3 text-sm ${unpairedSiteDiaryTerminal ? "border-rose-400/20 bg-rose-400/5 text-rose-200" : "border-amber-400/20 bg-amber-400/5 text-amber-100"}`}>
       <p className="font-semibold">One or more retained site diary sync targets are not cloud-confirmed.</p>

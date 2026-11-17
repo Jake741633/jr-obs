@@ -40,18 +40,16 @@ test("field diary assignment requires one exact operator id in an array", () => 
   assert.equal(fieldJobAssignedToOperator({ job: { assignedTo: ["field-1"] }, operatorMemberId: "" }), false);
 });
 
-test("both site diary entry points stop revoked assignments before optimistic effects", () => {
+test("both site diary entry points stop revoked assignments before saving", () => {
   const handlers = [
     {
       name: "field workspace",
       source: section(basicPage, "function saveDiary", "\n\n  function choosePhoto"),
-      diaryWrite: "diary.setItems",
       reset: "setForm({ ...blankDiary",
     },
     {
       name: "mobile site diary",
       source: section(advancedPage, "function saveDiary", "\n\n  if (!ready)"),
-      diaryWrite: "diaries.setItems",
       reset: "setForm({ ...blankForm",
     },
   ];
@@ -61,7 +59,7 @@ test("both site diary entry points stop revoked assignments before optimistic ef
     const assignmentGuard = handler.source.indexOf("if (cloudFieldMode && !fieldJobAssignedToOperator({ job: selectedJob, operatorMemberId }))");
     assert.ok(identityGuard >= 0, `${handler.name} must require the exact operator identity`);
     assert.ok(assignmentGuard > identityGuard, `${handler.name} must check assignment after resolving identity`);
-    for (const sideEffect of ["new Date", "makeId", "registerSiteDiarySyncAttempt", handler.diaryWrite, "timeline.setItems", "setMessage(cloudFieldMode", handler.reset]) {
+    for (const sideEffect of ["diarySave.saveDraft", "new Date", "makeId", "registerSiteDiarySyncAttempt", "setMessage(timelineSaved", handler.reset]) {
       assert.ok(assignmentGuard < handler.source.indexOf(sideEffect), `${handler.name} ${sideEffect} must follow the assignment guard`);
     }
   }

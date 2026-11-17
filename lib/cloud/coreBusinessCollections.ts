@@ -151,7 +151,7 @@ export function useSiteDiariesCollection() {
     removeLegacy(predicate);
   }, [removeCanonical, removeLegacy]);
 
-  return { ...canonical, items: mergedItems, remove, isReady: canonicalReady && legacyReady };
+  return { ...canonical, items: mergedItems, canonicalItems, remove, isReady: canonicalReady && legacyReady };
 }
 export function useJobTasksCollection() { return useCloudLocalCollection<JobTask>(coreBusinessStorageKeys.jobTasks); }
 export function useJobProgressCollection() { return useCloudLocalCollection<JobProgressRecord>(coreBusinessStorageKeys.jobProgress); }

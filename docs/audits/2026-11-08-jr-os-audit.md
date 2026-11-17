@@ -38,6 +38,7 @@ Four independent read-only reviews examined auth/sync, quote/invoice/purchase wo
 | A24 | High | The job folder closes its Add document draft and releases the selected file before the record and private file writes finish. A delayed file read can continue after the job or account changes. | Fixed in the fourth correction batch |
 | A25 | Medium | Confirming private bytes on retry can leave a live bridge idle when the metadata row already exists. | Fixed in the fourth correction batch |
 | A26 | Medium | The account page can keep showing the password form after a transient account lookup failure even after the same signed-in workspace verifies again. | Fixed in the sign-in continuation |
+| A27 | High | Both field diary forms can clear entered work and report capture before the diary and timeline note reach device storage. | Fixed in the field diary continuation |
 
 ## Implementation and acceptance
 
@@ -148,3 +149,9 @@ The first GitHub Actions run for this batch passed all 3,109 tests, lint, the pr
 The live [JR OS sign-in page](https://jr-os.netlify.app/cloud) uses the existing Netlify application's linked Supabase project. On 16 November the linked project reported a paused state. Resuming it returned the project to a healthy state, and a read-only check found an active, confirmed owner account. Netlify recorded HTTP 200 responses at the live sign-in address.
 
 A separate app test reproduced a transient failed account lookup followed by successful workspace identity verification. The account page kept showing the sign-in form because it never requested the account user again. It now repeats that lookup when the same session's workspace identity verifies. A failed recheck waits for another identity update, and a response retired by sign-out cannot open the workspace. An executed synthetic probe reproduced the failure on the earlier page and passed on the corrected path. The pull request records the full checks and preview. Interactive phone sign-in remains a separate check.
+
+## 17 November field diary continuation
+
+Synthetic storage failures in both field diary forms reproduced cleared drafts after a rejected queue write and a success message after a failed timeline write. The forms now confirm the diary save before clearing work. If the diary saves and the note fails, the open page keeps the note for retry with the original diary and job IDs. A retry checks the current account and field assignment. Pending timeline notes must be retried before leaving the page. Queue notices track the diary and timeline note separately.
+
+Nine regression cases use the rendered field handlers and real device storage and sync adapters with synthetic jobs and storage failures. They cover failed saves, offline retry without duplicate entries, assignment and account changes, sign-out, and local and unsigned migration workspaces. The live sign-in page and linked Supabase Auth health endpoint both returned HTTP 200. The pull request records test and preview results. Phone sign-in and field acceptance still need a signed-in device check.

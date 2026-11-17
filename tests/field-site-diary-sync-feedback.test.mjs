@@ -116,15 +116,16 @@ test("retained site diary targets surface without treating unrelated timeline no
   assert.equal(projection.timelineTargets["unrelated-timeline"], undefined);
 });
 
-test("site diary registers both targets before optimistic success surfaces", () => {
+test("site diary records both queue targets from a confirmed device save", () => {
   const saveDiary = page.slice(page.indexOf("function saveDiary"), page.indexOf("\n\n  if (!ready)"));
+  const save = saveDiary.indexOf("diarySave.saveDraft");
+  const outcome = saveDiary.indexOf("if (!saved) return;");
   const registration = saveDiary.indexOf("registerSiteDiarySyncAttempt");
-  assert.ok(registration >= 0);
-  assert.ok(registration < saveDiary.indexOf("diaries.setItems"));
-  assert.ok(registration < saveDiary.indexOf("timeline.setItems"));
-  assert.ok(registration < saveDiary.indexOf("setMessage(cloudFieldMode"));
+  assert.ok(save >= 0 && save < outcome && outcome < registration);
+  assert.ok(registration < saveDiary.indexOf("setMessage(timelineSaved"));
   assert.ok(registration < saveDiary.indexOf("setForm({ ...blankForm"));
   assert.match(saveDiary, /diaryId: entry\.id,[\s\S]*timelineId: timelineEntry\.id,[\s\S]*jobId: entry\.jobId,[\s\S]*workDate: entry\.workDate/);
+  assert.match(saveDiary, /refreshSiteDiarySyncProjection\([\s\S]*queue,[\s\S]*online: navigator\.onLine/);
 });
 
 test("site diary derives generic-collection success only from exact queue events", () => {
